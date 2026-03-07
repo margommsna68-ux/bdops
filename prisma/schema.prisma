@@ -1,0 +1,397 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════
+// AUTH & MULTI-PROJECT
+// ═══════════════════════════════════════
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String?
+  image         String?
+  googleId      String?         @unique
+  memberships   ProjectMember[]
+  auditLogs     AuditLog[]
+  proxyAssignments ProxyAssignmentHistory[] @relation("AssignedByUser")
+  assignedTasks VMTask[]        @relation("TaskAssignee")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Project {
+  id               String          @id @default(cuid())
+  name             String
+  code             String          @unique
+  description      String?
+  settings         Json?
+  members          ProjectMember[]
+  servers          Server[]
+  paypalAccounts   PayPalAccount[]
+  fundTransactions FundTransaction[]
+  withdrawals      Withdrawal[]
+  costRecords      CostRecord[]
+  profitSplits     ProfitSplit[]
+  proxyIPs         ProxyIP[]
+  gmailAccounts    GmailAccount[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  user      User        @relation(fields: [userId], references: [id])
+  userId    String
+  project   Project     @relation(fields: [projectId], references: [id])
+  projectId String
+  role      ProjectRole @default(VIEWER)
+  createdAt DateTime    @default(now())
+
+  @@unique([userId, projectId])
+}
+
+enum ProjectRole {
+  ADMIN
+  MANAGER
+  OPERATOR
+  PARTNER
+  VIEWER
+}
+
+// ═══════════════════════════════════════
+// INFRASTRUCTURE
+// ═══════════════════════════════════════
+
+model Server {
+  id            String       @id @default(cuid())
+  code          String
+  ipAddress     String?
+  provider      String?
+  cpu           String?
+  ram           String?
+  status        ServerStatus @default(BUILDING)
+  credentials   Json?
+  inventoryId   String?
+  notes         String?
+  createdDate   DateTime?
+  expiryDate    DateTime?
+  project       Project      @relation(fields: [projectId], references: [id])
+  projectId     String
+  vms           VirtualMachine[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([code, projectId])
+}
+
+enum ServerStatus {
+  BUILDING
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  MAINTENANCE
+}
+
+model VirtualMachine {
+  id            String      @id @default(cuid())
+  code          String
+  status        VMStatus    @default(NEW)
+  sdkId         String?
+  earnTotal     Decimal?    @db.Decimal(12, 4)
+  earn24h       Decimal?    @db.Decimal(12, 4)
+  uptime        String?
+  notes         String?
+  server        Server      @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId      String
+  proxy         ProxyIP?    @relation(fields: [proxyId], references: [id], onDelete: SetNull)
+  proxyId       String?     @unique
+  gmail         GmailAccount?
+  proxyHistory  ProxyAssignmentHistory[]
+  tasks         VMTask[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([code, serverId])
+}
+
+enum VMStatus {
+  NEW
+  OK
+  ERROR
+  SUSPENDED
+  NOT_CONNECTED
+  NOT_AVC
+  BLOCKED
+}
+
+model ProxyIP {
+  id            String      @id @default(cuid())
+  address       String
+  host          String?
+  port          Int?
+  subnet        String?
+  status        ProxyStatus @default(AVAILABLE)
+  outboundIP    String?
+  blockReason   String?
+  project       Project     @relation(fields: [projectId], references: [id])
+  projectId     String
+  vm            VirtualMachine?
+  assignmentHistory ProxyAssignmentHistory[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([address, projectId])
+  @@index([projectId, status])
+}
+
+enum ProxyStatus {
+  AVAILABLE
+  IN_USE
+  BLOCKED
+  RESERVED
+}
+
+model ProxyAssignmentHistory {
+  id            String          @id @default(cuid())
+  proxy         ProxyIP         @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+  proxyId       String
+  vm            VirtualMachine  @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId          String
+  assignedAt    DateTime        @default(now())
+  unassignedAt  DateTime?
+  reason        String?
+  assignedBy    User?           @relation("AssignedByUser", fields: [assignedById], references: [id])
+  assignedById  String?
+  createdAt     DateTime        @default(now())
+}
+
+// ═══════════════════════════════════════
+// ACCOUNT MANAGEMENT
+// ═══════════════════════════════════════
+
+model GmailAccount {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  password      String?
+  twoFaCurrent  String?
+  twoFaOld      String?
+  recoveryEmail String?
+  status        GmailStatus @default(ACTIVE)
+  notes         String?
+  vm            VirtualMachine? @relation(fields: [vmId], references: [id])
+  vmId          String?     @unique
+  paypal        PayPalAccount? @relation(fields: [paypalId], references: [id])
+  paypalId      String?
+  project       Project     @relation(fields: [projectId], references: [id])
+  projectId     String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+enum GmailStatus {
+  ACTIVE
+  SUSPENDED
+  NEEDS_RECOVERY
+  NEEDS_2FA_UPDATE
+  BLOCKED
+  DISABLED
+}
+
+model PayPalAccount {
+  id              String       @id @default(cuid())
+  code            String
+  primaryEmail    String
+  secondaryEmail  String?
+  bankCode        String?
+  hotmailToken    String?
+  status          PayPalStatus @default(ACTIVE)
+  role            PayPalRole   @default(NORMAL)
+  limitNote       String?
+  company         String       @default("Bright Data Ltd.")
+  serverAssignment String?
+  notes           String?
+  project         Project      @relation(fields: [projectId], references: [id])
+  projectId       String
+  gmails          GmailAccount[]
+  fundsReceived   FundTransaction[]
+  withdrawalsFrom Withdrawal[] @relation("WithdrawalSource")
+  withdrawalsTo   Withdrawal[] @relation("WithdrawalDest")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([code, projectId])
+  @@index([projectId, status])
+  @@index([projectId, role])
+}
+
+enum PayPalStatus {
+  ACTIVE
+  LIMITED
+  SUSPENDED
+  CLOSED
+  PENDING_VERIFY
+}
+
+enum PayPalRole {
+  NORMAL
+  MASTER
+  USDT
+}
+
+// ═══════════════════════════════════════
+// FINANCIAL TRANSACTIONS
+// ═══════════════════════════════════════
+
+model FundTransaction {
+  id            String        @id @default(cuid())
+  date          DateTime
+  amount        Decimal       @db.Decimal(12, 2)
+  transactionId String
+  confirmed     Boolean       @default(false)
+  company       String        @default("Bright Data Ltd.")
+  notes         String?
+  paypal        PayPalAccount @relation(fields: [paypalId], references: [id])
+  paypalId      String
+  project       Project       @relation(fields: [projectId], references: [id])
+  projectId     String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([transactionId, projectId])
+  @@index([projectId, date])
+  @@index([paypalId])
+  @@index([confirmed])
+}
+
+model Withdrawal {
+  id             String          @id @default(cuid())
+  date           DateTime
+  amount         Decimal         @db.Decimal(12, 2)
+  transactionId  String?
+  type           WithdrawalType
+  agent          String?
+  withdrawCode   String?
+  ppReceived     String?
+  mailConfirmed  Boolean         @default(false)
+  notes          String?
+  sourcePaypal   PayPalAccount   @relation("WithdrawalSource", fields: [sourcePaypalId], references: [id])
+  sourcePaypalId String
+  destPaypal     PayPalAccount?  @relation("WithdrawalDest", fields: [destPaypalId], references: [id])
+  destPaypalId   String?
+  project        Project         @relation(fields: [projectId], references: [id])
+  projectId      String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([projectId, date])
+  @@index([projectId, type])
+  @@index([sourcePaypalId])
+}
+
+enum WithdrawalType {
+  MIXING
+  EXCHANGE
+}
+
+model CostRecord {
+  id            String    @id @default(cuid())
+  date          DateTime
+  serverCost    Decimal?  @db.Decimal(12, 2)
+  ipCost        Decimal?  @db.Decimal(12, 2)
+  extraCost     Decimal?  @db.Decimal(12, 2)
+  total         Decimal   @db.Decimal(12, 2)
+  isPrepaid     Boolean   @default(false)
+  note          String?
+  fundingSource String?
+  project       Project   @relation(fields: [projectId], references: [id])
+  projectId     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([projectId, date])
+}
+
+// ═══════════════════════════════════════
+// PROFIT SPLIT
+// ═══════════════════════════════════════
+
+model ProfitSplit {
+  id              String            @id @default(cuid())
+  periodStart     DateTime
+  periodEnd       DateTime
+  totalWithdrawal Decimal           @db.Decimal(14, 2)
+  totalCost       Decimal           @db.Decimal(14, 2)
+  netProfit       Decimal           @db.Decimal(14, 2)
+  settled         Boolean           @default(false)
+  notes           String?
+  project         Project           @relation(fields: [projectId], references: [id])
+  projectId       String
+  allocations     SplitAllocation[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model SplitAllocation {
+  id            String      @id @default(cuid())
+  partnerName   String
+  percentage    Decimal     @db.Decimal(5, 2)
+  amount        Decimal     @db.Decimal(14, 2)
+  paid          Boolean     @default(false)
+  split         ProfitSplit @relation(fields: [splitId], references: [id], onDelete: Cascade)
+  splitId       String
+  createdAt     DateTime    @default(now())
+}
+
+// ═══════════════════════════════════════
+// VM SCHEDULED TASKS
+// ═══════════════════════════════════════
+
+model VMTask {
+  id            String       @id @default(cuid())
+  vm            VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  vmId          String
+  type          String
+  title         String
+  description   String?
+  scheduledAt   DateTime
+  completedAt   DateTime?
+  status        VMTaskStatus @default(PENDING)
+  assignedTo    User?        @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  assignedToId  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+enum VMTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ═══════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  action      String
+  entity      String
+  entityId    String
+  changes     Json?
+  projectId   String?
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  createdAt   DateTime  @default(now())
+
+  @@index([entity])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([projectId])
+}
