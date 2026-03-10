@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure } from "../trpc";
+import { router, infrastructureProcedure } from "../trpc";
 
 export const vmTaskRouter = router({
-  list: protectedProcedure
+  list: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -25,7 +25,7 @@ export const vmTaskRouter = router({
       });
     }),
 
-  create: operatorProcedure
+  create: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -49,7 +49,7 @@ export const vmTaskRouter = router({
       });
     }),
 
-  updateStatus: operatorProcedure
+  updateStatus: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -70,7 +70,7 @@ export const vmTaskRouter = router({
       });
     }),
 
-  upcoming: protectedProcedure
+  upcoming: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.vMTask.findMany({
@@ -87,7 +87,7 @@ export const vmTaskRouter = router({
       });
     }),
 
-  overdue: protectedProcedure
+  overdue: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.vMTask.findMany({

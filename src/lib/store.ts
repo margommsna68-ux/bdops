@@ -5,7 +5,9 @@ import { useState, useEffect } from "react";
 interface ProjectState {
   currentProjectId: string | null;
   currentProjectCode: string | null;
-  setCurrentProject: (id: string, code: string) => void;
+  currentRole: string | null;
+  currentModules: string[];
+  setCurrentProject: (id: string, code: string, role: string, modules: string[]) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -13,8 +15,10 @@ export const useProjectStore = create<ProjectState>()(
     (set) => ({
       currentProjectId: null,
       currentProjectCode: null,
-      setCurrentProject: (id, code) =>
-        set({ currentProjectId: id, currentProjectCode: code }),
+      currentRole: null,
+      currentModules: [],
+      setCurrentProject: (id, code, role, modules) =>
+        set({ currentProjectId: id, currentProjectCode: code, currentRole: role, currentModules: modules }),
     }),
     {
       name: "bdops-project",

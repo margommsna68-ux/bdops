@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure } from "../trpc";
+import { router, infrastructureProcedure } from "../trpc";
 
 export const vmRouter = router({
-  list: protectedProcedure
+  list: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -35,7 +35,7 @@ export const vmRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  getById: protectedProcedure
+  getById: infrastructureProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.virtualMachine.findFirstOrThrow({
@@ -56,7 +56,7 @@ export const vmRouter = router({
       });
     }),
 
-  create: operatorProcedure
+  create: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -74,7 +74,7 @@ export const vmRouter = router({
       return ctx.prisma.virtualMachine.create({ data });
     }),
 
-  update: operatorProcedure
+  update: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -94,7 +94,7 @@ export const vmRouter = router({
     }),
 
   // Get VMs without proxy assigned
-  withoutProxy: protectedProcedure
+  withoutProxy: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.virtualMachine.findMany({
@@ -107,7 +107,7 @@ export const vmRouter = router({
       });
     }),
 
-  bulkImport: operatorProcedure
+  bulkImport: infrastructureProcedure
     .input(z.object({
       projectId: z.string(),
       items: z.array(z.object({

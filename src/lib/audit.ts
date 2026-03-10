@@ -1,8 +1,8 @@
 import { prisma } from "./prisma";
 import { type Prisma } from "@prisma/client";
 
-export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "SETTLE" | "RECALCULATE";
-export type AuditEntity = "FundTransaction" | "Withdrawal" | "CostRecord" | "ProfitSplit" | "SplitAllocation";
+export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "DELETE_APPROVED" | "SETTLE" | "RECALCULATE";
+export type AuditEntity = "FundTransaction" | "Withdrawal" | "CostRecord" | "ProfitSplit" | "SplitAllocation" | "PayPalAccount" | "Server" | "VirtualMachine" | "ProxyIP" | "GmailAccount" | "VMTask";
 
 export async function createAuditLog(params: {
   action: AuditAction;

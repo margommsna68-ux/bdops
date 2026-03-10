@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, adminProcedure } from "../trpc";
+import { router, fundsProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
 export const fundRouter = router({
-  list: protectedProcedure
+  list: fundsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -46,7 +46,7 @@ export const fundRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  create: operatorProcedure
+  create: fundsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -104,7 +104,7 @@ export const fundRouter = router({
       return result;
     }),
 
-  update: operatorProcedure
+  update: fundsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -129,7 +129,7 @@ export const fundRouter = router({
       return result;
     }),
 
-  delete: adminProcedure
+  delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.prisma.fundTransaction.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
@@ -145,7 +145,7 @@ export const fundRouter = router({
       return result;
     }),
 
-  todaySummary: protectedProcedure
+  todaySummary: fundsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const today = new Date();
@@ -178,7 +178,7 @@ export const fundRouter = router({
       };
     }),
 
-  unconfirmed: protectedProcedure
+  unconfirmed: fundsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.fundTransaction.findMany({
@@ -188,7 +188,7 @@ export const fundRouter = router({
       });
     }),
 
-  dailySummary: protectedProcedure
+  dailySummary: fundsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -213,7 +213,7 @@ export const fundRouter = router({
       });
     }),
 
-  bulkConfirm: operatorProcedure
+  bulkConfirm: fundsProcedure
     .input(z.object({
       projectId: z.string(),
       ids: z.array(z.string()).min(1),
@@ -241,7 +241,7 @@ export const fundRouter = router({
       return { confirmed: result.count };
     }),
 
-  bulkImport: operatorProcedure
+  bulkImport: fundsProcedure
     .input(z.object({
       projectId: z.string(),
       items: z.array(z.object({

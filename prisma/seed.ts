@@ -1,328 +1,493 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import XLSX from "xlsx";
+import path from "path";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  console.log("Seeding database...");
+// Excel serial date to JS Date
+function excelDate(serial: number): Date {
+  if (typeof serial !== "number" || serial < 40000) return new Date();
+  return new Date((serial - 25569) * 86400 * 1000);
+}
 
-  // Create admin user
+// Safe string extraction
+function str(val: unknown): string {
+  if (val === null || val === undefined || val === "") return "";
+  return String(val).trim();
+}
+
+// Safe number extraction
+function num(val: unknown): number {
+  if (val === null || val === undefined || val === "") return 0;
+  const n = Number(val);
+  return isNaN(n) ? 0 : n;
+}
+
+// Map Excel status string to VMStatus enum
+function mapVMStatus(s: string): "OK" | "ERROR" | "NEW" | "NOT_CONNECTED" | "NOT_AVC" | "BLOCKED" | "SUSPENDED" {
+  const upper = s.toUpperCase().trim();
+  if (upper === "OK") return "OK";
+  if (upper === "ERROR") return "ERROR";
+  if (upper === "NOT_CONNECTED" || upper === "NOT CONNECTED") return "NOT_CONNECTED";
+  if (upper === "NOT_AVC" || upper === "NOT AVC") return "NOT_AVC";
+  if (upper === "BLOCKED") return "BLOCKED";
+  if (upper === "SUSPENDED") return "SUSPENDED";
+  return "NEW";
+}
+
+async function main() {
+  console.log("Seeding database with ~3% real data from Excel...");
+
+  const xlsxPath = path.resolve(__dirname, "../../Bright data AE 18+.xlsx");
+  console.log(`Reading Excel file: ${xlsxPath}`);
+  const wb = XLSX.readFile(xlsxPath);
+
+  // ═══════════════════════════════════════
+  // 1. ADMIN USER
+  // ═══════════════════════════════════════
+  const hashedPassword = await bcrypt.hash("admin123", 10);
   const admin = await prisma.user.upsert({
-    where: { email: "admin@bdops.local" },
-    update: {},
+    where: { email: "admin@bdops.com" },
+    update: { password: hashedPassword },
     create: {
-      email: "admin@bdops.local",
+      email: "admin@bdops.com",
       name: "Admin",
+      password: hashedPassword,
     },
   });
+  console.log(`  Admin user: ${admin.email}`);
 
-  // Create projects
+  // ═══════════════════════════════════════
+  // 2. PROJECT
+  // ═══════════════════════════════════════
   const projectAE = await prisma.project.upsert({
     where: { code: "AE" },
     update: {},
     create: {
-      name: "Bright Data AE",
+      name: "Bright Data AE 18+",
       code: "AE",
-      description: "Main team - 838+ VMs, 400+ PayPals",
+      description: "Main team - AE project with 838+ VMs, 700+ PayPals",
     },
   });
 
-  const projectDN = await prisma.project.upsert({
-    where: { code: "DN" },
+  await prisma.projectMember.upsert({
+    where: { userId_projectId: { userId: admin.id, projectId: projectAE.id } },
     update: {},
     create: {
-      name: "Bright Data Da Nang",
-      code: "DN",
-      description: "Da Nang team - 350+ VMs, 300+ PayPals",
+      userId: admin.id,
+      projectId: projectAE.id,
+      role: "ADMIN",
     },
   });
+  console.log(`  Project: ${projectAE.name} (${projectAE.code})`);
 
-  // Add admin to both projects
-  for (const project of [projectAE, projectDN]) {
-    await prisma.projectMember.upsert({
-      where: { userId_projectId: { userId: admin.id, projectId: project.id } },
+  // ═══════════════════════════════════════
+  // 3. VPS SHEET → Server (first 1 server)
+  // ═══════════════════════════════════════
+  const vpsSheet = XLSX.utils.sheet_to_json(wb.Sheets["VPS"], { header: 1, defval: "" }) as unknown[][];
+  // Row 2 has the first server data: C3=server info (parse IP, name), C8=code, C6=cpu, C7=ram
+  const vpsRow = vpsSheet[2];
+  const serverCode = str(vpsRow[8]) || "SERVER-01";
+  const serverInfo = str(vpsRow[3]);
+
+  // Parse IP from server info text
+  let serverIP = "";
+  const ipMatch = serverInfo.match(/Server IP:\s*([\d.]+)/i);
+  if (ipMatch) serverIP = ipMatch[1];
+
+  // Parse inventory ID
+  let inventoryId = "";
+  const invMatch = serverInfo.match(/Inventory ID:\s*(\S+)/i);
+  if (invMatch) inventoryId = invMatch[1];
+
+  const server = await prisma.server.upsert({
+    where: { code_projectId: { code: serverCode, projectId: projectAE.id } },
+    update: {},
+    create: {
+      code: serverCode,
+      ipAddress: serverIP || null,
+      provider: "ColoCrossing",
+      cpu: str(vpsRow[6]) || null,
+      ram: str(vpsRow[7]) || null,
+      status: "ACTIVE",
+      inventoryId: inventoryId || null,
+      notes: serverInfo.substring(0, 500) || null,
+      projectId: projectAE.id,
+    },
+  });
+  console.log(`  Server: ${server.code} (IP: ${server.ipAddress})`);
+
+  // ═══════════════════════════════════════
+  // 4. PP SHEET → PayPalAccount (first ~22 rows)
+  // ═══════════════════════════════════════
+  const ppSheet = XLSX.utils.sheet_to_json(wb.Sheets["PP"], { header: 1, defval: "" }) as unknown[][];
+  // Data starts at row 3 (row 0=header group, row 1=column headers, row 2=summary)
+  const ppDataRows = ppSheet.slice(3, 25); // 22 rows
+  const paypalMap: Record<string, string> = {}; // code -> id
+
+  let ppCount = 0;
+  for (let i = 0; i < ppDataRows.length; i++) {
+    const row = ppDataRows[i];
+    const code = str(row[1]);
+    if (!code) {
+      console.warn(`  [PP] Skipping row ${i + 3}: no code`);
+      continue;
+    }
+
+    const primaryEmail = str(row[3]);
+    if (!primaryEmail) {
+      console.warn(`  [PP] Skipping row ${i + 3} (${code}): no email`);
+      continue;
+    }
+
+    // Determine role
+    let role: "USDT" | "MASTER" | "NORMAL" = "NORMAL";
+    if (code.startsWith("USDT")) {
+      role = "USDT";
+    } else if (i <= 1) {
+      // First two data rows (USDT-01, PP_VietPhe) are special - but USDT already handled
+      // PP_VietPhe is row index 1 → treat as MASTER
+      role = "MASTER";
+    }
+
+    const pp = await prisma.payPalAccount.upsert({
+      where: { code_projectId: { code, projectId: projectAE.id } },
       update: {},
       create: {
-        userId: admin.id,
-        projectId: project.id,
-        role: "ADMIN",
+        code,
+        primaryEmail: primaryEmail.split("\n")[0].trim(),
+        secondaryEmail: primaryEmail.includes("\n") ? primaryEmail.split("\n")[1]?.trim() || null : null,
+        bankCode: str(row[4]) || null,
+        hotmailToken: str(row[5]) || null,
+        company: str(row[7]) || "Bright Data Ltd.",
+        serverAssignment: str(row[2]) || null,
+        status: "ACTIVE",
+        role,
+        projectId: projectAE.id,
       },
     });
+    paypalMap[code] = pp.id;
+    ppCount++;
   }
+  console.log(`  PayPal accounts: ${ppCount}`);
 
-  // === AE Project Sample Data (5%) ===
+  // ═══════════════════════════════════════
+  // 5. S1 SHEET → VirtualMachine + ProxyIP + GmailAccount (first ~25 rows)
+  // ═══════════════════════════════════════
+  const s1Sheet = XLSX.utils.sheet_to_json(wb.Sheets["S1"], { header: 1, defval: "" }) as unknown[][];
+  // Row 0 = sheet title, Row 1 = headers, Data starts at row 2
+  const s1DataRows = s1Sheet.slice(2, 27); // 25 rows
 
-  // Servers (3 of 19)
-  const servers = await Promise.all([
-    prisma.server.upsert({
-      where: { code_projectId: { code: "SERVER-01", projectId: projectAE.id } },
-      update: {},
-      create: {
-        code: "SERVER-01",
-        ipAddress: "192.168.1.10",
-        provider: "ColoCrossing",
-        cpu: "4 Cores - 8 Threads",
-        ram: "32 GB",
-        status: "ACTIVE",
-        projectId: projectAE.id,
-      },
-    }),
-    prisma.server.upsert({
-      where: { code_projectId: { code: "SERVER-02", projectId: projectAE.id } },
-      update: {},
-      create: {
-        code: "SERVER-02",
-        ipAddress: "192.168.1.11",
-        provider: "ColoCrossing",
-        cpu: "8 Cores - 16 Threads",
-        ram: "64 GB",
-        status: "ACTIVE",
-        projectId: projectAE.id,
-      },
-    }),
-    prisma.server.upsert({
-      where: { code_projectId: { code: "SERVER-03", projectId: projectAE.id } },
-      update: {},
-      create: {
-        code: "SERVER-03",
-        ipAddress: "192.168.1.12",
-        provider: "Google Cloud",
-        cpu: "4 Cores",
-        ram: "16 GB",
-        status: "MAINTENANCE",
-        projectId: projectAE.id,
-      },
-    }),
-  ]);
+  let vmCount = 0;
+  let proxyCount = 0;
+  let gmailCount = 0;
 
-  // VMs (20 of 838)
-  const vms = [];
-  for (let i = 1; i <= 20; i++) {
-    const serverIdx = i <= 8 ? 0 : i <= 15 ? 1 : 2;
-    const statuses = ["OK", "OK", "OK", "OK", "ERROR", "NOT_CONNECTED", "BLOCKED"] as const;
-    const vm = await prisma.virtualMachine.upsert({
-      where: {
-        code_serverId: { code: `M-${String(i).padStart(3, "0")}`, serverId: servers[serverIdx].id },
-      },
-      update: {},
-      create: {
-        code: `M-${String(i).padStart(3, "0")}`,
-        status: statuses[i % statuses.length],
-        sdkId: `sdk-win-${Math.random().toString(36).slice(2, 18)}`,
-        earnTotal: parseFloat((Math.random() * 100 + 10).toFixed(4)),
-        earn24h: parseFloat((Math.random() * 5).toFixed(4)),
-        uptime: `${Math.floor(Math.random() * 24)}h ${Math.floor(Math.random() * 60)}m`,
-        serverId: servers[serverIdx].id,
-      },
-    });
-    vms.push(vm);
-  }
+  for (let i = 0; i < s1DataRows.length; i++) {
+    const row = s1DataRows[i];
+    const proxyAddress = str(row[1]);
+    const vmCode = str(row[2]);
+    const statusStr = str(row[3]);
+    const sdkId = str(row[5]) || null;
+    const gmailEmail = str(row[7]);
+    const gmailPassword = str(row[8]);
+    const recoveryEmail = str(row[9]);
 
-  // Proxy IPs (20 of 5000)
-  for (let i = 0; i < 20; i++) {
-    const host = `23.142.${16 + Math.floor(i / 5)}.${70 + i}`;
-    const port = 40100 + i;
-    const proxy = await prisma.proxyIP.upsert({
-      where: {
-        address_projectId: {
-          address: `${host}:${port}:kenan:${Math.random().toString(36).slice(2, 12)}`,
-          projectId: projectAE.id,
+    if (!vmCode) {
+      console.warn(`  [S1] Skipping row ${i + 2}: no VM code`);
+      continue;
+    }
+
+    // Create ProxyIP if address exists
+    let proxyId: string | null = null;
+    if (proxyAddress) {
+      const parts = proxyAddress.split(":");
+      const host = parts[0] || "";
+      const port = parseInt(parts[1] || "0", 10);
+
+      try {
+        const proxy = await prisma.proxyIP.upsert({
+          where: { address_projectId: { address: proxyAddress, projectId: projectAE.id } },
+          update: {},
+          create: {
+            address: proxyAddress,
+            host,
+            port: port || null,
+            status: "IN_USE",
+            projectId: projectAE.id,
+          },
+        });
+        proxyId = proxy.id;
+        proxyCount++;
+      } catch (err) {
+        console.warn(`  [S1] Failed to create proxy for row ${i + 2}: ${err}`);
+      }
+    }
+
+    // Create VM
+    try {
+      const vm = await prisma.virtualMachine.upsert({
+        where: { code_serverId: { code: vmCode, serverId: server.id } },
+        update: {},
+        create: {
+          code: vmCode,
+          status: mapVMStatus(statusStr),
+          sdkId,
+          serverId: server.id,
+          proxyId,
         },
-      },
-      update: {},
-      create: {
-        address: `${host}:${port}:kenan:${Math.random().toString(36).slice(2, 12)}`,
-        host,
-        port,
-        subnet: `Subnet ${String(Math.floor(i / 5) + 1).padStart(2, "0")}`,
-        status: i < 20 ? "IN_USE" : "AVAILABLE",
-        projectId: projectAE.id,
-      },
-    });
-
-    // Assign proxy to VM
-    if (i < vms.length) {
-      await prisma.virtualMachine.update({
-        where: { id: vms[i].id },
-        data: { proxyId: proxy.id },
       });
+      vmCount++;
+
+      // Create GmailAccount if email exists
+      if (gmailEmail && gmailEmail.includes("@")) {
+        try {
+          await prisma.gmailAccount.upsert({
+            where: { email: gmailEmail },
+            update: {},
+            create: {
+              email: gmailEmail,
+              password: gmailPassword || null,
+              recoveryEmail: recoveryEmail || null,
+              status: "ACTIVE",
+              vmId: vm.id,
+              projectId: projectAE.id,
+            },
+          });
+          gmailCount++;
+        } catch (err) {
+          console.warn(`  [S1] Failed to create gmail ${gmailEmail}: ${err}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`  [S1] Failed to create VM ${vmCode}: ${err}`);
     }
   }
+  console.log(`  VMs: ${vmCount}, Proxies: ${proxyCount}, Gmails: ${gmailCount}`);
 
-  // PayPal Accounts (20 of 400)
-  const paypals = [];
-  for (let i = 1; i <= 20; i++) {
-    const statuses = ["ACTIVE", "ACTIVE", "ACTIVE", "LIMITED", "SUSPENDED"] as const;
-    const roles = i <= 2 ? "MASTER" as const : "NORMAL" as const;
-    const pp = await prisma.payPalAccount.upsert({
-      where: {
-        code_projectId: { code: `AE-${String(i).padStart(3, "0")}`, projectId: projectAE.id },
-      },
-      update: {},
-      create: {
-        code: `AE-${String(i).padStart(3, "0")}`,
-        primaryEmail: `ae.account${i}@gmail.com`,
-        secondaryEmail: i % 3 === 0 ? `ae.backup${i}@hotmail.com` : null,
-        bankCode: `PP-VN${100 + i}`,
-        status: statuses[i % statuses.length],
-        role: roles,
-        limitNote: statuses[i % statuses.length] === "LIMITED"
-          ? `limit (${Math.floor(Math.random() * 30)}/1) - ~$${Math.floor(Math.random() * 200)} - 180 days`
-          : null,
-        company: "Bright Data Ltd.",
-        serverAssignment: `Server${(i % 3) + 1}`,
-        projectId: projectAE.id,
-      },
-    });
-    paypals.push(pp);
-  }
+  // ═══════════════════════════════════════
+  // 6. FUND SHEET → FundTransaction (first ~54 rows)
+  // ═══════════════════════════════════════
+  const fundSheet = XLSX.utils.sheet_to_json(wb.Sheets["FUND"], { header: 1, defval: "" }) as unknown[][];
+  // Row 0 = info, Row 1 = header group, Row 2 = column headers, Data starts at row 3
+  const fundDataRows = fundSheet.slice(3, 57); // ~54 rows
 
-  // Fund Transactions (50 of ~1000)
-  for (let i = 0; i < 50; i++) {
-    const pp = paypals[i % paypals.length];
-    const daysAgo = Math.floor(Math.random() * 60);
-    const date = new Date();
-    date.setDate(date.getDate() - daysAgo);
-    const amount = parseFloat((Math.random() * 20 + 5).toFixed(2));
+  let fundCount = 0;
+  for (let i = 0; i < fundDataRows.length; i++) {
+    const row = fundDataRows[i];
+    const dateSerial = num(row[0]);
+    const ppCode = str(row[1]);
+    const transactionId = str(row[8]);
+    const amount = num(row[9]);
+    const confirmed = row[11] === true || str(row[11]).toLowerCase() === "true";
+    const company = str(row[7]) || "Bright Data Ltd.";
 
-    await prisma.fundTransaction.upsert({
-      where: {
-        transactionId_projectId: {
-          transactionId: `TX-AE-${String(i + 1).padStart(5, "0")}`,
+    if (!transactionId || amount <= 0) {
+      console.warn(`  [FUND] Skipping row ${i + 3}: no txId or amount=0`);
+      continue;
+    }
+
+    // Find the PayPal account
+    let paypalId = paypalMap[ppCode];
+    if (!paypalId) {
+      // PayPal not in our imported set - create a minimal one
+      try {
+        const pp = await prisma.payPalAccount.upsert({
+          where: { code_projectId: { code: ppCode, projectId: projectAE.id } },
+          update: {},
+          create: {
+            code: ppCode,
+            primaryEmail: `${ppCode.toLowerCase()}@unknown.com`,
+            status: "ACTIVE",
+            role: ppCode.startsWith("USDT") ? "USDT" : "NORMAL",
+            company,
+            projectId: projectAE.id,
+          },
+        });
+        paypalId = pp.id;
+        paypalMap[ppCode] = pp.id;
+      } catch (err) {
+        console.warn(`  [FUND] Failed to create PayPal ${ppCode}: ${err}`);
+        continue;
+      }
+    }
+
+    try {
+      await prisma.fundTransaction.upsert({
+        where: {
+          transactionId_projectId: { transactionId, projectId: projectAE.id },
+        },
+        update: {},
+        create: {
+          date: excelDate(dateSerial),
+          amount,
+          transactionId,
+          confirmed,
+          company,
+          paypalId,
           projectId: projectAE.id,
         },
-      },
-      update: {},
-      create: {
-        date,
-        amount,
-        transactionId: `TX-AE-${String(i + 1).padStart(5, "0")}`,
-        confirmed: Math.random() > 0.2,
-        company: "Bright Data Ltd.",
-        paypalId: pp.id,
-        projectId: projectAE.id,
-      },
-    });
+      });
+      fundCount++;
+    } catch (err) {
+      console.warn(`  [FUND] Failed to create fund tx ${transactionId}: ${err}`);
+    }
   }
+  console.log(`  Fund transactions: ${fundCount}`);
 
-  // Withdrawals (15 sample) - skip if already seeded
-  const existingWithdrawals = await prisma.withdrawal.count({ where: { projectId: projectAE.id } });
-  if (existingWithdrawals === 0) {
-    for (let i = 0; i < 15; i++) {
-      const isMixing = i < 10;
-      const sourcePP = isMixing ? paypals[i + 2] : paypals[0]; // normal PPs for mixing, master for exchange
-      const daysAgo = Math.floor(Math.random() * 30);
-      const date = new Date();
-      date.setDate(date.getDate() - daysAgo);
+  // ═══════════════════════════════════════
+  // 7. Rut PP SHEET → Withdrawal (first ~57 rows)
+  // ═══════════════════════════════════════
+  const rutSheet = XLSX.utils.sheet_to_json(wb.Sheets["Rút PP"], { header: 1, defval: "" }) as unknown[][];
+  // Row 0 = links, Row 1 = header group, Row 2 = column headers, Data starts at row 3
+  const rutDataRows = rutSheet.slice(3, 60); // ~57 rows
 
+  let wdCount = 0;
+  for (let i = 0; i < rutDataRows.length; i++) {
+    const row = rutDataRows[i];
+    const dateSerial = num(row[0]);
+    const ppCode = str(row[1]);
+    const transactionId = str(row[6]);
+    const amount = num(row[7]);
+    const ppReceivedCode = str(row[8]);
+    const agent = str(row[10]);
+    const withdrawCode = str(row[11]);
+
+    if (!ppCode || amount <= 0) {
+      console.warn(`  [Rut PP] Skipping row ${i + 3}: no code or amount=0`);
+      continue;
+    }
+
+    // Determine type
+    const type = agent.toUpperCase().includes("MIXING") ? "MIXING" : "EXCHANGE";
+
+    // Find source PayPal
+    let sourcePaypalId = paypalMap[ppCode];
+    if (!sourcePaypalId) {
+      try {
+        const pp = await prisma.payPalAccount.upsert({
+          where: { code_projectId: { code: ppCode, projectId: projectAE.id } },
+          update: {},
+          create: {
+            code: ppCode,
+            primaryEmail: `${ppCode.toLowerCase()}@unknown.com`,
+            status: "ACTIVE",
+            role: "NORMAL",
+            company: "Bright Data Ltd.",
+            projectId: projectAE.id,
+          },
+        });
+        sourcePaypalId = pp.id;
+        paypalMap[ppCode] = pp.id;
+      } catch (err) {
+        console.warn(`  [Rut PP] Failed to create PayPal ${ppCode}: ${err}`);
+        continue;
+      }
+    }
+
+    // Find dest PayPal if specified
+    let destPaypalId: string | null = null;
+    if (ppReceivedCode) {
+      destPaypalId = paypalMap[ppReceivedCode] || null;
+      if (!destPaypalId) {
+        try {
+          const destPP = await prisma.payPalAccount.upsert({
+            where: { code_projectId: { code: ppReceivedCode, projectId: projectAE.id } },
+            update: {},
+            create: {
+              code: ppReceivedCode,
+              primaryEmail: `${ppReceivedCode.toLowerCase()}@unknown.com`,
+              status: "ACTIVE",
+              role: "NORMAL",
+              company: "Bright Data Ltd.",
+              projectId: projectAE.id,
+            },
+          });
+          destPaypalId = destPP.id;
+          paypalMap[ppReceivedCode] = destPP.id;
+        } catch (err) {
+          console.warn(`  [Rut PP] Failed to create dest PayPal ${ppReceivedCode}: ${err}`);
+        }
+      }
+    }
+
+    try {
       await prisma.withdrawal.create({
         data: {
-          date,
-          amount: parseFloat((Math.random() * 50 + 10).toFixed(2)),
-          type: isMixing ? "MIXING" : "EXCHANGE",
-          agent: !isMixing ? ["PP_VP", "ACE", "Marua", "Direct"][i % 4] : null,
-          withdrawCode: isMixing
-            ? `MIXING-${String(i).padStart(3, "0")}U`
-            : `ACE-${String(i).padStart(3, "0")}N`,
-          mailConfirmed: Math.random() > 0.3,
-          sourcePaypalId: sourcePP.id,
-          destPaypalId: isMixing ? paypals[0].id : null, // master PP
+          date: excelDate(dateSerial),
+          amount,
+          transactionId: transactionId || null,
+          type,
+          agent: agent || null,
+          withdrawCode: withdrawCode || null,
+          ppReceived: ppReceivedCode || null,
+          sourcePaypalId,
+          destPaypalId,
           projectId: projectAE.id,
         },
       });
+      wdCount++;
+    } catch (err) {
+      console.warn(`  [Rut PP] Failed to create withdrawal row ${i + 3}: ${err}`);
     }
-  } else {
-    console.log(`  Skipping withdrawals (${existingWithdrawals} already exist)`);
   }
+  console.log(`  Withdrawals: ${wdCount}`);
 
-  // Cost Records (3 months) - skip if already seeded
-  const existingCosts = await prisma.costRecord.count({ where: { projectId: projectAE.id } });
-  if (existingCosts === 0) {
-    for (let m = 0; m < 3; m++) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - m);
-      date.setDate(1);
+  // ═══════════════════════════════════════
+  // 8. Chi Phi SHEET → CostRecord (first ~3 rows)
+  // ═══════════════════════════════════════
+  const cpSheet = XLSX.utils.sheet_to_json(wb.Sheets["Chi Phí"], { header: 1, defval: "" }) as unknown[][];
+  // Row 0 = headers, Data starts at row 1
+  const cpDataRows = cpSheet.slice(1, 4); // 3 rows
 
+  let costCount = 0;
+  for (let i = 0; i < cpDataRows.length; i++) {
+    const row = cpDataRows[i];
+    const dateSerial = num(row[0]);
+    const isPrepaid = row[1] === true || str(row[1]).toLowerCase() === "true";
+    const serverCost = num(row[2]) || null;
+    const ipCost = num(row[3]) || null;
+    const extraCost = num(row[4]) || null;
+    const total = num(row[5]);
+    const note = str(row[6]) || null;
+
+    if (total <= 0) {
+      console.warn(`  [Chi Phi] Skipping row ${i + 1}: total=0`);
+      continue;
+    }
+
+    try {
       await prisma.costRecord.create({
         data: {
-          date,
-          serverCost: 2470,
-          ipCost: 1250,
-          extraCost: parseFloat((Math.random() * 500).toFixed(2)),
-          total: parseFloat((2470 + 1250 + Math.random() * 500).toFixed(2)),
-          isPrepaid: m === 0,
-          note: m === 0 ? "Prepaid for current month" : null,
-          fundingSource: "Marua withdrawal",
+          date: excelDate(dateSerial),
+          serverCost,
+          ipCost,
+          extraCost,
+          total,
+          isPrepaid,
+          note,
           projectId: projectAE.id,
         },
       });
+      costCount++;
+    } catch (err) {
+      console.warn(`  [Chi Phi] Failed to create cost row ${i + 1}: ${err}`);
     }
-  } else {
-    console.log(`  Skipping costs (${existingCosts} already exist)`);
   }
+  console.log(`  Cost records: ${costCount}`);
 
-  // === DN Project Sample Data (smaller) ===
-  const serverDN = await prisma.server.upsert({
-    where: { code_projectId: { code: "SV-01", projectId: projectDN.id } },
-    update: {},
-    create: {
-      code: "SV-01",
-      ipAddress: "10.0.1.10",
-      provider: "ColoCrossing",
-      cpu: "4 Cores",
-      ram: "32 GB",
-      status: "ACTIVE",
-      projectId: projectDN.id,
-    },
-  });
-
-  // 5 PPs for DN
-  const ppsDN = [];
-  for (let i = 1; i <= 5; i++) {
-    const pp = await prisma.payPalAccount.upsert({
-      where: { code_projectId: { code: `PP-${String(i).padStart(3, "0")}`, projectId: projectDN.id } },
-      update: {},
-      create: {
-        code: `PP-${String(i).padStart(3, "0")}`,
-        primaryEmail: `dn.account${i}@gmail.com`,
-        status: i === 4 ? "LIMITED" : "ACTIVE",
-        role: i === 1 ? "MASTER" : "NORMAL",
-        company: "Bright Data Ltd.",
-        projectId: projectDN.id,
-      },
-    });
-    ppsDN.push(pp);
-  }
-
-  // 10 Funds for DN
-  for (let i = 0; i < 10; i++) {
-    const pp = ppsDN[i % ppsDN.length];
-    const date = new Date();
-    date.setDate(date.getDate() - Math.floor(Math.random() * 30));
-    await prisma.fundTransaction.upsert({
-      where: {
-        transactionId_projectId: {
-          transactionId: `TX-DN-${String(i + 1).padStart(5, "0")}`,
-          projectId: projectDN.id,
-        },
-      },
-      update: {},
-      create: {
-        date,
-        amount: parseFloat((Math.random() * 15 + 5).toFixed(2)),
-        transactionId: `TX-DN-${String(i + 1).padStart(5, "0")}`,
-        confirmed: Math.random() > 0.3,
-        company: "Bright Data Ltd.",
-        paypalId: pp.id,
-        projectId: projectDN.id,
-      },
-    });
-  }
-
-  console.log("Seed complete!");
-  console.log(`  Projects: AE, DN`);
-  console.log(`  Admin user: admin@bdops.local`);
-  console.log(`  AE: 3 servers, 20 VMs, 20 proxies, 20 PPs, 50 funds, 15 withdrawals, 3 costs`);
-  console.log(`  DN: 1 server, 5 PPs, 10 funds`);
+  // ═══════════════════════════════════════
+  // SUMMARY
+  // ═══════════════════════════════════════
+  console.log("\nSeed complete!");
+  console.log(`  Project: AE (Bright Data AE 18+)`);
+  console.log(`  Admin: admin@bdops.com / admin123`);
+  console.log(`  Servers: 1`);
+  console.log(`  PayPal accounts: ${Object.keys(paypalMap).length}`);
+  console.log(`  VMs: ${vmCount}, Proxies: ${proxyCount}, Gmails: ${gmailCount}`);
+  console.log(`  Fund transactions: ${fundCount}`);
+  console.log(`  Withdrawals: ${wdCount}`);
+  console.log(`  Cost records: ${costCount}`);
 }
 
 main()

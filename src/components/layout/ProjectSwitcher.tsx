@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { useProjectStore } from "@/lib/store";
 import { trpc } from "@/lib/trpc";
 import {
@@ -12,23 +13,36 @@ import {
 } from "@/components/ui/select";
 
 export function ProjectSwitcher() {
+  const { data: session } = useSession();
   const { data: projects } = trpc.project.list.useQuery();
   const { currentProjectId, setCurrentProject } = useProjectStore();
+
+  const memberships = (session?.user as any)?.memberships || [];
+
+  const selectProject = (projectId: string) => {
+    const project = projects?.find((p) => p.id === projectId);
+    const membership = memberships.find((m: any) => m.projectId === projectId);
+    if (project) {
+      setCurrentProject(
+        project.id,
+        project.code,
+        membership?.role || "USER",
+        membership?.allowedModules || []
+      );
+    }
+  };
 
   // Auto-select first project if none selected
   useEffect(() => {
     if (!currentProjectId && projects && projects.length > 0) {
-      setCurrentProject(projects[0].id, projects[0].code);
+      selectProject(projects[0].id);
     }
-  }, [currentProjectId, projects, setCurrentProject]);
+  }, [currentProjectId, projects, memberships]);
 
   return (
     <Select
       value={currentProjectId ?? undefined}
-      onValueChange={(val) => {
-        const project = projects?.find((p) => p.id === val);
-        if (project) setCurrentProject(project.id, project.code);
-      }}
+      onValueChange={selectProject}
     >
       <SelectTrigger className="w-full bg-gray-800 border-gray-600 text-white">
         <SelectValue placeholder="Select project..." />

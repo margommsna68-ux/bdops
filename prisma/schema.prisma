@@ -15,12 +15,17 @@ model User {
   id            String          @id @default(cuid())
   email         String          @unique
   name          String?
+  password      String?
+  pin           String?         // hashed PIN (4-6 digits)
   image         String?
   googleId      String?         @unique
+  lastActiveAt  DateTime?       // track online status
   memberships   ProjectMember[]
   auditLogs     AuditLog[]
   proxyAssignments ProxyAssignmentHistory[] @relation("AssignedByUser")
   assignedTasks VMTask[]        @relation("TaskAssignee")
+  deleteRequestsMade    DeleteRequest[] @relation("DeleteRequestor")
+  deleteRequestsReviewed DeleteRequest[] @relation("DeleteReviewer")
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -40,28 +45,28 @@ model Project {
   profitSplits     ProfitSplit[]
   proxyIPs         ProxyIP[]
   gmailAccounts    GmailAccount[]
+  deleteRequests   DeleteRequest[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
 
 model ProjectMember {
-  id        String      @id @default(cuid())
-  user      User        @relation(fields: [userId], references: [id])
-  userId    String
-  project   Project     @relation(fields: [projectId], references: [id])
-  projectId String
-  role      ProjectRole @default(VIEWER)
-  createdAt DateTime    @default(now())
+  id              String      @id @default(cuid())
+  user            User        @relation(fields: [userId], references: [id])
+  userId          String
+  project         Project     @relation(fields: [projectId], references: [id])
+  projectId       String
+  role            ProjectRole @default(USER)
+  allowedModules  String[]    @default([])
+  createdAt       DateTime    @default(now())
 
   @@unique([userId, projectId])
 }
 
 enum ProjectRole {
   ADMIN
-  MANAGER
-  OPERATOR
-  PARTNER
-  VIEWER
+  MODERATOR
+  USER
 }
 
 // ═══════════════════════════════════════
@@ -373,6 +378,37 @@ enum VMTaskStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+// ═══════════════════════════════════════
+// DELETE REQUESTS
+// ═══════════════════════════════════════
+
+model DeleteRequest {
+  id              String              @id @default(cuid())
+  entity          String
+  entityId        String
+  entityLabel     String?
+  reason          String?
+  status          DeleteRequestStatus @default(PENDING)
+  requestedBy     User                @relation("DeleteRequestor", fields: [requestedById], references: [id])
+  requestedById   String
+  reviewedBy      User?               @relation("DeleteReviewer", fields: [reviewedById], references: [id])
+  reviewedById    String?
+  reviewNote      String?
+  project         Project             @relation(fields: [projectId], references: [id])
+  projectId       String
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([projectId, status])
+  @@index([entity, entityId])
+}
+
+enum DeleteRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ═══════════════════════════════════════

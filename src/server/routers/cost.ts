@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, costsProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
 export const costRouter = router({
-  list: protectedProcedure
+  list: costsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -34,7 +34,7 @@ export const costRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  create: adminProcedure
+  create: moderatorProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -70,7 +70,7 @@ export const costRouter = router({
       return result;
     }),
 
-  update: adminProcedure
+  update: moderatorProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -99,7 +99,7 @@ export const costRouter = router({
       return result;
     }),
 
-  delete: adminProcedure
+  delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.prisma.costRecord.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
@@ -115,7 +115,7 @@ export const costRouter = router({
       return result;
     }),
 
-  monthly: protectedProcedure
+  monthly: costsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.costRecord.groupBy({
@@ -126,7 +126,7 @@ export const costRouter = router({
       });
     }),
 
-  summary: protectedProcedure
+  summary: costsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const result = await ctx.prisma.costRecord.aggregate({

@@ -12,6 +12,8 @@ import { proxyRouter } from "./proxy";
 import { gmailRouter } from "./gmail";
 import { vmTaskRouter } from "./vmTask";
 import { auditLogRouter } from "./auditLog";
+import { deleteRequestRouter } from "./deleteRequest";
+import { userRouter } from "./user";
 
 export const appRouter = router({
   project: projectRouter,
@@ -27,6 +29,8 @@ export const appRouter = router({
   gmail: gmailRouter,
   vmTask: vmTaskRouter,
   auditLog: auditLogRouter,
+  deleteRequest: deleteRequestRouter,
+  user: userRouter,
 });
 
 export type AppRouter = typeof appRouter;

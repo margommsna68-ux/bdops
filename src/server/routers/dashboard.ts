@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, memberProcedure } from "../trpc";
 
 export const dashboardRouter = router({
-  overview: protectedProcedure
+  overview: memberProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const { projectId } = input;

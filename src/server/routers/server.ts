@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, adminProcedure } from "../trpc";
+import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 import { encrypt, decrypt } from "@/lib/encryption";
 
 export const serverRouter = router({
-  list: protectedProcedure
+  list: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.server.findMany({
@@ -15,7 +15,7 @@ export const serverRouter = router({
       });
     }),
 
-  getById: protectedProcedure
+  getById: infrastructureProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.server.findFirstOrThrow({
@@ -32,7 +32,7 @@ export const serverRouter = router({
       });
     }),
 
-  create: operatorProcedure
+  create: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -55,7 +55,7 @@ export const serverRouter = router({
       return ctx.prisma.server.create({ data });
     }),
 
-  update: operatorProcedure
+  update: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -75,14 +75,14 @@ export const serverRouter = router({
       return ctx.prisma.server.update({ where: { id }, data });
     }),
 
-  delete: adminProcedure
+  delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.prisma.server.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
       return ctx.prisma.server.delete({ where: { id: input.id } });
     }),
 
-  getCredentials: adminProcedure
+  getCredentials: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       const server = await ctx.prisma.server.findFirstOrThrow({

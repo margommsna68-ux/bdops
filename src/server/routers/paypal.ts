@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, managerProcedure } from "../trpc";
+import { router, paypalsProcedure, moderatorProcedure } from "../trpc";
 
 export const paypalRouter = router({
-  list: protectedProcedure
+  list: paypalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -42,7 +42,7 @@ export const paypalRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  getById: protectedProcedure
+  getById: paypalsProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       const pp = await ctx.prisma.payPalAccount.findFirstOrThrow({
@@ -79,7 +79,7 @@ export const paypalRouter = router({
       };
     }),
 
-  create: operatorProcedure
+  create: paypalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -99,7 +99,7 @@ export const paypalRouter = router({
       return ctx.prisma.payPalAccount.create({ data: input });
     }),
 
-  update: operatorProcedure
+  update: paypalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -123,14 +123,14 @@ export const paypalRouter = router({
       return ctx.prisma.payPalAccount.update({ where: { id }, data });
     }),
 
-  delete: managerProcedure
+  delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.prisma.payPalAccount.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
       return ctx.prisma.payPalAccount.delete({ where: { id: input.id } });
     }),
 
-  masters: protectedProcedure
+  masters: paypalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.payPalAccount.findMany({
@@ -139,7 +139,7 @@ export const paypalRouter = router({
       });
     }),
 
-  withBalance: protectedProcedure
+  withBalance: paypalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Use raw query for performance with 500+ accounts
@@ -173,7 +173,7 @@ export const paypalRouter = router({
         .filter((r) => r.balance > 0);
     }),
 
-  bulkImport: operatorProcedure
+  bulkImport: paypalsProcedure
     .input(z.object({
       projectId: z.string(),
       items: z.array(z.object({

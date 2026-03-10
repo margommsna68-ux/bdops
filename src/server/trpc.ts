@@ -6,6 +6,17 @@ import { authOptions } from "./auth";
 import { prisma } from "@/lib/prisma";
 import { type ProjectRole } from "@prisma/client";
 
+export const APP_MODULES = [
+  "FUNDS",
+  "WITHDRAWALS",
+  "PAYPALS",
+  "INFRASTRUCTURE",
+  "COSTS",
+  "PROFIT",
+] as const;
+
+export type AppModule = (typeof APP_MODULES)[number];
+
 export type Context = {
   session: Session | null;
   prisma: typeof prisma;
@@ -47,41 +58,79 @@ const enforceAuth = t.middleware(({ ctx, next }) => {
 
 export const protectedProcedure = t.procedure.use(enforceAuth);
 
-// Role-based procedures - check role for a specific project
+// Role hierarchy: ADMIN > MODERATOR > USER
 const ROLE_HIERARCHY: Record<ProjectRole, number> = {
-  ADMIN: 5,
-  MANAGER: 4,
-  OPERATOR: 3,
-  PARTNER: 2,
-  VIEWER: 1,
+  ADMIN: 3,
+  MODERATOR: 2,
+  USER: 1,
 };
 
+// Base middleware: verify project membership and extract role
+const enforceProjectMember = enforceAuth.unstable_pipe(({ ctx, next, rawInput }) => {
+  const input = rawInput as any;
+  const projectId = input?.projectId;
+  if (!projectId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "projectId required" });
+  }
+  const membership = (ctx.user.memberships as any[])?.find(
+    (m: any) => m.projectId === projectId
+  );
+  if (!membership) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this project" });
+  }
+  return next({
+    ctx: {
+      ...ctx,
+      projectId,
+      membership,
+      role: membership.role as ProjectRole,
+    },
+  });
+});
+
+// Require minimum role (ADMIN or MODERATOR)
 export function requireRole(minRole: ProjectRole) {
-  return enforceAuth.unstable_pipe(({ ctx, next, rawInput }) => {
-    const input = rawInput as any;
-    const projectId = input?.projectId;
-    if (!projectId) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "projectId required" });
-    }
-    const membership = (ctx.user.memberships as any[])?.find(
-      (m: any) => m.projectId === projectId
-    );
-    if (!membership) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this project" });
-    }
-    if (ROLE_HIERARCHY[membership.role as ProjectRole] < ROLE_HIERARCHY[minRole]) {
+  return enforceProjectMember.unstable_pipe(({ ctx, next }) => {
+    if (ROLE_HIERARCHY[ctx.role] < ROLE_HIERARCHY[minRole]) {
       throw new TRPCError({ code: "FORBIDDEN", message: `Requires ${minRole} role or higher` });
     }
-    return next({
-      ctx: {
-        ...ctx,
-        projectId,
-        membership,
-      },
-    });
+    return next({ ctx });
   });
 }
 
-export const operatorProcedure = t.procedure.use(requireRole("OPERATOR"));
-export const managerProcedure = t.procedure.use(requireRole("MANAGER"));
+// Require access to a specific module
+export function requireModule(module: AppModule) {
+  return enforceProjectMember.unstable_pipe(({ ctx, next }) => {
+    // ADMIN and MODERATOR have access to all modules
+    if (ctx.role === "ADMIN" || ctx.role === "MODERATOR") {
+      return next({ ctx: { ...ctx, module } });
+    }
+    // USER: check allowedModules
+    const allowedModules: string[] = ctx.membership.allowedModules || [];
+    if (!allowedModules.includes(module)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `No access to ${module} module` });
+    }
+    return next({ ctx: { ...ctx, module } });
+  });
+}
+
+// Check if user can delete directly (ADMIN/MODERATOR) or needs approval (USER)
+export function canDeleteDirectly(role: ProjectRole): boolean {
+  return role === "ADMIN" || role === "MODERATOR";
+}
+
+// Exported procedures
+export const memberProcedure = t.procedure.use(enforceProjectMember);
+export const moderatorProcedure = t.procedure.use(requireRole("MODERATOR"));
 export const adminProcedure = t.procedure.use(requireRole("ADMIN"));
+
+// Module-specific procedures
+export const fundsProcedure = t.procedure.use(requireModule("FUNDS"));
+export const withdrawalsProcedure = t.procedure.use(requireModule("WITHDRAWALS"));
+export const paypalsProcedure = t.procedure.use(requireModule("PAYPALS"));
+export const infrastructureProcedure = t.procedure.use(requireModule("INFRASTRUCTURE"));
+export const costsProcedure = t.procedure.use(requireModule("COSTS"));
+export const profitProcedure = t.procedure.use(requireModule("PROFIT"));
+
+// Keep backward compat alias
+export const operatorProcedure = memberProcedure;

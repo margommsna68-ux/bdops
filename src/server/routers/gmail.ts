@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, managerProcedure } from "../trpc";
+import { router, infrastructureProcedure } from "../trpc";
 import { encrypt } from "@/lib/encryption";
 
 export const gmailRouter = router({
-  list: protectedProcedure
+  list: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
+        search: z.string().optional(),
         status: z.string().optional(),
         unassigned: z.boolean().optional(),
         page: z.number().min(1).default(1),
@@ -15,29 +16,33 @@ export const gmailRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const where: any = { projectId: input.projectId };
+      if (input.search) {
+        where.email = { contains: input.search, mode: "insensitive" };
+      }
       if (input.status) where.status = input.status;
       if (input.unassigned) {
         where.vmId = null;
       }
 
-      const [items, total] = await Promise.all([
+      const [items, total, unassignedCount] = await Promise.all([
         ctx.prisma.gmailAccount.findMany({
           where,
           skip: (input.page - 1) * input.limit,
           take: input.limit,
-          orderBy: { email: "asc" },
+          orderBy: { createdAt: "desc" },
           include: {
             vm: { select: { id: true, code: true, server: { select: { code: true } } } },
             paypal: { select: { code: true, status: true } },
           },
         }),
         ctx.prisma.gmailAccount.count({ where }),
+        ctx.prisma.gmailAccount.count({ where: { projectId: input.projectId, vmId: null } }),
       ]);
 
-      return { items, total, page: input.page, limit: input.limit };
+      return { items, total, unassignedCount, page: input.page, limit: input.limit };
     }),
 
-  create: operatorProcedure
+  create: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -66,7 +71,7 @@ export const gmailRouter = router({
       return ctx.prisma.gmailAccount.create({ data: { ...data, projectId } });
     }),
 
-  update: operatorProcedure
+  update: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -96,7 +101,7 @@ export const gmailRouter = router({
       return ctx.prisma.gmailAccount.update({ where: { id }, data });
     }),
 
-  assignToVm: operatorProcedure
+  assignToVm: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -128,7 +133,7 @@ export const gmailRouter = router({
       });
     }),
 
-  needsAction: protectedProcedure
+  needsAction: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.gmailAccount.findMany({
@@ -144,7 +149,7 @@ export const gmailRouter = router({
       });
     }),
 
-  bulkImport: managerProcedure
+  bulkImport: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -161,7 +166,18 @@ export const gmailRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       let imported = 0;
+      const skipped: { email: string; reason: string }[] = [];
+
       for (const g of input.gmails) {
+        // Check if email already exists in this project
+        const existing = await ctx.prisma.gmailAccount.findFirst({
+          where: { email: g.email, projectId: input.projectId },
+        });
+        if (existing) {
+          skipped.push({ email: g.email, reason: "Email đã tồn tại" });
+          continue;
+        }
+
         try {
           await ctx.prisma.gmailAccount.create({
             data: {
@@ -175,10 +191,10 @@ export const gmailRouter = router({
             },
           });
           imported++;
-        } catch {
-          // Skip duplicates
+        } catch (err: any) {
+          skipped.push({ email: g.email, reason: err.message?.includes("Unique") ? "Email đã tồn tại" : "Lỗi không xác định" });
         }
       }
-      return { imported, total: input.gmails.length };
+      return { imported, total: input.gmails.length, skipped };
     }),
 });

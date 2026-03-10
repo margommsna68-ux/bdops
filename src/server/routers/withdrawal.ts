@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, adminProcedure } from "../trpc";
+import { router, withdrawalsProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
 export const withdrawalRouter = router({
-  list: protectedProcedure
+  list: withdrawalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -42,7 +42,7 @@ export const withdrawalRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  create: operatorProcedure
+  create: withdrawalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -87,7 +87,7 @@ export const withdrawalRouter = router({
       return result;
     }),
 
-  update: operatorProcedure
+  update: withdrawalsProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -113,7 +113,7 @@ export const withdrawalRouter = router({
       return result;
     }),
 
-  delete: adminProcedure
+  delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.prisma.withdrawal.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
@@ -129,7 +129,7 @@ export const withdrawalRouter = router({
       return result;
     }),
 
-  todaySummary: protectedProcedure
+  todaySummary: withdrawalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const today = new Date();
@@ -165,7 +165,7 @@ export const withdrawalRouter = router({
       };
     }),
 
-  byAgent: protectedProcedure
+  byAgent: withdrawalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.withdrawal.groupBy({
@@ -176,7 +176,7 @@ export const withdrawalRouter = router({
       });
     }),
 
-  mixingStatus: protectedProcedure
+  mixingStatus: withdrawalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Batch queries instead of N+1
@@ -220,7 +220,7 @@ export const withdrawalRouter = router({
       };
     }),
 
-  bulkImport: operatorProcedure
+  bulkImport: withdrawalsProcedure
     .input(z.object({
       projectId: z.string(),
       items: z.array(z.object({

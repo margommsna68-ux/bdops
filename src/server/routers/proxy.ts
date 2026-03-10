@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { router, protectedProcedure, operatorProcedure, managerProcedure } from "../trpc";
+import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 
 export const proxyRouter = router({
-  list: protectedProcedure
+  list: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -33,7 +33,7 @@ export const proxyRouter = router({
       return { items, total, page: input.page, limit: input.limit };
     }),
 
-  statusCounts: protectedProcedure
+  statusCounts: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.proxyIP.groupBy({
@@ -43,7 +43,7 @@ export const proxyRouter = router({
       });
     }),
 
-  bySubnet: protectedProcedure
+  bySubnet: infrastructureProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.proxyIP.groupBy({
@@ -54,7 +54,7 @@ export const proxyRouter = router({
     }),
 
   // Manual assign proxy to VM
-  assign: operatorProcedure
+  assign: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -105,7 +105,7 @@ export const proxyRouter = router({
     }),
 
   // Unassign proxy from VM
-  unassign: operatorProcedure
+  unassign: infrastructureProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -154,7 +154,7 @@ export const proxyRouter = router({
     }),
 
   // Auto-assign: shuffle available proxies into VMs without proxy
-  autoAssign: managerProcedure
+  autoAssign: moderatorProcedure
     .input(z.object({ projectId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Get available proxies
@@ -204,7 +204,7 @@ export const proxyRouter = router({
     }),
 
   // Assignment history for a proxy
-  history: protectedProcedure
+  history: infrastructureProcedure
     .input(z.object({ projectId: z.string(), proxyId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Verify proxy belongs to project
@@ -222,7 +222,7 @@ export const proxyRouter = router({
     }),
 
   // Bulk import proxies
-  bulkImport: managerProcedure
+  bulkImport: moderatorProcedure
     .input(
       z.object({
         projectId: z.string(),

@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, profitProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
 export const profitSplitRouter = router({
-  list: protectedProcedure
+  list: profitProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.profitSplit.findMany({
@@ -15,7 +15,7 @@ export const profitSplitRouter = router({
       });
     }),
 
-  getById: protectedProcedure
+  getById: profitProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       return ctx.prisma.profitSplit.findFirstOrThrow({
@@ -24,7 +24,7 @@ export const profitSplitRouter = router({
       });
     }),
 
-  create: adminProcedure
+  create: moderatorProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -99,7 +99,7 @@ export const profitSplitRouter = router({
       return result;
     }),
 
-  recalculate: adminProcedure
+  recalculate: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const split = await ctx.prisma.profitSplit.findFirstOrThrow({
@@ -163,7 +163,7 @@ export const profitSplitRouter = router({
       return updated;
     }),
 
-  settle: adminProcedure
+  settle: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.prisma.profitSplit.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
@@ -183,7 +183,7 @@ export const profitSplitRouter = router({
       return result;
     }),
 
-  markAllocationPaid: adminProcedure
+  markAllocationPaid: moderatorProcedure
     .input(z.object({ projectId: z.string(), allocationId: z.string(), paid: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       // Verify allocation belongs to project
