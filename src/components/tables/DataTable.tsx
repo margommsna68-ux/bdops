@@ -18,6 +18,8 @@ export interface Column<T> {
   className?: string;
   minWidth?: number;
   defaultWidth?: number;
+  sortFn?: (a: T, b: T) => number;
+  sortable?: boolean;
 }
 
 interface DataTableProps<T> {

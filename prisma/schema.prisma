@@ -16,10 +16,9 @@ model User {
   email         String          @unique
   name          String?
   password      String?
-  pin           String?         // hashed PIN (4-6 digits)
+  pin           String?
+  lastActiveAt  DateTime?
   image         String?
-  googleId      String?         @unique
-  lastActiveAt  DateTime?       // track online status
   memberships   ProjectMember[]
   auditLogs     AuditLog[]
   proxyAssignments ProxyAssignmentHistory[] @relation("AssignedByUser")

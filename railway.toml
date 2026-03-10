@@ -1,10 +1,8 @@
 [build]
-builder = "nixpacks"
-installCommand = "npm install"
-buildCommand = "npx prisma generate && npm run build"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npx prisma db push --accept-data-loss && npm start"
 healthcheckPath = "/api/auth/providers"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

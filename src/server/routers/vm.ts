@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, infrastructureProcedure } from "../trpc";
+import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 
 export const vmRouter = router({
   list: infrastructureProcedure
@@ -105,6 +105,109 @@ export const vmRouter = router({
         include: { server: { select: { code: true } } },
         orderBy: { code: "asc" },
       });
+    }),
+
+  // Bulk create VMs: M-001 to M-N
+  bulkCreate: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      serverId: z.string(),
+      prefix: z.string().default("M"),
+      count: z.number().min(1).max(200),
+      startFrom: z.number().min(1).default(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.server.findFirstOrThrow({ where: { id: input.serverId, projectId: input.projectId } });
+      let created = 0;
+      const errors: string[] = [];
+      for (let i = 0; i < input.count; i++) {
+        const num = input.startFrom + i;
+        const code = `${input.prefix}-${String(num).padStart(3, "0")}`;
+        try {
+          await ctx.prisma.virtualMachine.create({
+            data: { code, serverId: input.serverId, status: "NEW" },
+          });
+          created++;
+        } catch {
+          errors.push(`${code} already exists`);
+        }
+      }
+      return { created, errors: errors.slice(0, 10) };
+    }),
+
+  // Bulk update status for multiple VMs
+  bulkUpdateStatus: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmIds: z.array(z.string()).min(1),
+      status: z.enum(["NEW", "OK", "ERROR", "SUSPENDED", "NOT_CONNECTED", "NOT_AVC", "BLOCKED"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.prisma.virtualMachine.updateMany({
+        where: {
+          id: { in: input.vmIds },
+          server: { projectId: input.projectId },
+        },
+        data: { status: input.status },
+      });
+      return { updated: result.count };
+    }),
+
+  // Inline update a single field
+  inlineUpdate: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      id: z.string(),
+      field: z.enum(["status", "sdkId", "notes", "code"]),
+      value: z.string().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.virtualMachine.findFirstOrThrow({ where: { id: input.id, server: { projectId: input.projectId } } });
+      return ctx.prisma.virtualMachine.update({
+        where: { id: input.id },
+        data: { [input.field]: input.value },
+      });
+    }),
+
+  // Get all VMs for a server (no pagination, for spreadsheet view)
+  listAll: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      serverId: z.string(),
+    }))
+    .query(async ({ ctx, input }) => {
+      await ctx.prisma.server.findFirstOrThrow({ where: { id: input.serverId, projectId: input.projectId } });
+      return ctx.prisma.virtualMachine.findMany({
+        where: { serverId: input.serverId },
+        orderBy: { code: "asc" },
+        include: {
+          proxy: { select: { id: true, address: true, status: true } },
+          gmail: {
+            select: {
+              id: true, email: true, status: true,
+              paypal: { select: { id: true, code: true, status: true } },
+            },
+          },
+        },
+      });
+    }),
+
+  // Delete VM
+  delete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.virtualMachine.findFirstOrThrow({ where: { id: input.id, server: { projectId: input.projectId } } });
+      return ctx.prisma.virtualMachine.delete({ where: { id: input.id } });
+    }),
+
+  // Bulk delete VMs
+  bulkDelete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), vmIds: z.array(z.string()).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.prisma.virtualMachine.deleteMany({
+        where: { id: { in: input.vmIds }, server: { projectId: input.projectId } },
+      });
+      return { deleted: result.count };
     }),
 
   bulkImport: infrastructureProcedure

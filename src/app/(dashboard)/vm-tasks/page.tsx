@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { VMTaskForm } from "@/components/forms/VMTaskForm";
@@ -24,11 +24,16 @@ const typeColors: Record<string, string> = {
 };
 
 type StatusFilter = "ALL" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+type SortKey = "scheduledAt" | "title" | "type" | "status" | "vm";
+type SortDir = "asc" | "desc";
 
 export default function VMTasksPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [showForm, setShowForm] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("scheduledAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const { data: tasks, isLoading, refetch } = trpc.vmTask.list.useQuery(
     {
@@ -54,6 +59,57 @@ export default function VMTasksPage() {
     setMutatingId(taskId);
     updateStatus.mutate({ projectId, id: taskId, status: newStatus });
   };
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortIcon = (key: SortKey) => (
+    <span className="ml-1 text-gray-400 text-[10px]">
+      {sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+    </span>
+  );
+
+  // Search + Sort
+  const filteredTasks = useMemo(() => {
+    let items = tasks ?? [];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      items = items.filter((t: any) =>
+        (t.title ?? "").toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q) ||
+        (t.type ?? "").toLowerCase().includes(q) ||
+        (t.vm?.code ?? "").toLowerCase().includes(q) ||
+        (t.vm?.server?.code ?? "").toLowerCase().includes(q)
+      );
+    }
+    return [...items].sort((a: any, b: any) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "scheduledAt":
+          cmp = new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
+          break;
+        case "title":
+          cmp = (a.title ?? "").localeCompare(b.title ?? "");
+          break;
+        case "type":
+          cmp = (a.type ?? "").localeCompare(b.type ?? "");
+          break;
+        case "status":
+          cmp = (a.status ?? "").localeCompare(b.status ?? "");
+          break;
+        case "vm":
+          cmp = (a.vm?.code ?? "").localeCompare(b.vm?.code ?? "");
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [tasks, search, sortKey, sortDir]);
 
   if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
 
@@ -92,14 +148,46 @@ export default function VMTasksPage() {
         ))}
       </div>
 
+      {/* Search */}
+      <div className="relative">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          placeholder="Search task title, VM, type..."
+        />
+        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">&times;</button>}
+      </div>
+
+      {/* Sort controls */}
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span>Sort by:</span>
+        {([
+          ["scheduledAt", "Schedule"],
+          ["title", "Title"],
+          ["type", "Type"],
+          ["status", "Status"],
+          ["vm", "VM"],
+        ] as [SortKey, string][]).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => handleSort(key)}
+            className={`px-2 py-1 rounded hover:bg-gray-100 ${sortKey === key ? "font-medium text-gray-900" : ""}`}
+          >
+            {label}{sortIcon(key)}
+          </button>
+        ))}
+      </div>
+
       {/* Task list */}
       {isLoading ? (
         <p className="text-gray-400 py-8 text-center">Loading...</p>
-      ) : !tasks?.length ? (
+      ) : !filteredTasks?.length ? (
         <p className="text-gray-400 py-8 text-center">No tasks found.</p>
       ) : (
         <div className="space-y-3">
-          {tasks.map((task: any) => {
+          {filteredTasks.map((task: any) => {
             const isOverdue =
               task.status === "PENDING" && new Date(task.scheduledAt) < new Date();
             return (

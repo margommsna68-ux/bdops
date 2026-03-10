@@ -39,6 +39,7 @@ export default function AuditLogPage() {
   const [page, setPage] = useState(1);
   const [filterEntity, setFilterEntity] = useState<string>("");
   const [filterAction, setFilterAction] = useState<string>("");
+  const [search, setSearch] = useState("");
 
   const { data, isLoading } = trpc.auditLog.list.useQuery(
     {
@@ -62,6 +63,7 @@ export default function AuditLogPage() {
       render: (item) => (
         <span className="text-sm text-gray-600">{formatDateTime(item.createdAt)}</span>
       ),
+      sortFn: (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     },
     {
       key: "user",
@@ -74,6 +76,7 @@ export default function AuditLogPage() {
           <span className="text-sm">{item.user?.name || item.user?.email || "—"}</span>
         </div>
       ),
+      sortFn: (a, b) => (a.user?.name || a.user?.email || "").localeCompare(b.user?.name || b.user?.email || ""),
     },
     {
       key: "action",
@@ -103,6 +106,7 @@ export default function AuditLogPage() {
     {
       key: "changes",
       header: "Changes",
+      sortable: false,
       render: (item) => {
         if (!item.changes) return <span className="text-gray-400">—</span>;
         const changes = item.changes as Record<string, unknown>;
@@ -123,6 +127,20 @@ export default function AuditLogPage() {
       },
     },
   ];
+
+  // Client-side search
+  const filteredData = search.trim()
+    ? (data?.items ?? []).filter((item: any) => {
+        const q = search.toLowerCase();
+        return (
+          (item.user?.name ?? "").toLowerCase().includes(q) ||
+          (item.user?.email ?? "").toLowerCase().includes(q) ||
+          (item.action ?? "").toLowerCase().includes(q) ||
+          (item.entity ?? "").toLowerCase().includes(q) ||
+          (item.entityId ?? "").toLowerCase().includes(q)
+        );
+      })
+    : data?.items ?? [];
 
   if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
 
@@ -146,8 +164,18 @@ export default function AuditLogPage() {
         />
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
+      {/* Search + Filters */}
+      <div className="flex gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            placeholder="Search user, action, entity..."
+          />
+          {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">&times;</button>}
+        </div>
         <select
           className="px-3 py-2 border rounded-md text-sm bg-white"
           value={filterEntity}
@@ -176,7 +204,7 @@ export default function AuditLogPage() {
 
       <DataTable
         columns={columns}
-        data={data?.items ?? []}
+        data={filteredData}
         total={data?.total ?? 0}
         page={page}
         limit={50}

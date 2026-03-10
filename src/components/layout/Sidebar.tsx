@@ -46,6 +46,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const hasModuleAccess = (module: AppModule | null | undefined): boolean => {
     if (!module) return true; // Dashboard - always visible
     if (hasFullAccess) return true;
+    // If no role set yet (loading), show all modules to avoid empty sidebar
+    if (!currentRole) return true;
     return currentModules.includes(module);
   };
 
@@ -55,7 +57,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       return true;
     }
     if (item.adminOnly) {
-      return isAdmin || isModerator;
+      // Show admin items if admin/mod, or if role not loaded yet
+      return isAdmin || isModerator || !currentRole;
     }
     return hasModuleAccess(item.module);
   });

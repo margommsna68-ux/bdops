@@ -10,7 +10,7 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/funds";
+  const callbackUrl = searchParams.get("callbackUrl") || "/";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +25,7 @@ function LoginForm() {
     });
 
     if (res?.error) {
-      setError("Email hoặc mật khẩu không đúng");
+      setError("Email hoac mat khau khong dung");
       setLoading(false);
     } else if (res?.url) {
       window.location.href = res.url;
@@ -57,7 +57,7 @@ function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           required
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder="••••••••"
+          placeholder="********"
         />
       </div>
 
@@ -70,7 +70,7 @@ function LoginForm() {
         disabled={loading}
         className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Signing in..." : "Sign In"}
+        {loading ? "Dang xac thuc..." : "Dang nhap"}
       </button>
     </form>
   );

@@ -11,6 +11,7 @@ import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { exportToExcel } from "@/lib/excel-export";
+import toast from "react-hot-toast";
 
 export default function FundsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
@@ -48,6 +49,7 @@ export default function FundsPage() {
       key: "date",
       header: "Date",
       render: (item) => formatDate(item.date),
+      sortFn: (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
     },
     {
       key: "paypal",
@@ -55,6 +57,7 @@ export default function FundsPage() {
       render: (item) => (
         <span className="font-medium">{item.paypal?.code ?? "—"}</span>
       ),
+      sortFn: (a, b) => (a.paypal?.code ?? "").localeCompare(b.paypal?.code ?? ""),
     },
     {
       key: "amount",
@@ -64,6 +67,7 @@ export default function FundsPage() {
           {formatCurrency(item.amount)}
         </span>
       ),
+      sortFn: (a, b) => Number(a.amount) - Number(b.amount),
     },
     { key: "transactionId", header: "TX ID" },
     {
@@ -77,6 +81,7 @@ export default function FundsPage() {
             Unconfirmed
           </Badge>
         ),
+      sortFn: (a, b) => Number(a.confirmed) - Number(b.confirmed),
     },
     { key: "company", header: "Company" },
   ];
@@ -144,7 +149,7 @@ export default function FundsPage() {
               if (!window.confirm(`Confirm all ${unconfirmedCount} unconfirmed transactions?`)) return;
               const ids = unconfirmedData.map((f: any) => f.id);
               const result = await bulkConfirm.mutateAsync({ projectId: projectId!, ids });
-              alert(`${result.confirmed} transactions confirmed`);
+              toast.success(`${result.confirmed} transactions confirmed`);
               refetch();
             }}
           >
@@ -156,12 +161,16 @@ export default function FundsPage() {
       {/* Filters */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <div className="flex flex-wrap gap-4">
-          <Input
-            placeholder="Search by TX ID or PP code..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="flex-1 min-w-[200px]"
-          />
+          <div className="relative flex-1 min-w-[200px]">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            <Input
+              placeholder="Search TX ID, PP code, amount..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              className="pl-8 pr-8"
+            />
+            {search && <button onClick={() => { setSearch(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">&times;</button>}
+          </div>
           <Input
             type="date"
             value={dateFrom}
@@ -174,6 +183,23 @@ export default function FundsPage() {
             onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
             className="w-40"
           />
+          <div className="flex items-center gap-1">
+            {[
+              { label: "Today", fn: () => { const d = new Date().toISOString().slice(0, 10); setDateFrom(d); setDateTo(d); setPage(1); } },
+              { label: "7 days", fn: () => { const d = new Date(); d.setDate(d.getDate() - 7); setDateFrom(d.toISOString().slice(0, 10)); setDateTo(new Date().toISOString().slice(0, 10)); setPage(1); } },
+              { label: "This month", fn: () => { const d = new Date(); setDateFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setDateTo(d.toISOString().slice(0, 10)); setPage(1); } },
+              { label: "Last month", fn: () => { const d = new Date(); d.setMonth(d.getMonth() - 1); const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const last = new Date(y, d.getMonth() + 1, 0).getDate(); setDateFrom(`${y}-${m}-01`); setDateTo(`${y}-${m}-${last}`); setPage(1); } },
+              { label: "Clear", fn: () => { setDateFrom(""); setDateTo(""); setPage(1); } },
+            ].map((p) => (
+              <button
+                key={p.label}
+                onClick={p.fn}
+                className="px-2 py-1.5 text-xs rounded border bg-gray-50 hover:bg-gray-100 text-gray-600 whitespace-nowrap"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <select
             value={confirmed === undefined ? "" : String(confirmed)}
             onChange={(e) => {
@@ -222,7 +248,7 @@ export default function FundsPage() {
             paypalCode: String(r["PayPal"] || r["paypal"] || r["PP Code"] || r["PP"] || ""),
           }));
           const result = await bulkImport.mutateAsync({ projectId: projectId!, items });
-          alert(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? '\nErrors: ' + result.errors.join(', ') : ''}`);
+          toast.success(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? ' | Errors: ' + result.errors.join(', ') : ''}`);
           refetch();
         }}
       />

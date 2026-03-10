@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { trpc } from "@/lib/trpc";
@@ -21,6 +22,13 @@ export default function PayPalDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-sm text-gray-500">
+        <Link href="/paypals" className="hover:text-blue-600 transition-colors">PayPal Accounts</Link>
+        <span>/</span>
+        <span className="font-medium text-gray-900">{pp.code}</span>
+      </nav>
+
       <div>
         <h1 className="text-2xl font-bold text-gray-900">{pp.code}</h1>
         <p className="text-gray-500">{pp.primaryEmail}</p>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, infrastructureProcedure } from "../trpc";
+import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 import { encrypt } from "@/lib/encryption";
 
 export const gmailRouter = router({
@@ -7,7 +7,6 @@ export const gmailRouter = router({
     .input(
       z.object({
         projectId: z.string(),
-        search: z.string().optional(),
         status: z.string().optional(),
         unassigned: z.boolean().optional(),
         page: z.number().min(1).default(1),
@@ -16,30 +15,26 @@ export const gmailRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const where: any = { projectId: input.projectId };
-      if (input.search) {
-        where.email = { contains: input.search, mode: "insensitive" };
-      }
       if (input.status) where.status = input.status;
       if (input.unassigned) {
         where.vmId = null;
       }
 
-      const [items, total, unassignedCount] = await Promise.all([
+      const [items, total] = await Promise.all([
         ctx.prisma.gmailAccount.findMany({
           where,
           skip: (input.page - 1) * input.limit,
           take: input.limit,
-          orderBy: { createdAt: "desc" },
+          orderBy: { email: "asc" },
           include: {
             vm: { select: { id: true, code: true, server: { select: { code: true } } } },
             paypal: { select: { code: true, status: true } },
           },
         }),
         ctx.prisma.gmailAccount.count({ where }),
-        ctx.prisma.gmailAccount.count({ where: { projectId: input.projectId, vmId: null } }),
       ]);
 
-      return { items, total, unassignedCount, page: input.page, limit: input.limit };
+      return { items, total, page: input.page, limit: input.limit };
     }),
 
   create: infrastructureProcedure
@@ -76,6 +71,8 @@ export const gmailRouter = router({
       z.object({
         projectId: z.string(),
         id: z.string(),
+        email: z.string().email().optional(),
+        password: z.string().optional(),
         status: z.enum(["ACTIVE", "SUSPENDED", "NEEDS_RECOVERY", "NEEDS_2FA_UPDATE", "BLOCKED", "DISABLED"]).optional(),
         twoFaCurrent: z.string().optional(),
         recoveryEmail: z.string().nullable().optional(),
@@ -85,12 +82,11 @@ export const gmailRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, id, ...data } = input;
-      // Verify gmail belongs to project
       await ctx.prisma.gmailAccount.findFirstOrThrow({
         where: { id, projectId },
       });
+      if (data.password) data.password = encrypt(data.password);
       if (data.twoFaCurrent) {
-        // Move current to old, encrypt new
         const existing = await ctx.prisma.gmailAccount.findUniqueOrThrow({
           where: { id },
           select: { twoFaCurrent: true },
@@ -149,7 +145,7 @@ export const gmailRouter = router({
       });
     }),
 
-  bulkImport: infrastructureProcedure
+  bulkImport: moderatorProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -166,18 +162,7 @@ export const gmailRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       let imported = 0;
-      const skipped: { email: string; reason: string }[] = [];
-
       for (const g of input.gmails) {
-        // Check if email already exists in this project
-        const existing = await ctx.prisma.gmailAccount.findFirst({
-          where: { email: g.email, projectId: input.projectId },
-        });
-        if (existing) {
-          skipped.push({ email: g.email, reason: "Email đã tồn tại" });
-          continue;
-        }
-
         try {
           await ctx.prisma.gmailAccount.create({
             data: {
@@ -191,10 +176,26 @@ export const gmailRouter = router({
             },
           });
           imported++;
-        } catch (err: any) {
-          skipped.push({ email: g.email, reason: err.message?.includes("Unique") ? "Email đã tồn tại" : "Lỗi không xác định" });
+        } catch {
+          // Skip duplicates
         }
       }
-      return { imported, total: input.gmails.length, skipped };
+      return { imported, total: input.gmails.length };
+    }),
+
+  delete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.gmailAccount.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      return ctx.prisma.gmailAccount.delete({ where: { id: input.id } });
+    }),
+
+  bulkDelete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), ids: z.array(z.string()).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.prisma.gmailAccount.deleteMany({
+        where: { id: { in: input.ids }, projectId: input.projectId },
+      });
+      return { deleted: result.count };
     }),
 });

@@ -32,7 +32,7 @@ export const paypalRouter = router({
           orderBy: { code: "asc" },
           include: {
             _count: {
-              select: { fundsReceived: true, withdrawalsFrom: true },
+              select: { fundsReceived: true, withdrawalsFrom: true, gmails: true },
             },
           },
         }),

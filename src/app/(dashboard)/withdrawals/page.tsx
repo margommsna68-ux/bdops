@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { exportToExcel } from "@/lib/excel-export";
+import toast from "react-hot-toast";
 
 export default function WithdrawalsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
@@ -18,6 +19,7 @@ export default function WithdrawalsPage() {
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showUnsold, setShowUnsold] = useState(false);
+  const [search, setSearch] = useState("");
 
   const { data, isLoading, refetch } = trpc.withdrawal.list.useQuery(
     {
@@ -36,7 +38,12 @@ export default function WithdrawalsPage() {
   );
 
   const columns: Column<any>[] = [
-    { key: "date", header: "Date", render: (item) => formatDate(item.date) },
+    {
+      key: "date",
+      header: "Date",
+      render: (item) => formatDate(item.date),
+      sortFn: (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    },
     {
       key: "type",
       header: "Type",
@@ -52,6 +59,7 @@ export default function WithdrawalsPage() {
       key: "source",
       header: "Source PP",
       render: (item) => <span className="font-medium">{item.sourcePaypal?.code ?? "—"}</span>,
+      sortFn: (a, b) => (a.sourcePaypal?.code ?? "").localeCompare(b.sourcePaypal?.code ?? ""),
     },
     {
       key: "dest",
@@ -60,11 +68,13 @@ export default function WithdrawalsPage() {
         item.type === "MIXING"
           ? item.destPaypal?.code ?? "—"
           : item.agent ?? "—",
+      sortable: false,
     },
     {
       key: "amount",
       header: "Amount",
       render: (item) => <span className="font-semibold">{formatCurrency(item.amount)}</span>,
+      sortFn: (a, b) => Number(a.amount) - Number(b.amount),
     },
     { key: "withdrawCode", header: "Code" },
     {
@@ -76,6 +86,7 @@ export default function WithdrawalsPage() {
         ) : (
           <Badge variant="outline" className="text-xs">No</Badge>
         ),
+      sortFn: (a, b) => Number(a.mailConfirmed) - Number(b.mailConfirmed),
     },
   ];
 
@@ -169,22 +180,37 @@ export default function WithdrawalsPage() {
         </div>
       )}
 
-      <div className="flex gap-2">
-        {(["", "MIXING", "EXCHANGE"] as const).map((t) => (
-          <Button
-            key={t}
-            variant={typeFilter === t ? "default" : "outline"}
-            size="sm"
-            onClick={() => { setTypeFilter(t); setPage(1); }}
-          >
-            {t || "All"}
-          </Button>
-        ))}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-2">
+          {(["", "MIXING", "EXCHANGE"] as const).map((t) => (
+            <Button
+              key={t}
+              variant={typeFilter === t ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setTypeFilter(t); setPage(1); }}
+            >
+              {t || "All"}
+            </Button>
+          ))}
+        </div>
+        <div className="relative flex-1 min-w-[200px]">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-8 pr-8 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            placeholder="Search PP code, agent, code, amount..."
+          />
+          {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">&times;</button>}
+        </div>
       </div>
 
       <DataTable
         columns={columns}
-        data={data?.items ?? []}
+        data={search.trim() ? (data?.items ?? []).filter((w: any) => {
+          const q = search.toLowerCase();
+          return (w.sourcePaypal?.code ?? "").toLowerCase().includes(q) || (w.destPaypal?.code ?? "").toLowerCase().includes(q) || (w.agent ?? "").toLowerCase().includes(q) || (w.withdrawCode ?? "").toLowerCase().includes(q) || String(w.amount).includes(q) || (w.type ?? "").toLowerCase().includes(q);
+        }) : data?.items ?? []}
         total={data?.total ?? 0}
         page={page}
         limit={50}
@@ -217,7 +243,7 @@ export default function WithdrawalsPage() {
             notes: r["Notes"] ? String(r["Notes"]) : undefined,
           }));
           const result = await bulkImport.mutateAsync({ projectId: projectId!, items });
-          alert(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? '\nErrors: ' + result.errors.join(', ') : ''}`);
+          toast.success(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? ' | Errors: ' + result.errors.join(', ') : ''}`);
           refetch();
         }}
       />

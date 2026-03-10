@@ -45,13 +45,18 @@ export const serverRouter = router({
         credentials: z.any().optional(),
         inventoryId: z.string().optional(),
         notes: z.string().optional(),
+        createdDate: z.string().optional(),
+        expiryDate: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const data: any = { ...input };
-      if (input.credentials) {
-        data.credentials = encrypt(JSON.stringify(input.credentials));
+      const { createdDate, expiryDate, credentials, ...rest } = input;
+      const data: any = { ...rest };
+      if (credentials) {
+        data.credentials = encrypt(JSON.stringify(credentials));
       }
+      if (createdDate) data.createdDate = new Date(createdDate);
+      if (expiryDate) data.expiryDate = new Date(expiryDate);
       return ctx.prisma.server.create({ data });
     }),
 
@@ -66,12 +71,22 @@ export const serverRouter = router({
         cpu: z.string().optional(),
         ram: z.string().optional(),
         status: z.enum(["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAINTENANCE"]).optional(),
+        credentials: z.any().optional(),
+        inventoryId: z.string().optional(),
         notes: z.string().nullable().optional(),
+        createdDate: z.string().nullable().optional(),
+        expiryDate: z.string().nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { projectId, id, ...data } = input;
+      const { projectId, id, createdDate, expiryDate, credentials, ...rest } = input;
       await ctx.prisma.server.findFirstOrThrow({ where: { id, projectId } });
+      const data: any = { ...rest };
+      if (credentials) {
+        data.credentials = encrypt(JSON.stringify(credentials));
+      }
+      if (createdDate !== undefined) data.createdDate = createdDate ? new Date(createdDate) : null;
+      if (expiryDate !== undefined) data.expiryDate = expiryDate ? new Date(expiryDate) : null;
       return ctx.prisma.server.update({ where: { id }, data });
     }),
 

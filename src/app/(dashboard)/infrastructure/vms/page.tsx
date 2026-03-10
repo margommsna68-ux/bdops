@@ -7,6 +7,8 @@ import { DataTable, type Column } from "@/components/tables/DataTable";
 import { ImportExcelDialog } from "@/components/forms/ImportExcelDialog";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
+import { exportToExcel } from "@/lib/excel-export";
+import toast from "react-hot-toast";
 
 const statusColors: Record<string, string> = {
   OK: "bg-green-100 text-green-800",
@@ -25,6 +27,7 @@ export default function VMsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [showImport, setShowImport] = useState(false);
+  const [search, setSearch] = useState("");
 
   const bulkImport = trpc.vm.bulkImport.useMutation();
 
@@ -39,7 +42,12 @@ export default function VMsPage() {
 
   const columns: Column<any>[] = [
     { key: "code", header: "Code", render: (item) => <span className="font-medium">{item.code}</span> },
-    { key: "server", header: "Server", render: (item) => item.server?.code ?? "—" },
+    {
+      key: "server",
+      header: "Server",
+      render: (item) => item.server?.code ?? "—",
+      sortFn: (a, b) => (a.server?.code ?? "").localeCompare(b.server?.code ?? ""),
+    },
     {
       key: "status",
       header: "Status",
@@ -71,6 +79,7 @@ export default function VMsPage() {
     {
       key: "proxy",
       header: "Proxy",
+      sortable: false,
       render: (item) => (
         <span className="text-xs">{item.proxy?.address?.split(":")[0] ?? "—"}</span>
       ),
@@ -78,9 +87,25 @@ export default function VMsPage() {
     {
       key: "gmail",
       header: "Gmail",
+      sortable: false,
       render: (item) => <span className="text-xs">{item.gmail?.email ?? "—"}</span>,
     },
   ];
+
+  // Client-side search filtering
+  const filteredData = search.trim()
+    ? (data?.items ?? []).filter((vm: any) => {
+        const q = search.toLowerCase();
+        return (
+          (vm.code ?? "").toLowerCase().includes(q) ||
+          (vm.server?.code ?? "").toLowerCase().includes(q) ||
+          (vm.sdkId ?? "").toLowerCase().includes(q) ||
+          (vm.status ?? "").toLowerCase().includes(q) ||
+          (vm.proxy?.address ?? "").toLowerCase().includes(q) ||
+          (vm.gmail?.email ?? "").toLowerCase().includes(q)
+        );
+      })
+    : data?.items ?? [];
 
   if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
 
@@ -92,6 +117,29 @@ export default function VMsPage() {
           <p className="text-gray-500">VM status, SDK, earn tracking</p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (!filteredData.length) return;
+              exportToExcel(
+                filteredData.map((vm: any) => ({
+                  Code: vm.code,
+                  Server: vm.server?.code ?? "",
+                  Status: vm.status,
+                  "SDK ID": vm.sdkId ?? "",
+                  "Earn Total": Number(vm.earnTotal ?? 0),
+                  "24h": Number(vm.earn24h ?? 0),
+                  Proxy: vm.proxy?.address?.split(":")[0] ?? "",
+                  Gmail: vm.gmail?.email ?? "",
+                })),
+                "vms-export",
+                "VMs"
+              );
+            }}
+            disabled={!filteredData.length}
+          >
+            Export Excel
+          </Button>
           <Button variant="outline" onClick={() => setShowImport(true)}>
             Import Excel
           </Button>
@@ -118,9 +166,21 @@ export default function VMsPage() {
         ))}
       </div>
 
+      {/* Search */}
+      <div className="relative">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          placeholder="Search VM code, server, SDK ID, proxy, gmail..."
+        />
+        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">&times;</button>}
+      </div>
+
       <DataTable
         columns={columns}
-        data={data?.items ?? []}
+        data={filteredData}
         total={data?.total ?? 0}
         page={page}
         limit={50}
@@ -143,7 +203,7 @@ export default function VMsPage() {
             notes: r["Notes"] ? String(r["Notes"]) : undefined,
           }));
           const result = await bulkImport.mutateAsync({ projectId: projectId!, items });
-          alert(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? '\nErrors: ' + result.errors.join(', ') : ''}`);
+          toast.success(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? ' | Errors: ' + result.errors.join(', ') : ''}`);
           refetch();
         }}
       />

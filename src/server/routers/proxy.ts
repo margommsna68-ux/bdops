@@ -53,6 +53,25 @@ export const proxyRouter = router({
       });
     }),
 
+  // Update proxy fields
+  update: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      id: z.string(),
+      address: z.string().optional(),
+      host: z.string().nullable().optional(),
+      port: z.number().nullable().optional(),
+      subnet: z.string().nullable().optional(),
+      status: z.enum(["AVAILABLE", "IN_USE", "BLOCKED", "RESERVED"]).optional(),
+      outboundIP: z.string().nullable().optional(),
+      blockReason: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { projectId, id, ...data } = input;
+      await ctx.prisma.proxyIP.findFirstOrThrow({ where: { id, projectId } });
+      return ctx.prisma.proxyIP.update({ where: { id }, data });
+    }),
+
   // Manual assign proxy to VM
   assign: infrastructureProcedure
     .input(
@@ -255,5 +274,25 @@ export const proxyRouter = router({
         }
       }
       return { imported, total: input.proxies.length };
+    }),
+
+  delete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.proxyIP.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      // Unassign from VM first if assigned
+      await ctx.prisma.virtualMachine.updateMany({ where: { proxyId: input.id }, data: { proxyId: null } });
+      return ctx.prisma.proxyIP.delete({ where: { id: input.id } });
+    }),
+
+  bulkDelete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), ids: z.array(z.string()).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      // Unassign VMs first
+      await ctx.prisma.virtualMachine.updateMany({ where: { proxyId: { in: input.ids } }, data: { proxyId: null } });
+      const result = await ctx.prisma.proxyIP.deleteMany({
+        where: { id: { in: input.ids }, projectId: input.projectId },
+      });
+      return { deleted: result.count };
     }),
 });

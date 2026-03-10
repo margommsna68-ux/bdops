@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
+import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "../trpc";
 import { APP_MODULES } from "../trpc";
 import bcrypt from "bcryptjs";
 
@@ -19,6 +20,7 @@ export const projectRouter = router({
           },
         },
       },
+      orderBy: { code: "asc" },
     });
   }),
 
@@ -199,5 +201,63 @@ export const projectRouter = router({
         select: { id: true, email: true, name: true, createdAt: true },
         orderBy: { createdAt: "desc" },
       });
+    }),
+
+  // Set PIN for a user (Admin/Moderator only)
+  setPin: moderatorProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        userId: z.string(),
+        pin: z.string().min(4).max(8).regex(/^\d+$/, "PIN must be digits only"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const hashedPin = await bcrypt.hash(input.pin, 10);
+      await ctx.prisma.user.update({
+        where: { id: input.userId },
+        data: { pin: hashedPin },
+      });
+      return { success: true };
+    }),
+
+  // Remove PIN for a user (Admin/Moderator only)
+  removePin: moderatorProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        userId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.user.update({
+        where: { id: input.userId },
+        data: { pin: null },
+      });
+      return { success: true };
+    }),
+
+  // Check if current logged-in user has PIN set
+  myPinStatus: protectedProcedure
+    .query(async ({ ctx }) => {
+      const user = await ctx.prisma.user.findUnique({
+        where: { id: (ctx.user as any).id },
+        select: { pin: true },
+      });
+      return { hasPin: !!user?.pin };
+    }),
+
+  // Verify PIN for current logged-in user
+  verifyPin: protectedProcedure
+    .input(z.object({ pin: z.string().min(4).max(8) }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.prisma.user.findUnique({
+        where: { id: (ctx.user as any).id },
+        select: { pin: true },
+      });
+      if (!user?.pin) return { valid: true };
+      const valid = await bcrypt.compare(input.pin, user.pin);
+      if (!valid) throw new TRPCError({ code: "UNAUTHORIZED", message: "PIN khong dung" });
+      return { valid: true };
     }),
 });
