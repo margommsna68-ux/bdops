@@ -341,12 +341,39 @@ export const vmRouter = router({
       return { success: true };
     }),
 
+  // Assign/unassign paypal to a VM (via gmail bridge)
+  assignPaypal: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmId: z.string(),
+      paypalId: z.string().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
+        where: { id: input.vmId, server: { projectId: input.projectId } },
+        include: { gmail: true },
+      });
+      if (!vm.gmail) {
+        throw new Error("VM must have a Gmail assigned before assigning PayPal");
+      }
+      if (input.paypalId) {
+        await ctx.prisma.payPalAccount.findFirstOrThrow({
+          where: { id: input.paypalId, projectId: input.projectId },
+        });
+      }
+      await ctx.prisma.gmailAccount.update({
+        where: { id: vm.gmail.id },
+        data: { paypalId: input.paypalId },
+      });
+      return { success: true };
+    }),
+
   // Bulk paste: assign a list of values (gmail/proxy/paypal) to VMs in order
   bulkPaste: infrastructureProcedure
     .input(z.object({
       projectId: z.string(),
       serverId: z.string(),
-      field: z.enum(["gmail", "proxy"]),
+      field: z.enum(["gmail", "proxy", "paypal"]),
       values: z.array(z.string().min(1)),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -425,6 +452,29 @@ export const vmRouter = router({
             await ctx.prisma.proxyIP.update({
               where: { id: proxy.id },
               data: { status: "IN_USE" },
+            });
+            assigned++;
+          } else if (input.field === "paypal") {
+            // Find paypal by code or email
+            const paypal = await ctx.prisma.payPalAccount.findFirst({
+              where: {
+                projectId: input.projectId,
+                OR: [
+                  { code: { contains: val, mode: "insensitive" } },
+                  { primaryEmail: { contains: val, mode: "insensitive" } },
+                ],
+              },
+            });
+            if (!paypal) { errors.push(`Row ${i + 1}: PayPal "${val}" not found`); continue; }
+            // VM must have gmail assigned
+            const vmFull = await ctx.prisma.virtualMachine.findFirst({
+              where: { id: vm.id },
+              include: { gmail: true },
+            });
+            if (!vmFull?.gmail) { errors.push(`Row ${i + 1}: VM "${vm.code}" has no Gmail assigned`); continue; }
+            await ctx.prisma.gmailAccount.update({
+              where: { id: vmFull.gmail.id },
+              data: { paypalId: paypal.id },
             });
             assigned++;
           }

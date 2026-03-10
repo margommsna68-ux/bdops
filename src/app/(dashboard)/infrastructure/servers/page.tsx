@@ -124,7 +124,7 @@ function ExpiryBadge({ expiryDate }: { expiryDate: string | Date | null | undefi
 
 // Inline cell editor dropdown for VM gmail/proxy assignment
 function VmCellEditor({ field, items, search, onSearch, onSelect, onUnassign, onClose, hasValue, loading }: {
-  field: "gmail" | "proxy";
+  field: "gmail" | "proxy" | "paypal";
   items: { id: string; label: string; sublabel?: string; assigned?: boolean }[];
   search: string;
   onSearch: (v: string) => void;
@@ -149,7 +149,7 @@ function VmCellEditor({ field, items, search, onSearch, onSelect, onUnassign, on
       )}
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 ? (
-          <p className="text-xs text-gray-400 p-3 text-center">No {field === "gmail" ? "available gmails" : "available proxies"}</p>
+          <p className="text-xs text-gray-400 p-3 text-center">No {field === "gmail" ? "available gmails" : field === "proxy" ? "available proxies" : "available paypals"}</p>
         ) : (
           items.map((item) => (
             <button key={item.id} onClick={() => !item.assigned && onSelect(item.id)} disabled={loading || item.assigned} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center justify-between ${item.assigned ? "bg-blue-50 text-blue-700" : ""}`}>
@@ -192,7 +192,7 @@ export default function ServersPage() {
   const [importPreview, setImportPreview] = useState<Record<string, string>[]>([]);
 
   // Bulk paste dialog for VMs
-  const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" } | null>(null);
+  const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" | "paypal" } | null>(null);
   const [pasteText, setPasteText] = useState("");
 
   // Credentials (PIN protected)
@@ -324,9 +324,13 @@ export default function ServersPage() {
     onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("Proxy updated"); },
     onError: (e) => toast.error(e.message),
   });
+  const assignPaypal = trpc.vm.assignPaypal.useMutation({
+    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("PayPal updated"); },
+    onError: (e) => toast.error(e.message),
+  });
 
   // Inline VM cell editing
-  const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" } | null>(null);
+  const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" | "paypal" } | null>(null);
   const [vmCellSearch, setVmCellSearch] = useState("");
 
   // Queries for assignment dropdowns
@@ -337,6 +341,10 @@ export default function ServersPage() {
   const { data: availableProxies } = trpc.proxy.list.useQuery(
     { projectId: projectId!, page: 1, limit: 200 },
     { enabled: !!projectId && editingVmCell?.field === "proxy" }
+  );
+  const { data: availablePaypals } = trpc.paypal.list.useQuery(
+    { projectId: projectId!, page: 1, limit: 200 },
+    { enabled: !!projectId && editingVmCell?.field === "paypal" }
   );
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
@@ -833,6 +841,7 @@ export default function ServersPage() {
                   )}
                   <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "gmail" }); setPasteText(""); }}>Paste Gmail</Button>
                   <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "proxy" }); setPasteText(""); }}>Paste Proxy</Button>
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "paypal" }); setPasteText(""); }}>Paste PayPal</Button>
                   <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setShowVmCreate(true); setVmCreateMode("single"); setVmSingleCode(""); }}>+ Add VM</Button>
                   <Input placeholder="Search VM..." value={vmSearch} onChange={(e) => setVmSearch(e.target.value)} className="h-7 text-xs w-36" />
                 </div>
@@ -872,7 +881,8 @@ export default function ServersPage() {
 
                                 items={(availableGmails?.items ?? []).filter((g: any) => {
                                   const q = vmCellSearch.toLowerCase();
-                                  return (!g.vmId || g.vmId === vm.id) && (!q || g.email.toLowerCase().includes(q));
+                                  const isCurrent = g.vmId === vm.id;
+                                  return (isCurrent || (!g.vmId && g.status === "ACTIVE")) && (!q || g.email.toLowerCase().includes(q));
                                 }).map((g: any) => ({ id: g.id, label: g.email.split("@")[0], sublabel: g.status, assigned: g.vmId === vm.id }))}
                                 search={vmCellSearch}
                                 onSearch={setVmCellSearch}
@@ -912,7 +922,29 @@ export default function ServersPage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 text-xs text-gray-500 truncate">{vm.gmail?.paypal?.code ?? "—"}</td>
+                          <td className="px-2 py-1.5 text-xs truncate relative">
+                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "paypal" ? (
+                              <VmCellEditor
+                                field="paypal"
+                                items={(availablePaypals?.items ?? []).filter((pp: any) => {
+                                  const q = vmCellSearch.toLowerCase();
+                                  const isCurrent = vm.gmail?.paypal?.id === pp.id;
+                                  return (isCurrent || pp.status === "ACTIVE") && (!q || pp.code.toLowerCase().includes(q) || pp.primaryEmail.toLowerCase().includes(q));
+                                }).map((pp: any) => ({ id: pp.id, label: pp.code, sublabel: pp.primaryEmail, assigned: vm.gmail?.paypal?.id === pp.id }))}
+                                search={vmCellSearch}
+                                onSearch={setVmCellSearch}
+                                onSelect={(id) => assignPaypal.mutate({ projectId: projectId!, vmId: vm.id, paypalId: id })}
+                                onUnassign={() => assignPaypal.mutate({ projectId: projectId!, vmId: vm.id, paypalId: null })}
+                                onClose={() => setEditingVmCell(null)}
+                                hasValue={!!vm.gmail?.paypal}
+                                loading={assignPaypal.isLoading}
+                              />
+                            ) : (
+                              <span onClick={() => { if (!vm.gmail) { toast.error("Assign Gmail first"); return; } setEditingVmCell({ vmId: vm.id, field: "paypal" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
+                                {vm.gmail?.paypal?.code ? <span className="text-gray-700">{vm.gmail.paypal.code}</span> : <span className="text-gray-300 italic">{vm.gmail ? "click to assign" : "—"}</span>}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 text-right font-medium">${Number(vm.earnTotal ?? 0).toFixed(2)}</td>
                           <td className={`px-2 py-1.5 text-right font-medium ${Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"}`}>${Number(vm.earn24h ?? 0).toFixed(2)}</td>
                           <td className="px-2 py-1.5 text-xs text-gray-500">{vm.uptime ?? "—"}</td>
@@ -952,10 +984,10 @@ export default function ServersPage() {
       {/* Bulk Paste Dialog */}
       <Dialog open={!!pasteDialog} onOpenChange={(v) => { if (!v) { setPasteDialog(null); setPasteText(""); } }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : "Proxy Addresses"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : pasteDialog?.field === "proxy" ? "Proxy Addresses" : "PayPal Codes"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-gray-500">One per line. Assigns to VMs in order.{serverDetail && <span className="font-medium"> {serverDetail.vms.length} VMs</span>}</p>
-            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={10} className="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder={pasteDialog?.field === "gmail" ? "email1@gmail.com\nemail2@gmail.com" : "1.2.3.4:8080\n5.6.7.8:8080"} autoFocus />
+            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={10} className="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder={pasteDialog?.field === "gmail" ? "email1@gmail.com\nemail2@gmail.com" : pasteDialog?.field === "proxy" ? "1.2.3.4:8080\n5.6.7.8:8080" : "PP-001\nPP-002"} autoFocus />
             <p className="text-xs text-gray-400">{pasteText.split("\n").filter((l) => l.trim()).length} values</p>
             <div className="flex gap-2">
               <Button onClick={handleBulkPaste} disabled={bulkPaste.isLoading || !pasteText.trim()}>{bulkPaste.isLoading ? "..." : "Assign"}</Button>

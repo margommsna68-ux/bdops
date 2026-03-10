@@ -24,7 +24,7 @@ export const serverRouter = router({
           vms: {
             include: {
               proxy: true,
-              gmail: { include: { paypal: { select: { code: true, status: true } } } },
+              gmail: { include: { paypal: { select: { id: true, code: true, status: true } } } },
             },
             orderBy: { code: "asc" },
           },
