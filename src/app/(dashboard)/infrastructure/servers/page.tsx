@@ -192,8 +192,6 @@ export default function ServersPage() {
   const [importPreview, setImportPreview] = useState<Record<string, string>[]>([]);
 
   // Bulk paste dialog for VMs
-  const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" | "paypal" } | null>(null);
-  const [pasteText, setPasteText] = useState("");
 
   // (credentials removed from UI)
 
@@ -292,7 +290,7 @@ export default function ServersPage() {
     onError: (e) => toast.error(e.message),
   });
   const bulkPaste = trpc.vm.bulkPaste.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); setPasteDialog(null); setPasteText(""); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
   });
   const vmBulkUpdateStatus = trpc.vm.bulkUpdateStatus.useMutation({
@@ -338,6 +336,11 @@ export default function ServersPage() {
   const [qaProxy, setQaProxy] = useState(true);
   const [qaPaypal, setQaPaypal] = useState(true);
 
+  // Picker dialog (select from available data)
+  const [pickerDialog, setPickerDialog] = useState<{ field: "gmail" | "proxy" | "paypal" } | null>(null);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
+
   // Inline VM cell editing
   const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" | "paypal" } | null>(null);
   const [vmCellSearch, setVmCellSearch] = useState("");
@@ -353,7 +356,16 @@ export default function ServersPage() {
   );
   const { data: availablePaypals } = trpc.paypal.list.useQuery(
     { projectId: projectId!, page: 1, limit: 200 },
-    { enabled: !!projectId && editingVmCell?.field === "paypal" }
+    { enabled: !!projectId && (editingVmCell?.field === "paypal" || pickerDialog?.field === "paypal") }
+  );
+  // Also fetch gmail/proxy for picker dialog
+  const { data: pickerGmails } = trpc.gmail.list.useQuery(
+    { projectId: projectId!, page: 1, limit: 500 },
+    { enabled: !!projectId && pickerDialog?.field === "gmail" }
+  );
+  const { data: pickerProxies } = trpc.proxy.list.useQuery(
+    { projectId: projectId!, page: 1, limit: 500 },
+    { enabled: !!projectId && pickerDialog?.field === "proxy" }
   );
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
@@ -467,10 +479,6 @@ export default function ServersPage() {
     setSelectedVmIds(selectedVmIds.size === filteredVMs.length ? new Set() : new Set(filteredVMs.map((vm: any) => vm.id)));
   };
 
-  const handleBulkPaste = () => {
-    if (!pasteDialog || !selectedServerId || !pasteText.trim()) return;
-    bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: pasteDialog.field, values: pasteText.split("\n").map((l) => l.trim()).filter(Boolean) });
-  };
 
 
   const handleVmCreate = () => {
@@ -784,12 +792,6 @@ export default function ServersPage() {
                     <p className="text-[10px] font-medium text-blue-600 uppercase">Total</p>
                     <p className="text-xl font-bold text-blue-700">${totalEarnAll.toFixed(2)}</p>
                   </div>
-                  {Object.entries(vmStatusCounts).map(([status, count]) => (
-                    <div key={status} onClick={() => setVmStatusFilter(vmStatusFilter === status ? "" : status)} className={`rounded-lg px-3 py-2 min-w-[60px] cursor-pointer transition-all ${vmStatusFilter === status ? "ring-2 ring-blue-500 bg-blue-50" : "bg-gray-50"}`}>
-                      <p className="text-[10px] font-medium text-gray-500 uppercase">{status}</p>
-                      <p className="text-xl font-bold text-gray-900">{count}</p>
-                    </div>
-                  ))}
                 </div>
               </div>
 
@@ -812,13 +814,13 @@ export default function ServersPage() {
                       </select>
                       {vmBulkStatus && <Button size="sm" className="h-6 text-xs px-2" onClick={() => vmBulkUpdateStatus.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), status: vmBulkStatus as any })}>Apply</Button>}
                       {canDelete && <Button size="sm" variant="destructive" className="h-6 text-xs px-2" onClick={() => requirePin(() => vmBulkDelete.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds) }), "PIN Required", `Delete ${selectedVmIds.size} VMs?`)} disabled={vmBulkDelete.isLoading}>{vmBulkDelete.isLoading ? "..." : "Delete"}</Button>}
-                      <Button size="sm" variant="ghost" className="h-6 text-xs px-1" onClick={() => setSelectedVmIds(new Set())}>x</Button>
                       <span className="text-gray-300">|</span>
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "gmail" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ Gmail</Button>
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "proxy" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ Proxy</Button>
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "paypal" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ PayPal</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-1" onClick={() => setSelectedVmIds(new Set())}>x</Button>
                     </>
                   )}
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "gmail" }); setPasteText(""); }}>Paste Gmail</Button>
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "proxy" }); setPasteText(""); }}>Paste Proxy</Button>
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "paypal" }); setPasteText(""); }}>Paste PayPal</Button>
                   <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setShowVmCreate(true); setVmCreateMode("single"); setVmSingleCode(""); }}>+ Add VM</Button>
                   <Input placeholder="Search VM..." value={vmSearch} onChange={(e) => setVmSearch(e.target.value)} className="h-7 text-xs w-36" />
                 </div>
@@ -896,7 +898,7 @@ export default function ServersPage() {
                                   const q = vmCellSearch.toLowerCase();
                                   const isCurrent = g.vmId === vm.id;
                                   return (isCurrent || (!g.vmId && g.status === "ACTIVE")) && (!q || g.email.toLowerCase().includes(q));
-                                }).map((g: any) => ({ id: g.id, label: g.email.split("@")[0], sublabel: g.status, assigned: g.vmId === vm.id }))}
+                                }).map((g: any) => ({ id: g.id, label: g.email, sublabel: g.status, assigned: g.vmId === vm.id }))}
                                 search={vmCellSearch}
                                 onSearch={setVmCellSearch}
                                 onSelect={(id) => assignGmail.mutate({ projectId: projectId!, vmId: vm.id, gmailId: id })}
@@ -907,7 +909,7 @@ export default function ServersPage() {
                               />
                             ) : (
                               <span onClick={() => { setEditingVmCell({ vmId: vm.id, field: "gmail" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
-                                {vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email.split("@")[0]}</span> : <span className="text-gray-300 italic">click to assign</span>}
+                                {vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email}</span> : <span className="text-gray-300 italic">click to assign</span>}
                               </span>
                             )}
                           </td>
@@ -1001,17 +1003,87 @@ export default function ServersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Paste Dialog */}
-      <Dialog open={!!pasteDialog} onOpenChange={(v) => { if (!v) { setPasteDialog(null); setPasteText(""); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : pasteDialog?.field === "proxy" ? "Proxy Addresses" : "PayPal Codes"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <p className="text-xs text-gray-500">One per line. Assigns to VMs in order.{serverDetail && <span className="font-medium"> {serverDetail.vms.length} VMs</span>}</p>
-            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={10} className="w-full px-3 py-2 border rounded-lg text-sm font-mono" placeholder={pasteDialog?.field === "gmail" ? "email1@gmail.com\nemail2@gmail.com" : pasteDialog?.field === "proxy" ? "1.2.3.4:8080\n5.6.7.8:8080" : "PP-001\nPP-002"} autoFocus />
-            <p className="text-xs text-gray-400">{pasteText.split("\n").filter((l) => l.trim()).length} values</p>
-            <div className="flex gap-2">
-              <Button onClick={handleBulkPaste} disabled={bulkPaste.isLoading || !pasteText.trim()}>{bulkPaste.isLoading ? "..." : "Assign"}</Button>
-              <Button variant="outline" onClick={() => { setPasteDialog(null); setPasteText(""); }}>Cancel</Button>
+      {/* Picker Dialog - Select available data to assign */}
+      <Dialog open={!!pickerDialog} onOpenChange={(v) => { if (!v) { setPickerDialog(null); setPickerSelected(new Set()); } }}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>
+              {pickerDialog?.field === "gmail" ? "Select Gmail" : pickerDialog?.field === "proxy" ? "Select Proxy" : "Select PayPal"}
+              <span className="text-sm font-normal text-gray-500 ml-2">→ {selectedVmIds.size} VMs selected</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 flex-1 min-h-0">
+            <div className="flex items-center gap-2">
+              <Input placeholder="Search..." value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} className="h-8 text-sm" autoFocus />
+              <span className="text-xs text-gray-500 whitespace-nowrap">{pickerSelected.size} selected</span>
+            </div>
+            <p className="text-[10px] text-gray-400">Tick chọn data muốn gán → Assign. Gán theo thứ tự cho {selectedVmIds.size} VMs đã chọn.</p>
+            <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 max-h-[50vh]">
+              {pickerDialog?.field === "gmail" && (
+                (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
+                ? <p className="text-xs text-gray-400 p-4 text-center">No available Gmail</p>
+                : (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).map((g: any) => (
+                  <label key={g.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(g.id) ? "bg-blue-50" : ""}`}>
+                    <input type="checkbox" checked={pickerSelected.has(g.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(g.id)) next.delete(g.id); else next.add(g.id); return next; })} className="rounded border-gray-300" />
+                    <span className="font-mono text-xs">{g.email}</span>
+                    <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">ACTIVE</Badge>
+                  </label>
+                ))
+              )}
+              {pickerDialog?.field === "proxy" && (
+                (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
+                ? <p className="text-xs text-gray-400 p-4 text-center">No available Proxy</p>
+                : (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => (
+                  <label key={p.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(p.id) ? "bg-blue-50" : ""}`}>
+                    <input type="checkbox" checked={pickerSelected.has(p.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="rounded border-gray-300" />
+                    <span className="font-mono text-xs">{p.address}</span>
+                    <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">AVAILABLE</Badge>
+                  </label>
+                ))
+              )}
+              {pickerDialog?.field === "paypal" && (
+                (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
+                ? <p className="text-xs text-gray-400 p-4 text-center">No available PayPal</p>
+                : (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).map((pp: any) => (
+                  <label key={pp.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(pp.id) ? "bg-blue-50" : ""}`}>
+                    <input type="checkbox" checked={pickerSelected.has(pp.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(pp.id)) next.delete(pp.id); else next.add(pp.id); return next; })} className="rounded border-gray-300" />
+                    <span className="font-medium text-xs">{pp.code}</span>
+                    <span className="text-xs text-gray-500">{pp.primaryEmail}</span>
+                    <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">ACTIVE</Badge>
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => {
+                if (!pickerDialog || !selectedServerId || pickerSelected.size === 0) return;
+                const values = Array.from(pickerSelected);
+                const field = pickerDialog.field;
+                if (field === "gmail") {
+                  const items = (pickerGmails?.items ?? []).filter((g: any) => values.includes(g.id));
+                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "gmail", values: items.map((g: any) => g.email) });
+                } else if (field === "proxy") {
+                  const items = (pickerProxies?.items ?? []).filter((p: any) => values.includes(p.id));
+                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "proxy", values: items.map((p: any) => p.address) });
+                } else {
+                  const items = (availablePaypals?.items ?? []).filter((pp: any) => values.includes(pp.id));
+                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "paypal", values: items.map((pp: any) => pp.code) });
+                }
+                setPickerDialog(null); setPickerSelected(new Set());
+              }} disabled={bulkPaste.isLoading || pickerSelected.size === 0}>
+                {bulkPaste.isLoading ? "Assigning..." : `Assign ${pickerSelected.size} → ${selectedVmIds.size} VMs`}
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => {
+                const field = pickerDialog?.field;
+                let allIds: string[] = [];
+                if (field === "gmail") allIds = (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).map((g: any) => g.id);
+                else if (field === "proxy") allIds = (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => p.id);
+                else allIds = (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).map((pp: any) => pp.id);
+                setPickerSelected(pickerSelected.size === allIds.length ? new Set() : new Set(allIds));
+              }}>
+                {pickerSelected.size > 0 ? "Deselect all" : "Select all"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setPickerDialog(null); setPickerSelected(new Set()); }}>Cancel</Button>
             </div>
           </div>
         </DialogContent>
