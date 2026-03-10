@@ -261,6 +261,86 @@ export const vmRouter = router({
       return { imported, skipped, errors: errors.slice(0, 10) };
     }),
 
+  // Assign/unassign gmail to a single VM
+  assignGmail: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmId: z.string(),
+      gmailId: z.string().nullable(), // null to unassign
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
+        where: { id: input.vmId, server: { projectId: input.projectId } },
+      });
+      // Unassign current gmail from this VM
+      await ctx.prisma.gmailAccount.updateMany({
+        where: { vmId: vm.id },
+        data: { vmId: null },
+      });
+      if (input.gmailId) {
+        // Check gmail belongs to project and not assigned elsewhere
+        const gmail = await ctx.prisma.gmailAccount.findFirstOrThrow({
+          where: { id: input.gmailId, projectId: input.projectId },
+        });
+        if (gmail.vmId && gmail.vmId !== vm.id) {
+          throw new Error(`Gmail already assigned to another VM`);
+        }
+        await ctx.prisma.gmailAccount.update({
+          where: { id: input.gmailId },
+          data: { vmId: vm.id },
+        });
+      }
+      return { success: true };
+    }),
+
+  // Assign/unassign proxy to a single VM
+  assignProxy: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmId: z.string(),
+      proxyId: z.string().nullable(), // null to unassign
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
+        where: { id: input.vmId, server: { projectId: input.projectId } },
+      });
+      // Unassign current proxy
+      if (vm.proxyId) {
+        await ctx.prisma.virtualMachine.update({
+          where: { id: vm.id },
+          data: { proxyId: null },
+        });
+        await ctx.prisma.proxyIP.update({
+          where: { id: vm.proxyId },
+          data: { status: "AVAILABLE" },
+        });
+      }
+      if (input.proxyId) {
+        const proxy = await ctx.prisma.proxyIP.findFirstOrThrow({
+          where: { id: input.proxyId, projectId: input.projectId },
+        });
+        // Unassign from old VM if any
+        const oldVm = await ctx.prisma.virtualMachine.findFirst({
+          where: { proxyId: proxy.id },
+        });
+        if (oldVm && oldVm.id !== vm.id) {
+          await ctx.prisma.virtualMachine.update({
+            where: { id: oldVm.id },
+            data: { proxyId: null },
+          });
+        }
+        await ctx.prisma.virtualMachine.update({
+          where: { id: vm.id },
+          data: { proxyId: proxy.id },
+        });
+        await ctx.prisma.proxyIP.update({
+          where: { id: proxy.id },
+          data: { status: "IN_USE" },
+        });
+      }
+      return { success: true };
+    }),
+
   // Bulk paste: assign a list of values (gmail/proxy/paypal) to VMs in order
   bulkPaste: infrastructureProcedure
     .input(z.object({

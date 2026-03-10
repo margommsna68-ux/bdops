@@ -96,6 +96,49 @@ function PasswordInput({ value, onChange, placeholder, className }: { value: str
   );
 }
 
+// Inline cell editor dropdown for VM gmail/proxy assignment
+function VmCellEditor({ field, items, search, onSearch, onSelect, onUnassign, onClose, hasValue, loading }: {
+  field: "gmail" | "proxy";
+  items: { id: string; label: string; sublabel?: string; assigned?: boolean }[];
+  search: string;
+  onSearch: (v: string) => void;
+  onSelect: (id: string) => void;
+  onUnassign: () => void;
+  onClose: () => void;
+  hasValue: boolean;
+  loading: boolean;
+}) {
+  return (
+    <>
+    <div className="fixed inset-0 z-40" onClick={onClose} />
+    <div className="absolute left-0 top-0 z-50 bg-white border border-gray-300 rounded-lg shadow-lg w-64 max-h-56 flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1 p-1.5 border-b">
+        <input autoFocus value={search} onChange={(e) => onSearch(e.target.value)} placeholder={`Search ${field}...`} className="flex-1 text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-blue-400" />
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+      </div>
+      {hasValue && (
+        <button onClick={onUnassign} disabled={loading} className="text-xs text-red-500 hover:bg-red-50 px-3 py-1.5 text-left border-b">
+          {loading ? "..." : "✕ Unassign current"}
+        </button>
+      )}
+      <div className="flex-1 overflow-y-auto">
+        {items.length === 0 ? (
+          <p className="text-xs text-gray-400 p-3 text-center">No {field === "gmail" ? "available gmails" : "available proxies"}</p>
+        ) : (
+          items.map((item) => (
+            <button key={item.id} onClick={() => !item.assigned && onSelect(item.id)} disabled={loading || item.assigned} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center justify-between ${item.assigned ? "bg-blue-50 text-blue-700" : ""}`}>
+              <span className="truncate">{item.label}</span>
+              {item.assigned && <span className="text-[10px] text-blue-500 ml-1 shrink-0">current</span>}
+              {item.sublabel && !item.assigned && <span className="text-[10px] text-gray-400 ml-1 shrink-0">{item.sublabel}</span>}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+    </>
+  );
+}
+
 export default function ServersPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
@@ -243,6 +286,28 @@ export default function ServersPage() {
     onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setShowVmCreate(false); toast.success(`Created ${r.created} VMs`); if (r.errors.length) toast.error(r.errors.join("\n")); },
     onError: (e) => toast.error(e.message),
   });
+  const assignGmail = trpc.vm.assignGmail.useMutation({
+    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("Gmail updated"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const assignProxy = trpc.vm.assignProxy.useMutation({
+    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("Proxy updated"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // Inline VM cell editing
+  const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" } | null>(null);
+  const [vmCellSearch, setVmCellSearch] = useState("");
+
+  // Queries for assignment dropdowns
+  const { data: availableGmails } = trpc.gmail.list.useQuery(
+    { projectId: projectId!, page: 1, limit: 200 },
+    { enabled: !!projectId && editingVmCell?.field === "gmail" }
+  );
+  const { data: availableProxies } = trpc.proxy.list.useQuery(
+    { projectId: projectId!, page: 1, limit: 200 },
+    { enabled: !!projectId && editingVmCell?.field === "proxy" }
+  );
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
   const canDelete = currentRole === "ADMIN" || currentRole === "MODERATOR";
@@ -716,8 +781,53 @@ export default function ServersPage() {
                           <td className="px-2 py-1.5"><Badge className={`text-[10px] px-1.5 py-0 ${vmStatusColors[vm.status] ?? ""}`}>{vm.status}</Badge></td>
                           <td className="px-2 py-1.5 text-xs font-medium text-gray-700 truncate">{serverDetail.code}</td>
                           <td className="px-2 py-1.5 font-medium text-gray-900 truncate">{vm.code}</td>
-                          <td className="px-2 py-1.5 text-xs truncate">{vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email.split("@")[0]}</span> : <span className="text-gray-300">—</span>}</td>
-                          <td className="px-2 py-1.5 text-xs font-mono truncate">{vm.proxy ? <span className="text-blue-600">{vm.proxy.address}</span> : <span className="text-orange-400">No proxy</span>}</td>
+                          <td className="px-2 py-1.5 text-xs truncate relative">
+                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "gmail" ? (
+                              <VmCellEditor
+                                field="gmail"
+
+                                items={(availableGmails?.items ?? []).filter((g: any) => {
+                                  const q = vmCellSearch.toLowerCase();
+                                  return (!g.vmId || g.vmId === vm.id) && (!q || g.email.toLowerCase().includes(q));
+                                }).map((g: any) => ({ id: g.id, label: g.email.split("@")[0], sublabel: g.status, assigned: g.vmId === vm.id }))}
+                                search={vmCellSearch}
+                                onSearch={setVmCellSearch}
+                                onSelect={(id) => assignGmail.mutate({ projectId: projectId!, vmId: vm.id, gmailId: id })}
+                                onUnassign={() => assignGmail.mutate({ projectId: projectId!, vmId: vm.id, gmailId: null })}
+                                onClose={() => setEditingVmCell(null)}
+                                hasValue={!!vm.gmail}
+                                loading={assignGmail.isLoading}
+                              />
+                            ) : (
+                              <span onClick={() => { setEditingVmCell({ vmId: vm.id, field: "gmail" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
+                                {vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email.split("@")[0]}</span> : <span className="text-gray-300 italic">click to assign</span>}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-xs font-mono truncate relative">
+                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "proxy" ? (
+                              <VmCellEditor
+                                field="proxy"
+
+                                items={(availableProxies?.items ?? []).filter((p: any) => {
+                                  const q = vmCellSearch.toLowerCase();
+                                  const isCurrent = vm.proxy?.address === p.address;
+                                  return (p.status === "AVAILABLE" || isCurrent) && (!q || p.address.toLowerCase().includes(q));
+                                }).map((p: any) => ({ id: p.id, label: p.address, sublabel: p.status, assigned: vm.proxy?.address === p.address }))}
+                                search={vmCellSearch}
+                                onSearch={setVmCellSearch}
+                                onSelect={(id) => assignProxy.mutate({ projectId: projectId!, vmId: vm.id, proxyId: id })}
+                                onUnassign={() => assignProxy.mutate({ projectId: projectId!, vmId: vm.id, proxyId: null })}
+                                onClose={() => setEditingVmCell(null)}
+                                hasValue={!!vm.proxy}
+                                loading={assignProxy.isLoading}
+                              />
+                            ) : (
+                              <span onClick={() => { setEditingVmCell({ vmId: vm.id, field: "proxy" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
+                                {vm.proxy ? <span className="text-blue-600">{vm.proxy.address}</span> : <span className="text-orange-400 italic">click to assign</span>}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 text-xs text-gray-500 truncate">{vm.gmail?.paypal?.code ?? "—"}</td>
                           <td className="px-2 py-1.5 text-right font-medium">${Number(vm.earnTotal ?? 0).toFixed(2)}</td>
                           <td className={`px-2 py-1.5 text-right font-medium ${Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"}`}>${Number(vm.earn24h ?? 0).toFixed(2)}</td>
