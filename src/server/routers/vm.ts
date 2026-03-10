@@ -489,4 +489,150 @@ export const vmRouter = router({
 
       return { assigned, total: Math.min(input.values.length, vms.length), errors: errors.slice(0, 20) };
     }),
+
+  // Auto-fill single VM: assign first available Gmail + Proxy + PayPal
+  autoFill: infrastructureProcedure
+    .input(z.object({ projectId: z.string(), vmId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
+        where: { id: input.vmId, server: { projectId: input.projectId } },
+        include: { gmail: true, proxy: true },
+      });
+      const results: string[] = [];
+
+      // 1. Gmail
+      if (!vm.gmail) {
+        const gmail = await ctx.prisma.gmailAccount.findFirst({
+          where: { projectId: input.projectId, status: "ACTIVE", vmId: null },
+          orderBy: { email: "asc" },
+        });
+        if (gmail) {
+          await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { vmId: vm.id } });
+          results.push(`Gmail: ${gmail.email}`);
+
+          // 3. PayPal (needs gmail first)
+          const paypal = await ctx.prisma.payPalAccount.findFirst({
+            where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
+            orderBy: { code: "asc" },
+          });
+          if (paypal) {
+            await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { paypalId: paypal.id } });
+            results.push(`PayPal: ${paypal.code}`);
+          }
+        }
+      } else if (!vm.gmail.paypalId) {
+        // VM has gmail but no paypal
+        const paypal = await ctx.prisma.payPalAccount.findFirst({
+          where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
+          orderBy: { code: "asc" },
+        });
+        if (paypal) {
+          await ctx.prisma.gmailAccount.update({ where: { id: vm.gmail.id }, data: { paypalId: paypal.id } });
+          results.push(`PayPal: ${paypal.code}`);
+        }
+      }
+
+      // 2. Proxy
+      if (!vm.proxyId) {
+        const proxy = await ctx.prisma.proxyIP.findFirst({
+          where: { projectId: input.projectId, status: "AVAILABLE" },
+          orderBy: { address: "asc" },
+        });
+        if (proxy) {
+          await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { proxyId: proxy.id } });
+          await ctx.prisma.proxyIP.update({ where: { id: proxy.id }, data: { status: "IN_USE" } });
+          results.push(`Proxy: ${proxy.address}`);
+        }
+      }
+
+      return { filled: results.length, details: results };
+    }),
+
+  // Bulk auto-assign: assign available Gmail + Proxy + PayPal to multiple VMs
+  bulkAutoAssign: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmIds: z.array(z.string()).min(1),
+      assignGmail: z.boolean().default(true),
+      assignProxy: z.boolean().default(true),
+      assignPaypal: z.boolean().default(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const vms = await ctx.prisma.virtualMachine.findMany({
+        where: { id: { in: input.vmIds }, server: { projectId: input.projectId } },
+        include: { gmail: true, proxy: true },
+        orderBy: { code: "asc" },
+      });
+
+      let gmailCount = 0, proxyCount = 0, paypalCount = 0;
+
+      // Pre-fetch available resources
+      const availGmails = input.assignGmail ? await ctx.prisma.gmailAccount.findMany({
+        where: { projectId: input.projectId, status: "ACTIVE", vmId: null },
+        orderBy: { email: "asc" },
+      }) : [];
+      const availProxies = input.assignProxy ? await ctx.prisma.proxyIP.findMany({
+        where: { projectId: input.projectId, status: "AVAILABLE" },
+        orderBy: { address: "asc" },
+      }) : [];
+      const availPaypals = input.assignPaypal ? await ctx.prisma.payPalAccount.findMany({
+        where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
+        orderBy: { code: "asc" },
+      }) : [];
+
+      let gi = 0, pi = 0, ppi = 0;
+
+      for (const vm of vms) {
+        // Gmail
+        let gmailId = vm.gmail?.id;
+        if (!vm.gmail && gi < availGmails.length && input.assignGmail) {
+          const gmail = availGmails[gi++];
+          await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { vmId: vm.id } });
+          gmailId = gmail.id;
+          gmailCount++;
+        }
+
+        // Proxy
+        if (!vm.proxyId && pi < availProxies.length && input.assignProxy) {
+          const proxy = availProxies[pi++];
+          await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { proxyId: proxy.id } });
+          await ctx.prisma.proxyIP.update({ where: { id: proxy.id }, data: { status: "IN_USE" } });
+          proxyCount++;
+        }
+
+        // PayPal (needs gmail)
+        if (gmailId && input.assignPaypal) {
+          const currentGmail = vm.gmail || availGmails[gi - 1];
+          if (currentGmail && !currentGmail.paypalId && ppi < availPaypals.length) {
+            const paypal = availPaypals[ppi++];
+            await ctx.prisma.gmailAccount.update({ where: { id: gmailId }, data: { paypalId: paypal.id } });
+            paypalCount++;
+          }
+        }
+      }
+
+      return {
+        total: vms.length,
+        gmail: gmailCount,
+        proxy: proxyCount,
+        paypal: paypalCount,
+        availableLeft: {
+          gmail: availGmails.length - gi,
+          proxy: availProxies.length - pi,
+          paypal: availPaypals.length - ppi,
+        },
+      };
+    }),
+
+  // Preview: count available resources for quick assign
+  availableCounts: infrastructureProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const [gmail, proxy, paypal] = await Promise.all([
+        ctx.prisma.gmailAccount.count({ where: { projectId: input.projectId, status: "ACTIVE", vmId: null } }),
+        ctx.prisma.proxyIP.count({ where: { projectId: input.projectId, status: "AVAILABLE" } }),
+        ctx.prisma.payPalAccount.count({ where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } } }),
+      ]);
+      return { gmail, proxy, paypal };
+    }),
 });

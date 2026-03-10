@@ -323,6 +323,20 @@ export default function ServersPage() {
     onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("PayPal updated"); },
     onError: (e) => toast.error(e.message),
   });
+  const autoFill = trpc.vm.autoFill.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(r.filled > 0 ? r.details.join(" | ") : "Nothing available to assign"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const bulkAutoAssign = trpc.vm.bulkAutoAssign.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); utils.vm.availableCounts.invalidate(); setSelectedVmIds(new Set()); setShowQuickAssign(false); toast.success(`Assigned: ${r.gmail} Gmail, ${r.proxy} Proxy, ${r.paypal} PayPal`); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // Quick Assign
+  const [showQuickAssign, setShowQuickAssign] = useState(false);
+  const [qaGmail, setQaGmail] = useState(true);
+  const [qaProxy, setQaProxy] = useState(true);
+  const [qaPaypal, setQaPaypal] = useState(true);
 
   // Inline VM cell editing
   const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" | "paypal" } | null>(null);
@@ -492,6 +506,10 @@ export default function ServersPage() {
 
   const hasSelection = selectedServerIds.size > 0;
   const hasVmSelection = selectedVmIds.size > 0;
+  const { data: availCounts } = trpc.vm.availableCounts.useQuery(
+    { projectId: projectId! },
+    { enabled: !!projectId && (showQuickAssign || hasVmSelection) }
+  );
 
   const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
@@ -787,6 +805,7 @@ export default function ServersPage() {
                   {hasVmSelection && (
                     <>
                       <span className="text-xs text-blue-600 font-medium">{selectedVmIds.size} VMs</span>
+                      <Button size="sm" className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700" onClick={() => setShowQuickAssign(true)}>Quick Assign</Button>
                       <select value={vmBulkStatus} onChange={(e) => setVmBulkStatus(e.target.value)} className="h-6 px-1 border rounded text-xs">
                         <option value="">Status...</option>
                         {ALL_VM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -805,6 +824,41 @@ export default function ServersPage() {
                 </div>
               </div>
 
+              {/* Quick Assign Panel */}
+              {showQuickAssign && hasVmSelection && (
+                <div className="bg-green-50 border-b border-green-200 px-4 py-3 shrink-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-green-900">Quick Assign - {selectedVmIds.size} VMs</h3>
+                    <button onClick={() => setShowQuickAssign(false)} className="text-green-600 hover:text-green-800">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-4 mb-3">
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input type="checkbox" checked={qaGmail} onChange={(e) => setQaGmail(e.target.checked)} className="rounded border-gray-300" />
+                      <span className="font-medium">Gmail</span>
+                      <span className="text-green-700">({availCounts?.gmail ?? 0} available)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input type="checkbox" checked={qaProxy} onChange={(e) => setQaProxy(e.target.checked)} className="rounded border-gray-300" />
+                      <span className="font-medium">Proxy</span>
+                      <span className="text-green-700">({availCounts?.proxy ?? 0} available)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input type="checkbox" checked={qaPaypal} onChange={(e) => setQaPaypal(e.target.checked)} className="rounded border-gray-300" />
+                      <span className="font-medium">PayPal</span>
+                      <span className="text-green-700">({availCounts?.paypal ?? 0} available)</span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => bulkAutoAssign.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), assignGmail: qaGmail, assignProxy: qaProxy, assignPaypal: qaPaypal })} disabled={bulkAutoAssign.isLoading}>
+                      {bulkAutoAssign.isLoading ? "Assigning..." : `Assign All (${selectedVmIds.size} VMs)`}
+                    </Button>
+                    <span className="text-[10px] text-green-700">Auto-assigns first available Gmail, Proxy, PayPal to selected VMs in order. Skips VMs that already have assignments.</span>
+                  </div>
+                </div>
+              )}
+
               {/* VMs Table */}
               <div className="flex-1 overflow-auto">
                 <table className="text-sm" style={{ minWidth: "100%", tableLayout: "fixed" }}>
@@ -819,11 +873,12 @@ export default function ServersPage() {
                           <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 group-hover:bg-blue-200 transition-colors" onMouseDown={(e) => handleColResize(e, col.key)} />
                         </th>
                       ))}
+                      <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs w-12"></th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {filteredVMs.length === 0 ? (
-                      <tr><td colSpan={VM_COLUMNS.length + 1} className="text-center py-8 text-gray-400 text-sm">{vmStatusFilter ? "No VMs with this status" : "No VMs on this server"}</td></tr>
+                      <tr><td colSpan={VM_COLUMNS.length + 2} className="text-center py-8 text-gray-400 text-sm">{vmStatusFilter ? "No VMs with this status" : "No VMs on this server"}</td></tr>
                     ) : (
                       filteredVMs.map((vm: any, idx: number) => (
                         <tr key={vm.id} className={`hover:bg-blue-50/30 transition-colors ${selectedVmIds.has(vm.id) ? "bg-blue-50/50" : ""}`}>
@@ -906,6 +961,13 @@ export default function ServersPage() {
                           <td className="px-2 py-1.5 text-right font-medium">${Number(vm.earnTotal ?? 0).toFixed(2)}</td>
                           <td className={`px-2 py-1.5 text-right font-medium ${Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"}`}>${Number(vm.earn24h ?? 0).toFixed(2)}</td>
                           <td className="px-2 py-1.5 text-xs text-gray-500">{vm.uptime ?? "—"}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            {(!vm.gmail || !vm.proxy || !vm.gmail?.paypal) && (
+                              <button onClick={() => autoFill.mutate({ projectId: projectId!, vmId: vm.id })} disabled={autoFill.isLoading} className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium whitespace-nowrap" title="Auto-assign available Gmail + Proxy + PayPal">
+                                {autoFill.isLoading ? "..." : "Auto"}
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))
                     )}

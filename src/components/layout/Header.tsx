@@ -29,9 +29,6 @@ export function Header({ onMenuClick }: HeaderProps) {
       <div className="flex items-center gap-3">
         {session?.user && (
           <>
-            <span className="text-sm text-gray-600 hidden sm:inline">
-              {session.user.name || session.user.email}
-            </span>
             {session.user.image && (
               <img
                 src={session.user.image}
