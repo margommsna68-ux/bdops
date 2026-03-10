@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,19 +39,38 @@ const ALL_SERVER_STATUSES = ["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAIN
 
 const emptyForm = {
   code: "",
+  inventoryId: "",
+  status: "BUILDING" as const,
   ipAddress: "",
+  netmask: "",
+  gateway: "",
+  allocation: "",
   provider: "",
   cpu: "",
   ram: "",
-  status: "BUILDING" as const,
-  inventoryId: "",
-  notes: "",
   createdDate: "",
-  expiryDate: "",
-  credentials: { users: [{ username: "", password: "", role: "" }] },
+  notes: "",
+  users: [{ username: "", password: "" }] as { username: string; password: string }[],
+  ipmiIp: "",
+  ipmiUser: "",
+  ipmiPass: "",
 };
 
 type ServerForm = typeof emptyForm;
+
+// VM column definitions for resize
+const VM_COLUMNS = [
+  { key: "idx", label: "#", defaultWidth: 40, minWidth: 30 },
+  { key: "status", label: "Status", defaultWidth: 100, minWidth: 70 },
+  { key: "server", label: "Server", defaultWidth: 120, minWidth: 80 },
+  { key: "code", label: "VM Code", defaultWidth: 100, minWidth: 70 },
+  { key: "gmail", label: "Gmail (BD Account)", defaultWidth: 160, minWidth: 100 },
+  { key: "proxy", label: "Proxy", defaultWidth: 150, minWidth: 80 },
+  { key: "paypal", label: "PayPal", defaultWidth: 100, minWidth: 70 },
+  { key: "earnTotal", label: "Earn Total", defaultWidth: 100, minWidth: 70 },
+  { key: "earn24h", label: "24h", defaultWidth: 80, minWidth: 60 },
+  { key: "uptime", label: "Uptime", defaultWidth: 80, minWidth: 50 },
+];
 
 export default function ServersPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
@@ -68,7 +87,7 @@ export default function ServersPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  // Bulk selection
+  // Bulk server selection
   const [selectedServerIds, setSelectedServerIds] = useState<Set<string>>(new Set());
   const [bulkStatusTarget, setBulkStatusTarget] = useState("");
   const [showBulkDelete, setShowBulkDelete] = useState(false);
@@ -82,6 +101,61 @@ export default function ServersPage() {
   const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" } | null>(null);
   const [pasteText, setPasteText] = useState("");
 
+  // Show credentials (PIN protected)
+  const [showCreds, setShowCreds] = useState(false);
+
+  // VM selection for bulk operations
+  const [selectedVmIds, setSelectedVmIds] = useState<Set<string>>(new Set());
+  const [vmBulkStatus, setVmBulkStatus] = useState("");
+
+  // VM column resize state
+  const [vmColWidths, setVmColWidths] = useState<Record<string, number>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("vm-col-widths");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    const defaults: Record<string, number> = {};
+    VM_COLUMNS.forEach((c) => { defaults[c.key] = c.defaultWidth; });
+    return defaults;
+  });
+  const resizingCol = useRef<string | null>(null);
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  const handleColResize = useCallback((e: React.MouseEvent, colKey: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingCol.current = colKey;
+    startX.current = e.clientX;
+    startW.current = vmColWidths[colKey] ?? 100;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!resizingCol.current) return;
+      const diff = ev.clientX - startX.current;
+      const col = VM_COLUMNS.find((c) => c.key === resizingCol.current);
+      const minW = col?.minWidth ?? 50;
+      const newW = Math.max(minW, startW.current + diff);
+      setVmColWidths((prev) => {
+        const next = { ...prev, [resizingCol.current!]: newW };
+        try { localStorage.setItem("vm-col-widths", JSON.stringify(next)); } catch {}
+        return next;
+      });
+    };
+    const onUp = () => {
+      resizingCol.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [vmColWidths]);
+
   // Server list
   const { data: servers, isLoading } = trpc.server.list.useQuery(
     { projectId: projectId! },
@@ -92,6 +166,12 @@ export default function ServersPage() {
   const { data: serverDetail, isLoading: detailLoading } = trpc.server.getById.useQuery(
     { projectId: projectId!, id: selectedServerId! },
     { enabled: !!projectId && !!selectedServerId }
+  );
+
+  // Credentials query (lazy, only when showCreds)
+  const { data: credentials } = trpc.server.getCredentials.useQuery(
+    { projectId: projectId!, id: selectedServerId! },
+    { enabled: !!projectId && !!selectedServerId && showCreds }
   );
 
   // Mutations
@@ -123,6 +203,10 @@ export default function ServersPage() {
     onSuccess: (r) => { utils.server.getById.invalidate(); setPasteDialog(null); setPasteText(""); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
   });
+  const vmBulkUpdateStatus = trpc.vm.bulkUpdateStatus.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); setSelectedVmIds(new Set()); setVmBulkStatus(""); toast.success(`${r.updated} VMs updated`); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
   const canDelete = currentRole === "ADMIN" || currentRole === "MODERATOR";
@@ -132,21 +216,31 @@ export default function ServersPage() {
   // Form handlers
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const creds: any = {};
+    if (form.users.some((u) => u.username)) {
+      creds.users = form.users.filter((u) => u.username);
+    }
+    if (form.ipmiIp || form.ipmiUser) {
+      creds.ipmi = { ip: form.ipmiIp, user: form.ipmiUser, password: form.ipmiPass };
+    }
+
     const payload: any = {
       projectId: projectId!,
       code: form.code,
+      inventoryId: form.inventoryId || undefined,
+      status: form.status,
       ipAddress: form.ipAddress || undefined,
+      netmask: form.netmask || undefined,
+      gateway: form.gateway || undefined,
+      allocation: form.allocation || undefined,
       provider: form.provider || undefined,
       cpu: form.cpu || undefined,
       ram: form.ram || undefined,
-      status: form.status,
-      inventoryId: form.inventoryId || undefined,
       notes: form.notes || undefined,
       createdDate: form.createdDate || undefined,
-      expiryDate: form.expiryDate || undefined,
     };
-    if (form.credentials.users.some((u) => u.username)) {
-      payload.credentials = form.credentials;
+    if (Object.keys(creds).length > 0) {
+      payload.credentials = creds;
     }
     if (editId) {
       updateServer.mutate({ ...payload, id: editId });
@@ -158,41 +252,25 @@ export default function ServersPage() {
   const startEdit = (server: any) => {
     setForm({
       code: server.code,
+      inventoryId: server.inventoryId || "",
+      status: server.status,
       ipAddress: server.ipAddress || "",
+      netmask: server.netmask || "",
+      gateway: server.gateway || "",
+      allocation: server.allocation || "",
       provider: server.provider || "",
       cpu: server.cpu || "",
       ram: server.ram || "",
-      status: server.status,
-      inventoryId: server.inventoryId || "",
-      notes: server.notes || "",
       createdDate: server.createdDate ? new Date(server.createdDate).toISOString().split("T")[0] : "",
-      expiryDate: server.expiryDate ? new Date(server.expiryDate).toISOString().split("T")[0] : "",
-      credentials: { users: [{ username: "", password: "", role: "" }] },
+      notes: server.notes || "",
+      users: [{ username: "", password: "" }],
+      ipmiIp: "",
+      ipmiUser: "",
+      ipmiPass: "",
     });
     setEditId(server.id);
     setShowForm(true);
-  };
-
-  const addCredentialRow = () => {
-    setForm((f) => ({
-      ...f,
-      credentials: { users: [...f.credentials.users, { username: "", password: "", role: "" }] },
-    }));
-  };
-
-  const updateCredential = (idx: number, field: string, value: string) => {
-    setForm((f) => {
-      const users = [...f.credentials.users];
-      users[idx] = { ...users[idx], [field]: value };
-      return { ...f, credentials: { users } };
-    });
-  };
-
-  const removeCredential = (idx: number) => {
-    setForm((f) => ({
-      ...f,
-      credentials: { users: f.credentials.users.filter((_, i) => i !== idx) },
-    }));
+    setShowCreds(false);
   };
 
   const handleExportCSV = () => {
@@ -200,12 +278,15 @@ export default function ServersPage() {
     exportToCSV(
       servers.map((s: any) => ({
         code: s.code,
+        inventoryId: s.inventoryId ?? "",
+        status: s.status,
         ipAddress: s.ipAddress ?? "",
+        netmask: s.netmask ?? "",
+        gateway: s.gateway ?? "",
+        allocation: s.allocation ?? "",
         provider: s.provider ?? "",
         cpu: s.cpu ?? "",
         ram: s.ram ?? "",
-        status: s.status,
-        inventoryId: s.inventoryId ?? "",
         notes: s.notes ?? "",
       })),
       "servers-backup"
@@ -223,7 +304,6 @@ export default function ServersPage() {
       setShowImport(true);
     };
     reader.readAsText(file);
-    // Reset input so same file can be selected again
     e.target.value = "";
   };
 
@@ -231,6 +311,9 @@ export default function ServersPage() {
     const items = importPreview.map((row) => ({
       code: row.code || row.Code || "",
       ipAddress: row.ipAddress || row["IP Address"] || row.ip || undefined,
+      netmask: row.netmask || row.Netmask || undefined,
+      gateway: row.gateway || row.Gateway || undefined,
+      allocation: row.allocation || row.Allocation || undefined,
       provider: row.provider || row.Provider || undefined,
       cpu: row.cpu || row.CPU || undefined,
       ram: row.ram || row.RAM || undefined,
@@ -250,7 +333,6 @@ export default function ServersPage() {
       return next;
     });
   };
-
   const toggleSelectAll = () => {
     if (selectedServerIds.size === filteredServers.length) {
       setSelectedServerIds(new Set());
@@ -259,43 +341,43 @@ export default function ServersPage() {
     }
   };
 
-  // Handle bulk paste
+  // VM selection helpers
+  const toggleVmSelect = (id: string) => {
+    setSelectedVmIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleVmSelectAll = () => {
+    if (selectedVmIds.size === filteredVMs.length) {
+      setSelectedVmIds(new Set());
+    } else {
+      setSelectedVmIds(new Set(filteredVMs.map((vm: any) => vm.id)));
+    }
+  };
+
   const handleBulkPaste = () => {
     if (!pasteDialog || !selectedServerId || !pasteText.trim()) return;
     const values = pasteText.split("\n").map((l) => l.trim()).filter(Boolean);
-    bulkPaste.mutate({
-      projectId: projectId!,
-      serverId: selectedServerId,
-      field: pasteDialog.field,
-      values,
-    });
+    bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: pasteDialog.field, values });
   };
 
-  // Filter VMs in detail view
+  // Filter VMs
   const filteredVMs = serverDetail?.vms?.filter((vm: any) => {
     if (vmStatusFilter && vm.status !== vmStatusFilter) return false;
     if (vmSearch) {
       const q = vmSearch.toLowerCase();
-      return (
-        vm.code.toLowerCase().includes(q) ||
-        (vm.sdkId && vm.sdkId.toLowerCase().includes(q)) ||
-        (vm.proxy?.address && vm.proxy.address.toLowerCase().includes(q)) ||
-        (vm.gmail?.email && vm.gmail.email.toLowerCase().includes(q))
-      );
+      return vm.code.toLowerCase().includes(q) || (vm.sdkId && vm.sdkId.toLowerCase().includes(q)) || (vm.proxy?.address && vm.proxy.address.toLowerCase().includes(q)) || (vm.gmail?.email && vm.gmail.email.toLowerCase().includes(q));
     }
     return true;
   }) ?? [];
 
-  // VM status breakdown
   const vmStatusCounts: Record<string, number> = {};
-  serverDetail?.vms?.forEach((vm: any) => {
-    vmStatusCounts[vm.status] = (vmStatusCounts[vm.status] || 0) + 1;
-  });
-
+  serverDetail?.vms?.forEach((vm: any) => { vmStatusCounts[vm.status] = (vmStatusCounts[vm.status] || 0) + 1; });
   const totalEarn24h = serverDetail?.vms?.reduce((sum: number, vm: any) => sum + Number(vm.earn24h ?? 0), 0) ?? 0;
   const totalEarnAll = serverDetail?.vms?.reduce((sum: number, vm: any) => sum + Number(vm.earnTotal ?? 0), 0) ?? 0;
 
-  // Filter servers by search
   const filteredServers = servers?.filter((s: any) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -303,6 +385,15 @@ export default function ServersPage() {
   }) ?? [];
 
   const hasSelection = selectedServerIds.size > 0;
+  const hasVmSelection = selectedVmIds.size > 0;
+
+  // Helper for form field
+  const F = ({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) => (
+    <div className={span ? `col-span-${span}` : ""}>
+      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      {children}
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
@@ -313,12 +404,8 @@ export default function ServersPage() {
           <span className="text-xs text-gray-400">({servers?.length ?? 0} servers, {servers?.reduce((s: number, sv: any) => s + (sv._count?.vms ?? 0), 0) ?? 0} VMs)</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>
-            Export CSV
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
-            Import CSV
-          </Button>
+          <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>Export CSV</Button>
+          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
           <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
           {canEdit && (
             <Button size="sm" onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ ...emptyForm }); }}>
@@ -328,123 +415,141 @@ export default function ServersPage() {
         </div>
       </div>
 
-      {/* Bulk action bar */}
+      {/* Bulk server action bar */}
       {hasSelection && (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-3 shrink-0">
           <span className="text-sm font-medium text-blue-800">{selectedServerIds.size} selected</span>
-          <select
-            value={bulkStatusTarget}
-            onChange={(e) => setBulkStatusTarget(e.target.value)}
-            className="h-7 px-2 border rounded text-sm"
-          >
+          <select value={bulkStatusTarget} onChange={(e) => setBulkStatusTarget(e.target.value)} className="h-7 px-2 border rounded text-sm">
             <option value="">Change status...</option>
-            {ALL_SERVER_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
+            {ALL_SERVER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           {bulkStatusTarget && (
-            <Button size="sm" onClick={() => bulkUpdateStatus.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds), status: bulkStatusTarget as any })} disabled={bulkUpdateStatus.isLoading}>
-              Apply
-            </Button>
+            <Button size="sm" onClick={() => bulkUpdateStatus.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds), status: bulkStatusTarget as any })} disabled={bulkUpdateStatus.isLoading}>Apply</Button>
           )}
-          {canDelete && (
-            <Button size="sm" variant="destructive" onClick={() => setShowBulkDelete(true)}>
-              Delete Selected
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setSelectedServerIds(new Set())}>
-            Clear
-          </Button>
+          {canDelete && <Button size="sm" variant="destructive" onClick={() => setShowBulkDelete(true)}>Delete Selected</Button>}
+          <Button size="sm" variant="ghost" onClick={() => setSelectedServerIds(new Set())}>Clear</Button>
         </div>
       )}
-
-      {/* Bulk delete confirmation */}
       {showBulkDelete && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
           <p className="text-sm text-red-800">Delete {selectedServerIds.size} servers and all their VMs?</p>
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => bulkDelete.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds) })} disabled={bulkDelete.isLoading}>
-              {bulkDelete.isLoading ? "..." : "Confirm Delete"}
-            </Button>
+            <Button size="sm" variant="destructive" onClick={() => bulkDelete.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds) })} disabled={bulkDelete.isLoading}>{bulkDelete.isLoading ? "..." : "Confirm Delete"}</Button>
             <Button size="sm" variant="outline" onClick={() => setShowBulkDelete(false)}>Cancel</Button>
           </div>
         </div>
       )}
 
-      {/* Create/Edit Form */}
+      {/* Create/Edit Form - organized by sections */}
       {showForm && (
-        <div className="bg-white border-b border-gray-200 px-4 py-4 shrink-0 overflow-y-auto max-h-[40vh]">
-          <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="bg-white border-b border-gray-200 px-4 py-4 shrink-0 overflow-y-auto max-h-[50vh]">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <h2 className="text-sm font-semibold text-gray-900">{editId ? "Edit Server" : "Add New Server"}</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Server Code *</label>
-                <Input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="SERVER-01" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">IP Address</label>
-                <Input value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="107.172.249.42" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Provider</label>
-                <Input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="ColoCrossing" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value as any })}
-                  className="w-full h-8 px-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                >
-                  {ALL_SERVER_STATUSES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">CPU</label>
-                <Input value={form.cpu} onChange={(e) => setForm({ ...form, cpu: e.target.value })} placeholder="32 vCPU" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">RAM</label>
-                <Input value={form.ram} onChange={(e) => setForm({ ...form, ram: e.target.value })} placeholder="64 GB" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Inventory ID</label>
-                <Input value={form.inventoryId} onChange={(e) => setForm({ ...form, inventoryId: e.target.value })} placeholder="INV-001" className="h-8 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Created Date</label>
-                <Input type="date" value={form.createdDate} onChange={(e) => setForm({ ...form, createdDate: e.target.value })} className="h-8 text-sm" />
-              </div>
-            </div>
+
+            {/* Section: Basic Info */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-              <textarea
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={2}
-                className="w-full px-3 py-1.5 border rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                placeholder="Server notes..."
-              />
-            </div>
-            {/* Login Credentials */}
-            <div className="border-t pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-gray-600">Login Credentials</label>
-                <button type="button" onClick={addCredentialRow} className="text-xs text-blue-600 hover:underline">+ Add Login</button>
+              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Basic Info</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <F label="Server Name *">
+                  <Input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="SERVER-01-8939CC" className="h-8 text-sm" />
+                </F>
+                <F label="Inventory ID">
+                  <Input value={form.inventoryId} onChange={(e) => setForm({ ...form, inventoryId: e.target.value })} placeholder="8939CC-RYZN" className="h-8 text-sm" />
+                </F>
+                <F label="Status">
+                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as any })} className="w-full h-8 px-2 border rounded-md text-sm">
+                    {ALL_SERVER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </F>
+                <F label="Created Date">
+                  <Input type="date" value={form.createdDate} onChange={(e) => setForm({ ...form, createdDate: e.target.value })} className="h-8 text-sm" />
+                </F>
               </div>
-              {form.credentials.users.map((cred, idx) => (
+            </div>
+
+            {/* Section: Network Info */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Network Info</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <F label="Server IP">
+                  <Input value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="107.172.249.42" className="h-8 text-sm font-mono" />
+                </F>
+                <F label="Netmask">
+                  <Input value={form.netmask} onChange={(e) => setForm({ ...form, netmask: e.target.value })} placeholder="255.255.255.252" className="h-8 text-sm font-mono" />
+                </F>
+                <F label="Gateway">
+                  <Input value={form.gateway} onChange={(e) => setForm({ ...form, gateway: e.target.value })} placeholder="107.172.249.41" className="h-8 text-sm font-mono" />
+                </F>
+                <F label="Allocation">
+                  <Input value={form.allocation} onChange={(e) => setForm({ ...form, allocation: e.target.value })} placeholder="107.172.249.40/30" className="h-8 text-sm font-mono" />
+                </F>
+              </div>
+            </div>
+
+            {/* Section: Hardware */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Hardware & Provider</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <F label="Provider">
+                  <Input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="ColoCrossing" className="h-8 text-sm" />
+                </F>
+                <F label="CPU">
+                  <Input value={form.cpu} onChange={(e) => setForm({ ...form, cpu: e.target.value })} placeholder="32 vCPU" className="h-8 text-sm" />
+                </F>
+                <F label="RAM">
+                  <Input value={form.ram} onChange={(e) => setForm({ ...form, ram: e.target.value })} placeholder="64 GB" className="h-8 text-sm" />
+                </F>
+              </div>
+            </div>
+
+            {/* Section: IPMI */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">IPMI Info</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <F label="IPMI IP">
+                  <Input value={form.ipmiIp} onChange={(e) => setForm({ ...form, ipmiIp: e.target.value })} placeholder="206.217.138.162" className="h-8 text-sm font-mono" />
+                </F>
+                <F label="IPMI User">
+                  <Input value={form.ipmiUser} onChange={(e) => setForm({ ...form, ipmiUser: e.target.value })} placeholder="IPMI_USER" className="h-8 text-sm" />
+                </F>
+                <F label="IPMI Password">
+                  <Input type="password" value={form.ipmiPass} onChange={(e) => setForm({ ...form, ipmiPass: e.target.value })} placeholder="********" className="h-8 text-sm" />
+                </F>
+              </div>
+            </div>
+
+            {/* Section: VPS Login Credentials */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-semibold uppercase text-gray-400">VPS Login Credentials</p>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, users: [...f.users, { username: "", password: "" }] }))} className="text-xs text-blue-600 hover:underline">+ Add Login</button>
+              </div>
+              {form.users.map((cred, idx) => (
                 <div key={idx} className="flex gap-2 mb-1.5">
-                  <Input value={cred.username} onChange={(e) => updateCredential(idx, "username", e.target.value)} placeholder="Username" className="h-8 text-sm flex-1" />
-                  <Input value={cred.password} onChange={(e) => updateCredential(idx, "password", e.target.value)} placeholder="Password" className="h-8 text-sm flex-1" />
-                  <Input value={cred.role} onChange={(e) => updateCredential(idx, "role", e.target.value)} placeholder="Role" className="h-8 text-sm w-28" />
-                  {form.credentials.users.length > 1 && (
-                    <button type="button" onClick={() => removeCredential(idx)} className="text-red-500 hover:text-red-700 px-1 text-sm">x</button>
+                  <Input
+                    value={cred.username}
+                    onChange={(e) => { const users = [...form.users]; users[idx] = { ...users[idx], username: e.target.value }; setForm({ ...form, users }); }}
+                    placeholder="Username" className="h-8 text-sm flex-1"
+                  />
+                  <Input
+                    type="password"
+                    value={cred.password}
+                    onChange={(e) => { const users = [...form.users]; users[idx] = { ...users[idx], password: e.target.value }; setForm({ ...form, users }); }}
+                    placeholder="Password" className="h-8 text-sm flex-1"
+                  />
+                  {form.users.length > 1 && (
+                    <button type="button" onClick={() => setForm((f) => ({ ...f, users: f.users.filter((_, i) => i !== idx) }))} className="text-red-500 hover:text-red-700 px-1 text-sm">x</button>
                   )}
                 </div>
               ))}
             </div>
+
+            {/* Notes */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-3 py-1.5 border rounded-md text-sm" placeholder="Server notes..." />
+            </div>
+
             <div className="flex gap-2">
               <Button type="submit" size="sm" disabled={createServer.isLoading || updateServer.isLoading}>
                 {createServer.isLoading || updateServer.isLoading ? "Saving..." : editId ? "Update" : "Create"}
@@ -458,14 +563,11 @@ export default function ServersPage() {
         </div>
       )}
 
-      {/* Delete single confirmation */}
       {deleteConfirm && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
           <p className="text-sm text-red-800">Delete this server and all its VMs?</p>
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => deleteServer.mutate({ projectId: projectId!, id: deleteConfirm })} disabled={deleteServer.isLoading}>
-              {deleteServer.isLoading ? "..." : "Delete"}
-            </Button>
+            <Button size="sm" variant="destructive" onClick={() => deleteServer.mutate({ projectId: projectId!, id: deleteConfirm })} disabled={deleteServer.isLoading}>{deleteServer.isLoading ? "..." : "Delete"}</Button>
             <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
           </div>
         </div>
@@ -476,25 +578,12 @@ export default function ServersPage() {
         {/* Left Panel - Server List */}
         <div className="w-72 xl:w-80 border-r border-gray-200 bg-white flex flex-col shrink-0">
           <div className="p-3 border-b border-gray-200">
-            <Input
-              placeholder="Search servers..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 text-sm"
-            />
+            <Input placeholder="Search servers..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-8 text-sm" />
           </div>
-
-          {/* Select all */}
           <div className="px-3 py-1.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filteredServers.length > 0 && selectedServerIds.size === filteredServers.length}
-              onChange={toggleSelectAll}
-              className="rounded border-gray-300"
-            />
+            <input type="checkbox" checked={filteredServers.length > 0 && selectedServerIds.size === filteredServers.length} onChange={toggleSelectAll} className="rounded border-gray-300" />
             <span className="text-[10px] text-gray-500">Select all ({filteredServers.length})</span>
           </div>
-
           <div className="flex-1 overflow-y-auto">
             {isLoading ? (
               <p className="p-4 text-gray-400 text-sm">Loading...</p>
@@ -506,58 +595,24 @@ export default function ServersPage() {
                 const isSelected = selectedServerId === server.id;
                 const isChecked = selectedServerIds.has(server.id);
                 return (
-                  <div
-                    key={server.id}
-                    className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors ${
-                      isSelected
-                        ? "bg-blue-50 border-l-2 border-l-blue-500"
-                        : isChecked
-                        ? "bg-blue-50/50 border-l-2 border-l-transparent"
-                        : "hover:bg-gray-50 border-l-2 border-l-transparent"
-                    }`}
-                  >
+                  <div key={server.id} className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? "bg-blue-50 border-l-2 border-l-blue-500" : isChecked ? "bg-blue-50/50 border-l-2 border-l-transparent" : "hover:bg-gray-50 border-l-2 border-l-transparent"}`}>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={(e) => { e.stopPropagation(); toggleServerSelect(server.id); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="rounded border-gray-300 shrink-0"
-                      />
-                      <div className="flex-1 min-w-0" onClick={() => setSelectedServerId(server.id)}>
+                      <input type="checkbox" checked={isChecked} onChange={() => toggleServerSelect(server.id)} onClick={(e) => e.stopPropagation()} className="rounded border-gray-300 shrink-0" />
+                      <div className="flex-1 min-w-0" onClick={() => { setSelectedServerId(server.id); setShowCreds(false); setSelectedVmIds(new Set()); }}>
                         <div className="flex items-center justify-between">
                           <span className="font-medium text-sm text-gray-900 truncate">{server.code}</span>
-                          <Badge className={`text-[10px] px-1.5 py-0 shrink-0 ${serverStatusColors[server.status] ?? ""}`}>
-                            {server.status}
-                          </Badge>
+                          <Badge className={`text-[10px] px-1.5 py-0 shrink-0 ${serverStatusColors[server.status] ?? ""}`}>{server.status}</Badge>
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
                           <span className="text-xs text-gray-500">{server.ipAddress ?? "No IP"}</span>
                           <span className="text-xs text-gray-500">{vmCount} VMs</span>
                         </div>
-                        {server.provider && (
-                          <span className="text-[10px] text-gray-400">{server.provider}</span>
-                        )}
+                        {server.provider && <span className="text-[10px] text-gray-400">{server.provider}</span>}
                       </div>
                     </div>
-                    {/* Action buttons */}
                     <div className="flex gap-1 mt-1 ml-6">
-                      {canEdit && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startEdit(server); }}
-                          className="px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteConfirm(server.id); }}
-                          className="px-1.5 py-0.5 text-[10px] bg-red-50 text-red-600 rounded hover:bg-red-100"
-                        >
-                          Delete
-                        </button>
-                      )}
+                      {canEdit && <button onClick={(e) => { e.stopPropagation(); startEdit(server); }} className="px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 rounded hover:bg-gray-200">Edit</button>}
+                      {canDelete && <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(server.id); }} className="px-1.5 py-0.5 text-[10px] bg-red-50 text-red-600 rounded hover:bg-red-100">Delete</button>}
                     </div>
                   </div>
                 );
@@ -578,9 +633,7 @@ export default function ServersPage() {
               </div>
             </div>
           ) : detailLoading ? (
-            <div className="flex-1 flex items-center justify-center text-gray-400">
-              <p>Loading server details...</p>
-            </div>
+            <div className="flex-1 flex items-center justify-center text-gray-400"><p>Loading...</p></div>
           ) : serverDetail ? (
             <>
               {/* Server Info Header */}
@@ -593,19 +646,50 @@ export default function ServersPage() {
                       {serverDetail.cpu && <Badge variant="outline" className="text-xs">{serverDetail.cpu}</Badge>}
                       {serverDetail.ram && <Badge variant="outline" className="text-xs">{serverDetail.ram}</Badge>}
                     </div>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      {serverDetail.ipAddress ?? "No IP"} {serverDetail.provider ? `- ${serverDetail.provider}` : ""}
-                    </p>
+                    <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                      <span className="font-mono">{serverDetail.ipAddress ?? "No IP"}</span>
+                      {serverDetail.netmask && <span>Mask: {serverDetail.netmask}</span>}
+                      {serverDetail.gateway && <span>GW: {serverDetail.gateway}</span>}
+                      {serverDetail.allocation && <span>Alloc: {serverDetail.allocation}</span>}
+                      {serverDetail.provider && <span>{serverDetail.provider}</span>}
+                      {serverDetail.inventoryId && <span>Inv: {serverDetail.inventoryId}</span>}
+                    </div>
                   </div>
                   <div className="flex gap-1">
-                    {canEdit && (
-                      <Button size="sm" variant="outline" onClick={() => startEdit(serverDetail)}>Edit</Button>
-                    )}
-                    {canDelete && (
-                      <Button size="sm" variant="outline" className="text-red-600" onClick={() => setDeleteConfirm(serverDetail.id)}>Delete</Button>
-                    )}
+                    <Button size="sm" variant="outline" onClick={() => setShowCreds(!showCreds)}>
+                      {showCreds ? "Hide Login" : "Show Login"}
+                    </Button>
+                    {canEdit && <Button size="sm" variant="outline" onClick={() => startEdit(serverDetail)}>Edit</Button>}
+                    {canDelete && <Button size="sm" variant="outline" className="text-red-600" onClick={() => setDeleteConfirm(serverDetail.id)}>Delete</Button>}
                   </div>
                 </div>
+
+                {/* Credentials display */}
+                {showCreds && credentials && (
+                  <div className="mt-3 bg-gray-50 rounded-lg p-3 text-xs space-y-2">
+                    {credentials.users?.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-gray-600 mb-1">VPS Login:</p>
+                        {credentials.users.map((u: any, i: number) => (
+                          <p key={i} className="font-mono text-gray-800">
+                            {u.username}: <span className="select-all">{u.password}</span>
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {credentials.ipmi && (
+                      <div>
+                        <p className="font-semibold text-gray-600 mb-1">IPMI:</p>
+                        <p className="font-mono text-gray-800">
+                          {credentials.ipmi.ip} - {credentials.ipmi.user} / <span className="select-all">{credentials.ipmi.password}</span>
+                        </p>
+                      </div>
+                    )}
+                    {!credentials.users?.length && !credentials.ipmi && (
+                      <p className="text-gray-400">No credentials saved</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Stats Row */}
                 <div className="flex gap-4 mt-3 flex-wrap">
@@ -622,14 +706,7 @@ export default function ServersPage() {
                     <p className="text-xl font-bold text-blue-700">${totalEarnAll.toFixed(2)}</p>
                   </div>
                   {Object.entries(vmStatusCounts).map(([status, count]) => (
-                    <div
-                      key={status}
-                      onClick={() => setVmStatusFilter(vmStatusFilter === status ? "" : status)}
-                      className={`rounded-lg px-3 py-2 min-w-[70px] cursor-pointer transition-all ${
-                        vmStatusFilter === status ? "ring-2 ring-blue-500" : ""
-                      }`}
-                      style={{ backgroundColor: vmStatusFilter === status ? "#eff6ff" : "#f9fafb" }}
-                    >
+                    <div key={status} onClick={() => setVmStatusFilter(vmStatusFilter === status ? "" : status)} className={`rounded-lg px-3 py-2 min-w-[70px] cursor-pointer transition-all ${vmStatusFilter === status ? "ring-2 ring-blue-500 bg-blue-50" : "bg-gray-50"}`}>
                       <p className="text-[10px] font-medium text-gray-500 uppercase">{status}</p>
                       <p className="text-xl font-bold text-gray-900">{count}</p>
                     </div>
@@ -637,113 +714,84 @@ export default function ServersPage() {
                 </div>
               </div>
 
-              {/* VM Filter Bar + Bulk Paste buttons */}
+              {/* VM action bar */}
               <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-gray-500">Filter:</span>
-                <Button
-                  size="sm"
-                  variant={vmStatusFilter === "" ? "default" : "outline"}
-                  className="h-6 text-xs px-2"
-                  onClick={() => setVmStatusFilter("")}
-                >
-                  ALL ({serverDetail.vms.length})
-                </Button>
+                <Button size="sm" variant={vmStatusFilter === "" ? "default" : "outline"} className="h-6 text-xs px-2" onClick={() => setVmStatusFilter("")}>ALL ({serverDetail.vms.length})</Button>
                 {ALL_VM_STATUSES.map((s) => {
                   const cnt = vmStatusCounts[s] ?? 0;
                   if (cnt === 0) return null;
-                  return (
-                    <Button
-                      key={s}
-                      size="sm"
-                      variant={vmStatusFilter === s ? "default" : "outline"}
-                      className="h-6 text-xs px-2"
-                      onClick={() => setVmStatusFilter(vmStatusFilter === s ? "" : s)}
-                    >
-                      {s} ({cnt})
-                    </Button>
-                  );
+                  return <Button key={s} size="sm" variant={vmStatusFilter === s ? "default" : "outline"} className="h-6 text-xs px-2" onClick={() => setVmStatusFilter(vmStatusFilter === s ? "" : s)}>{s} ({cnt})</Button>;
                 })}
                 <div className="ml-auto flex items-center gap-2">
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "gmail" }); setPasteText(""); }}>
-                    Paste Gmail
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "proxy" }); setPasteText(""); }}>
-                    Paste Proxy
-                  </Button>
-                  <Input
-                    placeholder="Search VM..."
-                    value={vmSearch}
-                    onChange={(e) => setVmSearch(e.target.value)}
-                    className="h-7 text-xs w-48"
-                  />
+                  {hasVmSelection && (
+                    <>
+                      <span className="text-xs text-blue-600 font-medium">{selectedVmIds.size} VMs</span>
+                      <select value={vmBulkStatus} onChange={(e) => setVmBulkStatus(e.target.value)} className="h-6 px-1 border rounded text-xs">
+                        <option value="">Status...</option>
+                        {ALL_VM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      {vmBulkStatus && (
+                        <Button size="sm" className="h-6 text-xs px-2" onClick={() => vmBulkUpdateStatus.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), status: vmBulkStatus as any })}>Apply</Button>
+                      )}
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setSelectedVmIds(new Set())}>Clear</Button>
+                      <span className="text-gray-300">|</span>
+                    </>
+                  )}
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "gmail" }); setPasteText(""); }}>Paste Gmail</Button>
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "proxy" }); setPasteText(""); }}>Paste Proxy</Button>
+                  <Input placeholder="Search VM..." value={vmSearch} onChange={(e) => setVmSearch(e.target.value)} className="h-7 text-xs w-44" />
                 </div>
               </div>
 
-              {/* VMs Table */}
+              {/* VMs Table with resizable columns */}
               <div className="flex-1 overflow-auto">
-                <table className="min-w-full text-sm">
+                <table className="text-sm" style={{ minWidth: "100%", tableLayout: "fixed" }}>
                   <thead className="bg-gray-100 sticky top-0">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">#</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Status</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Server</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">VM Code</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Gmail (BD Account)</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Proxy</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">PayPal</th>
-                      <th className="px-3 py-2 text-right font-medium text-gray-600 text-xs">Earn Total</th>
-                      <th className="px-3 py-2 text-right font-medium text-gray-600 text-xs">24h</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Uptime</th>
+                      <th className="px-2 py-2 text-left w-8">
+                        <input type="checkbox" checked={filteredVMs.length > 0 && selectedVmIds.size === filteredVMs.length} onChange={toggleVmSelectAll} className="rounded border-gray-300" />
+                      </th>
+                      {VM_COLUMNS.map((col) => (
+                        <th
+                          key={col.key}
+                          className="relative group select-none px-2 py-2 text-left font-medium text-gray-600 text-xs"
+                          style={{ width: vmColWidths[col.key] ?? col.defaultWidth, minWidth: col.minWidth }}
+                        >
+                          {col.label}
+                          <div
+                            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 group-hover:bg-blue-200 transition-colors"
+                            onMouseDown={(e) => handleColResize(e, col.key)}
+                          />
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {filteredVMs.length === 0 ? (
-                      <tr>
-                        <td colSpan={10} className="text-center py-8 text-gray-400 text-sm">
-                          {vmStatusFilter ? "No VMs with this status" : "No VMs on this server"}
-                        </td>
-                      </tr>
+                      <tr><td colSpan={VM_COLUMNS.length + 1} className="text-center py-8 text-gray-400 text-sm">{vmStatusFilter ? "No VMs with this status" : "No VMs on this server"}</td></tr>
                     ) : (
                       filteredVMs.map((vm: any, idx: number) => (
-                        <tr key={vm.id} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="px-3 py-1.5 text-xs text-gray-400">{idx + 1}</td>
-                          <td className="px-3 py-1.5">
-                            <Badge className={`text-[10px] px-1.5 py-0 ${vmStatusColors[vm.status] ?? ""}`}>
-                              {vm.status}
-                            </Badge>
+                        <tr key={vm.id} className={`hover:bg-blue-50/30 transition-colors ${selectedVmIds.has(vm.id) ? "bg-blue-50/50" : ""}`}>
+                          <td className="px-2 py-1.5 w-8">
+                            <input type="checkbox" checked={selectedVmIds.has(vm.id)} onChange={() => toggleVmSelect(vm.id)} className="rounded border-gray-300" />
                           </td>
-                          <td className="px-3 py-1.5 text-xs font-medium text-gray-700">
-                            {serverDetail.code}
+                          <td className="px-2 py-1.5 text-xs text-gray-400" style={{ width: vmColWidths.idx }}>{idx + 1}</td>
+                          <td className="px-2 py-1.5" style={{ width: vmColWidths.status }}>
+                            <Badge className={`text-[10px] px-1.5 py-0 ${vmStatusColors[vm.status] ?? ""}`}>{vm.status}</Badge>
                           </td>
-                          <td className="px-3 py-1.5 font-medium text-gray-900">{vm.code}</td>
-                          <td className="px-3 py-1.5 text-xs">
-                            {vm.gmail?.email ? (
-                              <span className="text-gray-700">{vm.gmail.email.split("@")[0]}</span>
-                            ) : (
-                              <span className="text-gray-300">—</span>
-                            )}
+                          <td className="px-2 py-1.5 text-xs font-medium text-gray-700 truncate" style={{ width: vmColWidths.server }}>{serverDetail.code}</td>
+                          <td className="px-2 py-1.5 font-medium text-gray-900 truncate" style={{ width: vmColWidths.code }}>{vm.code}</td>
+                          <td className="px-2 py-1.5 text-xs truncate" style={{ width: vmColWidths.gmail }}>
+                            {vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email.split("@")[0]}</span> : <span className="text-gray-300">—</span>}
                           </td>
-                          <td className="px-3 py-1.5 text-xs font-mono">
-                            {vm.proxy ? (
-                              <span className="text-blue-600">{vm.proxy.address?.split(":")[0]}</span>
-                            ) : (
-                              <span className="text-orange-400">No proxy</span>
-                            )}
+                          <td className="px-2 py-1.5 text-xs font-mono truncate" style={{ width: vmColWidths.proxy }}>
+                            {vm.proxy ? <span className="text-blue-600">{vm.proxy.address}</span> : <span className="text-orange-400">No proxy</span>}
                           </td>
-                          <td className="px-3 py-1.5 text-xs text-gray-500">
-                            {vm.gmail?.paypal?.code ?? "—"}
-                          </td>
-                          <td className="px-3 py-1.5 text-right font-medium">
-                            ${Number(vm.earnTotal ?? 0).toFixed(2)}
-                          </td>
-                          <td className={`px-3 py-1.5 text-right font-medium ${
-                            Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"
-                          }`}>
-                            ${Number(vm.earn24h ?? 0).toFixed(2)}
-                          </td>
-                          <td className="px-3 py-1.5 text-xs text-gray-500">
-                            {vm.uptime ?? "—"}
-                          </td>
+                          <td className="px-2 py-1.5 text-xs text-gray-500 truncate" style={{ width: vmColWidths.paypal }}>{vm.gmail?.paypal?.code ?? "—"}</td>
+                          <td className="px-2 py-1.5 text-right font-medium" style={{ width: vmColWidths.earnTotal }}>${Number(vm.earnTotal ?? 0).toFixed(2)}</td>
+                          <td className={`px-2 py-1.5 text-right font-medium ${Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"}`} style={{ width: vmColWidths.earn24h }}>${Number(vm.earn24h ?? 0).toFixed(2)}</td>
+                          <td className="px-2 py-1.5 text-xs text-gray-500" style={{ width: vmColWidths.uptime }}>{vm.uptime ?? "—"}</td>
                         </tr>
                       ))
                     )}
@@ -755,48 +803,25 @@ export default function ServersPage() {
         </div>
       </div>
 
-      {/* Import CSV Preview Dialog */}
+      {/* Import CSV Dialog */}
       <Dialog open={showImport} onOpenChange={(v) => { if (!v) { setShowImport(false); setImportPreview([]); } }}>
         <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Import Servers from CSV</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Import Servers from CSV</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <p className="text-sm text-gray-600">
-              {importPreview.length} rows found. Existing servers (same code) will be skipped.
-            </p>
+            <p className="text-sm text-gray-600">{importPreview.length} rows. Existing servers (same code) will be skipped.</p>
             {importPreview.length > 0 && (
               <div className="border rounded-lg overflow-x-auto max-h-60">
                 <table className="min-w-full text-xs">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {Object.keys(importPreview[0]).map((k) => (
-                        <th key={k} className="px-2 py-1.5 text-left font-medium text-gray-600">{k}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {importPreview.slice(0, 20).map((row, i) => (
-                      <tr key={i}>
-                        {Object.values(row).map((v, j) => (
-                          <td key={j} className="px-2 py-1 text-gray-700">{v}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
+                  <thead className="bg-gray-50"><tr>{Object.keys(importPreview[0]).map((k) => <th key={k} className="px-2 py-1.5 text-left font-medium text-gray-600">{k}</th>)}</tr></thead>
+                  <tbody className="divide-y">{importPreview.slice(0, 20).map((row, i) => <tr key={i}>{Object.values(row).map((v, j) => <td key={j} className="px-2 py-1 text-gray-700">{v}</td>)}</tr>)}</tbody>
                 </table>
-                {importPreview.length > 20 && (
-                  <p className="text-xs text-gray-400 p-2">...and {importPreview.length - 20} more rows</p>
-                )}
+                {importPreview.length > 20 && <p className="text-xs text-gray-400 p-2">...and {importPreview.length - 20} more</p>}
               </div>
             )}
             <div className="flex gap-2">
-              <Button onClick={handleImport} disabled={importFromCSV.isLoading || !importPreview.length}>
-                {importFromCSV.isLoading ? "Importing..." : `Import ${importPreview.length} servers`}
-              </Button>
+              <Button onClick={handleImport} disabled={importFromCSV.isLoading || !importPreview.length}>{importFromCSV.isLoading ? "Importing..." : `Import ${importPreview.length} servers`}</Button>
               <Button variant="outline" onClick={() => { setShowImport(false); setImportPreview([]); }}>Cancel</Button>
             </div>
-            {importFromCSV.error && <p className="text-sm text-red-600">{importFromCSV.error.message}</p>}
           </div>
         </DialogContent>
       </Dialog>
@@ -805,36 +830,26 @@ export default function ServersPage() {
       <Dialog open={!!pasteDialog} onOpenChange={(v) => { if (!v) { setPasteDialog(null); setPasteText(""); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : "Proxy Addresses"}
-            </DialogTitle>
+            <DialogTitle>Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : "Proxy Addresses"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-gray-500">
-              Paste one value per line. Each line will be assigned to VMs in order (VM 1 gets line 1, VM 2 gets line 2, etc.)
-              {serverDetail && <span className="font-medium"> - {serverDetail.vms.length} VMs on this server</span>}
+              Paste one per line. Each line assigns to VMs in order (line 1 → VM 1, line 2 → VM 2...)
+              {serverDetail && <span className="font-medium"> - {serverDetail.vms.length} VMs</span>}
             </p>
             <textarea
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
               rows={10}
-              className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder={pasteDialog?.field === "gmail"
-                ? "example1@gmail.com\nexample2@gmail.com\nexample3@gmail.com"
-                : "192.168.1.1:8080\n192.168.1.2:8080\n192.168.1.3:8080"
-              }
+              className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+              placeholder={pasteDialog?.field === "gmail" ? "example1@gmail.com\nexample2@gmail.com" : "192.168.1.1:8080\n192.168.1.2:8080"}
               autoFocus
             />
-            <p className="text-xs text-gray-400">
-              {pasteText.split("\n").filter((l) => l.trim()).length} values entered
-            </p>
+            <p className="text-xs text-gray-400">{pasteText.split("\n").filter((l) => l.trim()).length} values</p>
             <div className="flex gap-2">
-              <Button onClick={handleBulkPaste} disabled={bulkPaste.isLoading || !pasteText.trim()}>
-                {bulkPaste.isLoading ? "Assigning..." : "Assign"}
-              </Button>
+              <Button onClick={handleBulkPaste} disabled={bulkPaste.isLoading || !pasteText.trim()}>{bulkPaste.isLoading ? "Assigning..." : "Assign"}</Button>
               <Button variant="outline" onClick={() => { setPasteDialog(null); setPasteText(""); }}>Cancel</Button>
             </div>
-            {bulkPaste.error && <p className="text-sm text-red-600">{bulkPaste.error.message}</p>}
           </div>
         </DialogContent>
       </Dialog>

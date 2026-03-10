@@ -38,6 +38,9 @@ export const serverRouter = router({
         projectId: z.string(),
         code: z.string().min(1),
         ipAddress: z.string().optional(),
+        netmask: z.string().optional(),
+        gateway: z.string().optional(),
+        allocation: z.string().optional(),
         provider: z.string().optional(),
         cpu: z.string().optional(),
         ram: z.string().optional(),
@@ -67,6 +70,9 @@ export const serverRouter = router({
         id: z.string(),
         code: z.string().optional(),
         ipAddress: z.string().optional(),
+        netmask: z.string().nullable().optional(),
+        gateway: z.string().nullable().optional(),
+        allocation: z.string().nullable().optional(),
         provider: z.string().optional(),
         cpu: z.string().optional(),
         ram: z.string().optional(),
@@ -129,7 +135,6 @@ export const serverRouter = router({
   bulkDelete: moderatorProcedure
     .input(z.object({ projectId: z.string(), serverIds: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
-      // Delete VMs first (cascade), then servers
       await ctx.prisma.virtualMachine.deleteMany({
         where: { server: { id: { in: input.serverIds }, projectId: input.projectId } },
       });
@@ -145,6 +150,9 @@ export const serverRouter = router({
       items: z.array(z.object({
         code: z.string().min(1),
         ipAddress: z.string().optional(),
+        netmask: z.string().optional(),
+        gateway: z.string().optional(),
+        allocation: z.string().optional(),
         provider: z.string().optional(),
         cpu: z.string().optional(),
         ram: z.string().optional(),

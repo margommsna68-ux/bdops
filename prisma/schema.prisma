@@ -76,6 +76,9 @@ model Server {
   id            String       @id @default(cuid())
   code          String
   ipAddress     String?
+  netmask       String?
+  gateway       String?
+  allocation    String?
   provider      String?
   cpu           String?
   ram           String?
