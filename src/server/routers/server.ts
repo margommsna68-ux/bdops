@@ -48,6 +48,8 @@ export const serverRouter = router({
         credentials: z.any().optional(),
         inventoryId: z.string().optional(),
         notes: z.string().optional(),
+        monthlyCost: z.number().optional(),
+        billingCycle: z.number().int().min(1).optional(),
         createdDate: z.string().optional(),
         expiryDate: z.string().optional(),
       })
@@ -80,6 +82,8 @@ export const serverRouter = router({
         credentials: z.any().optional(),
         inventoryId: z.string().optional(),
         notes: z.string().nullable().optional(),
+        monthlyCost: z.number().nullable().optional(),
+        billingCycle: z.number().int().min(1).nullable().optional(),
         createdDate: z.string().nullable().optional(),
         expiryDate: z.string().nullable().optional(),
       })
@@ -116,6 +120,23 @@ export const serverRouter = router({
       } catch {
         return server.credentials;
       }
+    }),
+
+  renew: infrastructureProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const server = await ctx.prisma.server.findFirstOrThrow({
+        where: { id: input.id, projectId: input.projectId },
+      });
+      const cycle = server.billingCycle ?? 1;
+      const baseDate = server.expiryDate && new Date(server.expiryDate) > new Date()
+        ? new Date(server.expiryDate)
+        : new Date();
+      baseDate.setMonth(baseDate.getMonth() + cycle);
+      return ctx.prisma.server.update({
+        where: { id: input.id },
+        data: { expiryDate: baseDate },
+      });
     }),
 
   bulkUpdateStatus: infrastructureProcedure

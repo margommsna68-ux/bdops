@@ -49,7 +49,10 @@ const emptyForm = {
   provider: "",
   cpu: "",
   ram: "",
+  monthlyCost: "",
+  billingCycle: "1",
   createdDate: "",
+  expiryDate: "",
   notes: "",
   users: [{ username: "", password: "" }] as { username: string; password: string }[],
   ipmiIp: "",
@@ -73,9 +76,14 @@ const VM_COLUMNS = [
   { key: "uptime", label: "Uptime", defaultWidth: 80, minWidth: 50 },
 ];
 
-// Password field with eye toggle
-function PasswordInput({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+// Password field with eye toggle + optional PIN requirement
+function PasswordInput({ value, onChange, placeholder, className, onRequestShow }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; onRequestShow?: (cb: () => void) => void }) {
   const [show, setShow] = useState(false);
+  const handleToggle = () => {
+    if (show) { setShow(false); return; }
+    if (onRequestShow) { onRequestShow(() => setShow(true)); }
+    else { setShow(true); }
+  };
   return (
     <div className="relative">
       <Input
@@ -85,7 +93,7 @@ function PasswordInput({ value, onChange, placeholder, className }: { value: str
         placeholder={placeholder}
         className={`pr-8 ${className ?? ""}`}
       />
-      <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+      <button type="button" onClick={handleToggle} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
         {show ? (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.05 6.05m3.828 3.828L6.05 6.05M6.05 6.05L3 3m18 18l-3.05-3.05m0 0a9.953 9.953 0 01-4.073 1.95M17.95 17.95L21 21" /></svg>
         ) : (
@@ -94,6 +102,24 @@ function PasswordInput({ value, onChange, placeholder, className }: { value: str
       </button>
     </div>
   );
+}
+
+// Helper: days until expiry
+function getDaysUntilExpiry(expiryDate: string | Date | null | undefined): number | null {
+  if (!expiryDate) return null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const exp = new Date(expiryDate);
+  exp.setHours(0, 0, 0, 0);
+  return Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function ExpiryBadge({ expiryDate }: { expiryDate: string | Date | null | undefined }) {
+  const days = getDaysUntilExpiry(expiryDate);
+  if (days === null) return null;
+  if (days < 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Overdue {Math.abs(days)}d</span>;
+  if (days <= 5) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium animate-pulse">{days === 0 ? "Expires today" : `${days}d left`}</span>;
+  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{days}d left</span>;
 }
 
 // Inline cell editor dropdown for VM gmail/proxy assignment
@@ -270,6 +296,10 @@ export default function ServersPage() {
     onSuccess: (r) => { utils.server.list.invalidate(); setShowImport(false); setImportPreview([]); toast.success(`Imported ${r.imported}, skipped ${r.skipped}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
     onError: (e) => toast.error(e.message),
   });
+  const renewServer = trpc.server.renew.useMutation({
+    onSuccess: () => { utils.server.list.invalidate(); utils.server.getById.invalidate(); toast.success("Server renewed"); },
+    onError: (e) => toast.error(e.message),
+  });
   const bulkPaste = trpc.vm.bulkPaste.useMutation({
     onSuccess: (r) => { utils.server.getById.invalidate(); setPasteDialog(null); setPasteText(""); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
@@ -337,7 +367,10 @@ export default function ServersPage() {
       cpu: form.cpu || undefined,
       ram: form.ram || undefined,
       notes: form.notes || undefined,
+      monthlyCost: form.monthlyCost ? Number(form.monthlyCost) : undefined,
+      billingCycle: form.billingCycle ? Number(form.billingCycle) : undefined,
       createdDate: form.createdDate || undefined,
+      expiryDate: form.expiryDate || undefined,
     };
     if (Object.keys(creds).length > 0) payload.credentials = creds;
     if (editId) updateServer.mutate({ ...payload, id: editId });
@@ -356,7 +389,10 @@ export default function ServersPage() {
       provider: server.provider || "",
       cpu: server.cpu || "",
       ram: server.ram || "",
+      monthlyCost: server.monthlyCost ? String(server.monthlyCost) : "",
+      billingCycle: server.billingCycle ? String(server.billingCycle) : "1",
       createdDate: server.createdDate ? new Date(server.createdDate).toISOString().split("T")[0] : "",
+      expiryDate: server.expiryDate ? new Date(server.expiryDate).toISOString().split("T")[0] : "",
       notes: server.notes || "",
       users: [{ username: "", password: "" }],
       ipmiIp: "", ipmiUser: "", ipmiPass: "",
@@ -473,6 +509,12 @@ export default function ServersPage() {
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold text-gray-900">Servers</h1>
           <span className="text-xs text-gray-400">({servers?.length ?? 0} servers, {servers?.reduce((s: number, sv: any) => s + (sv._count?.vms ?? 0), 0) ?? 0} VMs)</span>
+          {servers && servers.length > 0 && (
+            <>
+              <span className="text-xs font-medium text-gray-600 ml-2">${servers.reduce((s: number, sv: any) => s + Number(sv.monthlyCost ?? 0), 0).toFixed(2)}/mo</span>
+              {(() => { const expiring = servers.filter((s: any) => { const d = getDaysUntilExpiry(s.expiryDate); return d !== null && d <= 5; }).length; return expiring > 0 ? <span className="text-xs font-medium text-amber-600 ml-1">({expiring} expiring)</span> : null; })()}
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>Export CSV</Button>
@@ -530,6 +572,15 @@ export default function ServersPage() {
             </div>
 
             <div>
+              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Billing</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <F label="Monthly Cost ($)"><Input type="number" step="0.01" min="0" value={form.monthlyCost} onChange={(e) => setForm({ ...form, monthlyCost: e.target.value })} placeholder="150.00" className="h-8 text-sm" /></F>
+                <F label="Billing Cycle (months)"><Input type="number" min="1" value={form.billingCycle} onChange={(e) => setForm({ ...form, billingCycle: e.target.value })} className="h-8 text-sm" /></F>
+                <F label="Expiry / Renewal Date"><Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} className="h-8 text-sm" /></F>
+              </div>
+            </div>
+
+            <div>
               <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Network Info</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <F label="Server IP"><Input value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="107.172.249.42" className="h-8 text-sm font-mono" /></F>
@@ -553,7 +604,7 @@ export default function ServersPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <F label="IPMI IP"><Input value={form.ipmiIp} onChange={(e) => setForm({ ...form, ipmiIp: e.target.value })} placeholder="206.217.138.162" className="h-8 text-sm font-mono" /></F>
                 <F label="IPMI User"><Input value={form.ipmiUser} onChange={(e) => setForm({ ...form, ipmiUser: e.target.value })} placeholder="IPMI_USER" className="h-8 text-sm" /></F>
-                <F label="IPMI Password"><PasswordInput value={form.ipmiPass} onChange={(v) => setForm({ ...form, ipmiPass: v })} placeholder="********" className="h-8 text-sm" /></F>
+                <F label="IPMI Password"><PasswordInput value={form.ipmiPass} onChange={(v) => setForm({ ...form, ipmiPass: v })} placeholder="********" className="h-8 text-sm" onRequestShow={(cb) => requirePin(cb, "PIN Required", "Enter PIN to view password")} /></F>
               </div>
             </div>
 
@@ -566,7 +617,7 @@ export default function ServersPage() {
                 <div key={idx} className="flex gap-2 mb-1.5">
                   <Input value={cred.username} onChange={(e) => { const users = [...form.users]; users[idx] = { ...users[idx], username: e.target.value }; setForm({ ...form, users }); }} placeholder="Username" className="h-8 text-sm flex-1" />
                   <div className="flex-1">
-                    <PasswordInput value={cred.password} onChange={(v) => { const users = [...form.users]; users[idx] = { ...users[idx], password: v }; setForm({ ...form, users }); }} placeholder="Password" className="h-8 text-sm" />
+                    <PasswordInput value={cred.password} onChange={(v) => { const users = [...form.users]; users[idx] = { ...users[idx], password: v }; setForm({ ...form, users }); }} placeholder="Password" className="h-8 text-sm" onRequestShow={(cb) => requirePin(cb, "PIN Required", "Enter PIN to view password")} />
                   </div>
                   {form.users.length > 1 && <button type="button" onClick={() => setForm((f) => ({ ...f, users: f.users.filter((_, i) => i !== idx) }))} className="text-red-500 hover:text-red-700 px-1 text-sm">x</button>}
                 </div>
@@ -615,20 +666,41 @@ export default function ServersPage() {
               filteredServers.map((server: any) => {
                 const isSelected = selectedServerId === server.id;
                 const isChecked = selectedServerIds.has(server.id);
+                const daysLeft = getDaysUntilExpiry(server.expiryDate);
+                const isExpiring = daysLeft !== null && daysLeft <= 5;
+                const isOverdue = daysLeft !== null && daysLeft < 0;
                 return (
-                  <div key={server.id} className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? "bg-blue-50 border-l-2 border-l-blue-500" : isChecked ? "bg-blue-50/50 border-l-2 border-l-transparent" : "hover:bg-gray-50 border-l-2 border-l-transparent"}`}>
+                  <div key={server.id} className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors group ${isSelected ? "bg-blue-50 border-l-2 border-l-blue-500" : isChecked ? "bg-blue-50/50 border-l-2 border-l-transparent" : isOverdue ? "bg-red-50/50 border-l-2 border-l-red-400" : isExpiring ? "bg-amber-50/50 border-l-2 border-l-amber-400" : "hover:bg-gray-50 border-l-2 border-l-transparent"}`}>
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={isChecked} onChange={() => toggleServerSelect(server.id)} onClick={(e) => e.stopPropagation()} className="rounded border-gray-300 shrink-0" />
                       <div className="flex-1 min-w-0" onClick={() => { setSelectedServerId(server.id); setShowCreds(false); setSelectedVmIds(new Set()); }}>
                         <div className="flex items-center justify-between">
                           <span className="font-medium text-sm text-gray-900 truncate">{server.code}</span>
-                          <Badge className={`text-[10px] px-1.5 py-0 shrink-0 ${serverStatusColors[server.status] ?? ""}`}>{server.status}</Badge>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Badge className={`text-[10px] px-1.5 py-0 ${serverStatusColors[server.status] ?? ""}`}>{server.status}</Badge>
+                          </div>
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
                           <span className="text-xs text-gray-500">{server.ipAddress ?? "No IP"}</span>
                           <span className="text-xs text-gray-500">{server._count?.vms ?? 0} VMs</span>
                         </div>
-                        {server.provider && <span className="text-[10px] text-gray-400">{server.provider}</span>}
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-[10px] text-gray-400">{server.provider || ""}{server.monthlyCost ? ` · $${Number(server.monthlyCost).toFixed(0)}/mo` : ""}</span>
+                          <ExpiryBadge expiryDate={server.expiryDate} />
+                        </div>
+                      </div>
+                      {/* Edit / Delete buttons */}
+                      <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {canEdit && (
+                          <button onClick={(e) => { e.stopPropagation(); startEdit(server); }} className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title="Edit">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button onClick={(e) => { e.stopPropagation(); requirePin(() => setDeleteConfirm(server.id), "PIN Required", "Enter PIN to delete server"); }} className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50" title="Delete">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -671,6 +743,18 @@ export default function ServersPage() {
                   {serverDetail.allocation && <span>Alloc: {serverDetail.allocation}</span>}
                   {serverDetail.provider && <span>{serverDetail.provider}</span>}
                   {serverDetail.inventoryId && <span>Inv: {serverDetail.inventoryId}</span>}
+                  {serverDetail.monthlyCost && <span className="font-medium text-gray-700">${Number(serverDetail.monthlyCost).toFixed(2)}/mo</span>}
+                  {serverDetail.expiryDate && (
+                    <span className="flex items-center gap-1">
+                      Exp: {new Date(serverDetail.expiryDate).toLocaleDateString()}
+                      <ExpiryBadge expiryDate={serverDetail.expiryDate} />
+                    </span>
+                  )}
+                  {canEdit && serverDetail.expiryDate && (
+                    <button onClick={() => renewServer.mutate({ projectId: projectId!, id: serverDetail.id })} disabled={renewServer.isLoading} className="text-green-600 hover:underline flex items-center gap-1 font-medium">
+                      {renewServer.isLoading ? "..." : "Renew"}
+                    </button>
+                  )}
                   {!showCreds && (
                     <button onClick={handleShowCreds} className="text-blue-600 hover:underline flex items-center gap-1">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>

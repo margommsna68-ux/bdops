@@ -86,6 +86,8 @@ model Server {
   credentials   Json?
   inventoryId   String?
   notes         String?
+  monthlyCost   Decimal?     @db.Decimal(12, 2)
+  billingCycle  Int?         @default(1) // months
   createdDate   DateTime?
   expiryDate    DateTime?
   project       Project      @relation(fields: [projectId], references: [id])
