@@ -111,4 +111,67 @@ export const serverRouter = router({
         return server.credentials;
       }
     }),
+
+  bulkUpdateStatus: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      serverIds: z.array(z.string()).min(1),
+      status: z.enum(["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAINTENANCE"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.prisma.server.updateMany({
+        where: { id: { in: input.serverIds }, projectId: input.projectId },
+        data: { status: input.status },
+      });
+      return { updated: result.count };
+    }),
+
+  bulkDelete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), serverIds: z.array(z.string()).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      // Delete VMs first (cascade), then servers
+      await ctx.prisma.virtualMachine.deleteMany({
+        where: { server: { id: { in: input.serverIds }, projectId: input.projectId } },
+      });
+      const result = await ctx.prisma.server.deleteMany({
+        where: { id: { in: input.serverIds }, projectId: input.projectId },
+      });
+      return { deleted: result.count };
+    }),
+
+  importFromCSV: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      items: z.array(z.object({
+        code: z.string().min(1),
+        ipAddress: z.string().optional(),
+        provider: z.string().optional(),
+        cpu: z.string().optional(),
+        ram: z.string().optional(),
+        status: z.enum(["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAINTENANCE"]).default("BUILDING"),
+        inventoryId: z.string().optional(),
+        notes: z.string().optional(),
+      })),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+      for (const item of input.items) {
+        try {
+          const existing = await ctx.prisma.server.findFirst({
+            where: { code: item.code, projectId: input.projectId },
+          });
+          if (existing) { skipped++; continue; }
+          await ctx.prisma.server.create({
+            data: { ...item, projectId: input.projectId },
+          });
+          imported++;
+        } catch (e: any) {
+          errors.push(`${item.code}: ${e.message}`);
+          skipped++;
+        }
+      }
+      return { imported, skipped, errors: errors.slice(0, 10) };
+    }),
 });

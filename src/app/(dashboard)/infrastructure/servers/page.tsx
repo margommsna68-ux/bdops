@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
-import { exportToExcel } from "@/lib/excel-export";
+import { exportToCSV, parseCSV } from "@/lib/excel-export";
 import toast from "react-hot-toast";
 
 const serverStatusColors: Record<string, string> = {
@@ -29,6 +35,7 @@ const vmStatusColors: Record<string, string> = {
 };
 
 const ALL_VM_STATUSES = ["OK", "ERROR", "SUSPENDED", "NEW", "NOT_CONNECTED", "NOT_AVC", "BLOCKED"];
+const ALL_SERVER_STATUSES = ["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAINTENANCE"];
 
 const emptyForm = {
   code: "",
@@ -61,6 +68,20 @@ export default function ServersPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Bulk selection
+  const [selectedServerIds, setSelectedServerIds] = useState<Set<string>>(new Set());
+  const [bulkStatusTarget, setBulkStatusTarget] = useState("");
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+
+  // Import CSV
+  const [showImport, setShowImport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<Record<string, string>[]>([]);
+
+  // Bulk paste dialog for VMs
+  const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" } | null>(null);
+  const [pasteText, setPasteText] = useState("");
+
   // Server list
   const { data: servers, isLoading } = trpc.server.list.useQuery(
     { projectId: projectId! },
@@ -84,6 +105,22 @@ export default function ServersPage() {
   });
   const deleteServer = trpc.server.delete.useMutation({
     onSuccess: () => { utils.server.list.invalidate(); setDeleteConfirm(null); if (deleteConfirm === selectedServerId) setSelectedServerId(null); toast.success("Server deleted"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const bulkUpdateStatus = trpc.server.bulkUpdateStatus.useMutation({
+    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setBulkStatusTarget(""); toast.success(`${r.updated} servers updated`); },
+    onError: (e) => toast.error(e.message),
+  });
+  const bulkDelete = trpc.server.bulkDelete.useMutation({
+    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setShowBulkDelete(false); if (selectedServerId && selectedServerIds.has(selectedServerId)) setSelectedServerId(null); toast.success(`${r.deleted} servers deleted`); },
+    onError: (e) => toast.error(e.message),
+  });
+  const importFromCSV = trpc.server.importFromCSV.useMutation({
+    onSuccess: (r) => { utils.server.list.invalidate(); setShowImport(false); setImportPreview([]); toast.success(`Imported ${r.imported}, skipped ${r.skipped}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const bulkPaste = trpc.vm.bulkPaste.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); setPasteDialog(null); setPasteText(""); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -158,22 +195,80 @@ export default function ServersPage() {
     }));
   };
 
-  const handleExport = () => {
+  const handleExportCSV = () => {
     if (!servers?.length) return;
-    exportToExcel(
+    exportToCSV(
       servers.map((s: any) => ({
-        Code: s.code,
-        "IP Address": s.ipAddress ?? "",
-        Provider: s.provider ?? "",
-        CPU: s.cpu ?? "",
-        RAM: s.ram ?? "",
-        Status: s.status,
-        VMs: s._count?.vms ?? 0,
-        Notes: s.notes ?? "",
+        code: s.code,
+        ipAddress: s.ipAddress ?? "",
+        provider: s.provider ?? "",
+        cpu: s.cpu ?? "",
+        ram: s.ram ?? "",
+        status: s.status,
+        inventoryId: s.inventoryId ?? "",
+        notes: s.notes ?? "",
       })),
-      "servers-export",
-      "Servers"
+      "servers-backup"
     );
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const parsed = parseCSV(text);
+      setImportPreview(parsed);
+      setShowImport(true);
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be selected again
+    e.target.value = "";
+  };
+
+  const handleImport = () => {
+    const items = importPreview.map((row) => ({
+      code: row.code || row.Code || "",
+      ipAddress: row.ipAddress || row["IP Address"] || row.ip || undefined,
+      provider: row.provider || row.Provider || undefined,
+      cpu: row.cpu || row.CPU || undefined,
+      ram: row.ram || row.RAM || undefined,
+      status: (row.status || row.Status || "BUILDING") as any,
+      inventoryId: row.inventoryId || row["Inventory ID"] || undefined,
+      notes: row.notes || row.Notes || undefined,
+    })).filter((i) => i.code);
+    if (!items.length) { toast.error("No valid rows"); return; }
+    importFromCSV.mutate({ projectId: projectId!, items });
+  };
+
+  // Bulk selection helpers
+  const toggleServerSelect = (id: string) => {
+    setSelectedServerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedServerIds.size === filteredServers.length) {
+      setSelectedServerIds(new Set());
+    } else {
+      setSelectedServerIds(new Set(filteredServers.map((s: any) => s.id)));
+    }
+  };
+
+  // Handle bulk paste
+  const handleBulkPaste = () => {
+    if (!pasteDialog || !selectedServerId || !pasteText.trim()) return;
+    const values = pasteText.split("\n").map((l) => l.trim()).filter(Boolean);
+    bulkPaste.mutate({
+      projectId: projectId!,
+      serverId: selectedServerId,
+      field: pasteDialog.field,
+      values,
+    });
   };
 
   // Filter VMs in detail view
@@ -207,6 +302,8 @@ export default function ServersPage() {
     return s.code.toLowerCase().includes(q) || (s.ipAddress && s.ipAddress.toLowerCase().includes(q)) || (s.provider && s.provider.toLowerCase().includes(q));
   }) ?? [];
 
+  const hasSelection = selectedServerIds.size > 0;
+
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
       {/* Top action bar */}
@@ -216,9 +313,13 @@ export default function ServersPage() {
           <span className="text-xs text-gray-400">({servers?.length ?? 0} servers, {servers?.reduce((s: number, sv: any) => s + (sv._count?.vms ?? 0), 0) ?? 0} VMs)</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleExport} disabled={!servers?.length}>
-            Export Excel
+          <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>
+            Export CSV
           </Button>
+          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+            Import CSV
+          </Button>
+          <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
           {canEdit && (
             <Button size="sm" onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ ...emptyForm }); }}>
               {showForm ? "Cancel" : "+ Add Server"}
@@ -226,6 +327,49 @@ export default function ServersPage() {
           )}
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {hasSelection && (
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-3 shrink-0">
+          <span className="text-sm font-medium text-blue-800">{selectedServerIds.size} selected</span>
+          <select
+            value={bulkStatusTarget}
+            onChange={(e) => setBulkStatusTarget(e.target.value)}
+            className="h-7 px-2 border rounded text-sm"
+          >
+            <option value="">Change status...</option>
+            {ALL_SERVER_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          {bulkStatusTarget && (
+            <Button size="sm" onClick={() => bulkUpdateStatus.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds), status: bulkStatusTarget as any })} disabled={bulkUpdateStatus.isLoading}>
+              Apply
+            </Button>
+          )}
+          {canDelete && (
+            <Button size="sm" variant="destructive" onClick={() => setShowBulkDelete(true)}>
+              Delete Selected
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setSelectedServerIds(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation */}
+      {showBulkDelete && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
+          <p className="text-sm text-red-800">Delete {selectedServerIds.size} servers and all their VMs?</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="destructive" onClick={() => bulkDelete.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds) })} disabled={bulkDelete.isLoading}>
+              {bulkDelete.isLoading ? "..." : "Confirm Delete"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowBulkDelete(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
 
       {/* Create/Edit Form */}
       {showForm && (
@@ -252,11 +396,9 @@ export default function ServersPage() {
                   onChange={(e) => setForm({ ...form, status: e.target.value as any })}
                   className="w-full h-8 px-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
-                  <option value="BUILDING">Building</option>
-                  <option value="ACTIVE">Active</option>
-                  <option value="SUSPENDED">Suspended</option>
-                  <option value="EXPIRED">Expired</option>
-                  <option value="MAINTENANCE">Maintenance</option>
+                  {ALL_SERVER_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -316,7 +458,7 @@ export default function ServersPage() {
         </div>
       )}
 
-      {/* Delete Confirmation */}
+      {/* Delete single confirmation */}
       {deleteConfirm && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
           <p className="text-sm text-red-800">Delete this server and all its VMs?</p>
@@ -342,6 +484,17 @@ export default function ServersPage() {
             />
           </div>
 
+          {/* Select all */}
+          <div className="px-3 py-1.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={filteredServers.length > 0 && selectedServerIds.size === filteredServers.length}
+              onChange={toggleSelectAll}
+              className="rounded border-gray-300"
+            />
+            <span className="text-[10px] text-gray-500">Select all ({filteredServers.length})</span>
+          </div>
+
           <div className="flex-1 overflow-y-auto">
             {isLoading ? (
               <p className="p-4 text-gray-400 text-sm">Loading...</p>
@@ -351,31 +504,44 @@ export default function ServersPage() {
               filteredServers.map((server: any) => {
                 const vmCount = server._count?.vms ?? 0;
                 const isSelected = selectedServerId === server.id;
+                const isChecked = selectedServerIds.has(server.id);
                 return (
                   <div
                     key={server.id}
-                    onClick={() => setSelectedServerId(server.id)}
                     className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors ${
                       isSelected
                         ? "bg-blue-50 border-l-2 border-l-blue-500"
+                        : isChecked
+                        ? "bg-blue-50/50 border-l-2 border-l-transparent"
                         : "hover:bg-gray-50 border-l-2 border-l-transparent"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-900">{server.code}</span>
-                      <Badge className={`text-[10px] px-1.5 py-0 ${serverStatusColors[server.status] ?? ""}`}>
-                        {server.status}
-                      </Badge>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => { e.stopPropagation(); toggleServerSelect(server.id); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="rounded border-gray-300 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0" onClick={() => setSelectedServerId(server.id)}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-sm text-gray-900 truncate">{server.code}</span>
+                          <Badge className={`text-[10px] px-1.5 py-0 shrink-0 ${serverStatusColors[server.status] ?? ""}`}>
+                            {server.status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-xs text-gray-500">{server.ipAddress ?? "No IP"}</span>
+                          <span className="text-xs text-gray-500">{vmCount} VMs</span>
+                        </div>
+                        {server.provider && (
+                          <span className="text-[10px] text-gray-400">{server.provider}</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-xs text-gray-500">{server.ipAddress ?? "No IP"}</span>
-                      <span className="text-xs text-gray-500">{vmCount} VMs</span>
-                    </div>
-                    {server.provider && (
-                      <span className="text-[10px] text-gray-400">{server.provider}</span>
-                    )}
-                    {/* Action buttons on hover */}
-                    <div className="flex gap-1 mt-1.5">
+                    {/* Action buttons */}
+                    <div className="flex gap-1 mt-1 ml-6">
                       {canEdit && (
                         <button
                           onClick={(e) => { e.stopPropagation(); startEdit(server); }}
@@ -471,7 +637,7 @@ export default function ServersPage() {
                 </div>
               </div>
 
-              {/* VM Filter Bar */}
+              {/* VM Filter Bar + Bulk Paste buttons */}
               <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-gray-500">Filter:</span>
                 <Button
@@ -497,7 +663,13 @@ export default function ServersPage() {
                     </Button>
                   );
                 })}
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-2">
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "gmail" }); setPasteText(""); }}>
+                    Paste Gmail
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPasteDialog({ field: "proxy" }); setPasteText(""); }}>
+                    Paste Proxy
+                  </Button>
                   <Input
                     placeholder="Search VM..."
                     value={vmSearch}
@@ -507,7 +679,7 @@ export default function ServersPage() {
                 </div>
               </div>
 
-              {/* VMs Table - Reordered: Status | Server | VM Code | Gmail | Proxy | PayPal */}
+              {/* VMs Table */}
               <div className="flex-1 overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0">
@@ -582,6 +754,90 @@ export default function ServersPage() {
           ) : null}
         </div>
       </div>
+
+      {/* Import CSV Preview Dialog */}
+      <Dialog open={showImport} onOpenChange={(v) => { if (!v) { setShowImport(false); setImportPreview([]); } }}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Import Servers from CSV</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              {importPreview.length} rows found. Existing servers (same code) will be skipped.
+            </p>
+            {importPreview.length > 0 && (
+              <div className="border rounded-lg overflow-x-auto max-h-60">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {Object.keys(importPreview[0]).map((k) => (
+                        <th key={k} className="px-2 py-1.5 text-left font-medium text-gray-600">{k}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {importPreview.slice(0, 20).map((row, i) => (
+                      <tr key={i}>
+                        {Object.values(row).map((v, j) => (
+                          <td key={j} className="px-2 py-1 text-gray-700">{v}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {importPreview.length > 20 && (
+                  <p className="text-xs text-gray-400 p-2">...and {importPreview.length - 20} more rows</p>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={handleImport} disabled={importFromCSV.isLoading || !importPreview.length}>
+                {importFromCSV.isLoading ? "Importing..." : `Import ${importPreview.length} servers`}
+              </Button>
+              <Button variant="outline" onClick={() => { setShowImport(false); setImportPreview([]); }}>Cancel</Button>
+            </div>
+            {importFromCSV.error && <p className="text-sm text-red-600">{importFromCSV.error.message}</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Paste Dialog */}
+      <Dialog open={!!pasteDialog} onOpenChange={(v) => { if (!v) { setPasteDialog(null); setPasteText(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Paste {pasteDialog?.field === "gmail" ? "Gmail Emails" : "Proxy Addresses"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              Paste one value per line. Each line will be assigned to VMs in order (VM 1 gets line 1, VM 2 gets line 2, etc.)
+              {serverDetail && <span className="font-medium"> - {serverDetail.vms.length} VMs on this server</span>}
+            </p>
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={10}
+              className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              placeholder={pasteDialog?.field === "gmail"
+                ? "example1@gmail.com\nexample2@gmail.com\nexample3@gmail.com"
+                : "192.168.1.1:8080\n192.168.1.2:8080\n192.168.1.3:8080"
+              }
+              autoFocus
+            />
+            <p className="text-xs text-gray-400">
+              {pasteText.split("\n").filter((l) => l.trim()).length} values entered
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={handleBulkPaste} disabled={bulkPaste.isLoading || !pasteText.trim()}>
+                {bulkPaste.isLoading ? "Assigning..." : "Assign"}
+              </Button>
+              <Button variant="outline" onClick={() => { setPasteDialog(null); setPasteText(""); }}>Cancel</Button>
+            </div>
+            {bulkPaste.error && <p className="text-sm text-red-600">{bulkPaste.error.message}</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
