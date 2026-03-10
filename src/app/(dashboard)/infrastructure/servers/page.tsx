@@ -195,8 +195,7 @@ export default function ServersPage() {
   const [pasteDialog, setPasteDialog] = useState<{ field: "gmail" | "proxy" | "paypal" } | null>(null);
   const [pasteText, setPasteText] = useState("");
 
-  // Credentials (PIN protected)
-  const [showCreds, setShowCreds] = useState(false);
+  // (credentials removed from UI)
 
   // VM selection
   const [selectedVmIds, setSelectedVmIds] = useState<Set<string>>(new Set());
@@ -266,10 +265,6 @@ export default function ServersPage() {
     { projectId: projectId!, id: selectedServerId! },
     { enabled: !!projectId && !!selectedServerId }
   );
-  const { data: credentials } = trpc.server.getCredentials.useQuery(
-    { projectId: projectId!, id: selectedServerId! },
-    { enabled: !!projectId && !!selectedServerId && showCreds }
-  );
 
   // Mutations
   const createServer = trpc.server.create.useMutation({
@@ -296,16 +291,16 @@ export default function ServersPage() {
     onSuccess: (r) => { utils.server.list.invalidate(); setShowImport(false); setImportPreview([]); toast.success(`Imported ${r.imported}, skipped ${r.skipped}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
     onError: (e) => toast.error(e.message),
   });
-  const renewServer = trpc.server.renew.useMutation({
-    onSuccess: () => { utils.server.list.invalidate(); utils.server.getById.invalidate(); toast.success("Server renewed"); },
-    onError: (e) => toast.error(e.message),
-  });
   const bulkPaste = trpc.vm.bulkPaste.useMutation({
     onSuccess: (r) => { utils.server.getById.invalidate(); setPasteDialog(null); setPasteText(""); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
   });
   const vmBulkUpdateStatus = trpc.vm.bulkUpdateStatus.useMutation({
     onSuccess: (r) => { utils.server.getById.invalidate(); setSelectedVmIds(new Set()); setVmBulkStatus(""); toast.success(`${r.updated} VMs updated`); },
+    onError: (e) => toast.error(e.message),
+  });
+  const vmBulkDelete = trpc.vm.bulkDelete.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setSelectedVmIds(new Set()); toast.success(`Deleted ${r.deleted} VMs`); },
     onError: (e) => toast.error(e.message),
   });
   const vmCreate = trpc.vm.create.useMutation({
@@ -463,9 +458,6 @@ export default function ServersPage() {
     bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: pasteDialog.field, values: pasteText.split("\n").map((l) => l.trim()).filter(Boolean) });
   };
 
-  const handleShowCreds = () => {
-    requirePin(() => setShowCreds(true), "PIN Required", "Enter PIN to view credentials");
-  };
 
   const handleVmCreate = () => {
     if (!selectedServerId) return;
@@ -681,7 +673,7 @@ export default function ServersPage() {
                   <div key={server.id} className={`px-3 py-2.5 border-b border-gray-50 cursor-pointer transition-colors group ${isSelected ? "bg-blue-50 border-l-2 border-l-blue-500" : isChecked ? "bg-blue-50/50 border-l-2 border-l-transparent" : isOverdue ? "bg-red-50/50 border-l-2 border-l-red-400" : isExpiring ? "bg-amber-50/50 border-l-2 border-l-amber-400" : "hover:bg-gray-50 border-l-2 border-l-transparent"}`}>
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={isChecked} onChange={() => toggleServerSelect(server.id)} onClick={(e) => e.stopPropagation()} className="rounded border-gray-300 shrink-0" />
-                      <div className="flex-1 min-w-0" onClick={() => { setSelectedServerId(server.id); setShowCreds(false); setSelectedVmIds(new Set()); }}>
+                      <div className="flex-1 min-w-0" onClick={() => { setSelectedServerId(server.id); setSelectedVmIds(new Set()); }}>
                         <div className="flex items-center justify-between">
                           <span className="font-medium text-sm text-gray-900 truncate">{server.code}</span>
                           <div className="flex items-center gap-1 shrink-0">
@@ -758,42 +750,7 @@ export default function ServersPage() {
                       <ExpiryBadge expiryDate={serverDetail.expiryDate} />
                     </span>
                   )}
-                  {canEdit && serverDetail.expiryDate && (
-                    <button onClick={() => renewServer.mutate({ projectId: projectId!, id: serverDetail.id })} disabled={renewServer.isLoading} className="text-green-600 hover:underline flex items-center gap-1 font-medium">
-                      {renewServer.isLoading ? "..." : "Renew"}
-                    </button>
-                  )}
-                  {!showCreds && (
-                    <button onClick={handleShowCreds} className="text-blue-600 hover:underline flex items-center gap-1">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
-                      Credentials
-                    </button>
-                  )}
-                  {showCreds && (
-                    <button onClick={() => setShowCreds(false)} className="text-gray-500 hover:underline">Hide Credentials</button>
-                  )}
                 </div>
-
-                {/* Credentials */}
-                {showCreds && credentials && (
-                  <div className="mt-2 bg-gray-50 rounded-lg p-3 text-xs space-y-2">
-                    {credentials.users?.length > 0 && (
-                      <div>
-                        <p className="font-semibold text-gray-600 mb-1">VPS Login:</p>
-                        {credentials.users.map((u: any, i: number) => (
-                          <p key={i} className="font-mono text-gray-800">{u.username}: <span className="select-all">{u.password}</span></p>
-                        ))}
-                      </div>
-                    )}
-                    {credentials.ipmi && (
-                      <div>
-                        <p className="font-semibold text-gray-600 mb-1">IPMI:</p>
-                        <p className="font-mono text-gray-800">{credentials.ipmi.ip} - {credentials.ipmi.user} / <span className="select-all">{credentials.ipmi.password}</span></p>
-                      </div>
-                    )}
-                    {!credentials.users?.length && !credentials.ipmi && <p className="text-gray-400">No credentials saved</p>}
-                  </div>
-                )}
 
                 {/* Stats */}
                 <div className="flex gap-3 mt-3 flex-wrap">
@@ -835,6 +792,7 @@ export default function ServersPage() {
                         {ALL_VM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                       {vmBulkStatus && <Button size="sm" className="h-6 text-xs px-2" onClick={() => vmBulkUpdateStatus.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), status: vmBulkStatus as any })}>Apply</Button>}
+                      {canDelete && <Button size="sm" variant="destructive" className="h-6 text-xs px-2" onClick={() => requirePin(() => vmBulkDelete.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds) }), "PIN Required", `Delete ${selectedVmIds.size} VMs?`)} disabled={vmBulkDelete.isLoading}>{vmBulkDelete.isLoading ? "..." : "Delete"}</Button>}
                       <Button size="sm" variant="ghost" className="h-6 text-xs px-1" onClick={() => setSelectedVmIds(new Set())}>x</Button>
                       <span className="text-gray-300">|</span>
                     </>
