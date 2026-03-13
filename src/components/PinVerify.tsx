@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +30,11 @@ export function PinVerifyDialog({
   const [error, setError] = useState("");
   const verifyPin = trpc.user.verifyPin.useMutation();
 
+  // Always reset pin and error when dialog opens
+  useEffect(() => {
+    if (open) { setPin(""); setError(""); }
+  }, [open]);
+
   const handleVerify = async () => {
     setError("");
     try {
@@ -52,7 +56,7 @@ export function PinVerifyDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
-          <Input
+          <input
             type="password"
             inputMode="numeric"
             maxLength={6}
@@ -60,7 +64,11 @@ export function PinVerifyDialog({
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
             onKeyDown={(e) => e.key === "Enter" && pin.length >= 4 && handleVerify()}
-            className="text-center text-2xl tracking-[0.5em]"
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center text-2xl tracking-[0.5em]"
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-1p-ignore
+            data-form-type="other"
             autoFocus
           />
           {error && <p className="text-sm text-red-600 text-center">{error}</p>}

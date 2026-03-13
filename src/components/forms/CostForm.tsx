@@ -20,6 +20,12 @@ interface CostFormProps {
   onSuccess: () => void;
 }
 
+function dateToISO(dateStr: string): string {
+  const now = new Date();
+  const timePart = now.toTimeString().slice(0, 8);
+  return new Date(`${dateStr}T${timePart}`).toISOString();
+}
+
 export function CostForm({ open, onClose, onSuccess }: CostFormProps) {
   const projectId = useProjectStore((s) => s.currentProjectId);
 
@@ -28,7 +34,7 @@ export function CostForm({ open, onClose, onSuccess }: CostFormProps) {
   });
 
   const [form, setForm] = useState({
-    date: new Date().toISOString().split("T")[0],
+    date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
     serverCost: "",
     ipCost: "",
     extraCost: "",
@@ -39,7 +45,7 @@ export function CostForm({ open, onClose, onSuccess }: CostFormProps) {
 
   const resetForm = () =>
     setForm({
-      date: new Date().toISOString().split("T")[0],
+      date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
       serverCost: "", ipCost: "", extraCost: "",
       isPrepaid: false, note: "", fundingSource: "",
     });
@@ -54,7 +60,7 @@ export function CostForm({ open, onClose, onSuccess }: CostFormProps) {
     if (!projectId) return;
     createCost.mutate({
       projectId,
-      date: form.date,
+      date: dateToISO(form.date),
       serverCost: form.serverCost ? parseFloat(form.serverCost) : undefined,
       ipCost: form.ipCost ? parseFloat(form.ipCost) : undefined,
       extraCost: form.extraCost ? parseFloat(form.extraCost) : undefined,

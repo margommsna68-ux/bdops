@@ -7,6 +7,7 @@ import { VMTaskForm } from "@/components/forms/VMTaskForm";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatDate } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 const statusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800",
@@ -28,6 +29,7 @@ type SortKey = "scheduledAt" | "title" | "type" | "status" | "vm";
 type SortDir = "asc" | "desc";
 
 export default function VMTasksPage() {
+  const t = useT();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [showForm, setShowForm] = useState(false);
@@ -80,12 +82,12 @@ export default function VMTasksPage() {
     let items = tasks ?? [];
     if (search.trim()) {
       const q = search.toLowerCase();
-      items = items.filter((t: any) =>
-        (t.title ?? "").toLowerCase().includes(q) ||
-        (t.description ?? "").toLowerCase().includes(q) ||
-        (t.type ?? "").toLowerCase().includes(q) ||
-        (t.vm?.code ?? "").toLowerCase().includes(q) ||
-        (t.vm?.server?.code ?? "").toLowerCase().includes(q)
+      items = items.filter((tk: any) =>
+        (tk.title ?? "").toLowerCase().includes(q) ||
+        (tk.description ?? "").toLowerCase().includes(q) ||
+        (tk.type ?? "").toLowerCase().includes(q) ||
+        (tk.vm?.code ?? "").toLowerCase().includes(q) ||
+        (tk.vm?.server?.code ?? "").toLowerCase().includes(q)
       );
     }
     return [...items].sort((a: any, b: any) => {
@@ -111,7 +113,7 @@ export default function VMTasksPage() {
     });
   }, [tasks, search, sortKey, sortDir]);
 
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   const overdueCount = overdueTasks?.length ?? 0;
 
@@ -119,17 +121,17 @@ export default function VMTasksPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">VM Tasks</h1>
-          <p className="text-gray-500">Scheduled tasks for virtual machines</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("vmt_title")}</h1>
+          <p className="text-gray-500">{t("vmt_subtitle")}</p>
         </div>
-        <Button onClick={() => setShowForm(true)}>+ New Task</Button>
+        <Button onClick={() => setShowForm(true)}>{t("vmt_new")}</Button>
       </div>
 
       {/* Overdue alert */}
       {overdueCount > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm font-medium text-red-800">
-            {overdueCount} overdue task{overdueCount > 1 ? "s" : ""} need attention
+            {overdueCount} {t("vmt_overdue_alert")}
           </p>
         </div>
       )}
@@ -143,7 +145,7 @@ export default function VMTasksPage() {
             size="sm"
             onClick={() => setStatusFilter(s)}
           >
-            {s === "ALL" ? "All" : s.replace(/_/g, " ")}
+            {s === "ALL" ? t("all") : s.replace(/_/g, " ")}
           </Button>
         ))}
       </div>
@@ -155,20 +157,20 @@ export default function VMTasksPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          placeholder="Search task title, VM, type..."
+          placeholder={t("vmt_search")}
         />
         {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">&times;</button>}
       </div>
 
       {/* Sort controls */}
       <div className="flex items-center gap-2 text-xs text-gray-500">
-        <span>Sort by:</span>
+        <span>{t("vmt_sort_by")}</span>
         {([
-          ["scheduledAt", "Schedule"],
-          ["title", "Title"],
-          ["type", "Type"],
-          ["status", "Status"],
-          ["vm", "VM"],
+          ["scheduledAt", t("vmt_schedule")],
+          ["title", t("vmt_title_col")],
+          ["type", t("type")],
+          ["status", t("col_status")],
+          ["vm", t("col_vm")],
         ] as [SortKey, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -182,9 +184,9 @@ export default function VMTasksPage() {
 
       {/* Task list */}
       {isLoading ? (
-        <p className="text-gray-400 py-8 text-center">Loading...</p>
+        <p className="text-gray-400 py-8 text-center">{t("loading")}</p>
       ) : !filteredTasks?.length ? (
-        <p className="text-gray-400 py-8 text-center">No tasks found.</p>
+        <p className="text-gray-400 py-8 text-center">{t("vmt_no_tasks")}</p>
       ) : (
         <div className="space-y-3">
           {filteredTasks.map((task: any) => {
@@ -207,7 +209,7 @@ export default function VMTasksPage() {
                         {task.status}
                       </Badge>
                       {isOverdue && (
-                        <Badge className="bg-red-100 text-red-800 text-xs">OVERDUE</Badge>
+                        <Badge className="bg-red-100 text-red-800 text-xs">{t("overdue").toUpperCase()}</Badge>
                       )}
                     </div>
                     <h3 className="font-medium text-gray-900">{task.title}</h3>
@@ -215,10 +217,10 @@ export default function VMTasksPage() {
                       <p className="text-sm text-gray-500 mt-1">{task.description}</p>
                     )}
                     <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                      <span>VM: <span className="font-mono">{task.vm?.code}</span> ({task.vm?.server?.code})</span>
-                      <span>Scheduled: {formatDate(task.scheduledAt)}</span>
-                      {task.assignedTo && <span>Assigned: {task.assignedTo.name ?? task.assignedTo.email}</span>}
-                      {task.completedAt && <span>Completed: {formatDate(task.completedAt)}</span>}
+                      <span>{t("vmt_vm")} <span className="font-mono">{task.vm?.code}</span> ({task.vm?.server?.code})</span>
+                      <span>{t("vmt_scheduled")} {formatDate(task.scheduledAt)}</span>
+                      {task.assignedTo && <span>{t("vmt_assigned")} {task.assignedTo.name ?? task.assignedTo.email}</span>}
+                      {task.completedAt && <span>{t("vmt_completed")} {formatDate(task.completedAt)}</span>}
                     </div>
                   </div>
 
@@ -232,7 +234,7 @@ export default function VMTasksPage() {
                         onClick={() => handleStatusChange(task.id, "IN_PROGRESS")}
                         disabled={mutatingId === task.id}
                       >
-                        Start
+                        {t("start")}
                       </Button>
                       <Button
                         size="sm"
@@ -241,7 +243,7 @@ export default function VMTasksPage() {
                         onClick={() => handleStatusChange(task.id, "CANCELLED")}
                         disabled={mutatingId === task.id}
                       >
-                        Cancel
+                        {t("cancel")}
                       </Button>
                     </div>
                   )}
@@ -252,7 +254,7 @@ export default function VMTasksPage() {
                       onClick={() => handleStatusChange(task.id, "COMPLETED")}
                       disabled={mutatingId === task.id}
                     >
-                      Complete
+                      {t("complete")}
                     </Button>
                   )}
                 </div>

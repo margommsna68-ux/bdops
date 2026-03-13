@@ -11,8 +11,8 @@ export async function GET() {
     const hashedPw = await bcrypt.hash("admin123", 10);
     const admin = await prisma.user.upsert({
       where: { email: "admin@bdops.com" },
-      update: {},
-      create: { email: "admin@bdops.com", name: "Admin", password: hashedPw },
+      update: { username: "admin" },
+      create: { email: "admin@bdops.com", username: "admin", name: "Admin", password: hashedPw },
     });
 
     // ═══ 2. Create Project ═══
@@ -195,17 +195,20 @@ export async function GET() {
       const email = `${gmailNames[i]}2025bd@${gmailDomains[0]}`;
       const ppIndex = i % paypals.length;
       try {
-        await prisma.gmailAccount.create({
+        const gmail = await prisma.gmailAccount.create({
           data: {
             email,
             password: encrypt("GmailP@ss2026!"),
             twoFaCurrent: encrypt("abcd efgh ijkl mnop"),
             recoveryEmail: `${gmailNames[i]}.recovery@yahoo.com`,
             status: i % 8 === 7 ? "NEEDS_2FA_UPDATE" : i % 12 === 11 ? "SUSPENDED" : "ACTIVE",
-            vmId: allVms[i].id,
             paypalId: paypals[ppIndex].id,
             projectId: pid,
           },
+        });
+        await prisma.virtualMachine.update({
+          where: { id: allVms[i].id },
+          data: { gmailId: gmail.id },
         });
       } catch {
         // Skip duplicates

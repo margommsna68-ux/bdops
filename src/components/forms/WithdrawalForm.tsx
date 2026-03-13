@@ -27,6 +27,12 @@ interface WithdrawalFormProps {
   onSuccess: () => void;
 }
 
+function dateToISO(dateStr: string): string {
+  const now = new Date();
+  const timePart = now.toTimeString().slice(0, 8);
+  return new Date(`${dateStr}T${timePart}`).toISOString();
+}
+
 export function WithdrawalForm({ open, onClose, onSuccess }: WithdrawalFormProps) {
   const projectId = useProjectStore((s) => s.currentProjectId);
   const { data: paypals } = trpc.paypal.list.useQuery(
@@ -43,7 +49,7 @@ export function WithdrawalForm({ open, onClose, onSuccess }: WithdrawalFormProps
   });
 
   const [form, setForm] = useState({
-    date: new Date().toISOString().split("T")[0],
+    date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
     amount: "",
     transactionId: "",
     type: "MIXING" as "MIXING" | "EXCHANGE",
@@ -57,7 +63,7 @@ export function WithdrawalForm({ open, onClose, onSuccess }: WithdrawalFormProps
 
   const resetForm = () =>
     setForm({
-      date: new Date().toISOString().split("T")[0],
+      date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
       amount: "", transactionId: "", type: "MIXING",
       agent: "", withdrawCode: "", sourcePaypalId: "",
       destPaypalId: "", mailConfirmed: false, notes: "",
@@ -68,7 +74,7 @@ export function WithdrawalForm({ open, onClose, onSuccess }: WithdrawalFormProps
     if (!projectId) return;
     createWithdrawal.mutate({
       projectId,
-      date: form.date,
+      date: dateToISO(form.date),
       amount: parseFloat(form.amount),
       transactionId: form.transactionId || undefined,
       type: form.type,
@@ -96,7 +102,7 @@ export function WithdrawalForm({ open, onClose, onSuccess }: WithdrawalFormProps
                 type="button"
                 variant={form.type === t ? "default" : "outline"}
                 size="sm"
-                onClick={() => setForm({ ...form, type: t })}
+                onClick={() => setForm({ ...form, type: t, ...(t === "MIXING" ? { agent: "" } : { destPaypalId: "" }) })}
               >
                 {t}
               </Button>

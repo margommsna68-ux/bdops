@@ -66,9 +66,9 @@ export const profitSplitRouter = router({
         _sum: { total: true },
       });
 
-      const withdrawal = Number(totalWithdrawal._sum.amount ?? 0);
-      const cost = Number(totalCost._sum.total ?? 0);
-      const netProfit = withdrawal - cost;
+      const withdrawal = totalWithdrawal._sum.amount?.toNumber() ?? 0;
+      const cost = totalCost._sum.total?.toNumber() ?? 0;
+      const netProfit = Math.round((withdrawal - cost) * 100) / 100;
 
       const result = await ctx.prisma.profitSplit.create({
         data: {
@@ -82,7 +82,7 @@ export const profitSplitRouter = router({
             create: input.partners.map((p) => ({
               partnerName: p.name,
               percentage: p.percentage,
-              amount: parseFloat(((netProfit * p.percentage) / 100).toFixed(2)),
+              amount: Math.round((netProfit * p.percentage) / 100 * 100) / 100,
             })),
           },
         },
@@ -127,9 +127,9 @@ export const profitSplitRouter = router({
         _sum: { total: true },
       });
 
-      const withdrawal = Number(totalWithdrawal._sum.amount ?? 0);
-      const cost = Number(totalCost._sum.total ?? 0);
-      const netProfit = withdrawal - cost;
+      const withdrawal = totalWithdrawal._sum.amount?.toNumber() ?? 0;
+      const cost = totalCost._sum.total?.toNumber() ?? 0;
+      const netProfit = Math.round((withdrawal - cost) * 100) / 100;
 
       // Update split and recalculate allocations
       await ctx.prisma.profitSplit.update({
@@ -138,12 +138,13 @@ export const profitSplitRouter = router({
       });
 
       for (const alloc of split.allocations) {
+        const pct = typeof alloc.percentage === 'object' && 'toNumber' in alloc.percentage
+          ? (alloc.percentage as any).toNumber()
+          : Number(alloc.percentage);
         await ctx.prisma.splitAllocation.update({
           where: { id: alloc.id },
           data: {
-            amount: parseFloat(
-              ((netProfit * Number(alloc.percentage)) / 100).toFixed(2)
-            ),
+            amount: Math.round((netProfit * pct) / 100 * 100) / 100,
           },
         });
       }

@@ -5,7 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
-import { exportToExcel } from "@/lib/excel-export";
+import { exportToCSV } from "@/lib/excel-export";
+import { ImportCSVDialog } from "@/components/forms/ImportCSVDialog";
+import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
 const statusColors: Record<string, string> = {
@@ -69,11 +71,10 @@ function EditableCell({ value, onSave, mono, placeholder }: {
 export default function ProxiesPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
+  const t = useT();
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [showImport, setShowImport] = useState(false);
-  const [pasteText, setPasteText] = useState("");
-  const [subnet, setSubnet] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
@@ -88,9 +89,9 @@ export default function ProxiesPage() {
 
   const invalidate = () => { utils.proxy.list.invalidate(); utils.proxy.statusCounts.invalidate(); refetch(); };
   const autoAssign = trpc.proxy.autoAssign.useMutation({ onSuccess: (d) => { invalidate(); toast.success(d.message); }, onError: (e) => toast.error(e.message) });
-  const bulkImport = trpc.proxy.bulkImport.useMutation({ onSuccess: (d) => { invalidate(); setShowImport(false); setPasteText(""); toast.success(`Imported ${d.imported} proxies`); }, onError: (e) => toast.error(e.message) });
-  const unassignProxy = trpc.proxy.unassign.useMutation({ onSuccess: () => { invalidate(); toast.success("Unassigned"); } });
-  const updateProxy = trpc.proxy.update.useMutation({ onSuccess: () => { invalidate(); toast.success("Saved"); }, onError: (e) => toast.error(e.message) });
+  const bulkImport = trpc.proxy.bulkImport.useMutation({ onSuccess: (d) => { invalidate(); setShowImport(false); toast.success(`Imported ${d.imported} proxies`); }, onError: (e) => toast.error(e.message) });
+  const unassignProxy = trpc.proxy.unassign.useMutation({ onSuccess: () => { invalidate(); toast.success(t("proxy_unassigned")); } });
+  const updateProxy = trpc.proxy.update.useMutation({ onSuccess: () => { invalidate(); toast.success(t("saved")); }, onError: (e) => toast.error(e.message) });
   const bulkDeleteProxy = trpc.proxy.bulkDelete.useMutation({ onSuccess: (d) => { invalidate(); setSelected(new Set()); toast.success(`Deleted ${d.deleted} proxies`); } });
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
@@ -145,31 +146,33 @@ export default function ProxiesPage() {
   };
 
   const bulkDelete = () => {
-    if (!confirm(`XOA VINH VIEN ${selected.size} proxies? Khong the hoan tac!`)) return;
+    if (!confirm(t("proxy_delete_confirm"))) return;
     bulkDeleteProxy.mutate({ projectId: projectId!, ids: Array.from(selected) });
   };
 
-  const handlePasteImport = () => {
-    const lines = pasteText.trim().split("\n").filter(Boolean);
-    const proxies = lines.map((line) => ({ address: line.trim(), subnet: subnet || undefined }));
+  const handleCSVImport = (rows: Record<string, string>[]) => {
+    const proxies = rows.map((row) => ({
+      address: row["Address"] || row["address"] || "",
+      subnet: row["Subnet"] || row["subnet"] || undefined,
+    })).filter((p) => p.address);
     if (proxies.length === 0) return;
     bulkImport.mutate({ projectId: projectId!, proxies });
   };
 
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Proxy IPs</h1>
-          <p className="text-sm text-gray-500">Click cell to edit inline. Checkbox to select for bulk actions.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("proxy_title")}</h1>
+          <p className="text-sm text-gray-500">{t("proxy_subtitle")}</p>
         </div>
       </div>
 
       {/* Stats */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => setStatusFilter("ALL")} className={`px-3 py-1 rounded-full text-xs font-medium transition ${statusFilter === "ALL" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>All ({totalProxies})</button>
+        <button onClick={() => setStatusFilter("ALL")} className={`px-3 py-1 rounded-full text-xs font-medium transition ${statusFilter === "ALL" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{t("all")} ({totalProxies})</button>
         {PROXY_STATUSES.map((s) => (
           <button key={s} onClick={() => setStatusFilter(s === statusFilter ? "ALL" : s)} className={`px-3 py-1 rounded-full text-xs font-medium transition ${statusFilter === s ? "bg-gray-900 text-white" : `${statusColors[s]} hover:opacity-80`}`}>{s} ({countMap[s] ?? 0})</button>
         ))}
@@ -183,76 +186,68 @@ export default function ProxiesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-8 pr-8 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            placeholder="Search address, VM, subnet..."
+            placeholder={t("proxy_search")}
           />
           {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">&times;</button>}
         </div>
-        {search && <span className="text-xs text-gray-500">{items.length} results</span>}
+        {search && <span className="text-xs text-gray-500">{items.length} {t("proxy_results")}</span>}
         <button
           onClick={() => {
             if (!items.length) return;
-            exportToExcel(
+            exportToCSV(
               items.map((p: any, i: number) => ({
                 "#": i + 1,
-                Address: p.address ?? "",
-                Status: p.status ?? "",
-                VM: p.vm?.code ?? "",
-                Subnet: p.subnet ?? "",
+                [t("info_address")]: p.address ?? "",
+                [t("col_status")]: p.status ?? "",
+                [t("col_vm")]: p.vm?.code ?? "",
+                [t("proxy_subnet")]: p.subnet ?? "",
               })),
-              "proxies-export",
-              "Proxies"
+              "proxies-export"
             );
           }}
           disabled={!items.length}
           className="px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
         >
-          Export Excel
+          {t("export_excel")}
         </button>
       {canEdit && (
         <>
-          <button onClick={() => setShowImport(!showImport)} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">+ Import Proxies</button>
+          <button onClick={() => setShowImport(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">{t("proxy_import")}</button>
           <button onClick={() => autoAssign.mutate({ projectId: projectId! })} disabled={autoAssign.isLoading} className="px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50">
-            {autoAssign.isLoading ? "Assigning..." : `Auto-Assign (${countMap["AVAILABLE"] ?? 0} avail)`}
+            {autoAssign.isLoading ? "Assigning..." : `${t("proxy_auto_assign")} (${countMap["AVAILABLE"] ?? 0} ${t("proxy_avail")})`}
           </button>
           {selected.size > 0 && (
             <>
               <span className="text-gray-300 mx-1">|</span>
-              <span className="text-xs font-medium text-blue-600">{selected.size} selected</span>
+              <span className="text-xs font-medium text-blue-600">{selected.size} {t("selected")}</span>
               <select defaultValue="" onChange={(e) => { if (e.target.value) { bulkUpdateStatus(e.target.value); e.target.value = ""; } }} className="px-2 py-1 border rounded text-xs">
-                <option value="" disabled>Change Status...</option>
+                <option value="" disabled>{t("change_status")}</option>
                 {PROXY_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
-              {canDelete && <button onClick={bulkBlock} className="px-3 py-1.5 bg-red-50 text-red-600 rounded text-xs font-medium hover:bg-red-100">Block Selected</button>}
-              {canDelete && <button onClick={bulkDelete} disabled={bulkDeleteProxy.isLoading} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-50">{bulkDeleteProxy.isLoading ? "Deleting..." : "Delete Selected"}</button>}
-              <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:underline">Clear</button>
+              {canDelete && <button onClick={bulkBlock} className="px-3 py-1.5 bg-red-50 text-red-600 rounded text-xs font-medium hover:bg-red-100">{t("proxy_block_selected")}</button>}
+              {canDelete && <button onClick={bulkDelete} disabled={bulkDeleteProxy.isLoading} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-50">{bulkDeleteProxy.isLoading ? "Deleting..." : t("delete_selected")}</button>}
+              <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:underline">{t("clear")}</button>
             </>
           )}
         </>
       )}
       </div>
 
-      {/* Import */}
-      {showImport && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold">Paste Proxy List</h3>
-          <p className="text-xs text-gray-500">One per line: IP:PORT:USER:PASS</p>
-          <div className="flex gap-3">
-            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={5} className="flex-1 px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none" placeholder={"23.142.16.73:44998:user:pass\n23.142.16.74:44998:user:pass"} />
-            <div className="flex flex-col gap-2 w-48">
-              <div><label className="block text-xs text-gray-600 mb-1">Subnet</label><input value={subnet} onChange={(e) => setSubnet(e.target.value)} className="w-full px-2 py-1.5 border rounded text-xs" placeholder="23.142.16.0/24" /></div>
-              <button onClick={handlePasteImport} disabled={bulkImport.isLoading || !pasteText.trim()} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">{bulkImport.isLoading ? "..." : `Import (${pasteText.trim().split("\n").filter(Boolean).length})`}</button>
-              <button onClick={() => { setShowImport(false); setPasteText(""); }} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">Cancel</button>
-            </div>
-          </div>
-          {bulkImport.data && <p className="text-xs text-green-700">Imported {bulkImport.data.imported}/{bulkImport.data.total}</p>}
-        </div>
-      )}
+      {/* Import CSV Dialog */}
+      <ImportCSVDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={handleCSVImport}
+        title={t("proxy_import")}
+        description={t("proxy_paste_desc")}
+        templateColumns={["Address", "Subnet"]}
+      />
 
       {autoAssign.data && <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">{autoAssign.data.message}</div>}
 
       {/* Table */}
-      {isLoading ? <p className="text-gray-500 p-4">Loading...</p> : items.length === 0 ? (
-        <div className="text-center py-12 bg-white border rounded-lg"><p className="text-gray-500">No proxies yet.</p></div>
+      {isLoading ? <p className="text-gray-500 p-4">{t("loading")}</p> : items.length === 0 ? (
+        <div className="text-center py-12 bg-white border rounded-lg"><p className="text-gray-500">{t("proxy_no_proxies")}</p></div>
       ) : (
         <div className="bg-white rounded-lg border overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -261,9 +256,9 @@ export default function ProxiesPage() {
                 <th className="w-8 px-2 py-2"><input type="checkbox" checked={selected.size === items.length && items.length > 0} onChange={toggleAll} className="rounded" /></th>
                 <th className="px-2 py-2 text-left font-medium text-gray-500 w-8">#</th>
                 {([
-                  ["address", "Address", ""],
-                  ["status", "Status", "w-28"],
-                  ["vm.code", "VM", ""],
+                  ["address", t("info_address"), ""],
+                  ["status", t("col_status"), "w-28"],
+                  ["vm.code", t("col_vm"), ""],
                 ] as [string, string, string][]).map(([key, label, cls]) => (
                   <th
                     key={key}
@@ -300,7 +295,7 @@ export default function ProxiesPage() {
               ))}
             </tbody>
           </table>
-          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{items.length} proxies</div>
+          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{items.length} {t("proxy_proxies")}</div>
         </div>
       )}
     </div>

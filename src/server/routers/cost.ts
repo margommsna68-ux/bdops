@@ -142,4 +142,144 @@ export const costRouter = router({
         count: result._count,
       };
     }),
+
+  bulkImport: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      items: z.array(z.object({
+        date: z.string(),
+        serverCost: z.number().optional(),
+        ipCost: z.number().optional(),
+        extraCost: z.number().optional(),
+        total: z.number(),
+        isPrepaid: z.boolean().default(false),
+        note: z.string().optional(),
+        fundingSource: z.string().optional(),
+      })),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      let imported = 0;
+      const errors: string[] = [];
+      for (const item of input.items) {
+        try {
+          await ctx.prisma.costRecord.create({
+            data: {
+              projectId: input.projectId,
+              date: new Date(item.date),
+              serverCost: item.serverCost ?? 0,
+              ipCost: item.ipCost ?? 0,
+              extraCost: item.extraCost ?? 0,
+              total: item.total,
+              isPrepaid: item.isPrepaid,
+              note: item.note,
+              fundingSource: item.fundingSource,
+            },
+          });
+          imported++;
+        } catch (e: any) {
+          errors.push(`Row ${imported + 1}: ${e.message}`);
+        }
+      }
+      return { imported, errors: errors.slice(0, 10) };
+    }),
+
+  // Server billing summary - calculate from active servers
+  serverBilling: costsProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const servers = await ctx.prisma.server.findMany({
+        where: {
+          projectId: input.projectId,
+          status: { in: ["ACTIVE", "BUILDING", "MAINTENANCE"] },
+          monthlyCost: { not: null },
+        },
+        select: {
+          id: true,
+          code: true,
+          monthlyCost: true,
+          billingCycle: true,
+          expiryDate: true,
+          status: true,
+          _count: { select: { vms: true } },
+        },
+        orderBy: { code: "asc" },
+      });
+
+      const totalMonthly = servers.reduce(
+        (sum, s) => sum + Number(s.monthlyCost ?? 0),
+        0
+      );
+
+      // Servers expiring within 7 days
+      const now = new Date();
+      const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const expiringSoon = servers.filter(
+        (s) => s.expiryDate && new Date(s.expiryDate) <= soon
+      );
+
+      return {
+        servers,
+        totalMonthly,
+        activeCount: servers.length,
+        expiringSoon,
+      };
+    }),
+
+  // Generate cost record from server billing
+  generateFromBilling: moderatorProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        date: z.string(),
+        note: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const servers = await ctx.prisma.server.findMany({
+        where: {
+          projectId: input.projectId,
+          status: { in: ["ACTIVE", "BUILDING", "MAINTENANCE"] },
+          monthlyCost: { not: null },
+        },
+        select: { code: true, monthlyCost: true },
+      });
+
+      const serverCost = servers.reduce(
+        (sum, s) => sum + Number(s.monthlyCost ?? 0),
+        0
+      );
+
+      if (serverCost === 0) {
+        throw new Error("No active servers with billing data");
+      }
+
+      const serverList = servers
+        .map((s) => `${s.code}: $${Number(s.monthlyCost).toFixed(2)}`)
+        .join(", ");
+
+      const result = await ctx.prisma.costRecord.create({
+        data: {
+          projectId: input.projectId,
+          date: new Date(input.date),
+          serverCost,
+          ipCost: 0,
+          extraCost: 0,
+          total: serverCost,
+          isPrepaid: false,
+          note: input.note || `Server billing: ${serverList}`,
+          fundingSource: "Server Billing",
+        },
+      });
+
+      await createAuditLog({
+        action: "CREATE",
+        entity: "CostRecord",
+        entityId: result.id,
+        userId: ctx.user.id,
+        projectId: input.projectId,
+        changes: { serverCost, source: "generateFromBilling", servers: serverList },
+      });
+
+      return result;
+    }),
 });

@@ -6,7 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", href: "/", keywords: "home overview" },
+  { label: "Dashboard", href: "/dashboard", keywords: "home overview" },
   { label: "Fund Tracking", href: "/funds", keywords: "funds money payment bright data" },
   { label: "Withdrawals", href: "/withdrawals", keywords: "withdraw mixing exchange" },
   { label: "PayPal Accounts", href: "/paypals", keywords: "paypal pp account" },

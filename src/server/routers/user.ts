@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import bcrypt from "bcryptjs";
+import { createAuditLog } from "@/lib/audit";
 
 export const userRouter = router({
   // Check if current user has PIN set
@@ -87,6 +88,7 @@ export const userRouter = router({
         where: { id: input.userId },
         data: { pin: hashedPin },
       });
+      await createAuditLog({ action: "RESET_PIN", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
     }),
 
@@ -105,6 +107,7 @@ export const userRouter = router({
         where: { id: input.userId },
         data: { password: hashedPassword },
       });
+      await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
     }),
 
@@ -120,6 +123,7 @@ export const userRouter = router({
             select: {
               id: true,
               email: true,
+              username: true,
               name: true,
               lastActiveAt: true,
               pin: true, // just to check hasPin
@@ -131,6 +135,7 @@ export const userRouter = router({
         memberId: m.id,
         userId: m.user.id,
         email: m.user.email,
+        username: m.user.username,
         name: m.user.name,
         role: m.role,
         hasPin: !!m.user.pin,

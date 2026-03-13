@@ -7,6 +7,7 @@ describe("useProjectStore", () => {
     useProjectStore.setState({
       currentProjectId: null,
       currentProjectCode: null,
+      currentProjectName: null,
     });
   });
 
@@ -17,18 +18,20 @@ describe("useProjectStore", () => {
   });
 
   it("sets current project", () => {
-    useProjectStore.getState().setCurrentProject("proj-1", "AE");
+    useProjectStore.getState().setCurrentProject("proj-1", "AE", "Bright Data AE", "ADMIN", []);
     const state = useProjectStore.getState();
     expect(state.currentProjectId).toBe("proj-1");
     expect(state.currentProjectCode).toBe("AE");
+    expect(state.currentProjectName).toBe("Bright Data AE");
   });
 
   it("switches between projects", () => {
     const store = useProjectStore.getState();
-    store.setCurrentProject("proj-1", "AE");
-    store.setCurrentProject("proj-2", "DN");
+    store.setCurrentProject("proj-1", "AE", "Bright Data AE", "ADMIN", []);
+    store.setCurrentProject("proj-2", "DN", "Da Nang Team", "USER", []);
     const state = useProjectStore.getState();
     expect(state.currentProjectId).toBe("proj-2");
     expect(state.currentProjectCode).toBe("DN");
+    expect(state.currentProjectName).toBe("Da Nang Team");
   });
 });

@@ -11,10 +11,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
+import { trpcVanilla } from "@/lib/trpc-vanilla";
 import { useProjectStore } from "@/lib/store";
 import { exportToCSV, parseCSV } from "@/lib/excel-export";
 import { usePinAction } from "@/components/PinVerify";
 import toast from "react-hot-toast";
+import { useT } from "@/lib/i18n";
 
 const serverStatusColors: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-800",
@@ -54,6 +56,7 @@ const emptyForm = {
   createdDate: "",
   expiryDate: "",
   notes: "",
+  gmailGroup: "1",
   users: [{ username: "", password: "" }] as { username: string; password: string }[],
   ipmiIp: "",
   ipmiUser: "",
@@ -61,6 +64,192 @@ const emptyForm = {
 };
 
 type ServerForm = typeof emptyForm;
+
+// ═══ Shared field wrapper ═══
+const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div>
+    <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+    {children}
+  </div>
+);
+
+// ═══ Copy button for inline fields ═══
+function CopyBtn({ value, prefix }: { value: string; prefix?: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  return (
+    <button type="button" onClick={() => { navigator.clipboard.writeText((prefix || "") + value); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="shrink-0 text-gray-400 hover:text-gray-600 p-1" title="Copy">
+      {copied ? (
+        <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+      )}
+    </button>
+  );
+}
+
+// ═══ Extracted Server Form Component (prevents full-page re-render on each keystroke) ═══
+import React from "react";
+
+const ServerFormPanel = React.memo(function ServerFormPanel({
+  form, setForm, editId, projectId, onSave, onCancel, isLoading, error, requirePin, t,
+}: {
+  form: ServerForm;
+  setForm: React.Dispatch<React.SetStateAction<ServerForm>>;
+  editId: string | null;
+  projectId: string;
+  onSave: (payload: any, isEdit: boolean) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+  error?: string;
+  requirePin: (action: () => void, title?: string, desc?: string) => void;
+  t: (key: string) => string;
+}) {
+  const updateField = useCallback((field: keyof ServerForm, value: string) => {
+    setForm(f => ({ ...f, [field]: value }));
+  }, [setForm]);
+
+  const updateUser = useCallback((idx: number, field: "username" | "password", value: string) => {
+    setForm(f => {
+      const users = [...f.users];
+      users[idx] = { ...users[idx], [field]: value };
+      return { ...f, users };
+    });
+  }, [setForm]);
+
+  const addUser = useCallback(() => {
+    setForm(f => ({ ...f, users: [...f.users, { username: "", password: "" }] }));
+  }, [setForm]);
+
+  const removeUser = useCallback((idx: number) => {
+    setForm(f => ({ ...f, users: f.users.filter((_, i) => i !== idx) }));
+  }, [setForm]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const creds: any = {};
+    if (form.users.some((u) => u.username)) {
+      creds.users = form.users.filter((u) => u.username);
+    }
+    if (form.ipmiIp || form.ipmiUser) {
+      creds.ipmi = { ip: form.ipmiIp, user: form.ipmiUser, password: form.ipmiPass };
+    }
+    const payload: any = {
+      projectId,
+      code: form.code,
+      inventoryId: form.inventoryId || undefined,
+      status: form.status as any,
+      ipAddress: form.ipAddress || undefined,
+      netmask: form.netmask || undefined,
+      gateway: form.gateway || undefined,
+      allocation: form.allocation || undefined,
+      provider: form.provider || undefined,
+      cpu: form.cpu || undefined,
+      ram: form.ram || undefined,
+      notes: form.notes || undefined,
+      gmailGroup: Number(form.gmailGroup),
+      monthlyCost: form.monthlyCost ? Number(form.monthlyCost) : undefined,
+      billingCycle: form.billingCycle ? Number(form.billingCycle) : undefined,
+      createdDate: form.createdDate || undefined,
+      expiryDate: form.expiryDate || undefined,
+    };
+    if (Object.keys(creds).length > 0) payload.credentials = creds;
+    if (editId) onSave({ ...payload, id: editId }, true);
+    else onSave(payload, false);
+  };
+
+  return (
+    <div className="bg-white border-b border-gray-200 px-4 py-4 shrink-0 overflow-y-auto max-h-[50vh]">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <h2 className="text-sm font-semibold text-gray-900">{editId ? t("srv_edit") : t("srv_add_new")}</h2>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">{t("srv_basic_info")}</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <F label={t("srv_server_name") + " *"}><Input required value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="SERVER-01-8939CC" className="h-8 text-sm" /></F>
+            <F label={t("srv_inventory_id")}><Input value={form.inventoryId} onChange={(e) => updateField("inventoryId", e.target.value)} placeholder="8939CC-RYZN" className="h-8 text-sm" /></F>
+            <F label={t("col_status")}>
+              <select value={form.status} onChange={(e) => updateField("status", e.target.value)} className="w-full h-8 px-2 border rounded-md text-sm bg-white">
+                {ALL_SERVER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </F>
+            <F label={t("srv_created_date")}><Input type="date" value={form.createdDate} onChange={(e) => updateField("createdDate", e.target.value)} className="h-8 text-sm" /></F>
+            <F label={t("srv_gmail_group")}>
+              <select value={form.gmailGroup} onChange={(e) => updateField("gmailGroup", e.target.value)} className="w-full h-8 px-2 border rounded-md text-sm bg-white">
+                <option value="1">Group 1 (1 VM = 1 Gmail)</option>
+                <option value="2">Group 2 (2 VM = 1 Gmail)</option>
+              </select>
+            </F>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">{t("srv_billing")}</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <F label={t("srv_monthly_cost")}><Input type="number" step="0.01" min="0" value={form.monthlyCost} onChange={(e) => updateField("monthlyCost", e.target.value)} placeholder="150.00" className="h-8 text-sm" /></F>
+            <F label={t("srv_billing_cycle")}><Input type="number" min="1" value={form.billingCycle} onChange={(e) => updateField("billingCycle", e.target.value)} className="h-8 text-sm" /></F>
+            <F label={t("srv_expiry_renewal")}><Input type="date" value={form.expiryDate} onChange={(e) => updateField("expiryDate", e.target.value)} className="h-8 text-sm" /></F>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">{t("srv_network_info")}</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <F label={t("srv_server_ip")}><div className="flex items-center gap-1"><Input value={form.ipAddress} onChange={(e) => updateField("ipAddress", e.target.value)} placeholder="107.172.249.42" className="h-8 text-sm font-mono flex-1" /><CopyBtn value={form.ipAddress} /></div></F>
+            <F label={t("srv_netmask")}><div className="flex items-center gap-1"><Input value={form.netmask} onChange={(e) => updateField("netmask", e.target.value)} placeholder="255.255.255.252" className="h-8 text-sm font-mono flex-1" /><CopyBtn value={form.netmask} /></div></F>
+            <F label={t("srv_gateway")}><div className="flex items-center gap-1"><Input value={form.gateway} onChange={(e) => updateField("gateway", e.target.value)} placeholder="107.172.249.41" className="h-8 text-sm font-mono flex-1" /><CopyBtn value={form.gateway} /></div></F>
+            <F label={t("srv_allocation")}><div className="flex items-center gap-1"><Input value={form.allocation} onChange={(e) => updateField("allocation", e.target.value)} placeholder="107.172.249.40/30" className="h-8 text-sm font-mono flex-1" /><CopyBtn value={form.allocation} /></div></F>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-semibold uppercase text-gray-400">{t("srv_vps_login")}</p>
+            <button type="button" onClick={addUser} className="text-xs text-blue-600 hover:underline">{t("srv_add_login")}</button>
+          </div>
+          {form.users.map((cred, idx) => (
+            <div key={idx} className="flex gap-2 mb-1.5 items-center">
+              <div className="flex items-center gap-1 flex-1"><Input value={cred.username} onChange={(e) => updateUser(idx, "username", e.target.value)} placeholder={t("srv_username")} className="h-8 text-sm flex-1" /><CopyBtn value={cred.username} /></div>
+              <div className="flex items-center gap-1 flex-1"><PasswordInput value={cred.password} onChange={(v) => updateUser(idx, "password", v)} placeholder={t("password")} className="h-8 text-sm flex-1" onRequestShow={(cb) => requirePin(cb, t("srv_pin_required"), t("srv_pin_view_pass"))} /><CopyBtn value={cred.password} /></div>
+              {form.users.length > 1 && <button type="button" onClick={() => removeUser(idx)} className="text-red-500 hover:text-red-700 px-1 text-sm">x</button>}
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">{t("srv_hardware")}</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <F label={t("srv_provider")}><Input value={form.provider} onChange={(e) => updateField("provider", e.target.value)} placeholder="ColoCrossing" className="h-8 text-sm" /></F>
+            <F label={t("srv_cpu")}><Input value={form.cpu} onChange={(e) => updateField("cpu", e.target.value)} placeholder="32 vCPU" className="h-8 text-sm" /></F>
+            <F label={t("srv_ram")}><Input value={form.ram} onChange={(e) => updateField("ram", e.target.value)} placeholder="64 GB" className="h-8 text-sm" /></F>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">{t("srv_ipmi_info")}</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <F label={t("srv_ipmi_ip")}><div className="flex items-center gap-1"><Input value={form.ipmiIp} onChange={(e) => updateField("ipmiIp", e.target.value)} placeholder="206.217.138.162" className="h-8 text-sm font-mono flex-1" /><CopyBtn value={form.ipmiIp} prefix="https://" /></div></F>
+            <F label={t("srv_ipmi_user")}><div className="flex items-center gap-1"><Input value={form.ipmiUser} onChange={(e) => updateField("ipmiUser", e.target.value)} placeholder="IPMI_USER" className="h-8 text-sm flex-1" /><CopyBtn value={form.ipmiUser} /></div></F>
+            <F label={t("srv_ipmi_password")}><div className="flex items-center gap-1"><PasswordInput value={form.ipmiPass} onChange={(v) => updateField("ipmiPass", v)} placeholder="********" className="h-8 text-sm flex-1" onRequestShow={(cb) => requirePin(cb, t("srv_pin_required"), t("srv_pin_view_pass"))} /><CopyBtn value={form.ipmiPass} /></div></F>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t("srv_notes")}</label>
+          <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={2} className="w-full px-3 py-1.5 border rounded-md text-sm" placeholder="Server notes..." />
+        </div>
+
+        <div className="flex gap-2">
+          <Button type="submit" size="sm" disabled={isLoading}>
+            {isLoading ? t("saving") : editId ? t("update") : t("create")}
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={onCancel}>{t("cancel")}</Button>
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+      </form>
+    </div>
+  );
+});
 
 // VM column definitions for resize
 const VM_COLUMNS = [
@@ -115,53 +304,55 @@ function getDaysUntilExpiry(expiryDate: string | Date | null | undefined): numbe
 }
 
 function ExpiryBadge({ expiryDate }: { expiryDate: string | Date | null | undefined }) {
+  const t = useT();
   const days = getDaysUntilExpiry(expiryDate);
   if (days === null) return null;
-  if (days < 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Overdue {Math.abs(days)}d</span>;
-  if (days <= 5) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium animate-pulse">{days === 0 ? "Expires today" : `${days}d left`}</span>;
-  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{days}d left</span>;
+  if (days < 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">{t("overdue")} {Math.abs(days)}d</span>;
+  if (days <= 5) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium animate-pulse">{days === 0 ? t("srv_expires_today") : `${days}${t("srv_days_left")}`}</span>;
+  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{days}{t("srv_days_left")}</span>;
 }
 
 // Inline cell editor dropdown for VM gmail/proxy assignment
-function VmCellEditor({ field, items, search, onSearch, onSelect, onUnassign, onClose, hasValue, loading }: {
-  field: "gmail" | "proxy" | "paypal";
-  items: { id: string; label: string; sublabel?: string; assigned?: boolean }[];
-  search: string;
-  onSearch: (v: string) => void;
-  onSelect: (id: string) => void;
-  onUnassign: () => void;
-  onClose: () => void;
-  hasValue: boolean;
-  loading: boolean;
-}) {
+
+// Info row with copy button for popup details
+function InfoRow({ label, value, secret, badge, onRequestShow }: { label: string; value?: string | null; secret?: boolean; badge?: boolean; onRequestShow?: (cb: () => void) => void }) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  const displayVal = secret && !show ? "••••••••" : value;
+  const handleToggleShow = () => {
+    if (show) { setShow(false); return; }
+    if (onRequestShow) { onRequestShow(() => setShow(true)); }
+    else { setShow(true); }
+  };
   return (
-    <>
-    <div className="fixed inset-0 z-40" onClick={onClose} />
-    <div className="absolute left-0 top-0 z-50 bg-white border border-gray-300 rounded-lg shadow-lg w-64 max-h-56 flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-1 p-1.5 border-b">
-        <input autoFocus value={search} onChange={(e) => onSearch(e.target.value)} placeholder={`Search ${field}...`} className="flex-1 text-xs px-2 py-1 border rounded outline-none focus:ring-1 focus:ring-blue-400" />
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-      </div>
-      {hasValue && (
-        <button onClick={onUnassign} disabled={loading} className="text-xs text-red-500 hover:bg-red-50 px-3 py-1.5 text-left border-b">
-          {loading ? "..." : "✕ Unassign current"}
-        </button>
-      )}
-      <div className="flex-1 overflow-y-auto">
-        {items.length === 0 ? (
-          <p className="text-xs text-gray-400 p-3 text-center">No {field === "gmail" ? "available gmails" : field === "proxy" ? "available proxies" : "available paypals"}</p>
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="text-gray-500 text-xs shrink-0 w-24">{label}</span>
+      <div className="flex items-center gap-1 flex-1 min-w-0">
+        {badge ? (
+          <Badge className="text-[10px] px-1.5 py-0">{value}</Badge>
         ) : (
-          items.map((item) => (
-            <button key={item.id} onClick={() => !item.assigned && onSelect(item.id)} disabled={loading || item.assigned} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center justify-between ${item.assigned ? "bg-blue-50 text-blue-700" : ""}`}>
-              <span className="truncate">{item.label}</span>
-              {item.assigned && <span className="text-[10px] text-blue-500 ml-1 shrink-0">current</span>}
-              {item.sublabel && !item.assigned && <span className="text-[10px] text-gray-400 ml-1 shrink-0">{item.sublabel}</span>}
-            </button>
-          ))
+          <span className="font-mono text-xs truncate">{displayVal}</span>
+        )}
+        {secret && (
+          <button onClick={handleToggleShow} className="text-gray-400 hover:text-gray-600 shrink-0" title={show ? "Hide" : "Show"}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {show ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242" />
+                : <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>}
+            </svg>
+          </button>
+        )}
+        {!badge && (
+          <button onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="text-gray-400 hover:text-gray-600 shrink-0" title="Copy">
+            {copied ? (
+              <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            )}
+          </button>
         )}
       </div>
     </div>
-    </>
   );
 }
 
@@ -169,6 +360,7 @@ export default function ServersPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
   const { requirePin, PinDialog } = usePinAction();
+  const t = useT();
 
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [vmStatusFilter, setVmStatusFilter] = useState("");
@@ -266,67 +458,59 @@ export default function ServersPage() {
 
   // Mutations
   const createServer = trpc.server.create.useMutation({
-    onSuccess: () => { utils.server.list.invalidate(); setShowForm(false); setForm({ ...emptyForm }); toast.success("Server created"); },
+    onSuccess: () => { utils.server.list.invalidate(); setShowForm(false); setForm({ ...emptyForm }); toast.success(t("srv_created")); },
     onError: (e) => toast.error(e.message),
   });
   const updateServer = trpc.server.update.useMutation({
-    onSuccess: () => { utils.server.list.invalidate(); utils.server.getById.invalidate(); setEditId(null); setShowForm(false); setForm({ ...emptyForm }); toast.success("Server updated"); },
+    onSuccess: () => { utils.server.list.invalidate(); utils.server.getById.invalidate(); setEditId(null); setShowForm(false); setForm({ ...emptyForm }); toast.success(t("srv_updated")); },
     onError: (e) => toast.error(e.message),
   });
   const deleteServer = trpc.server.delete.useMutation({
-    onSuccess: () => { utils.server.list.invalidate(); setDeleteConfirm(null); if (deleteConfirm === selectedServerId) setSelectedServerId(null); toast.success("Server deleted"); },
+    onSuccess: () => { utils.server.list.invalidate(); setDeleteConfirm(null); if (deleteConfirm === selectedServerId) setSelectedServerId(null); toast.success(t("srv_deleted")); },
     onError: (e) => toast.error(e.message),
   });
   const bulkUpdateStatus = trpc.server.bulkUpdateStatus.useMutation({
-    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setBulkStatusTarget(""); toast.success(`${r.updated} servers updated`); },
+    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setBulkStatusTarget(""); toast.success(`${r.updated} ${t("srv_servers_updated")}`); },
     onError: (e) => toast.error(e.message),
   });
   const bulkDelete = trpc.server.bulkDelete.useMutation({
-    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setShowBulkDelete(false); if (selectedServerId && selectedServerIds.has(selectedServerId)) setSelectedServerId(null); toast.success(`${r.deleted} servers deleted`); },
+    onSuccess: (r) => { utils.server.list.invalidate(); setSelectedServerIds(new Set()); setShowBulkDelete(false); if (selectedServerId && selectedServerIds.has(selectedServerId)) setSelectedServerId(null); toast.success(`${r.deleted} ${t("srv_servers_deleted")}`); },
     onError: (e) => toast.error(e.message),
   });
   const importFromCSV = trpc.server.importFromCSV.useMutation({
-    onSuccess: (r) => { utils.server.list.invalidate(); setShowImport(false); setImportPreview([]); toast.success(`Imported ${r.imported}, skipped ${r.skipped}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
+    onSuccess: (r) => { utils.server.list.invalidate(); setShowImport(false); setImportPreview([]); toast.success(`${t("srv_imported")} ${r.imported}, ${t("srv_skipped")} ${r.skipped}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
     onError: (e) => toast.error(e.message),
   });
-  const bulkPaste = trpc.vm.bulkPaste.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(`Assigned ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
+  const bulkAssignSelected = trpc.vm.bulkAssignSelected.useMutation({
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(`${t("qa_assigned")}: ${r.assigned}/${r.total}`); if (r.errors.length) toast.error(r.errors.slice(0, 5).join("\n")); },
     onError: (e) => toast.error(e.message),
   });
   const vmBulkUpdateStatus = trpc.vm.bulkUpdateStatus.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); setSelectedVmIds(new Set()); setVmBulkStatus(""); toast.success(`${r.updated} VMs updated`); },
+    onSuccess: (r) => { utils.server.getById.invalidate(); setSelectedVmIds(new Set()); setVmBulkStatus(""); toast.success(`${r.updated} ${t("srv_vms")} updated`); },
     onError: (e) => toast.error(e.message),
   });
   const vmBulkDelete = trpc.vm.bulkDelete.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setSelectedVmIds(new Set()); toast.success(`Deleted ${r.deleted} VMs`); },
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setSelectedVmIds(new Set()); toast.success(`${r.deleted} ${t("vm_deleted_count")}`); },
     onError: (e) => toast.error(e.message),
   });
   const vmCreate = trpc.vm.create.useMutation({
-    onSuccess: () => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setShowVmCreate(false); setVmSingleCode(""); toast.success("VM created"); },
+    onSuccess: () => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setShowVmCreate(false); setVmSingleCode(""); toast.success(t("vm_created")); },
     onError: (e) => toast.error(e.message),
   });
   const vmBulkCreate = trpc.vm.bulkCreate.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setShowVmCreate(false); toast.success(`Created ${r.created} VMs`); if (r.errors.length) toast.error(r.errors.join("\n")); },
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); setShowVmCreate(false); toast.success(`${r.created} ${t("vm_created_count")}`); if (r.errors.length) toast.error(r.errors.join("\n")); },
     onError: (e) => toast.error(e.message),
   });
   const assignGmail = trpc.vm.assignGmail.useMutation({
-    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("Gmail updated"); },
+    onSuccess: () => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(t("saved")); },
     onError: (e) => toast.error(e.message),
   });
   const assignProxy = trpc.vm.assignProxy.useMutation({
-    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("Proxy updated"); },
-    onError: (e) => toast.error(e.message),
-  });
-  const assignPaypal = trpc.vm.assignPaypal.useMutation({
-    onSuccess: () => { utils.server.getById.invalidate(); setEditingVmCell(null); toast.success("PayPal updated"); },
-    onError: (e) => toast.error(e.message),
-  });
-  const autoFill = trpc.vm.autoFill.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(r.filled > 0 ? r.details.join(" | ") : "Nothing available to assign"); },
+    onSuccess: () => { utils.server.getById.invalidate(); utils.vm.availableCounts.invalidate(); toast.success(t("saved")); },
     onError: (e) => toast.error(e.message),
   });
   const bulkAutoAssign = trpc.vm.bulkAutoAssign.useMutation({
-    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); utils.vm.availableCounts.invalidate(); setSelectedVmIds(new Set()); setShowQuickAssign(false); toast.success(`Assigned: ${r.gmail} Gmail, ${r.proxy} Proxy, ${r.paypal} PayPal`); },
+    onSuccess: (r) => { utils.server.getById.invalidate(); utils.server.list.invalidate(); utils.vm.availableCounts.invalidate(); setSelectedVmIds(new Set()); setShowQuickAssign(false); toast.success(`${t("qa_assigned")}: ${r.gmail} Gmail, ${r.proxy} Proxy`); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -334,80 +518,45 @@ export default function ServersPage() {
   const [showQuickAssign, setShowQuickAssign] = useState(false);
   const [qaGmail, setQaGmail] = useState(true);
   const [qaProxy, setQaProxy] = useState(true);
-  const [qaPaypal, setQaPaypal] = useState(true);
 
-  // Picker dialog (select from available data)
-  const [pickerDialog, setPickerDialog] = useState<{ field: "gmail" | "proxy" | "paypal" } | null>(null);
+  // Info popup (click Gmail/Proxy/PayPal to see details)
+  const [infoPopup, setInfoPopup] = useState<{ type: "gmail" | "proxy" | "paypal"; data: any; vmId: string } | null>(null);
+  // Decrypted credentials for info popup
+  const [decryptedCreds, setDecryptedCreds] = useState<{ password?: string | null; twoFaCurrent?: string | null } | null>(null);
+  const [loadingCreds, setLoadingCreds] = useState(false);
+
+  // Change assignment popup (from info popup)
+  const [changePopup, setChangePopup] = useState<{ field: "gmail" | "proxy"; vmId: string } | null>(null);
+  const [changeSearch, setChangeSearch] = useState("");
+
+  // Picker dialog (bulk select from available data to assign to multiple VMs)
+  const [pickerDialog, setPickerDialog] = useState<{ field: "gmail" | "proxy" } | null>(null);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
-  // Inline VM cell editing
-  const [editingVmCell, setEditingVmCell] = useState<{ vmId: string; field: "gmail" | "proxy" | "paypal" } | null>(null);
-  const [vmCellSearch, setVmCellSearch] = useState("");
-
-  // Queries for assignment dropdowns
+  // Queries for change popup & picker dialog
   const { data: availableGmails } = trpc.gmail.list.useQuery(
-    { projectId: projectId!, page: 1, limit: 200 },
-    { enabled: !!projectId && editingVmCell?.field === "gmail" }
+    { projectId: projectId!, page: 1, limit: 500 },
+    { enabled: !!projectId && (changePopup?.field === "gmail" || pickerDialog?.field === "gmail") }
   );
   const { data: availableProxies } = trpc.proxy.list.useQuery(
     { projectId: projectId!, page: 1, limit: 200 },
-    { enabled: !!projectId && editingVmCell?.field === "proxy" }
-  );
-  const { data: availablePaypals } = trpc.paypal.list.useQuery(
-    { projectId: projectId!, page: 1, limit: 200 },
-    { enabled: !!projectId && (editingVmCell?.field === "paypal" || pickerDialog?.field === "paypal") }
-  );
-  // Also fetch gmail/proxy for picker dialog
-  const { data: pickerGmails } = trpc.gmail.list.useQuery(
-    { projectId: projectId!, page: 1, limit: 500 },
-    { enabled: !!projectId && pickerDialog?.field === "gmail" }
-  );
-  const { data: pickerProxies } = trpc.proxy.list.useQuery(
-    { projectId: projectId!, page: 1, limit: 500 },
-    { enabled: !!projectId && pickerDialog?.field === "proxy" }
+    { enabled: !!projectId && (changePopup?.field === "proxy" || pickerDialog?.field === "proxy") }
   );
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
   const canDelete = currentRole === "ADMIN" || currentRole === "MODERATOR";
 
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
-
-  // Form handlers
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const creds: any = {};
-    if (form.users.some((u) => u.username)) {
-      creds.users = form.users.filter((u) => u.username);
-    }
-    if (form.ipmiIp || form.ipmiUser) {
-      creds.ipmi = { ip: form.ipmiIp, user: form.ipmiUser, password: form.ipmiPass };
-    }
-    const payload: any = {
-      projectId: projectId!,
-      code: form.code,
-      inventoryId: form.inventoryId || undefined,
-      status: form.status as any,
-      ipAddress: form.ipAddress || undefined,
-      netmask: form.netmask || undefined,
-      gateway: form.gateway || undefined,
-      allocation: form.allocation || undefined,
-      provider: form.provider || undefined,
-      cpu: form.cpu || undefined,
-      ram: form.ram || undefined,
-      notes: form.notes || undefined,
-      monthlyCost: form.monthlyCost ? Number(form.monthlyCost) : undefined,
-      billingCycle: form.billingCycle ? Number(form.billingCycle) : undefined,
-      createdDate: form.createdDate || undefined,
-      expiryDate: form.expiryDate || undefined,
-    };
-    if (Object.keys(creds).length > 0) payload.credentials = creds;
-    if (editId) updateServer.mutate({ ...payload, id: editId });
+  // Form save handler - receives payload directly from ServerFormPanel
+  const handleSave = useCallback((payload: any, isEdit: boolean) => {
+    if (isEdit) updateServer.mutate(payload);
     else createServer.mutate(payload);
-  };
+  }, [createServer, updateServer]);
+
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   const startEdit = (server: any) => {
-    setForm({
+    const baseForm: ServerForm = {
       code: server.code,
       inventoryId: server.inventoryId || "",
       status: server.status,
@@ -423,11 +572,27 @@ export default function ServersPage() {
       createdDate: server.createdDate ? new Date(server.createdDate).toISOString().split("T")[0] : "",
       expiryDate: server.expiryDate ? new Date(server.expiryDate).toISOString().split("T")[0] : "",
       notes: server.notes || "",
+      gmailGroup: String(server.gmailGroup ?? 1),
       users: [{ username: "", password: "" }],
       ipmiIp: "", ipmiUser: "", ipmiPass: "",
-    });
+    };
+    setForm(baseForm);
     setEditId(server.id);
     setShowForm(true);
+
+    // Load decrypted credentials async
+    trpcVanilla.server.getCredentials.query({ projectId: projectId!, id: server.id })
+      .then((creds: any) => {
+        if (!creds) return;
+        setForm(f => ({
+          ...f,
+          users: creds.users?.length ? creds.users.map((u: any) => ({ username: u.username || "", password: u.password || "" })) : [{ username: "", password: "" }],
+          ipmiIp: creds.ipmi?.ip || "",
+          ipmiUser: creds.ipmi?.user || "",
+          ipmiPass: creds.ipmi?.password || "",
+        }));
+      })
+      .catch(() => { /* credentials not available or no permission */ });
   };
 
   const handleExportCSV = () => {
@@ -515,15 +680,8 @@ export default function ServersPage() {
   const hasSelection = selectedServerIds.size > 0;
   const hasVmSelection = selectedVmIds.size > 0;
   const { data: availCounts } = trpc.vm.availableCounts.useQuery(
-    { projectId: projectId! },
+    { projectId: projectId!, serverId: selectedServerId ?? undefined },
     { enabled: !!projectId && (showQuickAssign || hasVmSelection) }
-  );
-
-  const F = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-      {children}
-    </div>
   );
 
   return (
@@ -533,22 +691,22 @@ export default function ServersPage() {
       {/* Top action bar */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-bold text-gray-900">Servers</h1>
-          <span className="text-xs text-gray-400">({servers?.length ?? 0} servers, {servers?.reduce((s: number, sv: any) => s + (sv._count?.vms ?? 0), 0) ?? 0} VMs)</span>
+          <h1 className="text-lg font-bold text-gray-900">{t("srv_title")}</h1>
+          <span className="text-xs text-gray-400">({servers?.length ?? 0} {t("srv_title").toLowerCase()}, {servers?.reduce((s: number, sv: any) => s + (sv._count?.vms ?? 0), 0) ?? 0} {t("srv_vms")})</span>
           {servers && servers.length > 0 && (
             <>
-              <span className="text-xs font-medium text-gray-600 ml-2">${servers.reduce((s: number, sv: any) => s + Number(sv.monthlyCost ?? 0), 0).toFixed(2)}/mo</span>
-              {(() => { const expiring = servers.filter((s: any) => { const d = getDaysUntilExpiry(s.expiryDate); return d !== null && d <= 5; }).length; return expiring > 0 ? <span className="text-xs font-medium text-amber-600 ml-1">({expiring} expiring)</span> : null; })()}
+              <span className="text-xs font-medium text-gray-600 ml-2">${servers.reduce((s: number, sv: any) => s + Number(sv.monthlyCost ?? 0), 0).toFixed(2)}{t("srv_per_mo")}</span>
+              {(() => { const expiring = servers.filter((s: any) => { const d = getDaysUntilExpiry(s.expiryDate); return d !== null && d <= 5; }).length; return expiring > 0 ? <span className="text-xs font-medium text-amber-600 ml-1">({expiring} {t("srv_expiring")})</span> : null; })()}
             </>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>Export CSV</Button>
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
+          <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={!servers?.length}>{t("export_csv")}</Button>
+          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>{t("import_csv")}</Button>
           <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
           {canEdit && (
             <Button size="sm" onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ ...emptyForm }); }}>
-              {showForm ? "Cancel" : "+ Add Server"}
+              {showForm ? t("cancel") : "+ " + t("srv_add")}
             </Button>
           )}
         </div>
@@ -557,121 +715,48 @@ export default function ServersPage() {
       {/* Bulk server action bar */}
       {hasSelection && (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-3 shrink-0">
-          <span className="text-sm font-medium text-blue-800">{selectedServerIds.size} selected</span>
+          <span className="text-sm font-medium text-blue-800">{selectedServerIds.size} {t("selected")}</span>
           <select value={bulkStatusTarget} onChange={(e) => setBulkStatusTarget(e.target.value)} className="h-7 px-2 border rounded text-sm">
-            <option value="">Change status...</option>
+            <option value="">{t("change_status")}</option>
             {ALL_SERVER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           {bulkStatusTarget && <Button size="sm" onClick={() => bulkUpdateStatus.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds), status: bulkStatusTarget as any })}>Apply</Button>}
-          {canDelete && <Button size="sm" variant="destructive" onClick={() => setShowBulkDelete(true)}>Delete Selected</Button>}
-          <Button size="sm" variant="ghost" onClick={() => setSelectedServerIds(new Set())}>Clear</Button>
+          {canDelete && <Button size="sm" variant="destructive" onClick={() => setShowBulkDelete(true)}>{t("delete_selected")}</Button>}
+          <Button size="sm" variant="ghost" onClick={() => setSelectedServerIds(new Set())}>{t("clear")}</Button>
         </div>
       )}
       {showBulkDelete && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
-          <p className="text-sm text-red-800">Delete {selectedServerIds.size} servers and all their VMs?</p>
+          <p className="text-sm text-red-800">{t("delete")} {selectedServerIds.size} {t("srv_bulk_delete_confirm")}</p>
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => bulkDelete.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds) })} disabled={bulkDelete.isLoading}>{bulkDelete.isLoading ? "..." : "Confirm"}</Button>
-            <Button size="sm" variant="outline" onClick={() => setShowBulkDelete(false)}>Cancel</Button>
+            <Button size="sm" variant="destructive" onClick={() => bulkDelete.mutate({ projectId: projectId!, serverIds: Array.from(selectedServerIds) })} disabled={bulkDelete.isLoading}>{bulkDelete.isLoading ? "..." : t("confirm")}</Button>
+            <Button size="sm" variant="outline" onClick={() => setShowBulkDelete(false)}>{t("cancel")}</Button>
           </div>
         </div>
       )}
 
-      {/* Create/Edit Form */}
+      {/* Create/Edit Form - extracted component to prevent re-render lag */}
       {showForm && (
-        <div className="bg-white border-b border-gray-200 px-4 py-4 shrink-0 overflow-y-auto max-h-[50vh]">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <h2 className="text-sm font-semibold text-gray-900">{editId ? "Edit Server" : "Add New Server"}</h2>
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Basic Info</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <F label="Server Name *"><Input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="SERVER-01-8939CC" className="h-8 text-sm" /></F>
-                <F label="Inventory ID"><Input value={form.inventoryId} onChange={(e) => setForm({ ...form, inventoryId: e.target.value })} placeholder="8939CC-RYZN" className="h-8 text-sm" /></F>
-                <F label="Status">
-                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full h-8 px-2 border rounded-md text-sm bg-white">
-                    {ALL_SERVER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </F>
-                <F label="Created Date"><Input type="date" value={form.createdDate} onChange={(e) => setForm({ ...form, createdDate: e.target.value })} className="h-8 text-sm" /></F>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Billing</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <F label="Monthly Cost ($)"><Input type="number" step="0.01" min="0" value={form.monthlyCost} onChange={(e) => setForm({ ...form, monthlyCost: e.target.value })} placeholder="150.00" className="h-8 text-sm" /></F>
-                <F label="Billing Cycle (months)"><Input type="number" min="1" value={form.billingCycle} onChange={(e) => setForm({ ...form, billingCycle: e.target.value })} className="h-8 text-sm" /></F>
-                <F label="Expiry / Renewal Date"><Input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} className="h-8 text-sm" /></F>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Network Info</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <F label="Server IP"><Input value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="107.172.249.42" className="h-8 text-sm font-mono" /></F>
-                <F label="Netmask"><Input value={form.netmask} onChange={(e) => setForm({ ...form, netmask: e.target.value })} placeholder="255.255.255.252" className="h-8 text-sm font-mono" /></F>
-                <F label="Gateway"><Input value={form.gateway} onChange={(e) => setForm({ ...form, gateway: e.target.value })} placeholder="107.172.249.41" className="h-8 text-sm font-mono" /></F>
-                <F label="Allocation"><Input value={form.allocation} onChange={(e) => setForm({ ...form, allocation: e.target.value })} placeholder="107.172.249.40/30" className="h-8 text-sm font-mono" /></F>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">Hardware & Provider</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <F label="Provider"><Input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="ColoCrossing" className="h-8 text-sm" /></F>
-                <F label="CPU"><Input value={form.cpu} onChange={(e) => setForm({ ...form, cpu: e.target.value })} placeholder="32 vCPU" className="h-8 text-sm" /></F>
-                <F label="RAM"><Input value={form.ram} onChange={(e) => setForm({ ...form, ram: e.target.value })} placeholder="64 GB" className="h-8 text-sm" /></F>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-semibold uppercase text-gray-400 mb-2">IPMI Info</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <F label="IPMI IP"><Input value={form.ipmiIp} onChange={(e) => setForm({ ...form, ipmiIp: e.target.value })} placeholder="206.217.138.162" className="h-8 text-sm font-mono" /></F>
-                <F label="IPMI User"><Input value={form.ipmiUser} onChange={(e) => setForm({ ...form, ipmiUser: e.target.value })} placeholder="IPMI_USER" className="h-8 text-sm" /></F>
-                <F label="IPMI Password"><PasswordInput value={form.ipmiPass} onChange={(v) => setForm({ ...form, ipmiPass: v })} placeholder="********" className="h-8 text-sm" onRequestShow={(cb) => requirePin(cb, "PIN Required", "Enter PIN to view password")} /></F>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-semibold uppercase text-gray-400">VPS Login Credentials</p>
-                <button type="button" onClick={() => setForm((f) => ({ ...f, users: [...f.users, { username: "", password: "" }] }))} className="text-xs text-blue-600 hover:underline">+ Add Login</button>
-              </div>
-              {form.users.map((cred, idx) => (
-                <div key={idx} className="flex gap-2 mb-1.5">
-                  <Input value={cred.username} onChange={(e) => { const users = [...form.users]; users[idx] = { ...users[idx], username: e.target.value }; setForm({ ...form, users }); }} placeholder="Username" className="h-8 text-sm flex-1" />
-                  <div className="flex-1">
-                    <PasswordInput value={cred.password} onChange={(v) => { const users = [...form.users]; users[idx] = { ...users[idx], password: v }; setForm({ ...form, users }); }} placeholder="Password" className="h-8 text-sm" onRequestShow={(cb) => requirePin(cb, "PIN Required", "Enter PIN to view password")} />
-                  </div>
-                  {form.users.length > 1 && <button type="button" onClick={() => setForm((f) => ({ ...f, users: f.users.filter((_, i) => i !== idx) }))} className="text-red-500 hover:text-red-700 px-1 text-sm">x</button>}
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-3 py-1.5 border rounded-md text-sm" placeholder="Server notes..." />
-            </div>
-
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={createServer.isLoading || updateServer.isLoading}>
-                {createServer.isLoading || updateServer.isLoading ? "Saving..." : editId ? "Update" : "Create"}
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setEditId(null); }}>Cancel</Button>
-            </div>
-            {(createServer.error || updateServer.error) && <p className="text-xs text-red-600">{createServer.error?.message || updateServer.error?.message}</p>}
-          </form>
-        </div>
+        <ServerFormPanel
+          form={form}
+          setForm={setForm}
+          editId={editId}
+          projectId={projectId!}
+          onSave={handleSave}
+          onCancel={() => { setShowForm(false); setEditId(null); }}
+          isLoading={createServer.isLoading || updateServer.isLoading}
+          error={createServer.error?.message || updateServer.error?.message}
+          requirePin={requirePin}
+          t={t}
+        />
       )}
 
       {deleteConfirm && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center justify-between shrink-0">
-          <p className="text-sm text-red-800">Delete this server and all its VMs?</p>
+          <p className="text-sm text-red-800">{t("srv_delete_confirm")}</p>
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => deleteServer.mutate({ projectId: projectId!, id: deleteConfirm })} disabled={deleteServer.isLoading}>{deleteServer.isLoading ? "..." : "Delete"}</Button>
-            <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button size="sm" variant="destructive" onClick={() => deleteServer.mutate({ projectId: projectId!, id: deleteConfirm })} disabled={deleteServer.isLoading}>{deleteServer.isLoading ? "..." : t("delete")}</Button>
+            <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>{t("cancel")}</Button>
           </div>
         </div>
       )}
@@ -681,14 +766,14 @@ export default function ServersPage() {
         {/* Left - Server List */}
         <div className="w-72 xl:w-80 border-r border-gray-200 bg-white flex flex-col shrink-0">
           <div className="p-3 border-b border-gray-200">
-            <Input placeholder="Search servers..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-8 text-sm" />
+            <Input placeholder={t("srv_search")} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-8 text-sm" />
           </div>
           <div className="px-3 py-1.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
             <input type="checkbox" checked={filteredServers.length > 0 && selectedServerIds.size === filteredServers.length} onChange={toggleSelectAll} className="rounded border-gray-300" />
-            <span className="text-[10px] text-gray-500">Select all ({filteredServers.length})</span>
+            <span className="text-[10px] text-gray-500">{t("select_all")} ({filteredServers.length})</span>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {isLoading ? <p className="p-4 text-gray-400 text-sm">Loading...</p> : filteredServers.length === 0 ? <p className="p-4 text-gray-400 text-sm">No servers found.</p> : (
+            {isLoading ? <p className="p-4 text-gray-400 text-sm">{t("loading")}</p> : filteredServers.length === 0 ? <p className="p-4 text-gray-400 text-sm">{t("srv_no_servers")}</p> : (
               filteredServers.map((server: any) => {
                 const isSelected = selectedServerId === server.id;
                 const isChecked = selectedServerIds.has(server.id);
@@ -707,23 +792,23 @@ export default function ServersPage() {
                           </div>
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
-                          <span className="text-xs text-gray-500">{server.ipAddress ?? "No IP"}</span>
-                          <span className="text-xs text-gray-500">{server._count?.vms ?? 0} VMs</span>
+                          <span className="text-xs text-gray-500">{server.ipAddress ?? t("no_ip")}</span>
+                          <span className="text-xs text-gray-500">{server._count?.vms ?? 0} {t("srv_vms")}</span>
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
-                          <span className="text-[10px] text-gray-400">{server.provider || ""}{server.monthlyCost ? ` · $${Number(server.monthlyCost).toFixed(0)}/mo` : ""}</span>
+                          <span className="text-[10px] text-gray-400">{server.provider || ""}{server.monthlyCost ? ` · $${Number(server.monthlyCost).toFixed(0)}${t("srv_per_mo")}` : ""}</span>
                           <ExpiryBadge expiryDate={server.expiryDate} />
                         </div>
                       </div>
                       {/* Edit / Delete buttons */}
                       <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         {canEdit && (
-                          <button onClick={(e) => { e.stopPropagation(); startEdit(server); }} className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title="Edit">
+                          <button onClick={(e) => { e.stopPropagation(); startEdit(server); }} className="p-1 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title={t("edit")}>
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={(e) => { e.stopPropagation(); requirePin(() => setDeleteConfirm(server.id), "PIN Required", "Enter PIN to delete server"); }} className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50" title="Delete">
+                          <button onClick={(e) => { e.stopPropagation(); requirePin(() => setDeleteConfirm(server.id), t("srv_pin_required"), "Enter PIN to delete server"); }} className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50" title={t("delete")}>
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
                         )}
@@ -744,11 +829,11 @@ export default function ServersPage() {
                 <svg className="w-16 h-16 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
                 </svg>
-                <p className="text-sm">Select a server to view details</p>
+                <p className="text-sm">{t("srv_select_detail")}</p>
               </div>
             </div>
           ) : detailLoading ? (
-            <div className="flex-1 flex items-center justify-center text-gray-400"><p>Loading...</p></div>
+            <div className="flex-1 flex items-center justify-center text-gray-400"><p>{t("loading")}</p></div>
           ) : serverDetail ? (
             <>
               {/* Server Info Header */}
@@ -756,23 +841,30 @@ export default function ServersPage() {
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-bold text-gray-900">{serverDetail.code}</h2>
                   <Badge className={serverStatusColors[serverDetail.status] ?? ""}>{serverDetail.status}</Badge>
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => startEdit(serverDetail)} title="Edit Server">
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => startEdit(serverDetail)} title={t("srv_edit")}>
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                   </Button>
-                  {serverDetail.cpu && <Badge variant="outline" className="text-xs">{serverDetail.cpu}</Badge>}
-                  {serverDetail.ram && <Badge variant="outline" className="text-xs">{serverDetail.ram}</Badge>}
                 </div>
+                {(serverDetail.cpu || serverDetail.ram || serverDetail.provider) && (
+                  <div className="flex items-center gap-2 mt-1">
+                    {serverDetail.cpu && <Badge variant="outline" className="text-xs">{serverDetail.cpu}</Badge>}
+                    {serverDetail.ram && <Badge variant="outline" className="text-xs">{serverDetail.ram}</Badge>}
+                    {serverDetail.provider && <Badge variant="outline" className="text-xs">{serverDetail.provider}</Badge>}
+                    <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                      Gmail Group {serverDetail.gmailGroup ?? 1} ({serverDetail.gmailGroup === 2 ? "2VM:1Gmail" : "1VM:1Gmail"})
+                    </Badge>
+                  </div>
+                )}
                 <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
-                  <span className="font-mono">{serverDetail.ipAddress ?? "No IP"}</span>
-                  {serverDetail.netmask && <span>Mask: {serverDetail.netmask}</span>}
-                  {serverDetail.gateway && <span>GW: {serverDetail.gateway}</span>}
-                  {serverDetail.allocation && <span>Alloc: {serverDetail.allocation}</span>}
-                  {serverDetail.provider && <span>{serverDetail.provider}</span>}
-                  {serverDetail.inventoryId && <span>Inv: {serverDetail.inventoryId}</span>}
-                  {serverDetail.monthlyCost && <span className="font-medium text-gray-700">${Number(serverDetail.monthlyCost).toFixed(2)}/mo</span>}
+                  <span className="font-mono">{serverDetail.ipAddress ?? t("no_ip")}</span>
+                  {serverDetail.netmask && <span>{t("srv_mask")} {serverDetail.netmask}</span>}
+                  {serverDetail.gateway && <span>{t("srv_gw")} {serverDetail.gateway}</span>}
+                  {serverDetail.allocation && <span>{t("srv_alloc")} {serverDetail.allocation}</span>}
+                  {serverDetail.inventoryId && <span>{t("srv_inv")} {serverDetail.inventoryId}</span>}
+                  {serverDetail.monthlyCost && <span className="font-medium text-gray-700">${Number(serverDetail.monthlyCost).toFixed(2)}{t("srv_per_mo")}</span>}
                   {serverDetail.expiryDate && (
                     <span className="flex items-center gap-1">
-                      Exp: {new Date(serverDetail.expiryDate).toLocaleDateString()}
+                      {t("srv_exp")} {new Date(serverDetail.expiryDate).toLocaleDateString()}
                       <ExpiryBadge expiryDate={serverDetail.expiryDate} />
                     </span>
                   )}
@@ -781,15 +873,15 @@ export default function ServersPage() {
                 {/* Stats */}
                 <div className="flex gap-3 mt-3 flex-wrap">
                   <div className="bg-gray-50 rounded-lg px-3 py-2 min-w-[80px]">
-                    <p className="text-[10px] font-medium text-gray-500 uppercase">VMs</p>
+                    <p className="text-[10px] font-medium text-gray-500 uppercase">{t("srv_vms")}</p>
                     <p className="text-xl font-bold text-gray-900">{serverDetail.vms.length}</p>
                   </div>
                   <div className="bg-green-50 rounded-lg px-3 py-2 min-w-[80px]">
-                    <p className="text-[10px] font-medium text-green-600 uppercase">24h</p>
+                    <p className="text-[10px] font-medium text-green-600 uppercase">{t("srv_24h")}</p>
                     <p className="text-xl font-bold text-green-700">${totalEarn24h.toFixed(2)}</p>
                   </div>
                   <div className="bg-blue-50 rounded-lg px-3 py-2 min-w-[80px]">
-                    <p className="text-[10px] font-medium text-blue-600 uppercase">Total</p>
+                    <p className="text-[10px] font-medium text-blue-600 uppercase">{t("total")}</p>
                     <p className="text-xl font-bold text-blue-700">${totalEarnAll.toFixed(2)}</p>
                   </div>
                 </div>
@@ -797,7 +889,7 @@ export default function ServersPage() {
 
               {/* VM action bar */}
               <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 flex-wrap">
-                <Button size="sm" variant={vmStatusFilter === "" ? "default" : "outline"} className="h-6 text-xs px-2" onClick={() => setVmStatusFilter("")}>ALL ({serverDetail.vms.length})</Button>
+                <Button size="sm" variant={vmStatusFilter === "" ? "default" : "outline"} className="h-6 text-xs px-2" onClick={() => setVmStatusFilter("")}>{t("all").toUpperCase()} ({serverDetail.vms.length})</Button>
                 {ALL_VM_STATUSES.map((s) => {
                   const cnt = vmStatusCounts[s] ?? 0;
                   if (cnt === 0) return null;
@@ -806,23 +898,22 @@ export default function ServersPage() {
                 <div className="ml-auto flex items-center gap-2">
                   {hasVmSelection && (
                     <>
-                      <span className="text-xs text-blue-600 font-medium">{selectedVmIds.size} VMs</span>
-                      <Button size="sm" className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700" onClick={() => setShowQuickAssign(true)}>Quick Assign</Button>
+                      <span className="text-xs text-blue-600 font-medium">{selectedVmIds.size} {t("srv_vms")}</span>
+                      <Button size="sm" className="h-6 text-xs px-2 bg-green-600 hover:bg-green-700" onClick={() => setShowQuickAssign(true)}>{t("qa_title")}</Button>
                       <select value={vmBulkStatus} onChange={(e) => setVmBulkStatus(e.target.value)} className="h-6 px-1 border rounded text-xs">
-                        <option value="">Status...</option>
+                        <option value="">{t("srv_status_filter")}</option>
                         {ALL_VM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                       {vmBulkStatus && <Button size="sm" className="h-6 text-xs px-2" onClick={() => vmBulkUpdateStatus.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), status: vmBulkStatus as any })}>Apply</Button>}
-                      {canDelete && <Button size="sm" variant="destructive" className="h-6 text-xs px-2" onClick={() => requirePin(() => vmBulkDelete.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds) }), "PIN Required", `Delete ${selectedVmIds.size} VMs?`)} disabled={vmBulkDelete.isLoading}>{vmBulkDelete.isLoading ? "..." : "Delete"}</Button>}
+                      {canDelete && <Button size="sm" variant="destructive" className="h-6 text-xs px-2" onClick={() => requirePin(() => vmBulkDelete.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds) }), t("srv_pin_required"), `${t("delete")} ${selectedVmIds.size} ${t("srv_vms")}?`)} disabled={vmBulkDelete.isLoading}>{vmBulkDelete.isLoading ? "..." : t("delete")}</Button>}
                       <span className="text-gray-300">|</span>
                       <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "gmail" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ Gmail</Button>
                       <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "proxy" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ Proxy</Button>
-                      <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setPickerDialog({ field: "paypal" }); setPickerSearch(""); setPickerSelected(new Set()); }}>+ PayPal</Button>
                       <Button size="sm" variant="ghost" className="h-6 text-xs px-1" onClick={() => setSelectedVmIds(new Set())}>x</Button>
                     </>
                   )}
-                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setShowVmCreate(true); setVmCreateMode("single"); setVmSingleCode(""); }}>+ Add VM</Button>
-                  <Input placeholder="Search VM..." value={vmSearch} onChange={(e) => setVmSearch(e.target.value)} className="h-7 text-xs w-36" />
+                  <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => { setShowVmCreate(true); setVmCreateMode("single"); setVmSingleCode(""); }}>{t("srv_add_vm")}</Button>
+                  <Input placeholder={t("srv_search_vm")} value={vmSearch} onChange={(e) => setVmSearch(e.target.value)} className="h-7 text-xs w-36" />
                 </div>
               </div>
 
@@ -830,7 +921,7 @@ export default function ServersPage() {
               {showQuickAssign && hasVmSelection && (
                 <div className="bg-green-50 border-b border-green-200 px-4 py-3 shrink-0">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-green-900">Quick Assign - {selectedVmIds.size} VMs</h3>
+                    <h3 className="text-sm font-semibold text-green-900">{t("qa_title")} - {selectedVmIds.size} {t("srv_vms")}</h3>
                     <button onClick={() => setShowQuickAssign(false)} className="text-green-600 hover:text-green-800">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
@@ -838,25 +929,20 @@ export default function ServersPage() {
                   <div className="flex items-center gap-4 mb-3">
                     <label className="flex items-center gap-1.5 text-xs">
                       <input type="checkbox" checked={qaGmail} onChange={(e) => setQaGmail(e.target.checked)} className="rounded border-gray-300" />
-                      <span className="font-medium">Gmail</span>
-                      <span className="text-green-700">({availCounts?.gmail ?? 0} available)</span>
+                      <span className="font-medium">{t("qa_gmail")}</span>
+                      <span className="text-green-700">({availCounts?.gmail ?? 0} {t("qa_available")})</span>
                     </label>
                     <label className="flex items-center gap-1.5 text-xs">
                       <input type="checkbox" checked={qaProxy} onChange={(e) => setQaProxy(e.target.checked)} className="rounded border-gray-300" />
-                      <span className="font-medium">Proxy</span>
-                      <span className="text-green-700">({availCounts?.proxy ?? 0} available)</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs">
-                      <input type="checkbox" checked={qaPaypal} onChange={(e) => setQaPaypal(e.target.checked)} className="rounded border-gray-300" />
-                      <span className="font-medium">PayPal</span>
-                      <span className="text-green-700">({availCounts?.paypal ?? 0} available)</span>
+                      <span className="font-medium">{t("qa_proxy")}</span>
+                      <span className="text-green-700">({availCounts?.proxy ?? 0} {t("qa_available")})</span>
                     </label>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => bulkAutoAssign.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), assignGmail: qaGmail, assignProxy: qaProxy, assignPaypal: qaPaypal })} disabled={bulkAutoAssign.isLoading}>
-                      {bulkAutoAssign.isLoading ? "Assigning..." : `Assign All (${selectedVmIds.size} VMs)`}
+                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => bulkAutoAssign.mutate({ projectId: projectId!, vmIds: Array.from(selectedVmIds), assignGmail: qaGmail, assignProxy: qaProxy })} disabled={bulkAutoAssign.isLoading}>
+                      {bulkAutoAssign.isLoading ? t("saving") : `${t("qa_assign_all")} (${selectedVmIds.size} ${t("srv_vms")})`}
                     </Button>
-                    <span className="text-[10px] text-green-700">Auto-assigns first available Gmail, Proxy, PayPal to selected VMs in order. Skips VMs that already have assignments.</span>
+                    <span className="text-[10px] text-green-700">{t("qa_assign_desc")}</span>
                   </div>
                 </div>
               )}
@@ -875,12 +961,11 @@ export default function ServersPage() {
                           <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 group-hover:bg-blue-200 transition-colors" onMouseDown={(e) => handleColResize(e, col.key)} />
                         </th>
                       ))}
-                      <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs w-12"></th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {filteredVMs.length === 0 ? (
-                      <tr><td colSpan={VM_COLUMNS.length + 2} className="text-center py-8 text-gray-400 text-sm">{vmStatusFilter ? "No VMs with this status" : "No VMs on this server"}</td></tr>
+                      <tr><td colSpan={VM_COLUMNS.length + 2} className="text-center py-8 text-gray-400 text-sm">{vmStatusFilter ? t("vm_no_vms_status") : t("vm_no_vms_server")}</td></tr>
                     ) : (
                       filteredVMs.map((vm: any, idx: number) => (
                         <tr key={vm.id} className={`hover:bg-blue-50/30 transition-colors ${selectedVmIds.has(vm.id) ? "bg-blue-50/50" : ""}`}>
@@ -889,87 +974,31 @@ export default function ServersPage() {
                           <td className="px-2 py-1.5"><Badge className={`text-[10px] px-1.5 py-0 ${vmStatusColors[vm.status] ?? ""}`}>{vm.status}</Badge></td>
                           <td className="px-2 py-1.5 text-xs font-medium text-gray-700 truncate">{serverDetail.code}</td>
                           <td className="px-2 py-1.5 font-medium text-gray-900 truncate">{vm.code}</td>
-                          <td className="px-2 py-1.5 text-xs truncate relative">
-                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "gmail" ? (
-                              <VmCellEditor
-                                field="gmail"
-
-                                items={(availableGmails?.items ?? []).filter((g: any) => {
-                                  const q = vmCellSearch.toLowerCase();
-                                  const isCurrent = g.vmId === vm.id;
-                                  return (isCurrent || (!g.vmId && g.status === "ACTIVE")) && (!q || g.email.toLowerCase().includes(q));
-                                }).map((g: any) => ({ id: g.id, label: g.email, sublabel: g.status, assigned: g.vmId === vm.id }))}
-                                search={vmCellSearch}
-                                onSearch={setVmCellSearch}
-                                onSelect={(id) => assignGmail.mutate({ projectId: projectId!, vmId: vm.id, gmailId: id })}
-                                onUnassign={() => assignGmail.mutate({ projectId: projectId!, vmId: vm.id, gmailId: null })}
-                                onClose={() => setEditingVmCell(null)}
-                                hasValue={!!vm.gmail}
-                                loading={assignGmail.isLoading}
-                              />
+                          {/* Gmail cell */}
+                          <td className="px-2 py-1.5 text-xs truncate">
+                            {vm.gmail ? (
+                              <span onClick={() => { setInfoPopup({ type: "gmail", data: vm.gmail, vmId: vm.id }); setDecryptedCreds(null); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate text-gray-700 underline decoration-dotted">{vm.gmail.email}</span>
                             ) : (
-                              <span onClick={() => { setEditingVmCell({ vmId: vm.id, field: "gmail" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
-                                {vm.gmail?.email ? <span className="text-gray-700">{vm.gmail.email}</span> : <span className="text-gray-300 italic">click to assign</span>}
-                              </span>
+                              <span className="text-gray-300">&mdash;</span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 text-xs font-mono truncate relative">
-                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "proxy" ? (
-                              <VmCellEditor
-                                field="proxy"
-
-                                items={(availableProxies?.items ?? []).filter((p: any) => {
-                                  const q = vmCellSearch.toLowerCase();
-                                  const isCurrent = vm.proxy?.address === p.address;
-                                  return (p.status === "AVAILABLE" || isCurrent) && (!q || p.address.toLowerCase().includes(q));
-                                }).map((p: any) => ({ id: p.id, label: p.address, sublabel: p.status, assigned: vm.proxy?.address === p.address }))}
-                                search={vmCellSearch}
-                                onSearch={setVmCellSearch}
-                                onSelect={(id) => assignProxy.mutate({ projectId: projectId!, vmId: vm.id, proxyId: id })}
-                                onUnassign={() => assignProxy.mutate({ projectId: projectId!, vmId: vm.id, proxyId: null })}
-                                onClose={() => setEditingVmCell(null)}
-                                hasValue={!!vm.proxy}
-                                loading={assignProxy.isLoading}
-                              />
+                          {/* Proxy cell */}
+                          <td className="px-2 py-1.5 text-xs font-mono truncate">
+                            {vm.proxy ? (
+                              <span onClick={() => setInfoPopup({ type: "proxy", data: vm.proxy, vmId: vm.id })} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate text-blue-600 underline decoration-dotted">{vm.proxy.address}</span>
                             ) : (
-                              <span onClick={() => { setEditingVmCell({ vmId: vm.id, field: "proxy" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
-                                {vm.proxy ? <span className="text-blue-600">{vm.proxy.address}</span> : <span className="text-orange-400 italic">click to assign</span>}
-                              </span>
+                              <span className="text-gray-300">&mdash;</span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 text-xs truncate relative">
-                            {editingVmCell?.vmId === vm.id && editingVmCell?.field === "paypal" ? (
-                              <VmCellEditor
-                                field="paypal"
-                                items={(availablePaypals?.items ?? []).filter((pp: any) => {
-                                  const q = vmCellSearch.toLowerCase();
-                                  const isCurrent = vm.gmail?.paypal?.id === pp.id;
-                                  return (isCurrent || pp.status === "ACTIVE") && (!q || pp.code.toLowerCase().includes(q) || pp.primaryEmail.toLowerCase().includes(q));
-                                }).map((pp: any) => ({ id: pp.id, label: pp.code, sublabel: pp.primaryEmail, assigned: vm.gmail?.paypal?.id === pp.id }))}
-                                search={vmCellSearch}
-                                onSearch={setVmCellSearch}
-                                onSelect={(id) => assignPaypal.mutate({ projectId: projectId!, vmId: vm.id, paypalId: id })}
-                                onUnassign={() => assignPaypal.mutate({ projectId: projectId!, vmId: vm.id, paypalId: null })}
-                                onClose={() => setEditingVmCell(null)}
-                                hasValue={!!vm.gmail?.paypal}
-                                loading={assignPaypal.isLoading}
-                              />
-                            ) : (
-                              <span onClick={() => { if (!vm.gmail) { toast.error("Assign Gmail first"); return; } setEditingVmCell({ vmId: vm.id, field: "paypal" }); setVmCellSearch(""); }} className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate">
-                                {vm.gmail?.paypal?.code ? <span className="text-gray-700">{vm.gmail.paypal.code}</span> : <span className="text-gray-300 italic">{vm.gmail ? "click to assign" : "—"}</span>}
-                              </span>
-                            )}
+                          {/* PayPal cell - read-only */}
+                          <td className="px-2 py-1.5 text-xs text-gray-500 truncate">
+                            {vm.gmail?.paypal ? (
+                              <span className="cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 block truncate underline decoration-dotted" onClick={() => setInfoPopup({ type: "paypal", data: vm.gmail.paypal, vmId: vm.id })}>{vm.gmail.paypal.code}</span>
+                            ) : "\u2014"}
                           </td>
                           <td className="px-2 py-1.5 text-right font-medium">${Number(vm.earnTotal ?? 0).toFixed(2)}</td>
                           <td className={`px-2 py-1.5 text-right font-medium ${Number(vm.earn24h ?? 0) > 0 ? "text-green-600" : "text-gray-400"}`}>${Number(vm.earn24h ?? 0).toFixed(2)}</td>
-                          <td className="px-2 py-1.5 text-xs text-gray-500">{vm.uptime ?? "—"}</td>
-                          <td className="px-2 py-1.5 text-center">
-                            {(!vm.gmail || !vm.proxy || !vm.gmail?.paypal) && (
-                              <button onClick={() => autoFill.mutate({ projectId: projectId!, vmId: vm.id })} disabled={autoFill.isLoading} className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 font-medium whitespace-nowrap" title="Auto-assign available Gmail + Proxy + PayPal">
-                                {autoFill.isLoading ? "..." : "Auto"}
-                              </button>
-                            )}
-                          </td>
+                          <td className="px-2 py-1.5 text-xs text-gray-500">{vm.uptime ?? "\u2014"}</td>
                         </tr>
                       ))
                     )}
@@ -984,7 +1013,7 @@ export default function ServersPage() {
       {/* Import CSV Dialog */}
       <Dialog open={showImport} onOpenChange={(v) => { if (!v) { setShowImport(false); setImportPreview([]); } }}>
         <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Import Servers from CSV</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("srv_import_title")}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-gray-600">{importPreview.length} rows. Duplicates skipped.</p>
             {importPreview.length > 0 && (
@@ -996,8 +1025,8 @@ export default function ServersPage() {
               </div>
             )}
             <div className="flex gap-2">
-              <Button onClick={handleImport} disabled={importFromCSV.isLoading || !importPreview.length}>{importFromCSV.isLoading ? "..." : `Import ${importPreview.length}`}</Button>
-              <Button variant="outline" onClick={() => { setShowImport(false); setImportPreview([]); }}>Cancel</Button>
+              <Button onClick={handleImport} disabled={importFromCSV.isLoading || !importPreview.length}>{importFromCSV.isLoading ? "..." : `${t("import")} ${importPreview.length}`}</Button>
+              <Button variant="outline" onClick={() => { setShowImport(false); setImportPreview([]); }}>{t("cancel")}</Button>
             </div>
           </div>
         </DialogContent>
@@ -1008,83 +1037,196 @@ export default function ServersPage() {
         <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
-              {pickerDialog?.field === "gmail" ? "Select Gmail" : pickerDialog?.field === "proxy" ? "Select Proxy" : "Select PayPal"}
-              <span className="text-sm font-normal text-gray-500 ml-2">→ {selectedVmIds.size} VMs selected</span>
+              {pickerDialog?.field === "gmail" ? t("pick_select_gmail") : t("pick_select_proxy")}
+              <span className="text-sm font-normal text-gray-500 ml-2">&rarr; {selectedVmIds.size} {t("pick_vms_selected")}</span>
             </DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3 flex-1 min-h-0">
             <div className="flex items-center gap-2">
-              <Input placeholder="Search..." value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} className="h-8 text-sm" autoFocus />
-              <span className="text-xs text-gray-500 whitespace-nowrap">{pickerSelected.size} selected</span>
+              <Input placeholder={t("search") + "..."} value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} className="h-8 text-sm" autoFocus />
+              <span className="text-xs text-gray-500 whitespace-nowrap">{pickerSelected.size} {t("selected")}</span>
             </div>
-            <p className="text-[10px] text-gray-400">Tick chọn data muốn gán → Assign. Gán theo thứ tự cho {selectedVmIds.size} VMs đã chọn.</p>
+            <p className="text-[10px] text-gray-400">{t("pick_select_max")} {selectedVmIds.size} {t("pick_assign_order")}</p>
             <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 max-h-[50vh]">
-              {pickerDialog?.field === "gmail" && (
-                (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
-                ? <p className="text-xs text-gray-400 p-4 text-center">No available Gmail</p>
-                : (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).map((g: any) => (
-                  <label key={g.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(g.id) ? "bg-blue-50" : ""}`}>
-                    <input type="checkbox" checked={pickerSelected.has(g.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(g.id)) next.delete(g.id); else next.add(g.id); return next; })} className="rounded border-gray-300" />
-                    <span className="font-mono text-xs">{g.email}</span>
-                    <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">ACTIVE</Badge>
-                  </label>
-                ))
-              )}
+              {pickerDialog?.field === "gmail" && (() => {
+                const maxVms = serverDetail?.gmailGroup === 2 ? 2 : 1;
+                const filtered = (availableGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && (g._count?.vms ?? 0) < maxVms).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase()));
+                return filtered.length === 0
+                  ? <p className="text-xs text-gray-400 p-4 text-center">{t("pick_no_gmail")}</p>
+                  : filtered.map((g: any) => (
+                    <label key={g.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(g.id) ? "bg-blue-50" : ""}`}>
+                      <input type="checkbox" checked={pickerSelected.has(g.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(g.id)) next.delete(g.id); else { if (next.size >= selectedVmIds.size) return prev; next.add(g.id); } return next; })} disabled={!pickerSelected.has(g.id) && pickerSelected.size >= selectedVmIds.size} className="rounded border-gray-300" />
+                      <span className="font-mono text-xs">{g.email}</span>
+                      <span className="text-[10px] text-gray-400 ml-auto">{g._count?.vms ?? 0}/{maxVms}</span>
+                    </label>
+                  ));
+              })()}
               {pickerDialog?.field === "proxy" && (
-                (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
-                ? <p className="text-xs text-gray-400 p-4 text-center">No available Proxy</p>
-                : (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => (
+                (availableProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
+                ? <p className="text-xs text-gray-400 p-4 text-center">{t("pick_no_proxy")}</p>
+                : (availableProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => (
                   <label key={p.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(p.id) ? "bg-blue-50" : ""}`}>
-                    <input type="checkbox" checked={pickerSelected.has(p.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="rounded border-gray-300" />
+                    <input type="checkbox" checked={pickerSelected.has(p.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else { if (next.size >= selectedVmIds.size) return prev; next.add(p.id); } return next; })} disabled={!pickerSelected.has(p.id) && pickerSelected.size >= selectedVmIds.size} className="rounded border-gray-300" />
                     <span className="font-mono text-xs">{p.address}</span>
+                    {p.subnet && <span className="text-[10px] text-gray-400">{p.subnet}</span>}
                     <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">AVAILABLE</Badge>
-                  </label>
-                ))
-              )}
-              {pickerDialog?.field === "paypal" && (
-                (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).length === 0
-                ? <p className="text-xs text-gray-400 p-4 text-center">No available PayPal</p>
-                : (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).map((pp: any) => (
-                  <label key={pp.id} className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-50 ${pickerSelected.has(pp.id) ? "bg-blue-50" : ""}`}>
-                    <input type="checkbox" checked={pickerSelected.has(pp.id)} onChange={() => setPickerSelected((prev) => { const next = new Set(prev); if (next.has(pp.id)) next.delete(pp.id); else next.add(pp.id); return next; })} className="rounded border-gray-300" />
-                    <span className="font-medium text-xs">{pp.code}</span>
-                    <span className="text-xs text-gray-500">{pp.primaryEmail}</span>
-                    <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-auto">ACTIVE</Badge>
                   </label>
                 ))
               )}
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={() => {
-                if (!pickerDialog || !selectedServerId || pickerSelected.size === 0) return;
-                const values = Array.from(pickerSelected);
-                const field = pickerDialog.field;
-                if (field === "gmail") {
-                  const items = (pickerGmails?.items ?? []).filter((g: any) => values.includes(g.id));
-                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "gmail", values: items.map((g: any) => g.email) });
-                } else if (field === "proxy") {
-                  const items = (pickerProxies?.items ?? []).filter((p: any) => values.includes(p.id));
-                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "proxy", values: items.map((p: any) => p.address) });
-                } else {
-                  const items = (availablePaypals?.items ?? []).filter((pp: any) => values.includes(pp.id));
-                  bulkPaste.mutate({ projectId: projectId!, serverId: selectedServerId, field: "paypal", values: items.map((pp: any) => pp.code) });
-                }
+                if (!pickerDialog || pickerSelected.size === 0 || selectedVmIds.size === 0) return;
+                const itemIds = Array.from(pickerSelected);
+                const vmIds = Array.from(selectedVmIds);
+                bulkAssignSelected.mutate({ projectId: projectId!, vmIds, field: pickerDialog.field, itemIds });
                 setPickerDialog(null); setPickerSelected(new Set());
-              }} disabled={bulkPaste.isLoading || pickerSelected.size === 0}>
-                {bulkPaste.isLoading ? "Assigning..." : `Assign ${pickerSelected.size} → ${selectedVmIds.size} VMs`}
+              }} disabled={bulkAssignSelected.isLoading || pickerSelected.size === 0}>
+                {bulkAssignSelected.isLoading ? t("saving") : `${t("pick_assign_to_vms")} (${pickerSelected.size} → ${selectedVmIds.size})`}
               </Button>
               <Button size="sm" variant="outline" className="text-xs" onClick={() => {
+                if (pickerSelected.size > 0) { setPickerSelected(new Set()); return; }
                 const field = pickerDialog?.field;
                 let allIds: string[] = [];
-                if (field === "gmail") allIds = (pickerGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && !g.vmId).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).map((g: any) => g.id);
-                else if (field === "proxy") allIds = (pickerProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => p.id);
-                else allIds = (availablePaypals?.items ?? []).filter((pp: any) => pp.status === "ACTIVE").filter((pp: any) => !pickerSearch || pp.code.toLowerCase().includes(pickerSearch.toLowerCase()) || pp.primaryEmail.toLowerCase().includes(pickerSearch.toLowerCase())).map((pp: any) => pp.id);
-                setPickerSelected(pickerSelected.size === allIds.length ? new Set() : new Set(allIds));
+                const maxVms = serverDetail?.gmailGroup === 2 ? 2 : 1;
+                if (field === "gmail") allIds = (availableGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && (g._count?.vms ?? 0) < maxVms).filter((g: any) => !pickerSearch || g.email.toLowerCase().includes(pickerSearch.toLowerCase())).map((g: any) => g.id);
+                else if (field === "proxy") allIds = (availableProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !pickerSearch || p.address.toLowerCase().includes(pickerSearch.toLowerCase())).map((p: any) => p.id);
+                // Limit to number of selected VMs
+                setPickerSelected(new Set(allIds.slice(0, selectedVmIds.size)));
               }}>
-                {pickerSelected.size > 0 ? "Deselect all" : "Select all"}
+                {pickerSelected.size > 0 ? t("deselect_all") : `${t("select_all")} (${Math.min(selectedVmIds.size, 999)})`}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => { setPickerDialog(null); setPickerSelected(new Set()); }}>Cancel</Button>
+              <Button size="sm" variant="outline" onClick={() => { setPickerDialog(null); setPickerSelected(new Set()); }}>{t("cancel")}</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Info Popup - Gmail/Proxy/PayPal details */}
+      <Dialog open={!!infoPopup} onOpenChange={(v) => { if (!v) { setInfoPopup(null); setDecryptedCreds(null); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {infoPopup?.type === "gmail" ? t("info_gmail_details") : infoPopup?.type === "proxy" ? t("info_proxy_details") : t("info_paypal_details")}
+            </DialogTitle>
+          </DialogHeader>
+          {infoPopup?.type === "gmail" && infoPopup.data && (
+            <div className="space-y-3">
+              <InfoRow label={t("email")} value={infoPopup.data.email} />
+              {decryptedCreds ? (
+                <>
+                  <InfoRow label={t("password")} value={decryptedCreds.password} secret />
+                  <InfoRow label={t("info_2fa_code")} value={decryptedCreds.twoFaCurrent} secret />
+                </>
+              ) : (
+                <Button size="sm" variant="outline" className="w-full text-xs" disabled={loadingCreds} onClick={() => {
+                  const gmailId = infoPopup.data.id;
+                  requirePin(() => {
+                    setLoadingCreds(true);
+                    trpcVanilla.gmail.getCredentials.query({ projectId: projectId!, id: gmailId })
+                      .then((creds) => {
+                        setDecryptedCreds(creds ?? null);
+                      })
+                      .catch(() => { toast.error("Failed to load credentials"); })
+                      .finally(() => setLoadingCreds(false));
+                  }, t("srv_pin_required"), t("srv_pin_view_pass"));
+                }}>
+                  {loadingCreds ? (
+                    <svg className="w-3.5 h-3.5 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  )}
+                  {loadingCreds ? t("loading") : t("info_show_pass_pin")}
+                </Button>
+              )}
+              <InfoRow label={t("info_recovery_email")} value={infoPopup.data.recoveryEmail} />
+              <InfoRow label={t("col_status")} value={infoPopup.data.status} badge />
+              {canEdit && (
+                <Button size="sm" variant="outline" className="w-full text-xs mt-2" onClick={() => {
+                  const vmId = infoPopup.vmId;
+                  setInfoPopup(null);
+                  setDecryptedCreds(null);
+                  setTimeout(() => { setChangePopup({ field: "gmail", vmId }); setChangeSearch(""); }, 100);
+                }}>{t("info_change_gmail")}</Button>
+              )}
+            </div>
+          )}
+          {infoPopup?.type === "proxy" && infoPopup.data && (
+            <div className="space-y-3">
+              <InfoRow label={t("info_address")} value={infoPopup.data.address} />
+              <InfoRow label={t("info_host")} value={infoPopup.data.host} />
+              <InfoRow label={t("info_port")} value={infoPopup.data.port?.toString()} />
+              <InfoRow label={t("info_subnet")} value={infoPopup.data.subnet} />
+              <InfoRow label={t("info_outbound_ip")} value={infoPopup.data.outboundIP} />
+              <InfoRow label={t("col_status")} value={infoPopup.data.status} badge />
+              {canEdit && (
+                <Button size="sm" variant="outline" className="w-full text-xs mt-2" onClick={() => {
+                  const vmId = infoPopup!.vmId;
+                  setInfoPopup(null);
+                  setTimeout(() => { setChangePopup({ field: "proxy", vmId }); setChangeSearch(""); }, 100);
+                }}>{t("info_change_proxy")}</Button>
+              )}
+            </div>
+          )}
+          {infoPopup?.type === "paypal" && infoPopup.data && (
+            <div className="space-y-3">
+              <InfoRow label={t("pp_code")} value={infoPopup.data.code} />
+              <InfoRow label={t("email")} value={infoPopup.data.primaryEmail} />
+              <InfoRow label={t("col_status")} value={infoPopup.data.status} badge />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Assignment Popup */}
+      <Dialog open={!!changePopup} onOpenChange={(v) => { if (!v) setChangePopup(null); }}>
+        <DialogContent className="sm:max-w-md max-h-[70vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>
+              {changePopup?.field === "gmail" ? t("info_change_gmail_for") : t("info_change_proxy_for")}
+              {changePopup && serverDetail?.vms && (() => {
+                const vm = serverDetail.vms.find((v: any) => v.id === changePopup.vmId);
+                return vm ? <span className="text-sm font-normal text-gray-500 ml-2">{vm.code}</span> : null;
+              })()}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 flex-1 min-h-0">
+            <Input placeholder={t("search") + "..."} value={changeSearch} onChange={(e) => setChangeSearch(e.target.value)} className="h-8 text-sm" autoFocus />
+            <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 max-h-[45vh]">
+              {changePopup?.field === "gmail" && (() => {
+                const maxVms = serverDetail?.gmailGroup === 2 ? 2 : 1;
+                const filtered = (availableGmails?.items ?? []).filter((g: any) => g.status === "ACTIVE" && (g._count?.vms ?? 0) < maxVms).filter((g: any) => !changeSearch || g.email.toLowerCase().includes(changeSearch.toLowerCase()));
+                return filtered.length === 0
+                  ? <p className="text-xs text-gray-400 p-4 text-center">{t("pick_no_gmail")}</p>
+                  : filtered.map((g: any) => (
+                    <button key={g.id} onClick={() => { assignGmail.mutate({ projectId: projectId!, vmId: changePopup.vmId, gmailId: g.id }); setChangePopup(null); }} className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-50 flex items-center justify-between">
+                      <span className="font-mono text-xs truncate">{g.email}</span>
+                      <span className="text-[10px] text-gray-400 ml-2 shrink-0">{g._count?.vms ?? 0}/{maxVms}</span>
+                    </button>
+                  ));
+              })()}
+              {changePopup?.field === "proxy" && (() => {
+                const filtered = (availableProxies?.items ?? []).filter((p: any) => p.status === "AVAILABLE").filter((p: any) => !changeSearch || p.address.toLowerCase().includes(changeSearch.toLowerCase()));
+                return filtered.length === 0
+                  ? <p className="text-xs text-gray-400 p-4 text-center">{t("pick_no_proxy")}</p>
+                  : filtered.map((p: any) => (
+                    <button key={p.id} onClick={() => { assignProxy.mutate({ projectId: projectId!, vmId: changePopup.vmId, proxyId: p.id }); setChangePopup(null); }} className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-50 flex items-center justify-between">
+                      <span className="font-mono text-xs truncate">{p.address}</span>
+                      <Badge className="text-[10px] px-1 py-0 bg-green-100 text-green-700 ml-2">AVAILABLE</Badge>
+                    </button>
+                  ));
+              })()}
+            </div>
+            {changePopup && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="destructive" className="text-xs" onClick={() => {
+                  if (changePopup.field === "gmail") assignGmail.mutate({ projectId: projectId!, vmId: changePopup.vmId, gmailId: null });
+                  else assignProxy.mutate({ projectId: projectId!, vmId: changePopup.vmId, proxyId: null });
+                  setChangePopup(null);
+                }}>{t("info_unassign")}</Button>
+                <Button size="sm" variant="outline" className="text-xs" onClick={() => setChangePopup(null)}>{t("cancel")}</Button>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -1092,32 +1234,32 @@ export default function ServersPage() {
       {/* VM Create Dialog */}
       <Dialog open={showVmCreate} onOpenChange={(v) => { if (!v) setShowVmCreate(false); }}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Add VMs to {serverDetail?.code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("vm_add_title")} {serverDetail?.code}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="flex gap-2">
-              <Button size="sm" variant={vmCreateMode === "single" ? "default" : "outline"} onClick={() => setVmCreateMode("single")}>Single</Button>
-              <Button size="sm" variant={vmCreateMode === "bulk" ? "default" : "outline"} onClick={() => setVmCreateMode("bulk")}>Bulk</Button>
+              <Button size="sm" variant={vmCreateMode === "single" ? "default" : "outline"} onClick={() => setVmCreateMode("single")}>{t("vm_single")}</Button>
+              <Button size="sm" variant={vmCreateMode === "bulk" ? "default" : "outline"} onClick={() => setVmCreateMode("bulk")}>{t("vm_bulk")}</Button>
             </div>
             {vmCreateMode === "single" ? (
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">VM Code</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t("vm_vm_code")}</label>
                 <Input value={vmSingleCode} onChange={(e) => setVmSingleCode(e.target.value)} placeholder="M-001" className="text-sm" autoFocus />
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="grid grid-cols-3 gap-2">
-                  <F label="Prefix"><Input value={vmBulkPrefix} onChange={(e) => setVmBulkPrefix(e.target.value)} className="text-sm" /></F>
-                  <F label="Start #"><Input type="number" min={1} value={vmBulkStart} onChange={(e) => setVmBulkStart(Number(e.target.value))} className="text-sm" /></F>
-                  <F label="Count"><Input type="number" min={1} max={200} value={vmBulkCount} onChange={(e) => setVmBulkCount(Number(e.target.value))} className="text-sm" /></F>
+                  <F label={t("vm_prefix")}><Input value={vmBulkPrefix} onChange={(e) => setVmBulkPrefix(e.target.value)} className="text-sm" /></F>
+                  <F label={t("vm_start_num")}><Input type="number" min={1} value={vmBulkStart} onChange={(e) => setVmBulkStart(Number(e.target.value))} className="text-sm" /></F>
+                  <F label={t("vm_count")}><Input type="number" min={1} max={200} value={vmBulkCount} onChange={(e) => setVmBulkCount(Number(e.target.value))} className="text-sm" /></F>
                 </div>
-                <p className="text-xs text-gray-400">Preview: {vmBulkPrefix}-{String(vmBulkStart).padStart(3, "0")} to {vmBulkPrefix}-{String(vmBulkStart + vmBulkCount - 1).padStart(3, "0")}</p>
+                <p className="text-xs text-gray-400">{t("vm_preview")}: {vmBulkPrefix}-{String(vmBulkStart).padStart(3, "0")} to {vmBulkPrefix}-{String(vmBulkStart + vmBulkCount - 1).padStart(3, "0")}</p>
               </div>
             )}
             <div className="flex gap-2">
               <Button onClick={handleVmCreate} disabled={vmCreate.isLoading || vmBulkCreate.isLoading}>
-                {vmCreate.isLoading || vmBulkCreate.isLoading ? "..." : vmCreateMode === "single" ? "Create VM" : `Create ${vmBulkCount} VMs`}
+                {vmCreate.isLoading || vmBulkCreate.isLoading ? "..." : vmCreateMode === "single" ? t("vm_create_vm") : `${t("vm_create_vms")} (${vmBulkCount})`}
               </Button>
-              <Button variant="outline" onClick={() => setShowVmCreate(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => setShowVmCreate(false)}>{t("cancel")}</Button>
             </div>
           </div>
         </DialogContent>

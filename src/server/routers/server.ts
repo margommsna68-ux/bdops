@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 import { encrypt, decrypt } from "@/lib/encryption";
+import { createAuditLog } from "@/lib/audit";
 
 export const serverRouter = router({
   list: infrastructureProcedure
@@ -24,7 +25,9 @@ export const serverRouter = router({
           vms: {
             include: {
               proxy: true,
-              gmail: { include: { paypal: { select: { id: true, code: true, status: true } } } },
+              gmail: {
+                select: { id: true, email: true, password: true, twoFaCurrent: true, recoveryEmail: true, status: true, paypal: { select: { id: true, code: true, status: true, primaryEmail: true } } },
+              },
             },
             orderBy: { code: "asc" },
           },
@@ -48,6 +51,7 @@ export const serverRouter = router({
         credentials: z.any().optional(),
         inventoryId: z.string().optional(),
         notes: z.string().optional(),
+        gmailGroup: z.number().int().min(1).max(2).default(1),
         monthlyCost: z.number().optional(),
         billingCycle: z.number().int().min(1).optional(),
         createdDate: z.string().optional(),
@@ -62,7 +66,16 @@ export const serverRouter = router({
       }
       if (createdDate) data.createdDate = new Date(createdDate);
       if (expiryDate) data.expiryDate = new Date(expiryDate);
-      return ctx.prisma.server.create({ data });
+      const result = await ctx.prisma.server.create({ data });
+      await createAuditLog({
+        action: "CREATE",
+        entity: "Server",
+        entityId: result.id,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { code: input.code, ipAddress: input.ipAddress, provider: input.provider },
+      });
+      return result;
     }),
 
   update: infrastructureProcedure
@@ -82,6 +95,7 @@ export const serverRouter = router({
         credentials: z.any().optional(),
         inventoryId: z.string().optional(),
         notes: z.string().nullable().optional(),
+        gmailGroup: z.number().int().min(1).max(2).optional(),
         monthlyCost: z.number().nullable().optional(),
         billingCycle: z.number().int().min(1).nullable().optional(),
         createdDate: z.string().nullable().optional(),
@@ -97,17 +111,34 @@ export const serverRouter = router({
       }
       if (createdDate !== undefined) data.createdDate = createdDate ? new Date(createdDate) : null;
       if (expiryDate !== undefined) data.expiryDate = expiryDate ? new Date(expiryDate) : null;
-      return ctx.prisma.server.update({ where: { id }, data });
+      const result = await ctx.prisma.server.update({ where: { id }, data });
+      await createAuditLog({
+        action: "UPDATE",
+        entity: "Server",
+        entityId: id,
+        userId: (ctx.user as any).id,
+        projectId,
+        changes: rest,
+      });
+      return result;
     }),
 
   delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.prisma.server.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      const server = await ctx.prisma.server.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      await createAuditLog({
+        action: "DELETE",
+        entity: "Server",
+        entityId: input.id,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { code: server.code },
+      });
       return ctx.prisma.server.delete({ where: { id: input.id } });
     }),
 
-  getCredentials: moderatorProcedure
+  getCredentials: infrastructureProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
       const server = await ctx.prisma.server.findFirstOrThrow({
@@ -118,7 +149,7 @@ export const serverRouter = router({
       try {
         return JSON.parse(decrypt(server.credentials as string));
       } catch {
-        return server.credentials;
+        return null;
       }
     }),
 
@@ -133,10 +164,19 @@ export const serverRouter = router({
         ? new Date(server.expiryDate)
         : new Date();
       baseDate.setMonth(baseDate.getMonth() + cycle);
-      return ctx.prisma.server.update({
+      const result = await ctx.prisma.server.update({
         where: { id: input.id },
         data: { expiryDate: baseDate },
       });
+      await createAuditLog({
+        action: "UPDATE",
+        entity: "Server",
+        entityId: input.id,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { action: "renew", cycle, newExpiryDate: baseDate.toISOString() },
+      });
+      return result;
     }),
 
   bulkUpdateStatus: infrastructureProcedure
@@ -150,12 +190,28 @@ export const serverRouter = router({
         where: { id: { in: input.serverIds }, projectId: input.projectId },
         data: { status: input.status },
       });
+      await createAuditLog({
+        action: "BULK_UPDATE",
+        entity: "Server",
+        entityId: input.serverIds.join(","),
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { count: input.serverIds.length, status: input.status },
+      });
       return { updated: result.count };
     }),
 
   bulkDelete: moderatorProcedure
     .input(z.object({ projectId: z.string(), serverIds: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
+      await createAuditLog({
+        action: "BULK_DELETE",
+        entity: "Server",
+        entityId: input.serverIds.join(","),
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { count: input.serverIds.length },
+      });
       await ctx.prisma.virtualMachine.deleteMany({
         where: { server: { id: { in: input.serverIds }, projectId: input.projectId } },
       });
@@ -201,6 +257,14 @@ export const serverRouter = router({
           skipped++;
         }
       }
+      await createAuditLog({
+        action: "IMPORT",
+        entity: "Server",
+        entityId: input.projectId,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { imported, skipped, totalItems: input.items.length },
+      });
       return { imported, skipped, errors: errors.slice(0, 10) };
     }),
 });

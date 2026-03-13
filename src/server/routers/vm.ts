@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
+import { createAuditLog } from "@/lib/audit";
 
 export const vmRouter = router({
   list: infrastructureProcedure
@@ -71,7 +72,9 @@ export const vmRouter = router({
       // Verify server belongs to project
       await ctx.prisma.server.findFirstOrThrow({ where: { id: input.serverId, projectId: input.projectId } });
       const { projectId: _, ...data } = input;
-      return ctx.prisma.virtualMachine.create({ data });
+      const vm = await ctx.prisma.virtualMachine.create({ data });
+      await createAuditLog({ action: "CREATE", entity: "VirtualMachine", entityId: vm.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { code: input.code, serverId: input.serverId, status: input.status } });
+      return vm;
     }),
 
   update: infrastructureProcedure
@@ -90,7 +93,9 @@ export const vmRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { projectId, id, ...data } = input;
       await ctx.prisma.virtualMachine.findFirstOrThrow({ where: { id, server: { projectId } } });
-      return ctx.prisma.virtualMachine.update({ where: { id }, data });
+      const vm = await ctx.prisma.virtualMachine.update({ where: { id }, data });
+      await createAuditLog({ action: "UPDATE", entity: "VirtualMachine", entityId: id, userId: (ctx.user as any).id, projectId, changes: data });
+      return vm;
     }),
 
   // Get VMs without proxy assigned
@@ -150,6 +155,7 @@ export const vmRouter = router({
         },
         data: { status: input.status },
       });
+      await createAuditLog({ action: "BULK_UPDATE", entity: "VirtualMachine", entityId: input.vmIds[0], userId: (ctx.user as any).id, projectId: input.projectId, changes: { status: input.status, count: result.count, vmIds: input.vmIds } });
       return { updated: result.count };
     }),
 
@@ -196,7 +202,8 @@ export const vmRouter = router({
   delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.prisma.virtualMachine.findFirstOrThrow({ where: { id: input.id, server: { projectId: input.projectId } } });
+      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({ where: { id: input.id, server: { projectId: input.projectId } } });
+      await createAuditLog({ action: "DELETE", entity: "VirtualMachine", entityId: input.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { code: vm.code, serverId: vm.serverId } });
       return ctx.prisma.virtualMachine.delete({ where: { id: input.id } });
     }),
 
@@ -204,6 +211,7 @@ export const vmRouter = router({
   bulkDelete: moderatorProcedure
     .input(z.object({ projectId: z.string(), vmIds: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
+      await createAuditLog({ action: "BULK_DELETE", entity: "VirtualMachine", entityId: input.vmIds[0], userId: (ctx.user as any).id, projectId: input.projectId, changes: { count: input.vmIds.length, vmIds: input.vmIds } });
       const result = await ctx.prisma.virtualMachine.deleteMany({
         where: { id: { in: input.vmIds }, server: { projectId: input.projectId } },
       });
@@ -261,35 +269,36 @@ export const vmRouter = router({
       return { imported, skipped, errors: errors.slice(0, 10) };
     }),
 
-  // Assign/unassign gmail to a single VM
+  // Assign/unassign gmail to a single VM (max 2 VMs per Gmail)
   assignGmail: infrastructureProcedure
     .input(z.object({
       projectId: z.string(),
       vmId: z.string(),
-      gmailId: z.string().nullable(), // null to unassign
+      gmailId: z.string().nullable(),
     }))
     .mutation(async ({ ctx, input }) => {
       const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
         where: { id: input.vmId, server: { projectId: input.projectId } },
-      });
-      // Unassign current gmail from this VM
-      await ctx.prisma.gmailAccount.updateMany({
-        where: { vmId: vm.id },
-        data: { vmId: null },
+        include: { server: { select: { gmailGroup: true } } },
       });
       if (input.gmailId) {
-        // Check gmail belongs to project and not assigned elsewhere
         const gmail = await ctx.prisma.gmailAccount.findFirstOrThrow({
           where: { id: input.gmailId, projectId: input.projectId },
         });
-        if (gmail.vmId && gmail.vmId !== vm.id) {
-          throw new Error(`Gmail already assigned to another VM`);
-        }
-        await ctx.prisma.gmailAccount.update({
-          where: { id: input.gmailId },
-          data: { vmId: vm.id },
-        });
+        // Check max VMs per Gmail based on server's gmailGroup
+        const maxVms = vm.server.gmailGroup ?? 1;
+        const assignedCount = await ctx.prisma.virtualMachine.count({ where: { gmailId: gmail.id, id: { not: vm.id }, server: { projectId: input.projectId } } });
+        if (assignedCount >= maxVms) throw new Error(`Gmail already assigned to ${maxVms} VM(s)`);
+        await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: gmail.id } });
+      } else {
+        await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: null } });
       }
+      // Auto-set status OK if has gmail + proxy
+      const updated = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id } });
+      if (updated && updated.gmailId && updated.proxyId && updated.status === "NEW") {
+        await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { status: "OK" } });
+      }
+      await createAuditLog({ action: "ASSIGN", entity: "VirtualMachine", entityId: vm.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { type: "gmail", gmailId: input.gmailId, vmCode: vm.code } });
       return { success: true };
     }),
 
@@ -338,37 +347,16 @@ export const vmRouter = router({
           data: { status: "IN_USE" },
         });
       }
+      // Auto-set status OK if has gmail + proxy
+      const updated = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id } });
+      if (updated && updated.gmailId && updated.proxyId && updated.status === "NEW") {
+        await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { status: "OK" } });
+      }
+      await createAuditLog({ action: "ASSIGN", entity: "VirtualMachine", entityId: vm.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { type: "proxy", proxyId: input.proxyId, vmCode: vm.code } });
       return { success: true };
     }),
 
-  // Assign/unassign paypal to a VM (via gmail bridge)
-  assignPaypal: infrastructureProcedure
-    .input(z.object({
-      projectId: z.string(),
-      vmId: z.string(),
-      paypalId: z.string().nullable(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
-        where: { id: input.vmId, server: { projectId: input.projectId } },
-        include: { gmail: true },
-      });
-      if (!vm.gmail) {
-        throw new Error("VM must have a Gmail assigned before assigning PayPal");
-      }
-      if (input.paypalId) {
-        await ctx.prisma.payPalAccount.findFirstOrThrow({
-          where: { id: input.paypalId, projectId: input.projectId },
-        });
-      }
-      await ctx.prisma.gmailAccount.update({
-        where: { id: vm.gmail.id },
-        data: { paypalId: input.paypalId },
-      });
-      return { success: true };
-    }),
-
-  // Bulk paste: assign a list of values (gmail/proxy/paypal) to VMs in order
+  // Bulk paste: assign a list of values (gmail/proxy) to VMs in order
   bulkPaste: infrastructureProcedure
     .input(z.object({
       projectId: z.string(),
@@ -394,29 +382,14 @@ export const vmRouter = router({
 
         try {
           if (input.field === "gmail") {
-            // Find gmail by email (partial match)
             const gmail = await ctx.prisma.gmailAccount.findFirst({
-              where: {
-                projectId: input.projectId,
-                email: { contains: val, mode: "insensitive" },
-              },
+              where: { projectId: input.projectId, email: { contains: val, mode: "insensitive" } },
             });
             if (!gmail) { errors.push(`Row ${i + 1}: Gmail "${val}" not found`); continue; }
-            // Check if already assigned to another VM
-            if (gmail.vmId && gmail.vmId !== vm.id) {
-              errors.push(`Row ${i + 1}: "${val}" already assigned to another VM`);
-              continue;
-            }
-            // Unassign current gmail from VM if any
-            await ctx.prisma.gmailAccount.updateMany({
-              where: { vmId: vm.id },
-              data: { vmId: null },
-            });
-            // Assign new gmail
-            await ctx.prisma.gmailAccount.update({
-              where: { id: gmail.id },
-              data: { vmId: vm.id },
-            });
+            const assignedCount = await ctx.prisma.virtualMachine.count({ where: { gmailId: gmail.id, id: { not: vm.id }, server: { projectId: input.projectId } } });
+            const maxVmsForPaste = vm.id ? (await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id }, include: { server: { select: { gmailGroup: true } } } }))?.server?.gmailGroup ?? 1 : 1;
+            if (assignedCount >= maxVmsForPaste) { errors.push(`Row ${i + 1}: "${val}" already at max ${maxVmsForPaste} VMs`); continue; }
+            await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: gmail.id } });
             assigned++;
           } else if (input.field === "proxy") {
             // Find proxy by address (partial match)
@@ -490,45 +463,90 @@ export const vmRouter = router({
       return { assigned, total: Math.min(input.values.length, vms.length), errors: errors.slice(0, 20) };
     }),
 
-  // Auto-fill single VM: assign first available Gmail + Proxy + PayPal
+  // Bulk assign Gmail/Proxy to specific selected VM IDs (not whole server)
+  bulkAssignSelected: infrastructureProcedure
+    .input(z.object({
+      projectId: z.string(),
+      vmIds: z.array(z.string()).min(1),
+      field: z.enum(["gmail", "proxy"]),
+      itemIds: z.array(z.string()).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const vms = await ctx.prisma.virtualMachine.findMany({
+        where: { id: { in: input.vmIds }, server: { projectId: input.projectId } },
+        include: { server: { select: { gmailGroup: true } } },
+        orderBy: { code: "asc" },
+      });
+
+      let assigned = 0;
+      const errors: string[] = [];
+      const count = Math.min(input.itemIds.length, vms.length);
+
+      for (let i = 0; i < count; i++) {
+        const vm = vms[i];
+        const itemId = input.itemIds[i];
+        try {
+          if (input.field === "gmail") {
+            const maxVms = vm.server.gmailGroup ?? 1;
+            const assignedCount = await ctx.prisma.virtualMachine.count({ where: { gmailId: itemId, id: { not: vm.id }, server: { projectId: input.projectId } } });
+            if (assignedCount >= maxVms) { errors.push(`${vm.code}: Gmail already at max ${maxVms} VMs`); continue; }
+            await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: itemId } });
+            assigned++;
+          } else {
+            // Unassign old proxy
+            if (vm.id) {
+              const oldVm = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id }, select: { proxyId: true } });
+              if (oldVm?.proxyId) {
+                await ctx.prisma.proxyIP.update({ where: { id: oldVm.proxyId }, data: { status: "AVAILABLE" } });
+              }
+            }
+            await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { proxyId: itemId } });
+            await ctx.prisma.proxyIP.update({ where: { id: itemId }, data: { status: "IN_USE" } });
+            assigned++;
+          }
+          // Auto-set OK
+          const updated = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id } });
+          if (updated && updated.gmailId && updated.proxyId && updated.status === "NEW") {
+            await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { status: "OK" } });
+          }
+        } catch (e: any) {
+          errors.push(`${vm.code}: ${e.message}`);
+        }
+      }
+      return { assigned, total: count, errors: errors.slice(0, 20) };
+    }),
+
+  // Auto-fill single VM: assign first available Gmail + Proxy
   autoFill: infrastructureProcedure
     .input(z.object({ projectId: z.string(), vmId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const vm = await ctx.prisma.virtualMachine.findFirstOrThrow({
         where: { id: input.vmId, server: { projectId: input.projectId } },
-        include: { gmail: true, proxy: true },
+        include: { gmail: true, proxy: true, server: { select: { gmailGroup: true } } },
       });
+      const maxVms = vm.server.gmailGroup ?? 1;
       const results: string[] = [];
 
-      // 1. Gmail
-      if (!vm.gmail) {
+      // 1. Gmail (respect server's gmailGroup)
+      if (!vm.gmailId) {
+        // First try: find Gmail with no VMs
         const gmail = await ctx.prisma.gmailAccount.findFirst({
-          where: { projectId: input.projectId, status: "ACTIVE", vmId: null },
+          where: { projectId: input.projectId, status: "ACTIVE", vms: { none: {} } },
           orderBy: { email: "asc" },
         });
-        if (gmail) {
-          await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { vmId: vm.id } });
-          results.push(`Gmail: ${gmail.email}`);
-
-          // 3. PayPal (needs gmail first)
-          const paypal = await ctx.prisma.payPalAccount.findFirst({
-            where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
-            orderBy: { code: "asc" },
+        // Fallback for group 2: find Gmail with <maxVms
+        let target = gmail;
+        if (!target && maxVms > 1) {
+          const candidates = await ctx.prisma.gmailAccount.findMany({
+            where: { projectId: input.projectId, status: "ACTIVE" },
+            include: { _count: { select: { vms: true } } },
+            orderBy: { email: "asc" },
           });
-          if (paypal) {
-            await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { paypalId: paypal.id } });
-            results.push(`PayPal: ${paypal.code}`);
-          }
+          target = candidates.find(g => g._count.vms < maxVms) ?? null;
         }
-      } else if (!vm.gmail.paypalId) {
-        // VM has gmail but no paypal
-        const paypal = await ctx.prisma.payPalAccount.findFirst({
-          where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
-          orderBy: { code: "asc" },
-        });
-        if (paypal) {
-          await ctx.prisma.gmailAccount.update({ where: { id: vm.gmail.id }, data: { paypalId: paypal.id } });
-          results.push(`PayPal: ${paypal.code}`);
+        if (target) {
+          await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: target.id } });
+          results.push(`Gmail: ${target.email}`);
         }
       }
 
@@ -545,69 +563,109 @@ export const vmRouter = router({
         }
       }
 
+      // Auto-set OK if both gmail + proxy
+      const final = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id } });
+      if (final && final.gmailId && final.proxyId && final.status === "NEW") {
+        await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { status: "OK" } });
+      }
+
       return { filled: results.length, details: results };
     }),
 
-  // Bulk auto-assign: assign available Gmail + Proxy + PayPal to multiple VMs
+  // Bulk auto-assign: assign available Gmail + Proxy to multiple VMs
   bulkAutoAssign: infrastructureProcedure
     .input(z.object({
       projectId: z.string(),
       vmIds: z.array(z.string()).min(1),
       assignGmail: z.boolean().default(true),
       assignProxy: z.boolean().default(true),
-      assignPaypal: z.boolean().default(true),
     }))
     .mutation(async ({ ctx, input }) => {
       const vms = await ctx.prisma.virtualMachine.findMany({
         where: { id: { in: input.vmIds }, server: { projectId: input.projectId } },
-        include: { gmail: true, proxy: true },
+        include: { gmail: true, proxy: true, server: { select: { gmailGroup: true } } },
         orderBy: { code: "asc" },
       });
 
-      let gmailCount = 0, proxyCount = 0, paypalCount = 0;
+      let gmailCount = 0, proxyCount = 0;
+      // Determine max VMs per Gmail from server's gmailGroup
+      const maxVms = vms[0]?.server?.gmailGroup ?? 1;
 
-      // Pre-fetch available resources
+      // Pre-fetch available resources (Gmail: those with < maxVms VMs)
       const availGmails = input.assignGmail ? await ctx.prisma.gmailAccount.findMany({
-        where: { projectId: input.projectId, status: "ACTIVE", vmId: null },
+        where: { projectId: input.projectId, status: "ACTIVE" },
+        include: { _count: { select: { vms: true } } },
         orderBy: { email: "asc" },
-      }) : [];
-      const availProxies = input.assignProxy ? await ctx.prisma.proxyIP.findMany({
-        where: { projectId: input.projectId, status: "AVAILABLE" },
-        orderBy: { address: "asc" },
-      }) : [];
-      const availPaypals = input.assignPaypal ? await ctx.prisma.payPalAccount.findMany({
-        where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } },
-        orderBy: { code: "asc" },
-      }) : [];
+      }).then(gs => gs.filter(g => g._count.vms < maxVms)) : [];
+      // Fetch proxies and shuffle by subnet (mix different subnets, avoid consecutive IPs)
+      const shuffledProxies: any[] = [];
+      if (input.assignProxy) {
+        const rawProxies = await ctx.prisma.proxyIP.findMany({
+          where: { projectId: input.projectId, status: "AVAILABLE" },
+          orderBy: { address: "asc" },
+        });
+        // Group by subnet, then interleave (round-robin across subnets)
+        const bySubnet: Record<string, typeof rawProxies> = {};
+        for (const p of rawProxies) {
+          const subnet = p.subnet || p.address.split(".").slice(0, 3).join(".");
+          if (!bySubnet[subnet]) bySubnet[subnet] = [];
+          bySubnet[subnet].push(p);
+        }
+        // Shuffle within each subnet
+        const subnets = Object.keys(bySubnet);
+        for (const s of subnets) {
+          for (let i = bySubnet[s].length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [bySubnet[s][i], bySubnet[s][j]] = [bySubnet[s][j], bySubnet[s][i]];
+          }
+        }
+        // Shuffle subnet order
+        for (let i = subnets.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [subnets[i], subnets[j]] = [subnets[j], subnets[i]];
+        }
+        // Round-robin interleave across subnets
+        const indices = subnets.map(() => 0);
+        let remaining = rawProxies.length;
+        while (remaining > 0) {
+          for (let si = 0; si < subnets.length && remaining > 0; si++) {
+            const arr = bySubnet[subnets[si]];
+            if (indices[si] < arr.length) {
+              shuffledProxies.push(arr[indices[si]++]);
+              remaining--;
+            }
+          }
+        }
+      }
 
-      let gi = 0, pi = 0, ppi = 0;
+      let gi = 0, pi = 0;
+      const gmailUsage: Record<string, number> = {};
 
       for (const vm of vms) {
         // Gmail
-        let gmailId = vm.gmail?.id;
-        if (!vm.gmail && gi < availGmails.length && input.assignGmail) {
-          const gmail = availGmails[gi++];
-          await ctx.prisma.gmailAccount.update({ where: { id: gmail.id }, data: { vmId: vm.id } });
-          gmailId = gmail.id;
-          gmailCount++;
+        if (!vm.gmailId && gi < availGmails.length && input.assignGmail) {
+          const gmail = availGmails[gi];
+          const currentUsage = (gmailUsage[gmail.id] ?? gmail._count.vms);
+          if (currentUsage < maxVms) {
+            await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { gmailId: gmail.id } });
+            gmailUsage[gmail.id] = currentUsage + 1;
+            if (gmailUsage[gmail.id] >= maxVms) gi++;
+            gmailCount++;
+          } else { gi++; }
         }
 
-        // Proxy
-        if (!vm.proxyId && pi < availProxies.length && input.assignProxy) {
-          const proxy = availProxies[pi++];
+        // Proxy (subnet-mixed)
+        if (!vm.proxyId && pi < shuffledProxies.length && input.assignProxy) {
+          const proxy = shuffledProxies[pi++];
           await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { proxyId: proxy.id } });
           await ctx.prisma.proxyIP.update({ where: { id: proxy.id }, data: { status: "IN_USE" } });
           proxyCount++;
         }
 
-        // PayPal (needs gmail)
-        if (gmailId && input.assignPaypal) {
-          const currentGmail = vm.gmail || availGmails[gi - 1];
-          if (currentGmail && !currentGmail.paypalId && ppi < availPaypals.length) {
-            const paypal = availPaypals[ppi++];
-            await ctx.prisma.gmailAccount.update({ where: { id: gmailId }, data: { paypalId: paypal.id } });
-            paypalCount++;
-          }
+        // Auto-set OK
+        const final = await ctx.prisma.virtualMachine.findUnique({ where: { id: vm.id } });
+        if (final && final.gmailId && final.proxyId && final.status === "NEW") {
+          await ctx.prisma.virtualMachine.update({ where: { id: vm.id }, data: { status: "OK" } });
         }
       }
 
@@ -615,24 +673,26 @@ export const vmRouter = router({
         total: vms.length,
         gmail: gmailCount,
         proxy: proxyCount,
-        paypal: paypalCount,
-        availableLeft: {
-          gmail: availGmails.length - gi,
-          proxy: availProxies.length - pi,
-          paypal: availPaypals.length - ppi,
-        },
+        paypal: 0,
       };
     }),
 
   // Preview: count available resources for quick assign
   availableCounts: infrastructureProcedure
-    .input(z.object({ projectId: z.string() }))
+    .input(z.object({ projectId: z.string(), serverId: z.string().optional() }))
     .query(async ({ ctx, input }) => {
-      const [gmail, proxy, paypal] = await Promise.all([
-        ctx.prisma.gmailAccount.count({ where: { projectId: input.projectId, status: "ACTIVE", vmId: null } }),
-        ctx.prisma.proxyIP.count({ where: { projectId: input.projectId, status: "AVAILABLE" } }),
-        ctx.prisma.payPalAccount.count({ where: { projectId: input.projectId, status: "ACTIVE", gmails: { none: {} } } }),
-      ]);
-      return { gmail, proxy, paypal };
+      // Determine max VMs per Gmail from server's gmailGroup
+      let maxVms = 1;
+      if (input.serverId) {
+        const server = await ctx.prisma.server.findUnique({ where: { id: input.serverId }, select: { gmailGroup: true } });
+        maxVms = server?.gmailGroup ?? 1;
+      }
+      const gmails = await ctx.prisma.gmailAccount.findMany({
+        where: { projectId: input.projectId, status: "ACTIVE" },
+        include: { _count: { select: { vms: true } } },
+      });
+      const gmail = gmails.filter(g => g._count.vms < maxVms).length;
+      const proxy = await ctx.prisma.proxyIP.count({ where: { projectId: input.projectId, status: "AVAILABLE" } });
+      return { gmail, proxy };
     }),
 });

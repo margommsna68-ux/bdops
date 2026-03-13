@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
+import { useProjectStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 
 interface HeaderProps {
@@ -8,7 +8,7 @@ interface HeaderProps {
 }
 
 export function Header({ onMenuClick }: HeaderProps) {
-  const { data: session } = useSession();
+  const { currentProjectCode, currentProjectName } = useProjectStore();
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-6 shrink-0">
@@ -24,23 +24,20 @@ export function Header({ onMenuClick }: HeaderProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </Button>
+
+        {/* Current project */}
+        {currentProjectCode && (
+          <div className="hidden sm:flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-500">Project</span>
+            <span className="text-sm font-semibold text-gray-900">
+              {currentProjectCode}{currentProjectName ? ` — ${currentProjectName}` : ""}
+            </span>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-3">
-        {session?.user && (
-          <>
-            {session.user.image && (
-              <img
-                src={session.user.image}
-                alt=""
-                className="w-8 h-8 rounded-full"
-              />
-            )}
-            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
-              Sign out
-            </Button>
-          </>
-        )}
+      <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+        BDOps v1.0
       </div>
     </header>
   );

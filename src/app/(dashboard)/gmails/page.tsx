@@ -5,7 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
-import { exportToExcel } from "@/lib/excel-export";
+import { exportToCSV } from "@/lib/excel-export";
+import { ImportCSVDialog } from "@/components/forms/ImportCSVDialog";
+import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
 const statusColors: Record<string, string> = {
@@ -69,9 +71,10 @@ function EditableCell({ value, onSave, mono, placeholder }: {
 }
 
 // ─── Self-contained Secret Cell (password/2FA) ─────────
-function SecretCell({ onSave, placeholder }: {
+function SecretCell({ onSave, placeholder, displayText }: {
   onSave: (v: string) => void;
   placeholder: string;
+  displayText?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -112,7 +115,7 @@ function SecretCell({ onSave, placeholder }: {
       onClick={open}
       title={`Click to change ${placeholder}`}
     >
-      *** click
+      {displayText ?? "*** click"}
     </div>
   );
 }
@@ -120,12 +123,12 @@ function SecretCell({ onSave, placeholder }: {
 export default function GmailsPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
+  const t = useT();
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [showUnassigned, setShowUnassigned] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [showPaste, setShowPaste] = useState(false);
-  const [pasteText, setPasteText] = useState("");
+  const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
@@ -141,10 +144,9 @@ export default function GmailsPage() {
   );
 
   const invalidate = () => { utils.gmail.list.invalidate(); refetch(); };
-  const createGmail = trpc.gmail.create.useMutation({ onSuccess: () => { invalidate(); setAddEmail(""); setAddPassword(""); setAddRecovery(""); setAdd2fa(""); toast.success("Gmail created"); }, onError: (e) => toast.error(e.message) });
-  const bulkImport = trpc.gmail.bulkImport.useMutation({ onSuccess: (d) => { invalidate(); setShowPaste(false); setPasteText(""); toast.success(`Imported ${d.imported} gmails`); }, onError: (e) => toast.error(e.message) });
-  const assignGmail = trpc.gmail.assignToVm.useMutation({ onSuccess: () => { invalidate(); toast.success("Assigned"); } });
-  const updateGmail = trpc.gmail.update.useMutation({ onSuccess: () => { invalidate(); toast.success("Saved"); }, onError: (e) => toast.error(e.message) });
+  const createGmail = trpc.gmail.create.useMutation({ onSuccess: () => { invalidate(); setAddEmail(""); setAddPassword(""); setAddRecovery(""); setAdd2fa(""); toast.success(t("gmail_created")); }, onError: (e) => toast.error(e.message) });
+  const bulkImport = trpc.gmail.bulkImport.useMutation({ onSuccess: (d) => { invalidate(); setShowImport(false); toast.success(`Imported ${d.imported} gmails`); }, onError: (e) => toast.error(e.message) });
+  const updateGmail = trpc.gmail.update.useMutation({ onSuccess: () => { invalidate(); toast.success(t("saved")); }, onError: (e) => toast.error(e.message) });
   const bulkDeleteGmail = trpc.gmail.bulkDelete.useMutation({ onSuccess: (d) => { invalidate(); setSelected(new Set()); toast.success(`Deleted ${d.deleted} gmails`); } });
 
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
@@ -156,8 +158,8 @@ export default function GmailsPage() {
         return (
           (g.email ?? "").toLowerCase().includes(q) ||
           (g.recoveryEmail ?? "").toLowerCase().includes(q) ||
-          (g.vm?.code ?? "").toLowerCase().includes(q) ||
-          (g.vm?.server?.code ?? "").toLowerCase().includes(q) ||
+          (g.vms?.[0]?.code ?? "").toLowerCase().includes(q) ||
+          (g.vms?.[0]?.server?.code ?? "").toLowerCase().includes(q) ||
           (g.notes ?? "").toLowerCase().includes(q) ||
           (g.status ?? "").toLowerCase().includes(q)
         );
@@ -192,53 +194,37 @@ export default function GmailsPage() {
       .then(() => { invalidate(); setSelected(new Set()); });
   };
 
-  const bulkUnassignVm = () => {
-    if (!confirm(`Unassign ${selected.size} Gmail accounts from their VMs?`)) return;
-    const ids = Array.from(selected);
-    Promise.all(ids.map((id) => assignGmail.mutateAsync({ projectId: projectId!, gmailId: id, vmId: null })))
-      .then(() => { invalidate(); setSelected(new Set()); });
-  };
 
   const bulkDisable = () => {
-    if (!confirm(`Disable ${selected.size} Gmail accounts?`)) return;
+    if (!confirm(`${t("gmail_disable_confirm").replace("?", "")} (${selected.size})?`)) return;
     const ids = Array.from(selected);
     Promise.all(ids.map((id) => updateGmail.mutateAsync({ projectId: projectId!, id, status: "DISABLED" as any })))
       .then(() => { invalidate(); setSelected(new Set()); });
   };
 
   const bulkDelete = () => {
-    if (!confirm(`XOA VINH VIEN ${selected.size} Gmail accounts? Khong the hoan tac!`)) return;
+    if (!confirm(`${t("gmail_delete_confirm")} (${selected.size})`)) return;
     bulkDeleteGmail.mutate({ projectId: projectId!, ids: Array.from(selected) });
   };
 
-  const handlePasteImport = () => {
-    const lines = pasteText.trim().split("\n").filter(Boolean);
-    const gmails = lines.map((line) => {
-      const parts = line.split("\t");
-      return { email: parts[0]?.trim() ?? "", password: parts[1]?.trim() || undefined, recoveryEmail: parts[2]?.trim() || undefined, twoFaCurrent: parts[3]?.trim() || undefined };
-    }).filter((g) => g.email.includes("@"));
-    if (gmails.length === 0) return;
-    bulkImport.mutate({ projectId: projectId!, gmails });
-  };
-
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Gmail Accounts</h1>
-          <p className="text-sm text-gray-500">Click any cell to edit inline. Checkbox to select for bulk actions.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("gmail_title")}</h1>
+          <p className="text-sm text-gray-500">{t("gmail_subtitle")}</p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={() => { setStatusFilter("ALL"); setShowUnassigned(false); }} className={`px-3 py-1 rounded-full text-xs font-medium transition ${statusFilter === "ALL" && !showUnassigned ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-          All ({data?.total ?? 0})
+          {t("all")} ({data?.total ?? 0})
         </button>
         <button onClick={() => { setShowUnassigned(!showUnassigned); setStatusFilter("ALL"); }} className={`px-3 py-1 rounded-full text-xs font-medium transition ${showUnassigned ? "bg-orange-600 text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"}`}>
-          Unassigned
+          {t("unassigned")}
         </button>
         {GMAIL_STATUSES.map((s) => (
           <button key={s} onClick={() => { setStatusFilter(s === statusFilter ? "ALL" : s); setShowUnassigned(false); }} className={`px-3 py-1 rounded-full text-xs font-medium transition ${statusFilter === s ? "bg-gray-900 text-white" : `${statusColors[s]} hover:opacity-80`}`}>
@@ -255,7 +241,7 @@ export default function GmailsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-8 pr-8 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            placeholder="Search email, VM, server, notes..."
+            placeholder={t("gmail_search")}
           />
           {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">&times;</button>}
         </div>
@@ -263,42 +249,40 @@ export default function GmailsPage() {
         <button
           onClick={() => {
             if (!items.length) return;
-            exportToExcel(
+            exportToCSV(
               items.map((g: any, i: number) => ({
                 "#": i + 1,
-                Email: g.email ?? "",
-                "Recovery Mail": g.recoveryEmail ?? "",
-                Status: g.status ?? "",
-                Server: g.vm?.server?.code ?? "",
-                VM: g.vm?.code ?? "",
-                Notes: g.notes ?? "",
+                [t("email")]: g.email ?? "",
+                [t("gmail_recovery_mail")]: g.recoveryEmail ?? "",
+                [t("col_status")]: g.status ?? "",
+                [t("col_server")]: g.vm?.server?.code ?? "",
+                [t("col_vm")]: g.vm?.code ?? "",
+                [t("col_notes")]: g.notes ?? "",
               })),
-              "gmails-export",
-              "Gmails"
+              "gmails-export"
             );
           }}
           disabled={!items.length}
           className="px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
         >
-          Export Excel
+          {t("export_excel")}
         </button>
       {canEdit && (
         <>
-          <button onClick={() => { setShowAdd(!showAdd); setShowPaste(false); }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">+ Add Gmail</button>
-          <button onClick={() => { setShowPaste(!showPaste); setShowAdd(false); }} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700">Paste Import</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700">{t("gmail_add")}</button>
+          <button onClick={() => setShowImport(true)} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700">{t("gmail_paste_import")}</button>
 
           {selected.size > 0 && (
             <>
               <span className="text-gray-300 mx-1">|</span>
-              <span className="text-xs font-medium text-blue-600">{selected.size} selected</span>
+              <span className="text-xs font-medium text-blue-600">{selected.size} {t("selected")}</span>
               <select defaultValue="" onChange={(e) => { if (e.target.value) { bulkUpdateStatus(e.target.value); e.target.value = ""; } }} className="px-2 py-1 border rounded text-xs">
-                <option value="" disabled>Change Status...</option>
+                <option value="" disabled>{t("change_status")}</option>
                 {GMAIL_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
               </select>
-              <button onClick={bulkUnassignVm} className="px-3 py-1.5 bg-orange-50 text-orange-600 rounded text-xs font-medium hover:bg-orange-100">Unassign VMs</button>
-              {canDelete && <button onClick={bulkDisable} className="px-3 py-1.5 bg-red-50 text-red-600 rounded text-xs font-medium hover:bg-red-100">Disable Selected</button>}
-              {canDelete && <button onClick={bulkDelete} disabled={bulkDeleteGmail.isLoading} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-50">{bulkDeleteGmail.isLoading ? "Deleting..." : "Delete Selected"}</button>}
-              <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:underline">Clear</button>
+              {canDelete && <button onClick={bulkDisable} className="px-3 py-1.5 bg-red-50 text-red-600 rounded text-xs font-medium hover:bg-red-100">{t("gmail_disable_selected")}</button>}
+              {canDelete && <button onClick={bulkDelete} disabled={bulkDeleteGmail.isLoading} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-50">{bulkDeleteGmail.isLoading ? "Deleting..." : t("delete_selected")}</button>}
+              <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:underline">{t("clear")}</button>
             </>
           )}
         </>
@@ -308,38 +292,43 @@ export default function GmailsPage() {
       {/* Add */}
       {showAdd && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold">Add Gmail Account</h3>
+          <h3 className="text-sm font-semibold">{t("gmail_add_title")}</h3>
           <div className="flex items-end gap-3 flex-wrap">
-            <div><label className="block text-xs text-gray-600 mb-1">Email *</label><input value={addEmail} onChange={(e) => setAddEmail(e.target.value)} className="w-56 px-2 py-1.5 border rounded text-xs" placeholder="abc@gmail.com" /></div>
-            <div><label className="block text-xs text-gray-600 mb-1">Password</label><input value={addPassword} onChange={(e) => setAddPassword(e.target.value)} className="w-40 px-2 py-1.5 border rounded text-xs" placeholder="password" /></div>
-            <div><label className="block text-xs text-gray-600 mb-1">Recovery</label><input value={addRecovery} onChange={(e) => setAddRecovery(e.target.value)} className="w-48 px-2 py-1.5 border rounded text-xs" placeholder="recovery@yahoo.com" /></div>
-            <div><label className="block text-xs text-gray-600 mb-1">2FA Codes</label><input value={add2fa} onChange={(e) => setAdd2fa(e.target.value)} className="w-48 px-2 py-1.5 border rounded text-xs" placeholder="abcd efgh ijkl" /></div>
-            <button onClick={() => createGmail.mutate({ projectId: projectId!, email: addEmail, password: addPassword || undefined, recoveryEmail: addRecovery || undefined, twoFaCurrent: add2fa || undefined })} disabled={createGmail.isLoading || !addEmail} className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">{createGmail.isLoading ? "..." : "Add"}</button>
-            <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">Cancel</button>
+            <div><label className="block text-xs text-gray-600 mb-1">{t("email")} *</label><input value={addEmail} onChange={(e) => setAddEmail(e.target.value)} className="w-56 px-2 py-1.5 border rounded text-xs" placeholder="abc@gmail.com" /></div>
+            <div><label className="block text-xs text-gray-600 mb-1">{t("password")}</label><input value={addPassword} onChange={(e) => setAddPassword(e.target.value)} className="w-40 px-2 py-1.5 border rounded text-xs" placeholder="password" /></div>
+            <div><label className="block text-xs text-gray-600 mb-1">{t("gmail_recovery")}</label><input value={addRecovery} onChange={(e) => setAddRecovery(e.target.value)} className="w-48 px-2 py-1.5 border rounded text-xs" placeholder="recovery@yahoo.com" /></div>
+            <div><label className="block text-xs text-gray-600 mb-1">{t("gmail_2fa")}</label><input value={add2fa} onChange={(e) => setAdd2fa(e.target.value)} className="w-48 px-2 py-1.5 border rounded text-xs" placeholder="abcd efgh ijkl" /></div>
+            <button onClick={() => createGmail.mutate({ projectId: projectId!, email: addEmail, password: addPassword || undefined, recoveryEmail: addRecovery || undefined, twoFaCurrent: add2fa || undefined })} disabled={createGmail.isLoading || !addEmail} className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50">{createGmail.isLoading ? "..." : t("add")}</button>
+            <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">{t("cancel")}</button>
           </div>
           {createGmail.error && <p className="text-xs text-red-600">{createGmail.error.message}</p>}
         </div>
       )}
 
-      {/* Paste Import */}
-      {showPaste && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-semibold">Paste Gmail Data</h3>
-          <p className="text-xs text-gray-500">Tab-separated: email, password, recovery_email, 2fa_codes</p>
-          <div className="flex gap-3">
-            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={5} className="flex-1 px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none" placeholder={"abc@gmail.com\tpass123\trecovery@yahoo.com\tabcd efgh"} />
-            <div className="flex flex-col gap-2 w-36">
-              <button onClick={handlePasteImport} disabled={bulkImport.isLoading || !pasteText.trim()} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">{bulkImport.isLoading ? "..." : `Import (${pasteText.trim().split("\n").filter(Boolean).length})`}</button>
-              <button onClick={() => { setShowPaste(false); setPasteText(""); }} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">Cancel</button>
-            </div>
-          </div>
-          {bulkImport.data && <p className="text-xs text-green-700">Imported {bulkImport.data.imported}/{bulkImport.data.total}</p>}
-        </div>
-      )}
+      {/* CSV Import Dialog */}
+      <ImportCSVDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        title={t("gmail_paste_title")}
+        description={t("gmail_paste_desc")}
+        templateColumns={["Email", "Password", "Recovery Email", "2FA Code"]}
+        onImport={(rows) => {
+          const gmails = rows
+            .map((row) => ({
+              email: (row["Email"] ?? "").trim(),
+              password: (row["Password"] ?? "").trim() || undefined,
+              twoFaCurrent: (row["2FA Code"] ?? "").trim() || undefined,
+              recoveryEmail: (row["Recovery Email"] ?? "").trim() || undefined,
+            }))
+            .filter((g) => g.email.includes("@"));
+          if (gmails.length === 0) return;
+          bulkImport.mutate({ projectId: projectId!, gmails });
+        }}
+      />
 
       {/* Table */}
-      {isLoading ? <p className="text-gray-500 p-4">Loading...</p> : items.length === 0 ? (
-        <div className="text-center py-12 bg-white border rounded-lg"><p className="text-gray-500">No Gmail accounts yet.</p></div>
+      {isLoading ? <p className="text-gray-500 p-4">{t("loading")}</p> : items.length === 0 ? (
+        <div className="text-center py-12 bg-white border rounded-lg"><p className="text-gray-500">{t("gmail_no_accounts")}</p></div>
       ) : (
         <div className="bg-white rounded-lg border overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -348,14 +337,14 @@ export default function GmailsPage() {
                 <th className="w-8 px-2 py-2"><input type="checkbox" checked={selected.size === items.length && items.length > 0} onChange={toggleAll} className="rounded" /></th>
                 <th className="px-2 py-2 text-left font-medium text-gray-500 w-8">#</th>
                 {([
-                  ["email", "Email", ""],
-                  ["_pw", "Password", "w-24"],
-                  ["_2fa", "2FA", "w-24"],
-                  ["recoveryEmail", "Recovery Mail", ""],
-                  ["status", "Status", "w-28"],
-                  ["vm.server.code", "Server", ""],
-                  ["vm.code", "VM", ""],
-                  ["notes", "Notes", ""],
+                  ["email", t("email"), ""],
+                  ["_pw", t("password"), "w-24"],
+                  ["_2fa", t("gmail_2fa_col"), "w-24"],
+                  ["recoveryEmail", t("gmail_recovery_mail"), ""],
+                  ["status", t("col_status"), "w-28"],
+                  ["vm.server.code", t("col_server"), ""],
+                  ["vm.code", t("col_vm"), ""],
+                  ["notes", t("col_notes"), ""],
                 ] as [string, string, string][]).map(([key, label, cls]) => (
                   <th
                     key={key}
@@ -373,8 +362,8 @@ export default function GmailsPage() {
                   <td className="px-2 py-0.5 text-center"><input type="checkbox" checked={selected.has(gmail.id)} onChange={() => toggleSelect(gmail.id)} className="rounded" /></td>
                   <td className="px-2 py-0.5 text-gray-400">{idx + 1}</td>
                   <td className="px-1 py-0.5">{canEdit ? <EditableCell value={gmail.email ?? ""} onSave={(v) => saveField(gmail.id, "email", v)} mono /> : <span className="font-mono px-2">{gmail.email}</span>}</td>
-                  <td className="px-1 py-0.5">{canEdit ? <SecretCell onSave={(v) => saveField(gmail.id, "password", v)} placeholder="password" /> : <span className="px-2 text-gray-400">***</span>}</td>
-                  <td className="px-1 py-0.5">{canEdit ? <SecretCell onSave={(v) => saveField(gmail.id, "twoFaCurrent", v)} placeholder="2FA codes" /> : <span className="px-2 text-gray-400">***</span>}</td>
+                  <td className="px-1 py-0.5">{canEdit ? <SecretCell onSave={(v) => saveField(gmail.id, "password", v)} placeholder="password" displayText={t("gmail_click_pass")} /> : <span className="px-2 text-gray-400">***</span>}</td>
+                  <td className="px-1 py-0.5">{canEdit ? <SecretCell onSave={(v) => saveField(gmail.id, "twoFaCurrent", v)} placeholder="2FA codes" displayText={t("gmail_click_pass")} /> : <span className="px-2 text-gray-400">***</span>}</td>
                   <td className="px-1 py-0.5">{canEdit ? <EditableCell value={gmail.recoveryEmail ?? ""} onSave={(v) => saveField(gmail.id, "recoveryEmail", v)} placeholder="recovery@..." /> : <span className="px-2">{gmail.recoveryEmail ?? "—"}</span>}</td>
                   <td className="px-1 py-0.5">
                     {canEdit ? (
@@ -383,21 +372,21 @@ export default function GmailsPage() {
                       </select>
                     ) : <Badge className={`text-xs ${statusColors[gmail.status] ?? ""}`}>{gmail.status}</Badge>}
                   </td>
-                  <td className="px-1 py-0.5 text-gray-600 px-2">{gmail.vm?.server?.code ?? "—"}</td>
+                  <td className="px-1 py-0.5 text-gray-600 px-2">{gmail.vms?.[0]?.server?.code ?? "—"}</td>
                   <td className="px-1 py-0.5 font-mono">
-                    {gmail.vm ? (
-                      <div className="flex items-center gap-1 group px-2">
-                        <span>{gmail.vm.code}</span>
-                        {canEdit && <button onClick={() => assignGmail.mutate({ projectId: projectId!, gmailId: gmail.id, vmId: null })} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 text-sm leading-none">&times;</button>}
+                    {gmail.vms && gmail.vms.length > 0 ? (
+                      <div className="flex items-center gap-1 px-2">
+                        {gmail.vms.map((v: any) => <span key={v.id} className="text-xs">{v.code}</span>)}
+                        <span className="text-[10px] text-gray-400">({gmail.vms.length}/2)</span>
                       </div>
-                    ) : <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">Free</Badge>}
+                    ) : <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">{t("free")}</Badge>}
                   </td>
-                  <td className="px-1 py-0.5">{canEdit ? <EditableCell value={gmail.notes ?? ""} onSave={(v) => saveField(gmail.id, "notes", v)} placeholder="notes..." /> : <span className="px-2">{gmail.notes ?? "—"}</span>}</td>
+                  <td className="px-1 py-0.5">{canEdit ? <EditableCell value={gmail.notes ?? ""} onSave={(v) => saveField(gmail.id, "notes", v)} placeholder={t("col_notes").toLowerCase() + "..."} /> : <span className="px-2">{gmail.notes ?? "—"}</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{items.length} Gmail accounts</div>
+          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{items.length} {t("gmail_accounts")}</div>
         </div>
       )}
     </div>

@@ -14,6 +14,7 @@ datasource db {
 model User {
   id            String          @id @default(cuid())
   email         String          @unique
+  username      String?         @unique
   name          String?
   password      String?
   pin           String?
@@ -38,6 +39,7 @@ model Project {
   members          ProjectMember[]
   servers          Server[]
   paypalAccounts   PayPalAccount[]
+  paypalEmails     PayPalEmail[]
   fundTransactions FundTransaction[]
   withdrawals      Withdrawal[]
   costRecords      CostRecord[]
@@ -86,6 +88,7 @@ model Server {
   credentials   Json?
   inventoryId   String?
   notes         String?
+  gmailGroup    Int          @default(1)
   monthlyCost   Decimal?     @db.Decimal(12, 2)
   billingCycle  Int?         @default(1) // months
   createdDate   DateTime?
@@ -93,10 +96,12 @@ model Server {
   project       Project      @relation(fields: [projectId], references: [id])
   projectId     String
   vms           VirtualMachine[]
+  fundTransactions FundTransaction[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   @@unique([code, projectId])
+  @@index([projectId])
 }
 
 enum ServerStatus {
@@ -120,9 +125,11 @@ model VirtualMachine {
   serverId      String
   proxy         ProxyIP?    @relation(fields: [proxyId], references: [id], onDelete: SetNull)
   proxyId       String?     @unique
-  gmail         GmailAccount?
+  gmail         GmailAccount? @relation(fields: [gmailId], references: [id], onDelete: SetNull)
+  gmailId       String?
   proxyHistory  ProxyAssignmentHistory[]
   tasks         VMTask[]
+  fundTransactions FundTransaction[]
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -193,14 +200,15 @@ model GmailAccount {
   recoveryEmail String?
   status        GmailStatus @default(ACTIVE)
   notes         String?
-  vm            VirtualMachine? @relation(fields: [vmId], references: [id])
-  vmId          String?     @unique
-  paypal        PayPalAccount? @relation(fields: [paypalId], references: [id])
+  vms           VirtualMachine[]
+  paypal        PayPalAccount? @relation(fields: [paypalId], references: [id], onDelete: SetNull)
   paypalId      String?
   project       Project     @relation(fields: [projectId], references: [id])
   projectId     String
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+
+  @@index([projectId])
 }
 
 enum GmailStatus {
@@ -215,18 +223,32 @@ enum GmailStatus {
 model PayPalAccount {
   id              String       @id @default(cuid())
   code            String
-  primaryEmail    String
+  primaryEmail    String       // denormalized from PayPalEmail for quick display/search
   secondaryEmail  String?
+  password        String?      // encrypted (legacy, credentials now in PayPalEmail)
+  twoFa           String?      // encrypted (legacy)
   bankCode        String?
-  hotmailToken    String?
+  hotmailToken    String?      // encrypted (legacy)
+  holder          String?      // who manages this PP
+  vmppCode        String?      // VMPP code for PP management
   status          PayPalStatus @default(ACTIVE)
   role            PayPalRole   @default(NORMAL)
   limitNote       String?
   company         String       @default("Bright Data Ltd.")
   serverAssignment String?
   notes           String?
+  holderName      String?      // Tên chủ PP
+  dateOfBirth     String?      // Ngày sinh
+  idNumber        String?      // Số CCCD
+  address         String?      // Địa chỉ
+  phone           String?      // SĐT
+  docsLink        String?      // Link docs (Google Drive, etc.)
+  suspendedAt     DateTime?    // Ngày bị suspend vĩnh viễn
+  limitedAt       DateTime?    // Ngày bị limit (cần updocs)
+  caseHistory     Json?        // [{date, type, note, docsLink}] - lịch sử xử lý
   project         Project      @relation(fields: [projectId], references: [id])
   projectId       String
+  emails          PayPalEmail[]
   gmails          GmailAccount[]
   fundsReceived   FundTransaction[]
   withdrawalsFrom Withdrawal[] @relation("WithdrawalSource")
@@ -237,6 +259,26 @@ model PayPalAccount {
   @@unique([code, projectId])
   @@index([projectId, status])
   @@index([projectId, role])
+}
+
+model PayPalEmail {
+  id            String        @id @default(cuid())
+  email         String
+  password      String?       // encrypted
+  twoFa         String?       // encrypted
+  hotmailToken  String?       // encrypted
+  isPrimary     Boolean       @default(false)
+  notes         String?
+  paypal        PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Cascade)
+  paypalId      String
+  project       Project       @relation(fields: [projectId], references: [id])
+  projectId     String
+  funds         FundTransaction[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([email, projectId])
+  @@index([paypalId])
 }
 
 enum PayPalStatus {
@@ -265,8 +307,14 @@ model FundTransaction {
   confirmed     Boolean       @default(false)
   company       String        @default("Bright Data Ltd.")
   notes         String?
-  paypal        PayPalAccount @relation(fields: [paypalId], references: [id])
+  paypal        PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Cascade)
   paypalId      String
+  paypalEmail   PayPalEmail?  @relation(fields: [paypalEmailId], references: [id], onDelete: SetNull)
+  paypalEmailId String?
+  server        Server?       @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  serverId      String?
+  vm            VirtualMachine? @relation(fields: [vmId], references: [id])
+  vmId          String?
   project       Project       @relation(fields: [projectId], references: [id])
   projectId     String
   createdAt     DateTime      @default(now())
@@ -275,7 +323,10 @@ model FundTransaction {
   @@unique([transactionId, projectId])
   @@index([projectId, date])
   @@index([paypalId])
+  @@index([paypalEmailId])
   @@index([confirmed])
+  @@index([serverId])
+  @@index([vmId])
 }
 
 model Withdrawal {
@@ -289,9 +340,9 @@ model Withdrawal {
   ppReceived     String?
   mailConfirmed  Boolean         @default(false)
   notes          String?
-  sourcePaypal   PayPalAccount   @relation("WithdrawalSource", fields: [sourcePaypalId], references: [id])
+  sourcePaypal   PayPalAccount   @relation("WithdrawalSource", fields: [sourcePaypalId], references: [id], onDelete: Cascade)
   sourcePaypalId String
-  destPaypal     PayPalAccount?  @relation("WithdrawalDest", fields: [destPaypalId], references: [id])
+  destPaypal     PayPalAccount?  @relation("WithdrawalDest", fields: [destPaypalId], references: [id], onDelete: SetNull)
   destPaypalId   String?
   project        Project         @relation(fields: [projectId], references: [id])
   projectId      String

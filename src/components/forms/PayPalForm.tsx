@@ -35,7 +35,7 @@ export function PayPalForm({ open, onClose, onSuccess, editData }: PayPalFormPro
     onSuccess: () => { onSuccess(); onClose(); resetForm(); },
   });
   const updatePP = trpc.paypal.update.useMutation({
-    onSuccess: () => { onSuccess(); onClose(); },
+    onSuccess: () => { onSuccess(); onClose(); resetForm(); },
   });
 
   const [form, setForm] = useState({

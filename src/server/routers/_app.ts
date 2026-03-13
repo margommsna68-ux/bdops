@@ -14,6 +14,7 @@ import { vmTaskRouter } from "./vmTask";
 import { auditLogRouter } from "./auditLog";
 import { deleteRequestRouter } from "./deleteRequest";
 import { userRouter } from "./user";
+import { paypalEmailRouter } from "./paypalEmail";
 
 export const appRouter = router({
   project: projectRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   auditLog: auditLogRouter,
   deleteRequest: deleteRequestRouter,
   user: userRouter,
+  paypalEmail: paypalEmailRouter,
 });
 
 export type AppRouter = typeof appRouter;

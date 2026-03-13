@@ -8,14 +8,20 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: "credentials",
       credentials: {
-        email: { label: "Email", type: "email" },
+        username: { label: "Username", type: "text" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+        if (!credentials?.username || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+        // Try username first, then email for backward compat
+        const user = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { username: credentials.username },
+              { email: credentials.username },
+            ],
+          },
         });
         if (!user || !user.password) return null;
 
@@ -36,10 +42,10 @@ export const authOptions: NextAuthOptions = {
     },
     async jwt({ token, user }) {
       // Always refresh memberships from DB to get latest role/modules
-      const email = user?.email ?? token.email;
-      if (email) {
+      const userId = (user as any)?.id ?? token.userId;
+      if (userId) {
         const dbUser = await prisma.user.findUnique({
-          where: { email },
+          where: { id: userId as string },
           include: {
             memberships: {
               include: { project: true },

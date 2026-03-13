@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 
 function LoginForm() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,14 +18,14 @@ function LoginForm() {
     setLoading(true);
 
     const res = await signIn("credentials", {
-      email,
+      username,
       password,
       redirect: false,
       callbackUrl,
     });
 
     if (res?.error) {
-      setError("Email hoac mat khau khong dung");
+      setError("Tên đăng nhập hoặc mật khẩu không đúng");
       setLoading(false);
     } else if (res?.url) {
       window.location.href = res.url;
@@ -36,20 +36,21 @@ function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Email
+          Tên đăng nhập
         </label>
         <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder="admin@bdops.com"
+          placeholder="username"
+          autoComplete="username"
         />
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Password
+          Mật khẩu
         </label>
         <input
           type="password"
@@ -70,7 +71,7 @@ function LoginForm() {
         disabled={loading}
         className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Dang xac thuc..." : "Dang nhap"}
+        {loading ? "Đang xác thực..." : "Đăng nhập"}
       </button>
     </form>
   );
@@ -92,7 +93,7 @@ export default function LoginPage() {
         </Suspense>
 
         <p className="text-xs text-center text-gray-500">
-          Contact admin for account access.
+          Liên hệ admin để được cấp tài khoản.
         </p>
       </div>
     </div>

@@ -242,7 +242,7 @@ async function main() {
       // Create GmailAccount if email exists
       if (gmailEmail && gmailEmail.includes("@")) {
         try {
-          await prisma.gmailAccount.upsert({
+          const gmail = await prisma.gmailAccount.upsert({
             where: { email: gmailEmail },
             update: {},
             create: {
@@ -250,9 +250,12 @@ async function main() {
               password: gmailPassword || null,
               recoveryEmail: recoveryEmail || null,
               status: "ACTIVE",
-              vmId: vm.id,
               projectId: projectAE.id,
             },
+          });
+          await prisma.virtualMachine.update({
+            where: { id: vm.id },
+            data: { gmailId: gmail.id },
           });
           gmailCount++;
         } catch (err) {

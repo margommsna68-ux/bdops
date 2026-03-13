@@ -36,11 +36,11 @@ export function GmailAssignDialog({ open, onClose, onSuccess }: GmailAssignDialo
   );
 
   const { data: gmails } = trpc.gmail.list.useQuery(
-    { projectId: projectId!, unassigned: true, limit: 200 },
+    { projectId: projectId!, limit: 200 },
     { enabled: !!projectId && open }
   );
 
-  const assignMutation = trpc.gmail.assignToVm.useMutation({
+  const assignMutation = trpc.vm.assignGmail.useMutation({
     onSuccess: () => {
       onSuccess();
       onClose();
@@ -50,15 +50,17 @@ export function GmailAssignDialog({ open, onClose, onSuccess }: GmailAssignDialo
   });
 
   // Filter VMs that don't have a gmail assigned
-  const availableVMs = vms?.items.filter((vm: any) => !vm.gmail) ?? [];
+  const availableVMs = vms?.items.filter((vm: any) => !vm.gmailId) ?? [];
+  // Filter Gmails with <2 VMs assigned
+  const availableGmails = gmails?.items.filter((g: any) => g.status === "ACTIVE" && (g._count?.vms ?? 0) < 2) ?? [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectId || !gmailId || !vmId) return;
     assignMutation.mutate({
       projectId,
-      gmailId,
       vmId,
+      gmailId,
     });
   };
 
@@ -70,17 +72,17 @@ export function GmailAssignDialog({ open, onClose, onSuccess }: GmailAssignDialo
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <p className="text-sm text-gray-500">
-            Select an unassigned Gmail and a VM without Gmail to link them.
+            Select an available Gmail and a VM without Gmail to link them.
           </p>
 
           <div>
-            <Label>Gmail Account (unassigned)</Label>
+            <Label>Gmail Account (available)</Label>
             <Select value={gmailId} onValueChange={setGmailId}>
               <SelectTrigger><SelectValue placeholder="Select Gmail..." /></SelectTrigger>
               <SelectContent>
-                {gmails?.items.map((g: any) => (
+                {availableGmails.map((g: any) => (
                   <SelectItem key={g.id} value={g.id}>
-                    {g.email}
+                    {g.email} ({g._count?.vms ?? 0}/2)
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -33,7 +33,7 @@ export const auditLogRouter = router({
           take: input.limit,
           orderBy: { createdAt: "desc" },
           include: {
-            user: { select: { id: true, name: true, email: true, image: true } },
+            user: { select: { id: true, name: true, email: true, username: true, image: true } },
           },
         }),
         ctx.prisma.auditLog.count({ where }),

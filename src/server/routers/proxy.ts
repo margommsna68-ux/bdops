@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
+import { createAuditLog } from "@/lib/audit";
 
 export const proxyRouter = router({
   list: infrastructureProcedure
@@ -69,7 +70,16 @@ export const proxyRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { projectId, id, ...data } = input;
       await ctx.prisma.proxyIP.findFirstOrThrow({ where: { id, projectId } });
-      return ctx.prisma.proxyIP.update({ where: { id }, data });
+      const result = await ctx.prisma.proxyIP.update({ where: { id }, data });
+      await createAuditLog({
+        action: "UPDATE",
+        entity: "ProxyIP",
+        entityId: id,
+        userId: (ctx.user as any).id,
+        projectId,
+        changes: data,
+      });
+      return result;
     }),
 
   // Manual assign proxy to VM
@@ -120,6 +130,15 @@ export const proxyRouter = router({
         },
       });
 
+      await createAuditLog({
+        action: "ASSIGN",
+        entity: "ProxyIP",
+        entityId: input.proxyId,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { vmId: input.vmId, proxyAddress: proxy.address },
+      });
+
       return { success: true };
     }),
 
@@ -168,6 +187,15 @@ export const proxyRouter = router({
           data: { unassignedAt: new Date(), reason: input.reason },
         });
       }
+
+      await createAuditLog({
+        action: "UNASSIGN",
+        entity: "ProxyIP",
+        entityId: input.proxyId,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { vmId: proxy.vm.id, proxyAddress: proxy.address, reason: input.reason },
+      });
 
       return { success: true };
     }),
@@ -262,7 +290,7 @@ export const proxyRouter = router({
             data: {
               address: p.address,
               host: parts[0],
-              port: parts[1] ? parseInt(parts[1]) : null,
+              port: parts[1] && !isNaN(parseInt(parts[1])) && parseInt(parts[1]) >= 1 && parseInt(parts[1]) <= 65535 ? parseInt(parts[1]) : null,
               subnet: p.subnet,
               status: "AVAILABLE",
               projectId: input.projectId,
@@ -279,7 +307,15 @@ export const proxyRouter = router({
   delete: moderatorProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.prisma.proxyIP.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      const proxy = await ctx.prisma.proxyIP.findFirstOrThrow({ where: { id: input.id, projectId: input.projectId } });
+      await createAuditLog({
+        action: "DELETE",
+        entity: "ProxyIP",
+        entityId: input.id,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { address: proxy.address, status: proxy.status },
+      });
       // Unassign from VM first if assigned
       await ctx.prisma.virtualMachine.updateMany({ where: { proxyId: input.id }, data: { proxyId: null } });
       return ctx.prisma.proxyIP.delete({ where: { id: input.id } });
@@ -288,6 +324,14 @@ export const proxyRouter = router({
   bulkDelete: moderatorProcedure
     .input(z.object({ projectId: z.string(), ids: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
+      await createAuditLog({
+        action: "BULK_DELETE",
+        entity: "ProxyIP",
+        entityId: input.ids.join(","),
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { count: input.ids.length, ids: input.ids },
+      });
       // Unassign VMs first
       await ctx.prisma.virtualMachine.updateMany({ where: { proxyId: { in: input.ids } }, data: { proxyId: null } });
       const result = await ctx.prisma.proxyIP.deleteMany({

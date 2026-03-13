@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "../trpc";
 import { APP_MODULES } from "../trpc";
 import bcrypt from "bcryptjs";
+import { createAuditLog } from "@/lib/audit";
 
 export const projectRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -35,7 +36,15 @@ export const projectRouter = router({
         where: { id: input.projectId },
         include: {
           members: {
-            include: { user: true },
+            include: {
+              user: {
+                include: {
+                  memberships: {
+                    include: { project: { select: { id: true, code: true, name: true } } },
+                  },
+                },
+              },
+            },
           },
           _count: {
             select: {
@@ -60,7 +69,7 @@ export const projectRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
-      return ctx.prisma.project.create({
+      const result = await ctx.prisma.project.create({
         data: {
           name: input.name,
           code: input.code.toUpperCase(),
@@ -70,6 +79,8 @@ export const projectRouter = router({
           },
         },
       });
+      await createAuditLog({ action: "CREATE", entity: "Project", entityId: result.id, userId, projectId: result.id, changes: { code: result.code, name: result.name } });
+      return result;
     }),
 
   update: adminProcedure
@@ -83,49 +94,61 @@ export const projectRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, ...data } = input;
-      return ctx.prisma.project.update({
+      const result = await ctx.prisma.project.update({
         where: { id: projectId },
         data,
       });
+      await createAuditLog({ action: "UPDATE", entity: "Project", entityId: projectId, userId: (ctx.user as any).id, projectId, changes: data });
+      return result;
     }),
 
-  // Create a new user with email + password
+  // Create a new user with username + password
   createUser: adminProcedure
     .input(
       z.object({
         projectId: z.string(),
-        email: z.string().email(),
+        username: z.string().min(1).max(50).regex(/^[a-zA-Z0-9._-]+$/, "Username chỉ chứa chữ, số, dấu chấm, gạch ngang"),
         name: z.string().min(1),
         password: z.string().min(6),
+        pin: z.string().min(4).max(6).regex(/^\d+$/).optional(),
         role: z.enum(["ADMIN", "MODERATOR", "USER"]),
         allowedModules: z.array(z.enum(APP_MODULES as unknown as [string, ...string[]])).default([]),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const hashedPassword = await bcrypt.hash(input.password, 10);
+      const hashedPin = input.pin ? await bcrypt.hash(input.pin, 10) : undefined;
 
-      // Create or find user
-      let user = await ctx.prisma.user.findUnique({
-        where: { email: input.email },
+      // Check if username already exists
+      const existing = await ctx.prisma.user.findFirst({
+        where: { username: input.username },
       });
-      if (user) {
+
+      let user;
+      if (existing) {
         // Update password if user already exists
+        const updateData: any = { password: hashedPassword, name: input.name };
+        if (hashedPin) updateData.pin = hashedPin;
         user = await ctx.prisma.user.update({
-          where: { id: user.id },
-          data: { password: hashedPassword, name: input.name },
+          where: { id: existing.id },
+          data: updateData,
         });
       } else {
+        // Auto-generate email from username for backward compat
+        const email = `${input.username}@bdops.local`;
         user = await ctx.prisma.user.create({
           data: {
-            email: input.email,
+            email,
+            username: input.username,
             name: input.name,
             password: hashedPassword,
+            ...(hashedPin ? { pin: hashedPin } : {}),
           },
         });
       }
 
       // Add to project
-      return ctx.prisma.projectMember.upsert({
+      const member = await ctx.prisma.projectMember.upsert({
         where: { userId_projectId: { userId: user.id, projectId: input.projectId } },
         update: { role: input.role, allowedModules: input.allowedModules },
         create: {
@@ -136,6 +159,8 @@ export const projectRouter = router({
         },
         include: { user: true },
       });
+      await createAuditLog({ action: "CREATE", entity: "User", entityId: user.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { username: input.username, name: input.name, role: input.role } });
+      return member;
     }),
 
   addMember: adminProcedure
@@ -178,29 +203,72 @@ export const projectRouter = router({
       const data: any = {};
       if (input.role) data.role = input.role;
       if (input.allowedModules) data.allowedModules = input.allowedModules;
-      return ctx.prisma.projectMember.update({
+      const result = await ctx.prisma.projectMember.update({
         where: { id: input.memberId },
         data,
         include: { user: true },
       });
+      await createAuditLog({ action: "UPDATE", entity: "ProjectMember", entityId: input.memberId, userId: (ctx.user as any).id, projectId: input.projectId, changes: data });
+      return result;
     }),
 
   removeMember: adminProcedure
     .input(z.object({ projectId: z.string(), memberId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const member = await ctx.prisma.projectMember.findUnique({ where: { id: input.memberId }, include: { user: { select: { username: true, name: true } } } });
+      await createAuditLog({ action: "DELETE", entity: "ProjectMember", entityId: input.memberId, userId: (ctx.user as any).id, projectId: input.projectId, changes: { removedUser: member?.user?.username || member?.user?.name } });
       return ctx.prisma.projectMember.delete({
         where: { id: input.memberId },
       });
     }),
 
-  // List all users (for admin)
+  // List users in this project (for admin)
   listUsers: adminProcedure
     .input(z.object({ projectId: z.string() }))
-    .query(async ({ ctx }) => {
+    .query(async ({ ctx, input }) => {
       return ctx.prisma.user.findMany({
-        select: { id: true, email: true, name: true, createdAt: true },
+        where: {
+          memberships: { some: { projectId: input.projectId } },
+        },
+        select: { id: true, email: true, username: true, name: true, createdAt: true },
         orderBy: { createdAt: "desc" },
       });
+    }),
+
+  // Update user info (name, username) - Admin only
+  updateUserInfo: adminProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        userId: z.string(),
+        name: z.string().min(1).optional(),
+        username: z.string().min(1).max(50).regex(/^[a-zA-Z0-9._-]+$/, "Username chỉ chứa chữ, số, dấu chấm, gạch ngang").optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify user belongs to project
+      await ctx.prisma.projectMember.findFirstOrThrow({
+        where: { projectId: input.projectId, userId: input.userId },
+      });
+
+      const data: any = {};
+      if (input.name !== undefined) data.name = input.name;
+      if (input.username !== undefined) {
+        // Check uniqueness
+        const existing = await ctx.prisma.user.findFirst({
+          where: { username: input.username, NOT: { id: input.userId } },
+        });
+        if (existing) throw new TRPCError({ code: "CONFLICT", message: "Username đã tồn tại" });
+        data.username = input.username;
+      }
+
+      const result = await ctx.prisma.user.update({
+        where: { id: input.userId },
+        data,
+        select: { id: true, username: true, name: true, email: true },
+      });
+      await createAuditLog({ action: "UPDATE", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId, changes: data });
+      return result;
     }),
 
   // Set PIN for a user (Admin/Moderator only)
@@ -209,7 +277,7 @@ export const projectRouter = router({
       z.object({
         projectId: z.string(),
         userId: z.string(),
-        pin: z.string().min(4).max(8).regex(/^\d+$/, "PIN must be digits only"),
+        pin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
       })
     )
     .mutation(async ({ ctx, input }) => {

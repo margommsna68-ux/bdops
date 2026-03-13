@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatDate } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 const statusColors: Record<string, string> = {
   PENDING: "bg-yellow-100 text-yellow-800",
@@ -15,6 +16,7 @@ const statusColors: Record<string, string> = {
 
 export default function DeleteRequestsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
+  const t = useT();
   const [statusFilter, setStatusFilter] = useState<"PENDING" | "APPROVED" | "REJECTED" | undefined>(
     "PENDING"
   );
@@ -35,14 +37,14 @@ export default function DeleteRequestsPage() {
     onSuccess: () => refetch(),
   });
 
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Delete Requests</h1>
-          <p className="text-gray-500">Review and approve or reject delete requests</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("dr_title")}</h1>
+          <p className="text-gray-500">{t("dr_subtitle")}</p>
         </div>
       </div>
 
@@ -64,7 +66,7 @@ export default function DeleteRequestsPage() {
             size="sm"
             onClick={() => setStatusFilter(undefined)}
           >
-            All
+            {t("all")}
           </Button>
         </div>
       </div>
@@ -72,10 +74,10 @@ export default function DeleteRequestsPage() {
       {/* Requests List */}
       <div className="bg-white rounded-lg border border-gray-200">
         {isLoading ? (
-          <div className="p-8 text-center text-gray-500">Loading...</div>
+          <div className="p-8 text-center text-gray-500">{t("loading")}</div>
         ) : !requests?.length ? (
           <div className="p-8 text-center text-gray-500">
-            No {statusFilter?.toLowerCase() ?? ""} delete requests.
+            {t("dr_no_requests")}
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
@@ -96,27 +98,27 @@ export default function DeleteRequestsPage() {
                     </p>
                     {req.reason && (
                       <p className="text-sm text-gray-600">
-                        <span className="font-medium">Reason:</span> {req.reason}
+                        <span className="font-medium">{t("dr_reason")}</span> {req.reason}
                       </p>
                     )}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                       <span>
-                        Requested by:{" "}
+                        {t("dr_requested_by")}{" "}
                         <span className="font-medium">
                           {req.requestedBy?.name || req.requestedBy?.email || "Unknown"}
                         </span>
                       </span>
-                      <span>Date: {formatDate(req.createdAt)}</span>
+                      <span>{t("dr_date")} {formatDate(req.createdAt)}</span>
                       {req.reviewedBy && (
                         <span>
-                          Reviewed by:{" "}
+                          {t("dr_reviewed_by")}{" "}
                           <span className="font-medium">
                             {req.reviewedBy.name || req.reviewedBy.email}
                           </span>
                         </span>
                       )}
                       {req.reviewNote && (
-                        <span>Note: {req.reviewNote}</span>
+                        <span>{t("dr_note")} {req.reviewNote}</span>
                       )}
                     </div>
                   </div>
@@ -126,20 +128,20 @@ export default function DeleteRequestsPage() {
                       <Button
                         size="sm"
                         onClick={() => {
-                          if (!window.confirm("Approve this delete request? The entity will be permanently deleted.")) return;
+                          if (!window.confirm(t("dr_approve_confirm"))) return;
                           approve.mutate({ projectId: projectId!, id: req.id });
                         }}
                         disabled={approve.isLoading}
                         className="bg-green-600 hover:bg-green-700"
                       >
-                        {approve.isLoading ? "..." : "Approve"}
+                        {approve.isLoading ? "..." : t("approve")}
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
                         className="text-red-600 hover:bg-red-50"
                         onClick={() => {
-                          const note = window.prompt("Rejection note (optional):");
+                          const note = window.prompt(t("dr_reject_note"));
                           reject.mutate({
                             projectId: projectId!,
                             id: req.id,
@@ -148,7 +150,7 @@ export default function DeleteRequestsPage() {
                         }}
                         disabled={reject.isLoading}
                       >
-                        {reject.isLoading ? "..." : "Reject"}
+                        {reject.isLoading ? "..." : t("reject")}
                       </Button>
                     </div>
                   )}

@@ -5,9 +5,10 @@ import { useState, useEffect } from "react";
 interface ProjectState {
   currentProjectId: string | null;
   currentProjectCode: string | null;
+  currentProjectName: string | null;
   currentRole: string | null;
   currentModules: string[];
-  setCurrentProject: (id: string, code: string, role: string, modules: string[]) => void;
+  setCurrentProject: (id: string, code: string, name: string, role: string, modules: string[]) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -15,10 +16,11 @@ export const useProjectStore = create<ProjectState>()(
     (set) => ({
       currentProjectId: null,
       currentProjectCode: null,
+      currentProjectName: null,
       currentRole: null,
       currentModules: [],
-      setCurrentProject: (id, code, role, modules) =>
-        set({ currentProjectId: id, currentProjectCode: code, currentRole: role, currentModules: modules }),
+      setCurrentProject: (id, code, name, role, modules) =>
+        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentRole: role, currentModules: modules }),
     }),
     {
       name: "bdops-project",
@@ -33,6 +35,10 @@ export function useHydration() {
 
   useEffect(() => {
     useProjectStore.persist.rehydrate();
+    // Also rehydrate settings store
+    import("./settings-store").then(({ useSettingsStore }) => {
+      useSettingsStore.persist.rehydrate();
+    });
     setHydrated(true);
   }, []);
 

@@ -4,10 +4,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type Column } from "@/components/tables/DataTable";
-import { ImportExcelDialog } from "@/components/forms/ImportExcelDialog";
+import { ImportCSVDialog } from "@/components/forms/ImportCSVDialog";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
-import { exportToExcel } from "@/lib/excel-export";
+import { exportToCSV } from "@/lib/excel-export";
+import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
 const statusColors: Record<string, string> = {
@@ -23,6 +24,7 @@ const statusColors: Record<string, string> = {
 const ALL_STATUSES = ["OK", "ERROR", "SUSPENDED", "NEW", "NOT_CONNECTED", "NOT_AVC", "BLOCKED"];
 
 export default function VMsPage() {
+  const t = useT();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
@@ -41,21 +43,21 @@ export default function VMsPage() {
   );
 
   const columns: Column<any>[] = [
-    { key: "code", header: "Code", render: (item) => <span className="font-medium">{item.code}</span> },
+    { key: "code", header: t("vm_code"), render: (item) => <span className="font-medium">{item.code}</span> },
     {
       key: "server",
-      header: "Server",
+      header: t("vm_server"),
       render: (item) => item.server?.code ?? "—",
       sortFn: (a, b) => (a.server?.code ?? "").localeCompare(b.server?.code ?? ""),
     },
     {
       key: "status",
-      header: "Status",
+      header: t("col_status"),
       render: (item) => <Badge className={`text-xs ${statusColors[item.status] ?? ""}`}>{item.status}</Badge>,
     },
     {
       key: "sdkId",
-      header: "SDK ID",
+      header: t("vm_sdk_id"),
       render: (item) => (
         <span className="text-xs text-gray-500 max-w-[100px] truncate block">
           {item.sdkId ? item.sdkId.slice(0, 16) + "..." : "—"}
@@ -64,12 +66,12 @@ export default function VMsPage() {
     },
     {
       key: "earnTotal",
-      header: "Earn Total",
+      header: t("vm_earn_total"),
       render: (item) => `$${Number(item.earnTotal ?? 0).toFixed(2)}`,
     },
     {
       key: "earn24h",
-      header: "24h",
+      header: t("vm_24h"),
       render: (item) => (
         <span className={Number(item.earn24h ?? 0) > 0 ? "text-green-700" : "text-gray-400"}>
           ${Number(item.earn24h ?? 0).toFixed(2)}
@@ -78,7 +80,7 @@ export default function VMsPage() {
     },
     {
       key: "proxy",
-      header: "Proxy",
+      header: t("vm_proxy"),
       sortable: false,
       render: (item) => (
         <span className="text-xs">{item.proxy?.address?.split(":")[0] ?? "—"}</span>
@@ -86,7 +88,7 @@ export default function VMsPage() {
     },
     {
       key: "gmail",
-      header: "Gmail",
+      header: t("vm_gmail"),
       sortable: false,
       render: (item) => <span className="text-xs">{item.gmail?.email ?? "—"}</span>,
     },
@@ -107,21 +109,21 @@ export default function VMsPage() {
       })
     : data?.items ?? [];
 
-  if (!projectId) return <p className="text-gray-500 p-8">Select a project first.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Virtual Machines</h1>
-          <p className="text-gray-500">VM status, SDK, earn tracking</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("vm_title")}</h1>
+          <p className="text-gray-500">{t("vm_subtitle")}</p>
         </div>
         <div className="flex gap-2">
           <Button
             variant="outline"
             onClick={() => {
               if (!filteredData.length) return;
-              exportToExcel(
+              exportToCSV(
                 filteredData.map((vm: any) => ({
                   Code: vm.code,
                   Server: vm.server?.code ?? "",
@@ -132,16 +134,15 @@ export default function VMsPage() {
                   Proxy: vm.proxy?.address?.split(":")[0] ?? "",
                   Gmail: vm.gmail?.email ?? "",
                 })),
-                "vms-export",
-                "VMs"
+                "vms-export"
               );
             }}
             disabled={!filteredData.length}
           >
-            Export Excel
+            {t("export_excel")}
           </Button>
           <Button variant="outline" onClick={() => setShowImport(true)}>
-            Import Excel
+            {t("vm_import_excel")}
           </Button>
         </div>
       </div>
@@ -152,7 +153,7 @@ export default function VMsPage() {
           size="sm"
           onClick={() => { setStatusFilter(""); setPage(1); }}
         >
-          ALL
+          {t("all")}
         </Button>
         {ALL_STATUSES.map((s) => (
           <Button
@@ -173,7 +174,7 @@ export default function VMsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-          placeholder="Search VM code, server, SDK ID, proxy, gmail..."
+          placeholder={t("vm_search")}
         />
         {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">&times;</button>}
       </div>
@@ -186,16 +187,17 @@ export default function VMsPage() {
         limit={50}
         onPageChange={setPage}
         isLoading={isLoading}
-        emptyMessage="No VMs yet."
+        emptyMessage={t("vm_no_vms")}
       />
 
-      <ImportExcelDialog
+      <ImportCSVDialog
         open={showImport}
         onClose={() => setShowImport(false)}
-        title="Import Virtual Machines"
-        description="Required columns: Code (VM code), Server (server code). Optional: Status, SDK ID, Notes"
+        title={t("vm_import_title")}
+        description={t("vm_import_desc")}
+        templateColumns={["Code", "Server", "Status", "SDK ID", "Notes"]}
         onImport={async (rows) => {
-          const items = rows.map((r: any) => ({
+          const items = rows.map((r) => ({
             code: String(r["Code"] || r["code"] || r["VM Code"] || ""),
             serverCode: String(r["Server"] || r["server"] || r["Server Code"] || ""),
             status: (String(r["Status"] || "NEW").toUpperCase().replace(/ /g, "_")) as any,
@@ -203,7 +205,7 @@ export default function VMsPage() {
             notes: r["Notes"] ? String(r["Notes"]) : undefined,
           }));
           const result = await bulkImport.mutateAsync({ projectId: projectId!, items });
-          toast.success(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? ' | Errors: ' + result.errors.join(', ') : ''}`);
+          toast.success(`${t("srv_imported")}: ${result.imported}, ${t("srv_skipped")}: ${result.skipped}${result.errors.length ? ' | Errors: ' + result.errors.join(', ') : ''}`);
           refetch();
         }}
       />
