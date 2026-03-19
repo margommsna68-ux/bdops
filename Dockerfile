@@ -8,10 +8,10 @@ COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
 RUN npm install --legacy-peer-deps
-RUN npx prisma generate
 
 COPY . .
 
+RUN npx prisma generate
 RUN npx next build
 
 ENV NODE_ENV=production

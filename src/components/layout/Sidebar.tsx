@@ -16,24 +16,28 @@ type NavItem =
 const navItems: NavItem[] = [
   // ─── Tổng Quan ───
   { href: "/dashboard", labelKey: "nav_dashboard", icon: "D", module: null },
-  // ─── Tài Chính ───
-  { type: "separator", labelKey: "nav_finance" },
+  // ─── Vận Hành ───
+  { type: "separator", labelKey: "nav_operations" },
+  { href: "/infrastructure/vms", labelKey: "nav_vms", icon: "E", module: "INFRASTRUCTURE" },
   { href: "/funds", labelKey: "nav_fund_tracking", icon: "$", module: "FUNDS" },
   { href: "/withdrawals", labelKey: "nav_withdrawals", icon: "W", module: "WITHDRAWALS" },
-  { href: "/costs", labelKey: "nav_costs", icon: "C", module: "COSTS" },
-  { href: "/profit", labelKey: "nav_profit", icon: "%", module: "PROFIT" },
   // ─── Hạ Tầng ───
   { type: "separator", labelKey: "nav_infrastructure" },
   { href: "/infrastructure/servers", labelKey: "nav_servers", icon: "S", module: "INFRASTRUCTURE" },
-  { href: "/infrastructure/vms", labelKey: "nav_vms", icon: "V", module: "INFRASTRUCTURE" },
   { href: "/infrastructure/proxies", labelKey: "nav_proxies", icon: "I", module: "INFRASTRUCTURE" },
   { href: "/paypals", labelKey: "nav_paypal_accounts", icon: "P", module: "PAYPALS" },
   { href: "/gmails", labelKey: "nav_gmails", icon: "G", module: "INFRASTRUCTURE" },
+  // ─── Tài Chính ───
+  { type: "separator", labelKey: "nav_finance" },
+  { href: "/agent-pp", labelKey: "nav_agent_pp", icon: "A", module: "AGENT_PP" },
+  { href: "/costs", labelKey: "nav_costs", icon: "C", module: "COSTS" },
+  { href: "/profit", labelKey: "nav_profit", icon: "%", module: "PROFIT" },
   // ─── Quản Trị ───
   { type: "separator", labelKey: "nav_admin" },
+  { href: "/admin/projects", labelKey: "nav_projects", icon: "P", adminOnly: true },
   { href: "/admin/users", labelKey: "nav_users", icon: "U", adminOnly: true },
   { href: "/audit-log", labelKey: "nav_audit_log", icon: "A", adminOnly: true },
-  { href: "/settings", labelKey: "nav_settings", icon: "*", adminOnly: true },
+  { href: "/settings", labelKey: "nav_settings", icon: "*" },
 ];
 
 interface SidebarProps {
@@ -51,21 +55,21 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
 
   const isAdmin = currentRole === "ADMIN";
   const isModerator = currentRole === "MODERATOR";
-  const hasFullAccess = isAdmin || isModerator;
+  const isAdminOrMod = isAdmin || isModerator;
 
   const isGolden = theme === "golden";
   const accentBg = isGolden ? "bg-amber-500" : "bg-[#2563eb]";
 
   const hasModuleAccess = (module: AppModule | null | undefined): boolean => {
     if (!module) return true;
-    if (hasFullAccess) return true;
+    if (isAdmin) return true;
     if (!currentRole) return false;
     return currentModules.includes(module);
   };
 
   const filteredItems = navItems.filter((item) => {
     if ("type" in item) return true;
-    if (item.adminOnly) return isAdmin || isModerator;
+    if (item.adminOnly) return isAdminOrMod;
     return hasModuleAccess(item.module);
   });
 
@@ -215,6 +219,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
             <button
               onClick={() => {
                 sessionStorage.removeItem("bdops-pin-ok");
+                localStorage.removeItem("bdops-project");
                 signOut({ callbackUrl: "/login" });
               }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors text-gray-300 hover:text-white ${
@@ -237,6 +242,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
             <button
               onClick={() => {
                 sessionStorage.removeItem("bdops-pin-ok");
+                localStorage.removeItem("bdops-project");
                 signOut({ callbackUrl: "/login" });
               }}
               className="text-gray-400 hover:text-white transition-colors p-1"

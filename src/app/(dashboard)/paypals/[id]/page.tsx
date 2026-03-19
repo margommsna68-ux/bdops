@@ -28,14 +28,17 @@ function CopyBtn({ value }: { value: string }) {
   );
 }
 
-// ─── Secret Field (reveal + copy) ─────────
-function SecretField({ emailId, field, projectId, pinVerified, onNeedPin }: {
+// ─── Secret Field (reveal + copy + inline edit) ─────────
+function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdit, onSaved }: {
   emailId: string; field: "password" | "twoFa" | "hotmailToken"; projectId: string;
-  pinVerified: boolean; onNeedPin: () => void;
+  pinVerified: boolean; onNeedPin: () => void; canEdit?: boolean; onSaved?: () => void;
 }) {
   const [revealed, setRevealed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const fetchCred = (): Promise<string> =>
     trpcVanilla.paypalEmail.getCredentials.query({ projectId, id: emailId })
@@ -56,6 +59,76 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin }: {
     }).catch(() => toast.error("Failed")).finally(() => setCopying(false));
   };
 
+  const handleEdit = () => {
+    if (!pinVerified) { onNeedPin(); return; }
+    // Fetch current value first
+    setLoading(true);
+    fetchCred().then((v) => {
+      setDraft(v === "—" ? "" : (v || ""));
+      setEditing(true);
+    }).catch(() => toast.error("Failed")).finally(() => setLoading(false));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload: any = { projectId, id: emailId };
+      payload[field] = draft || null;
+      await trpcVanilla.paypalEmail.update.mutate(payload);
+      toast.success("Đã lưu");
+      setEditing(false);
+      setRevealed(null);
+      onSaved?.();
+    } catch (e: any) {
+      toast.error(e.message || "Lỗi");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    const isLong = field === "hotmailToken";
+    return (
+      <div className={isLong ? "space-y-1" : "flex items-center gap-1"}>
+        {isLong ? (
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            rows={3}
+            className="w-full px-1.5 py-1 border border-blue-400 rounded text-[10px] font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y min-w-[280px]"
+            placeholder="email|password|token|clientId"
+          />
+        ) : (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }}
+            className="px-1.5 py-0.5 border border-blue-400 rounded text-xs font-mono w-[180px] focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            placeholder={field === "password" ? "password" : "2FA code"}
+          />
+        )}
+        <div className="flex items-center gap-1">
+          <button onClick={handleSave} disabled={saving} className="text-green-600 hover:text-green-800 shrink-0" title="Save">
+            {saving ? (
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            )}
+          </button>
+          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0" title="Cancel">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          {isLong && draft && (
+            <span className="text-[9px] text-gray-400">{draft.split("|").length} parts, {draft.length} chars</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (revealed !== null) {
     return (
       <div className="flex items-center gap-1.5">
@@ -64,6 +137,11 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin }: {
         <button onClick={() => setRevealed(null)} className="text-gray-400 hover:text-gray-600 shrink-0" title="Hide">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243" /></svg>
         </button>
+        {canEdit && (
+          <button onClick={handleEdit} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+          </button>
+        )}
       </div>
     );
   }
@@ -85,6 +163,11 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin }: {
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
         )}
       </button>
+      {canEdit && (
+        <button onClick={handleEdit} disabled={loading} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -95,8 +178,11 @@ export default function PayPalDetailPage() {
   const { currentRole } = useProjectStore();
   const utils = trpc.useUtils();
 
-  // PIN
-  const [pinVerified, setPinVerified] = useState(false);
+  // PIN — shared via sessionStorage with list page
+  const [pinVerified, setPinVerified] = useState(() => {
+    if (typeof window !== "undefined") return sessionStorage.getItem("pp_pin_ok") === "1";
+    return false;
+  });
   const [showPinDialog, setShowPinDialog] = useState(false);
 
   // Add email form
@@ -119,6 +205,17 @@ export default function PayPalDetailPage() {
   const [newNoteType, setNewNoteType] = useState("note");
   const [newNoteText, setNewNoteText] = useState("");
   const [newNoteDocsLink, setNewNoteDocsLink] = useState("");
+
+  // Mailbox
+  const [showMailbox, setShowMailbox] = useState(false);
+  const [mailboxEmails, setMailboxEmails] = useState<any[]>([]);
+  const [mailboxLoading, setMailboxLoading] = useState(false);
+  const [mailboxError, setMailboxError] = useState<string | null>(null);
+  const [mailboxEmailAddr, setMailboxEmailAddr] = useState("");
+  const [mailboxCurrentEmailId, setMailboxCurrentEmailId] = useState<string | null>(null); // PayPalEmail ID
+  // Email detail view
+  const [detailMsg, setDetailMsg] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const { data: pp, isLoading } = trpc.paypal.getById.useQuery(
     { projectId: projectId!, id: params.id as string },
@@ -157,6 +254,37 @@ export default function PayPalDetailPage() {
     onError: (e) => toast.error(e.message),
   });
 
+  const openMailbox = trpc.paypal.readMailbox.useMutation({
+    onSuccess: (res: any) => {
+      setMailboxLoading(false);
+      if (res.error) { setMailboxError(res.error); setMailboxEmails([]); }
+      else { setMailboxEmails(res.emails); setMailboxError(null); }
+      if (res.emailAddr) setMailboxEmailAddr(res.emailAddr);
+      setDetailMsg(null);
+      setShowMailbox(true);
+    },
+    onError: (e) => { setMailboxLoading(false); setMailboxError(e.message); setShowMailbox(true); },
+  });
+
+  const readDetail = trpc.paypal.readEmailDetail.useMutation({
+    onSuccess: (res: any) => {
+      setDetailLoading(false);
+      if (res.error) { toast.error(res.error); return; }
+      setDetailMsg(res);
+    },
+    onError: (e) => { setDetailLoading(false); toast.error(e.message); },
+  });
+
+  const checkSinglePP = trpc.paypal.checkSingleStatus.useMutation({
+    onSuccess: (res: any) => {
+      invalidate();
+      if (res.error) toast.error(res.error);
+      else if (res.newStatus) toast.error(`Phát hiện: ${res.newStatus} — ${res.alertSubject || ""}`);
+      else toast.success("PP OK — Không phát hiện suspend/limit");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
 
   const emails = emailsData ?? [];
@@ -164,10 +292,26 @@ export default function PayPalDetailPage() {
   // Parse bulk text for adding emails
   const parsedBulk = useMemo(() => {
     return bulkText.split("\n").map((l) => l.trim()).filter(Boolean).map((line) => {
-      const sep = line.includes("\t") ? "\t" : line.includes("|") ? "|" : null;
-      if (sep) {
-        const parts = line.split(sep).map((p) => p.trim());
+      // Tab-separated: email\tpassword\t2fa\ttoken
+      if (line.includes("\t")) {
+        const parts = line.split("\t").map((p) => p.trim());
         return { email: parts[0] || "", password: parts[1] || "", twoFa: parts[2] || "", hotmailToken: parts[3] || "" };
+      }
+      // Pipe-separated: email|password|refreshToken$$|clientId
+      // Token format: entire string stored as-is in hotmailToken field
+      if (line.includes("|")) {
+        const parts = line.split("|");
+        const email = parts[0]?.trim() || "";
+        const password = parts[1]?.trim() || "";
+        // Everything from parts[2] onwards is the token (rejoin with |)
+        // Format: refreshToken|clientId → store full "email|pass|token|clientId" as hotmailToken
+        const hasToken = parts.length >= 3 && parts[2]?.trim().length > 50;
+        return {
+          email,
+          password,
+          twoFa: "",
+          hotmailToken: hasToken ? line : "", // store full line as token so parseTokenField can extract
+        };
       }
       return { email: line, password: "", twoFa: "", hotmailToken: "" };
     });
@@ -212,7 +356,7 @@ export default function PayPalDetailPage() {
   return (
     <div className="space-y-6">
       <PinVerifyDialog open={showPinDialog} onClose={() => setShowPinDialog(false)}
-        onVerified={() => { setPinVerified(true); setShowPinDialog(false); }}
+        onVerified={() => { setPinVerified(true); sessionStorage.setItem("pp_pin_ok", "1"); setShowPinDialog(false); }}
         title="PIN Required" description="Nhập PIN để xem thông tin nhạy cảm" />
 
       {/* Breadcrumb */}
@@ -222,15 +366,52 @@ export default function PayPalDetailPage() {
         <span className="font-medium text-gray-900">{pp.code}</span>
       </nav>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{pp.code}</h1>
           <p className="text-gray-500">{pp.primaryEmail}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Badge className="bg-green-100 text-green-800">{pp.status}</Badge>
           <Badge variant="outline">{pp.role}</Badge>
           <Badge variant="outline">{pp.company}</Badge>
+          {pp.holder && (
+            <Badge className="bg-indigo-100 text-indigo-800">User Win: {pp.holder}</Badge>
+          )}
+          {pp.vmppCode && (
+            <Badge className="bg-purple-100 text-purple-800">VMPP: {pp.vmppCode}</Badge>
+          )}
+        </div>
+        {/* Action buttons */}
+        <div className="flex gap-2 ml-auto">
+          <button
+            onClick={() => {
+              setMailboxLoading(true);
+              setMailboxCurrentEmailId(null);
+              openMailbox.mutate({ projectId: projectId!, paypalId: pp.id });
+            }}
+            disabled={mailboxLoading}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {mailboxLoading ? (
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            )}
+            Open Mailbox
+          </button>
+          <button
+            onClick={() => checkSinglePP.mutate({ projectId: projectId!, paypalId: pp.id })}
+            disabled={checkSinglePP.isLoading}
+            className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {checkSinglePP.isLoading ? (
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            )}
+            Check PP
+          </button>
         </div>
       </div>
 
@@ -240,6 +421,8 @@ export default function PayPalDetailPage() {
         <StatCard title="Total Withdrawn" value={formatCurrency(Number(pp.totalWithdrawn))} />
         <StatCard title="Current Balance" value={formatCurrency(pp.currentBalance)} trend={pp.currentBalance > 0 ? "up" : "neutral"} />
       </div>
+
+      {/* ═══ Mailbox Popup ═══ */}
 
       {/* ═══════════════════════════════════════ */}
       {/* 180-DAY ALERT */}
@@ -334,11 +517,11 @@ export default function PayPalDetailPage() {
         {/* Add Email Panel */}
         {showAddEmail && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 space-y-3">
-            <p className="text-xs text-gray-500">Paste dữ liệu email (mỗi dòng 1 email). Cột: Email | Password | 2FA | Token — hoặc chỉ email</p>
+            <p className="text-xs text-gray-500">Paste dữ liệu email (mỗi dòng 1 email). Format: <code className="bg-gray-100 px-1 rounded">email|password|refreshToken|clientId</code> — hoặc chỉ email</p>
             <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)}
               rows={4} autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
               className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none bg-white resize-y"
-              placeholder={"user1@hotmail.com|Mi#o*AKxoOzk7G|AZKU IYVS 3RYR 5VBR|token123\nuser2@outlook.com|password2\nuser3@gmail.com"} />
+              placeholder={"user@outlook.com|password123|M.C521_BAY.0.U.-token$$|9e5f94bc-...\nuser2@outlook.com|password2\nuser3@gmail.com"} />
             {parsedBulk.length > 0 && (
               <div className="bg-white border rounded overflow-auto max-h-[160px]">
                 <table className="min-w-full text-xs">
@@ -418,15 +601,31 @@ export default function PayPalDetailPage() {
                     </td>
                     <td className="py-2 pr-2">
                       <SecretField emailId={email.id} field="password" projectId={projectId!}
-                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} />
+                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
                     </td>
                     <td className="py-2 pr-2">
                       <SecretField emailId={email.id} field="twoFa" projectId={projectId!}
-                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} />
+                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
                     </td>
                     <td className="py-2 pr-2">
-                      <SecretField emailId={email.id} field="hotmailToken" projectId={projectId!}
-                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} />
+                      <div className="flex items-center gap-1.5">
+                        <SecretField emailId={email.id} field="hotmailToken" projectId={projectId!}
+                          pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
+                        <button
+                          onClick={() => {
+                            setMailboxLoading(true);
+                            setMailboxEmailAddr(email.email);
+                            setMailboxCurrentEmailId(email.id);
+                            openMailbox.mutate({ projectId: projectId!, paypalId: pp.id, emailId: email.id });
+                          }}
+                          disabled={mailboxLoading}
+                          className="shrink-0 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium hover:bg-blue-200 disabled:opacity-50 flex items-center gap-0.5"
+                          title={`Open mailbox: ${email.email}`}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                          Mail
+                        </button>
+                      </div>
                     </td>
                     <td className="py-2 pr-2 text-right font-mono text-xs">
                       {email.totalReceived > 0 ? (
@@ -875,6 +1074,156 @@ export default function PayPalDetailPage() {
           </table>
         )}
       </div>
+
+      {/* ═══ Mailbox Popup Dialog ═══ */}
+      {showMailbox && (() => {
+        // Build list of emails with tokens for arrow navigation
+        const tokenEmails = emails.filter((e: any) => e.hotmailToken);
+        const currentIdx = mailboxCurrentEmailId ? tokenEmails.findIndex((e: any) => e.id === mailboxCurrentEmailId) : -1;
+        const hasPrev = currentIdx > 0;
+        const hasNext = currentIdx >= 0 && currentIdx < tokenEmails.length - 1;
+        const canNav = tokenEmails.length > 1;
+
+        const navigateTo = (idx: number) => {
+          const target = tokenEmails[idx];
+          if (!target) return;
+          setMailboxLoading(true);
+          setMailboxCurrentEmailId(target.id);
+          setMailboxEmailAddr(target.email);
+          setDetailMsg(null);
+          openMailbox.mutate({ projectId: projectId!, paypalId: pp.id, emailId: target.id });
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowMailbox(false); setDetailMsg(null); }}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="p-4 border-b bg-blue-50 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  {/* Arrow navigation */}
+                  {canNav && (
+                    <div className="flex items-center gap-0.5 mr-1">
+                      <button onClick={() => hasPrev && navigateTo(currentIdx - 1)} disabled={!hasPrev || mailboxLoading}
+                        className="p-1 rounded hover:bg-blue-100 disabled:opacity-30 disabled:cursor-not-allowed">
+                        <svg className="w-4 h-4 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                      </button>
+                      <button onClick={() => hasNext && navigateTo(currentIdx + 1)} disabled={!hasNext || mailboxLoading}
+                        className="p-1 rounded hover:bg-blue-100 disabled:opacity-30 disabled:cursor-not-allowed">
+                        <svg className="w-4 h-4 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      </button>
+                    </div>
+                  )}
+                  <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-blue-900 truncate">{mailboxEmailAddr || "Mailbox"}</h3>
+                      <Badge className="bg-blue-100 text-blue-800 text-[10px] shrink-0">{mailboxEmails.length}</Badge>
+                      {canNav && currentIdx >= 0 && (
+                        <span className="text-[10px] text-blue-500">{currentIdx + 1}/{tokenEmails.length}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {detailMsg && (
+                    <button onClick={() => setDetailMsg(null)}
+                      className="px-2.5 py-1 text-xs text-gray-600 hover:text-gray-800 font-medium border rounded hover:bg-gray-50">
+                      ← Inbox
+                    </button>
+                  )}
+                  <button onClick={() => {
+                    setMailboxLoading(true);
+                    openMailbox.mutate({ projectId: projectId!, paypalId: pp.id, emailId: mailboxCurrentEmailId || undefined });
+                  }} disabled={mailboxLoading}
+                    className="px-2.5 py-1 text-xs text-blue-600 hover:text-blue-800 font-medium border border-blue-200 rounded hover:bg-blue-50">
+                    {mailboxLoading ? "..." : "Refresh"}
+                  </button>
+                  <button onClick={() => { setShowMailbox(false); setDetailMsg(null); }} className="text-gray-400 hover:text-gray-600 p-1">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Body: Detail view or List view */}
+              {detailMsg ? (
+                /* Email Detail */
+                <div className="flex-1 overflow-y-auto">
+                  <div className="p-4 border-b bg-gray-50">
+                    <h4 className="text-base font-semibold text-gray-900">{detailMsg.subject}</h4>
+                    <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{detailMsg.senderName || detailMsg.sender}</span>
+                      <span>&lt;{detailMsg.sender}&gt;</span>
+                      <span className="ml-auto">
+                        {detailMsg.receivedAt && new Date(detailMsg.receivedAt).toLocaleString("vi-VN")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <iframe
+                      srcDoc={detailMsg.body}
+                      className="w-full border-0 min-h-[400px]"
+                      sandbox="allow-same-origin"
+                      style={{ height: "60vh" }}
+                      title="Email content"
+                    />
+                  </div>
+                </div>
+              ) : detailLoading ? (
+                <div className="p-8 text-center text-gray-400">
+                  <svg className="w-6 h-6 animate-spin mx-auto mb-2" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  Đang tải...
+                </div>
+              ) : mailboxError ? (
+                <div className="p-8 text-center text-red-500 text-sm">{mailboxError}</div>
+              ) : mailboxEmails.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 text-sm">Không có email nào</div>
+              ) : (
+                /* Email List */
+                <div className="divide-y overflow-y-auto flex-1">
+                  {mailboxEmails.map((em: any) => {
+                    const isPayPal = em.sender?.toLowerCase().includes("paypal");
+                    const isSuspendMail = /permanently deactivated|vô hiệu hóa/i.test(em.subject + " " + em.preview);
+                    const isLimitMail = /paused.*features|tạm dừng|limitation|limited/i.test(em.subject + " " + em.preview);
+                    return (
+                      <div key={em.id}
+                        className={`px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer ${!em.isRead ? "bg-blue-50/40" : ""}`}
+                        onClick={() => {
+                          setDetailLoading(true);
+                          readDetail.mutate({
+                            projectId: projectId!,
+                            paypalId: pp.id,
+                            emailId: mailboxCurrentEmailId || undefined,
+                            messageId: em.id,
+                          });
+                        }}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {!em.isRead && <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />}
+                              <span className="text-xs font-medium text-gray-900">{em.senderName || em.sender}</span>
+                              <span className="text-[10px] text-gray-400">&lt;{em.sender}&gt;</span>
+                              {isPayPal && <Badge className="bg-blue-100 text-blue-700 text-[9px]">PayPal</Badge>}
+                              {isSuspendMail && <Badge className="bg-red-100 text-red-700 text-[9px]">SUSPEND</Badge>}
+                              {isLimitMail && <Badge className="bg-yellow-100 text-yellow-700 text-[9px]">LIMITED</Badge>}
+                            </div>
+                            <p className="text-sm text-gray-800 mt-0.5">{em.subject}</p>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{em.preview}</p>
+                          </div>
+                          <span className="text-[10px] text-gray-400 shrink-0 whitespace-nowrap pt-0.5">
+                            {new Date(em.receivedAt).toLocaleDateString("vi-VN")}{" "}
+                            {new Date(em.receivedAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

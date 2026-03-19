@@ -6,10 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Combobox } from "@/components/ui/combobox";
 import { PickerDialog, type PickerItem } from "@/components/ui/picker-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { trpcVanilla } from "@/lib/trpc-vanilla";
 import { useProjectStore } from "@/lib/store";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { exportToCSV, parseCSV } from "@/lib/excel-export";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
@@ -49,7 +50,7 @@ function makeQuickRow(serverId = "", vmId = ""): QuickRow {
 }
 
 const DEFAULT_WIDTHS: Record<string, number> = {
-  checkbox: 40, date: 160, server: 130, vm: 110, paypal: 130,
+  checkbox: 40, date: 160, server: 130, vm: 110, paypal: 180,
   amount: 110, txid: 150, status: 100, company: 120, notes: 140, actions: 60,
 };
 
@@ -76,6 +77,8 @@ export default function FundsPage() {
   const [ppPickerFor, setPpPickerFor] = useState<{ rowId: string; type: "data" | "quick" } | null>(null);
   // VM name cache for quick-add display
   const [vmNameCache, setVmNameCache] = useState<Record<string, string>>({});
+  // PP selected email per row (rowId → email user chose in picker)
+  const [ppSelectedEmail, setPpSelectedEmail] = useState<Record<string, string>>({});
   const [editingAmount, setEditingAmount] = useState<string | null>(null);
   const [editingAmountValue, setEditingAmountValue] = useState("");
 
@@ -158,20 +161,43 @@ export default function FundsPage() {
     { enabled: !!projectId && !!qaServerId && showQuickAddPopup }
   );
 
+  const { data: serverTotals } = trpc.fund.serverTotals.useQuery(
+    { projectId: projectId! }, { enabled: !!projectId }
+  );
+  const serverTotalMap = new Map((serverTotals ?? []).map((s) => [s.serverId, s]));
+
   const unconfirmedCount = unconfirmedData?.length ?? 0;
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
 
   const serverOptions = (servers ?? []).map((s: any) => ({ value: s.id, label: s.code, sub: s.ipAddress }));
-  const ppOptions = (paypals?.items ?? []).map((pp: any) => ({ value: pp.id, label: pp.code, sub: pp.primaryEmail }));
+  const ppOptions = (paypals?.items ?? []).map((pp: any) => {
+    const firstEmail = pp.emails?.[0]?.email || pp.primaryEmail;
+    return { value: pp.id, label: pp.code, sub: firstEmail, emails: (pp.emails ?? []).map((e: any) => e.email) as string[] };
+  });
+  // Map paypalId → emails array for data table display
+  const ppEmailMap = new Map<string, string[]>();
+  for (const pp of (paypals?.items ?? []) as any[]) {
+    const emails = (pp.emails ?? []).map((e: any) => e.email as string);
+    if (emails.length === 0 && pp.primaryEmail) emails.push(pp.primaryEmail);
+    ppEmailMap.set(pp.id, emails);
+  }
   const qaVmOptions = (qaVmsData?.items ?? []).map((vm: any) => ({ value: vm.id, label: vm.code }));
 
-  // Picker items for popup
-  const ppPickerItems: PickerItem[] = (paypals?.items ?? []).map((pp: any) => ({
-    id: pp.id, label: pp.code, sub: pp.primaryEmail,
-    badge: pp.status, badgeColor: pp.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700",
-  }));
+  // PP picker data with emails + last used (exclude LIMITED/SUSPENDED/CLOSED)
+  const ppPickerData = (paypals?.items ?? [])
+    .filter((pp: any) => !["LIMITED", "SUSPENDED", "CLOSED"].includes(pp.status))
+    .map((pp: any) => ({
+      id: pp.id,
+      code: pp.code,
+      status: pp.status,
+      primaryEmail: pp.primaryEmail,
+      emails: pp.emails ?? [],
+      lastFundDate: pp.lastFundDate ? new Date(pp.lastFundDate) : null,
+      holder: pp.holder,
+      fundCount: pp._count?.fundsReceived ?? 0,
+    }));
 
   // VM picker query (when picker is open)
   const vmPickerServerId = vmPickerFor?.serverId ?? "";
@@ -363,8 +389,10 @@ export default function FundsPage() {
     <th className="relative px-2 py-2 text-left text-xs font-medium text-gray-500 select-none"
       style={{ width: colWidths[col], minWidth: 40 }}>
       {children}
-      <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-300 active:bg-blue-400"
-        onMouseDown={(e) => onResizeStart(col, e)} />
+      <div className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-10 group/handle flex items-center justify-center"
+        onMouseDown={(e) => onResizeStart(col, e)}>
+        <div className="w-[3px] h-5 rounded-full bg-gray-200 group-hover/handle:bg-blue-500 group-active/handle:bg-blue-600 transition-colors" />
+      </div>
     </th>
   );
 
@@ -382,7 +410,7 @@ export default function FundsPage() {
           <Button variant="outline" size="sm" onClick={() => {
             if (!items.length) return;
             exportToCSV(items.map((f: any) => ({
-              Date: formatDateTime(f.date), Server: f.server?.code ?? "", VM: f.vm?.code ?? "",
+              Date: formatDate(f.date), Server: f.server?.code ?? "", VM: f.vm?.code ?? "",
               PayPal: f.paypal?.code ?? "", Amount: Number(f.amount), "TX ID": f.transactionId,
               Confirmed: f.confirmed ? "Yes" : "No", Company: f.company, Notes: f.notes ?? "",
             })), "funds-export");
@@ -506,22 +534,30 @@ export default function FundsPage() {
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-semibold">{servers?.length ?? 0}</span>
           </button>
           {/* Each server card */}
-          {(servers ?? []).map((srv: any) => (
-            <button
-              key={srv.id}
-              onClick={() => { setFilterServerId(srv.id === filterServerId ? "" : srv.id); setPage(1); }}
-              className={`shrink-0 flex flex-col items-start px-3 py-2 rounded-lg border-2 text-left transition-all min-w-[120px] ${
-                filterServerId === srv.id
-                  ? "border-blue-500 bg-blue-50 shadow-sm"
-                  : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-              }`}
-            >
-              <span className={`text-sm font-bold ${filterServerId === srv.id ? "text-blue-700" : "text-gray-800"}`}>
-                {srv.code}
-              </span>
-              <span className="text-[10px] text-gray-400 mt-0.5">{srv.ipAddress || "—"}</span>
-            </button>
-          ))}
+          {(servers ?? []).map((srv: any) => {
+            const st = serverTotalMap.get(srv.id);
+            return (
+              <button
+                key={srv.id}
+                onClick={() => { setFilterServerId(srv.id === filterServerId ? "" : srv.id); setPage(1); }}
+                className={`shrink-0 flex flex-col items-start px-3 py-2 rounded-lg border-2 text-left transition-all min-w-[130px] ${
+                  filterServerId === srv.id
+                    ? "border-blue-500 bg-blue-50 shadow-sm"
+                    : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <span className={`text-sm font-bold ${filterServerId === srv.id ? "text-blue-700" : "text-gray-800"}`}>
+                    {srv.code}
+                  </span>
+                  {st && <span className="text-[10px] text-gray-400 ml-auto">{st.count} GD</span>}
+                </div>
+                <span className={`text-xs font-semibold mt-0.5 ${st && st.total > 0 ? "text-green-600" : "text-gray-400"}`}>
+                  {st ? formatCurrency(st.total) : "$0.00"}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -603,6 +639,7 @@ export default function FundsPage() {
                   onPickVm={() => row.serverId && setVmPickerFor({ rowId: row.id, serverId: row.serverId, type: "quick" })}
                   onPickPp={() => setPpPickerFor({ rowId: row.id, type: "quick" })}
                   vmName={vmNameCache[row.vmId] || ""}
+                  selectedEmail={ppSelectedEmail[row.id]}
                 />
               ))}
 
@@ -643,12 +680,33 @@ export default function FundsPage() {
                     </td>
 
                     {/* PayPal */}
-                    <td className="px-2 py-1.5 overflow-visible">
-                      <span className="font-medium text-xs cursor-pointer hover:bg-purple-50 hover:text-purple-700 px-1.5 py-0.5 rounded inline-flex items-center gap-1 border border-transparent hover:border-purple-200 transition-all"
-                        onClick={() => setPpPickerFor({ rowId: item.id, type: "data" })}>
-                        {item.paypal?.code ?? <span className="text-gray-300">—</span>}
-                        <svg className="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" /></svg>
-                      </span>
+                    <td className="px-2 py-1 overflow-visible">
+                      <div className="group/pp">
+                        <span className="font-semibold text-xs cursor-pointer hover:bg-purple-50 hover:text-purple-700 px-1.5 py-0.5 rounded inline-flex items-center gap-1 border border-transparent hover:border-purple-200 transition-all text-purple-700"
+                          onClick={() => setPpPickerFor({ rowId: item.id, type: "data" })}>
+                          {item.paypal?.code ?? <span className="text-gray-300">—</span>}
+                          <svg className="w-2.5 h-2.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
+                        </span>
+                        {(() => {
+                          const selectedEmail = ppSelectedEmail[item.id];
+                          const emails = ppEmailMap.get(item.paypalId ?? "") ?? [];
+                          const displayEmail = selectedEmail || emails[0];
+                          if (!displayEmail) return null;
+                          return (
+                            <div className="flex items-center gap-0.5 mt-0.5 pl-1">
+                              <span className="text-[10px] text-gray-500 truncate max-w-[140px]" title={emails.join("\n")}>
+                                {displayEmail}
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(displayEmail); toast.success("Copied!"); }}
+                                className="opacity-0 group-hover/pp:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity shrink-0 p-0.5"
+                                title="Copy email">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </td>
 
                     {/* Amount */}
@@ -808,14 +866,12 @@ export default function FundsPage() {
       })()}
 
       {/* PP Picker Dialog */}
-      <PickerDialog
+      <PPPickerDialog
         open={!!ppPickerFor}
         onClose={() => setPpPickerFor(null)}
-        title="Select PayPal"
-        items={ppPickerItems}
-        columns={4}
+        items={ppPickerData}
         selectedId={ppPickerFor?.type === "data" ? (items.find((i: any) => i.id === ppPickerFor?.rowId)?.paypalId ?? "") : ""}
-        onSelect={(ppId) => {
+        onSelect={(ppId, email) => {
           if (!ppPickerFor || !ppId) return;
           if (ppPickerFor.type === "data") {
             savePp(ppPickerFor.rowId, ppId);
@@ -823,6 +879,7 @@ export default function FundsPage() {
             const row = quickRows.find((r) => r.id === ppPickerFor.rowId);
             if (row) updateQuickRow(row.id, { ...row, paypalId: ppId });
           }
+          if (email) setPpSelectedEmail((prev) => ({ ...prev, [ppPickerFor.rowId]: email }));
           setPpPickerFor(null);
         }}
       />
@@ -831,11 +888,12 @@ export default function FundsPage() {
 }
 
 // ═══ Quick-Add Row (display only, save in parent) ═══
-function QuickAddRow({ row, serverOptions, ppOptions, saving, onChange, onSave, onRemove, onPickVm, onPickPp, vmName }: {
+function QuickAddRow({ row, serverOptions, ppOptions, saving, onChange, onSave, onRemove, onPickVm, onPickPp, vmName, selectedEmail }: {
   row: QuickRow;
-  serverOptions: { value: string; label: string; sub?: string }[];
-  ppOptions: { value: string; label: string; sub?: string }[];
+  serverOptions: { value: string; label: string; sub?: string; emails?: string[] }[];
+  ppOptions: { value: string; label: string; sub?: string; emails?: string[] }[];
   saving: boolean;
+  selectedEmail?: string;
   onChange: (row: QuickRow) => void;
   onSave: () => void;
   onRemove: () => void;
@@ -866,12 +924,28 @@ function QuickAddRow({ row, serverOptions, ppOptions, saving, onChange, onSave, 
         </button>
       </td>
       <td className="px-1 py-1">
-        <button
-          onClick={() => onPickPp?.()}
-          className={`w-full text-left px-1.5 py-1 text-xs border rounded transition-colors ${row.paypalId ? "bg-purple-50 border-purple-200 text-purple-700 font-medium" : "bg-white border-gray-200 text-gray-400 hover:border-purple-300"}`}
-        >
-          {row.paypalId ? ppOptions.find(p => p.value === row.paypalId)?.label || "PP selected" : "Pick PP..."}
-        </button>
+        <div className="group/pp">
+          <button
+            onClick={() => onPickPp?.()}
+            className={`text-left px-1.5 py-0.5 text-xs border rounded transition-colors ${row.paypalId ? "bg-purple-50 border-purple-200 text-purple-700 font-semibold" : "bg-white border-gray-200 text-gray-400 hover:border-purple-300"}`}
+          >
+            {row.paypalId ? ppOptions.find(p => p.value === row.paypalId)?.label || "PP" : "Pick PP..."}
+          </button>
+          {row.paypalId && (() => {
+            const pp = ppOptions.find(p => p.value === row.paypalId);
+            const displayEmail = selectedEmail || pp?.sub;
+            if (!displayEmail) return null;
+            return (
+              <div className="flex items-center gap-0.5 mt-0.5 pl-0.5">
+                <span className="text-[10px] text-gray-500 truncate max-w-[120px]" title={pp?.emails?.join("\n") || displayEmail}>{displayEmail}</span>
+                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(displayEmail); toast.success("Copied!"); }}
+                  className="opacity-0 group-hover/pp:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity shrink-0 p-0.5" title="Copy email">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                </button>
+              </div>
+            );
+          })()}
+        </div>
       </td>
       <td className="px-1 py-1">
         <input type="number" step="0.01" min="0" value={row.amount}
@@ -906,5 +980,220 @@ function QuickAddRow({ row, serverOptions, ppOptions, saving, onChange, onSave, 
         </Button>
       </td>
     </tr>
+  );
+}
+
+// ═══ PP Picker Dialog — list layout with emails, status, last used ═══
+interface PPPickerItem {
+  id: string;
+  code: string;
+  status: string;
+  primaryEmail: string | null;
+  emails: { id: string; email: string; isPrimary: boolean }[];
+  lastFundDate: Date | null;
+  holder: string | null;
+  fundCount: number;
+}
+
+type PPSort = "balanced" | "last_used_asc" | "fund_count_asc";
+
+function formatDaysAgo(date: Date | null): { text: string; color: string } {
+  if (!date) return { text: "Chưa dùng", color: "text-gray-400" };
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const diff = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+  if (diff === 0) return { text: "Hôm nay", color: "text-green-600" };
+  if (diff === 1) return { text: "Hôm qua", color: "text-blue-600" };
+  if (diff <= 7) return { text: `${diff} ngày trước`, color: "text-orange-600" };
+  if (diff <= 30) return { text: `${diff} ngày trước`, color: "text-red-500" };
+  return { text: `${diff} ngày trước`, color: "text-red-700 font-bold" };
+}
+
+const statusColors: Record<string, string> = {
+  ACTIVE: "bg-green-100 text-green-700",
+  LIMITED: "bg-red-100 text-red-700",
+  SUSPENDED: "bg-orange-100 text-orange-700",
+  CLOSED: "bg-gray-100 text-gray-500",
+  PENDING_VERIFY: "bg-yellow-100 text-yellow-700",
+};
+
+function PPPickerDialog({ open, onClose, items, selectedId, onSelect }: {
+  open: boolean;
+  onClose: () => void;
+  items: PPPickerItem[];
+  selectedId: string;
+  onSelect: (id: string, email: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<PPSort>("balanced");
+
+  const filtered = items.filter((pp) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return pp.code.toLowerCase().includes(q)
+      || pp.primaryEmail?.toLowerCase().includes(q)
+      || pp.emails.some((e) => e.email.toLowerCase().includes(q))
+      || pp.holder?.toLowerCase().includes(q);
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === "balanced") {
+      // Score = days since last used + penalty for high fund count
+      // Higher score = should be used first (top)
+      const now = Date.now();
+      const daysA = a.lastFundDate ? Math.floor((now - new Date(a.lastFundDate).getTime()) / 86400000) : 999;
+      const daysB = b.lastFundDate ? Math.floor((now - new Date(b.lastFundDate).getTime()) / 86400000) : 999;
+      const scoreA = daysA * 2 - a.fundCount;
+      const scoreB = daysB * 2 - b.fundCount;
+      return scoreB - scoreA || a.code.localeCompare(b.code);
+    }
+    if (sort === "last_used_asc") {
+      if (!a.lastFundDate && !b.lastFundDate) return a.code.localeCompare(b.code);
+      if (!a.lastFundDate) return -1;
+      if (!b.lastFundDate) return 1;
+      return new Date(a.lastFundDate).getTime() - new Date(b.lastFundDate).getTime();
+    }
+    if (sort === "fund_count_asc") {
+      return (a.fundCount - b.fundCount) || a.code.localeCompare(b.code);
+    }
+    return a.code.localeCompare(b.code);
+  });
+
+  const handleSelect = (id: string, email: string) => {
+    onSelect(id, email);
+    setSearch("");
+  };
+
+  const handleClose = () => {
+    setSearch("");
+    onClose();
+  };
+
+  const copyEmail = (email: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(email);
+    toast.success(`Copied: ${email}`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Chọn PayPal — <span className="text-purple-600">chọn đúng email muốn nhận tiền</span></DialogTitle>
+        </DialogHeader>
+
+        <div className="flex gap-2 items-center">
+          <div className="relative flex-1">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <Input placeholder="Tìm PP code, email, holder..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" autoFocus />
+          </div>
+          <span className="text-xs text-gray-400 whitespace-nowrap">{sorted.length} PP</span>
+        </div>
+
+        {/* Sort buttons */}
+        <div className="flex gap-1.5 items-center">
+          <span className="text-xs text-gray-400">Sắp xếp:</span>
+          {([
+            ["balanced", "Cân bằng"],
+            ["last_used_asc", "Lâu chưa dùng"],
+            ["fund_count_asc", "Ít lần nhận"],
+          ] as const).map(([key, label]) => (
+            <button key={key}
+              onClick={() => setSort(key)}
+              className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                sort === key ? "bg-blue-100 border-blue-300 text-blue-700 font-medium" : "border-gray-200 text-gray-500 hover:bg-gray-50"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto -mx-2 space-y-1">
+          {sorted.length === 0 && (
+            <div className="text-center py-8 text-gray-400 text-sm">Không tìm thấy</div>
+          )}
+          {sorted.map((pp) => {
+            const isSelected = pp.id === selectedId;
+            const daysAgo = formatDaysAgo(pp.lastFundDate);
+            const allEmails = pp.emails.length > 0 ? pp.emails : (pp.primaryEmail ? [{ id: "primary", email: pp.primaryEmail, isPrimary: true }] : []);
+
+            return (
+              <div key={pp.id}
+                className={`px-3 py-2.5 rounded-lg border-2 transition-all hover:shadow-sm ${
+                  isSelected
+                    ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200"
+                    : "border-transparent hover:border-gray-200 hover:bg-gray-50"
+                }`}>
+                {/* Header row */}
+                <div className="flex items-center gap-3">
+                  {/* PP Code */}
+                  <span className={`text-sm font-bold min-w-[60px] ${isSelected ? "text-blue-700" : "text-gray-900"}`}>
+                    {pp.code}
+                  </span>
+
+                  {/* Status badge */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 ${statusColors[pp.status] || "bg-gray-100 text-gray-600"}`}>
+                    {pp.status}
+                  </span>
+
+                  {/* Holder */}
+                  {pp.holder && (
+                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                      {pp.holder}
+                    </span>
+                  )}
+
+                  {/* Fund count */}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                    pp.fundCount === 0 ? "bg-red-50 text-red-600" :
+                    pp.fundCount <= 5 ? "bg-orange-50 text-orange-600" :
+                    pp.fundCount <= 20 ? "bg-blue-50 text-blue-600" :
+                    "bg-green-50 text-green-700"
+                  }`}>
+                    {pp.fundCount} lần dùng
+                  </span>
+
+                  <div className="flex-1" />
+
+                  {/* Last used */}
+                  <span className={`text-xs whitespace-nowrap ${daysAgo.color}`}>
+                    {daysAgo.text}
+                  </span>
+                </div>
+
+                {/* Emails - click email to select */}
+                {allEmails.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {allEmails.map((em) => (
+                      <span key={em.id}
+                        onClick={() => handleSelect(pp.id, em.email)}
+                        className="inline-flex items-center gap-1.5 text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-2.5 py-1 group cursor-pointer hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all"
+                        title={`Chọn ${pp.code} với email này`}>
+                        <svg className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        <span className="font-medium">{em.email}</span>
+                        <button
+                          onClick={(e) => copyEmail(em.email, e)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110 ml-0.5"
+                          title="Copy email"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

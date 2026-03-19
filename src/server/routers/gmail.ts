@@ -45,6 +45,7 @@ export const gmailRouter = router({
         twoFaCurrent: z.string().optional(),
         twoFaOld: z.string().optional(),
         recoveryEmail: z.string().optional(),
+        token: z.string().optional(),
         status: z.enum(["ACTIVE", "SUSPENDED", "NEEDS_RECOVERY", "NEEDS_2FA_UPDATE", "BLOCKED", "DISABLED"]).default("ACTIVE"),
         paypalId: z.string().optional(),
         notes: z.string().optional(),
@@ -55,6 +56,7 @@ export const gmailRouter = router({
       if (data.password) data.password = encrypt(data.password);
       if (data.twoFaCurrent) data.twoFaCurrent = encrypt(data.twoFaCurrent);
       if (data.twoFaOld) data.twoFaOld = encrypt(data.twoFaOld);
+      if (data.token) data.token = encrypt(data.token);
 
       const created = await ctx.prisma.gmailAccount.create({ data: { ...data, projectId } });
       await createAuditLog({
@@ -78,6 +80,7 @@ export const gmailRouter = router({
         status: z.enum(["ACTIVE", "SUSPENDED", "NEEDS_RECOVERY", "NEEDS_2FA_UPDATE", "BLOCKED", "DISABLED"]).optional(),
         twoFaCurrent: z.string().optional(),
         recoveryEmail: z.string().nullable().optional(),
+        token: z.string().nullable().optional(),
         paypalId: z.string().nullable().optional(),
         notes: z.string().nullable().optional(),
       })
@@ -88,6 +91,7 @@ export const gmailRouter = router({
         where: { id, projectId },
       });
       if (data.password) data.password = encrypt(data.password);
+      if (data.token) data.token = encrypt(data.token);
       if (data.twoFaCurrent) {
         const existing = await ctx.prisma.gmailAccount.findUniqueOrThrow({
           where: { id },
@@ -132,8 +136,9 @@ export const gmailRouter = router({
           z.object({
             email: z.string().email(),
             password: z.string().optional(),
-            twoFaCurrent: z.string().optional(),
             recoveryEmail: z.string().optional(),
+            twoFaCurrent: z.string().optional(),
+            token: z.string().optional(),
           })
         ),
       })
@@ -147,6 +152,7 @@ export const gmailRouter = router({
               email: g.email,
               password: g.password ? encrypt(g.password) : null,
               twoFaCurrent: g.twoFaCurrent ? encrypt(g.twoFaCurrent) : null,
+              token: g.token ? encrypt(g.token) : null,
               recoveryEmail: g.recoveryEmail,
               projectId: input.projectId,
               status: "ACTIVE",
@@ -173,13 +179,15 @@ export const gmailRouter = router({
     .query(async ({ ctx, input }) => {
       const gmail = await ctx.prisma.gmailAccount.findFirstOrThrow({
         where: { id: input.id, projectId: input.projectId },
-        select: { password: true, twoFaCurrent: true },
+        select: { password: true, twoFaCurrent: true, token: true },
       });
       let password = gmail.password;
       let twoFaCurrent = gmail.twoFaCurrent;
+      let token = gmail.token;
       if (password) { try { password = decrypt(password); } catch {} }
       if (twoFaCurrent) { try { twoFaCurrent = decrypt(twoFaCurrent); } catch {} }
-      return { password, twoFaCurrent };
+      if (token) { try { token = decrypt(token); } catch {} }
+      return { password, twoFaCurrent, token };
     }),
 
   delete: moderatorProcedure

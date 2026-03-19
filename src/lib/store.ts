@@ -8,7 +8,9 @@ interface ProjectState {
   currentProjectName: string | null;
   currentRole: string | null;
   currentModules: string[];
-  setCurrentProject: (id: string, code: string, name: string, role: string, modules: string[]) => void;
+  canManageUsers: boolean;
+  currentMemberId: string | null;
+  setCurrentProject: (id: string, code: string, name: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -19,8 +21,10 @@ export const useProjectStore = create<ProjectState>()(
       currentProjectName: null,
       currentRole: null,
       currentModules: [],
-      setCurrentProject: (id, code, name, role, modules) =>
-        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentRole: role, currentModules: modules }),
+      canManageUsers: false,
+      currentMemberId: null,
+      setCurrentProject: (id, code, name, role, modules, canManageUsers = false, memberId = undefined) =>
+        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null }),
     }),
     {
       name: "bdops-project",

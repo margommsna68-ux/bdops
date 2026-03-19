@@ -469,7 +469,7 @@ export const fundRouter = router({
       const funds = await ctx.prisma.fundTransaction.findMany({
         where,
         include: {
-          paypal: { select: { id: true, code: true, primaryEmail: true, role: true } },
+          paypal: { select: { id: true, code: true, primaryEmail: true, role: true, holder: true, vmppCode: true } },
           server: { select: { code: true } },
           vm: { select: { code: true } },
         },
@@ -482,6 +482,8 @@ export const fundRouter = router({
         paypalCode: string;
         paypalEmail: string;
         paypalRole: string;
+        holder: string | null;
+        vmppCode: string | null;
         totalAmount: number;
         transactions: typeof funds;
       }> = {};
@@ -493,6 +495,8 @@ export const fundRouter = router({
             paypalCode: f.paypal.code,
             paypalEmail: f.paypal.primaryEmail,
             paypalRole: f.paypal.role,
+            holder: f.paypal.holder,
+            vmppCode: f.paypal.vmppCode,
             totalAmount: 0,
             transactions: [],
           };
@@ -502,5 +506,23 @@ export const fundRouter = router({
       }
 
       return Object.values(grouped).sort((a, b) => b.totalAmount - a.totalAmount);
+    }),
+
+  serverTotals: fundsProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const results = await ctx.prisma.fundTransaction.groupBy({
+        by: ["serverId"],
+        where: { projectId: input.projectId, confirmed: true },
+        _sum: { amount: true },
+        _count: true,
+      });
+      return results
+        .filter((r) => r.serverId)
+        .map((r) => ({
+          serverId: r.serverId!,
+          total: Number(r._sum.amount ?? 0),
+          count: r._count,
+        }));
     }),
 });

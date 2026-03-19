@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +12,16 @@ import {
 } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
+import { useT } from "@/lib/i18n";
+import toast from "react-hot-toast";
+
+const CATEGORIES = [
+  { value: "SERVER", vi: "Server", color: "bg-blue-100 text-blue-800" },
+  { value: "IP_PROXY", vi: "IP/Proxy", color: "bg-purple-100 text-purple-800" },
+  { value: "GMAIL", vi: "Gmail", color: "bg-red-100 text-red-800" },
+  { value: "PAYPAL", vi: "PayPal", color: "bg-indigo-100 text-indigo-800" },
+  { value: "OTHER", vi: "Khác", color: "bg-gray-200 text-gray-800" },
+] as const;
 
 interface CostFormProps {
   open: boolean;
@@ -20,149 +29,99 @@ interface CostFormProps {
   onSuccess: () => void;
 }
 
-function dateToISO(dateStr: string): string {
-  const now = new Date();
-  const timePart = now.toTimeString().slice(0, 8);
-  return new Date(`${dateStr}T${timePart}`).toISOString();
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function CostForm({ open, onClose, onSuccess }: CostFormProps) {
+  const t = useT();
   const projectId = useProjectStore((s) => s.currentProjectId);
 
   const createCost = trpc.cost.create.useMutation({
-    onSuccess: () => { onSuccess(); onClose(); resetForm(); },
+    onSuccess: () => {
+      onSuccess();
+      onClose();
+      setForm(emptyForm());
+      toast.success(t("saved"));
+    },
+    onError: (e) => toast.error(e.message),
   });
 
-  const [form, setForm] = useState({
-    date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
-    serverCost: "",
-    ipCost: "",
-    extraCost: "",
-    isPrepaid: false,
+  const emptyForm = () => ({
+    date: todayStr(),
+    category: "SERVER" as string,
+    amount: "",
     note: "",
-    fundingSource: "",
+    isPrepaid: false,
   });
 
-  const resetForm = () =>
-    setForm({
-      date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(),
-      serverCost: "", ipCost: "", extraCost: "",
-      isPrepaid: false, note: "", fundingSource: "",
-    });
+  const [form, setForm] = useState(emptyForm());
 
-  const total =
-    (parseFloat(form.serverCost) || 0) +
-    (parseFloat(form.ipCost) || 0) +
-    (parseFloat(form.extraCost) || 0);
+  useEffect(() => {
+    if (open) setForm(emptyForm());
+  }, [open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!projectId) return;
+    if (!projectId || !form.amount) return;
     createCost.mutate({
       projectId,
-      date: dateToISO(form.date),
-      serverCost: form.serverCost ? parseFloat(form.serverCost) : undefined,
-      ipCost: form.ipCost ? parseFloat(form.ipCost) : undefined,
-      extraCost: form.extraCost ? parseFloat(form.extraCost) : undefined,
-      total,
-      isPrepaid: form.isPrepaid,
+      date: new Date(`${form.date}T12:00:00`).toISOString(),
+      category: form.category as any,
+      amount: parseFloat(form.amount),
       note: form.note || undefined,
-      fundingSource: form.fundingSource || undefined,
+      isPrepaid: form.isPrepaid,
     });
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add Cost Record</DialogTitle>
+          <DialogTitle>{t("cost_form_title_add")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label>Date</Label>
-            <Input
-              type="date"
-              value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Server Cost ($)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.serverCost}
-                onChange={(e) => setForm({ ...form, serverCost: e.target.value })}
-                placeholder="2470"
-              />
+            <Label className="mb-1.5 block">{t("cost_category")}</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {CATEGORIES.map((c) => (
+                <button key={c.value} type="button" onClick={() => setForm({ ...form, category: c.value })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${form.category === c.value ? `${c.color} ring-2 ring-offset-1 ring-gray-400 scale-105` : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                  {c.vi}
+                </button>
+              ))}
             </div>
-            <div>
-              <Label>IP Cost ($)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.ipCost}
-                onChange={(e) => setForm({ ...form, ipCost: e.target.value })}
-                placeholder="1250"
-              />
-            </div>
-            <div>
-              <Label>Extra ($)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.extraCost}
-                onChange={(e) => setForm({ ...form, extraCost: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-          </div>
-
-          <div className="bg-gray-50 rounded-md p-3 text-center">
-            <span className="text-sm text-gray-500">Total: </span>
-            <span className="text-lg font-bold">${total.toFixed(2)}</span>
           </div>
 
           <div>
-            <Label>Funding Source</Label>
-            <Input
-              value={form.fundingSource}
-              onChange={(e) => setForm({ ...form, fundingSource: e.target.value })}
-              placeholder="Marua withdrawal, Viet chi..."
-            />
+            <Label>{t("cost_date")}</Label>
+            <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
           </div>
 
           <div>
-            <Label>Note</Label>
-            <Textarea
-              value={form.note}
-              onChange={(e) => setForm({ ...form, note: e.target.value })}
-              rows={2}
-            />
+            <Label>{t("cost_amount")} ($)</Label>
+            <Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              placeholder="0.00" required autoFocus />
+          </div>
+
+          <div>
+            <Label>{t("cost_note")}</Label>
+            <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
+              placeholder={t("cost_note_placeholder")} />
           </div>
 
           <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="isPrepaid"
-              checked={form.isPrepaid}
-              onChange={(e) => setForm({ ...form, isPrepaid: e.target.checked })}
-              className="rounded"
-            />
-            <Label htmlFor="isPrepaid">Prepaid (for next month)</Label>
+            <input type="checkbox" id="isPrepaid" checked={form.isPrepaid} onChange={(e) => setForm({ ...form, isPrepaid: e.target.checked })} className="rounded" />
+            <Label htmlFor="isPrepaid">{t("cost_form_prepaid_label")}</Label>
           </div>
 
-          {createCost.error && (
-            <p className="text-sm text-red-600">{createCost.error.message}</p>
-          )}
+          {createCost.error && <p className="text-sm text-red-600">{createCost.error.message}</p>}
 
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={createCost.isLoading}>
-              {createCost.isLoading ? "Saving..." : "Add Cost"}
+            <Button type="button" variant="outline" onClick={onClose}>{t("cancel")}</Button>
+            <Button type="submit" disabled={createCost.isLoading || !form.amount}>
+              {createCost.isLoading ? "..." : t("cost_add")}
             </Button>
           </div>
         </form>

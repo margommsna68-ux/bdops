@@ -175,17 +175,22 @@ export default function PayPalsPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
 
-  // Page-level PIN verification (once per page visit)
-  const [pinVerified, setPinVerified] = useState(false);
+  // PIN verification — once per session for entire PayPals section
+  const [pinVerified, setPinVerified] = useState(() => {
+    if (typeof window !== "undefined") return sessionStorage.getItem("pp_pin_ok") === "1";
+    return false;
+  });
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [pendingPinAction, setPendingPinAction] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     if (projectId && !pinVerified) setShowPinDialog(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const handlePinSuccess = () => {
     setPinVerified(true);
+    sessionStorage.setItem("pp_pin_ok", "1");
     setShowPinDialog(false);
     if (pendingPinAction) { pendingPinAction(); setPendingPinAction(null); }
   };
@@ -209,6 +214,15 @@ export default function PayPalsPage() {
   const [quickEmails, setQuickEmails] = useState(""); // one email per line
   const [savingQuick, setSavingQuick] = useState(false);
 
+  // Sheet import
+  const [showSheetImport, setShowSheetImport] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState("https://docs.google.com/spreadsheets/d/1kJqc2HiH7x0BzAj4HxU8MZKQtUb60jj-0oKZU3TiBNo/edit?gid=1086067347#gid=1086067347");
+  const [sheetPPCodes, setSheetPPCodes] = useState("");
+  const [sheetResult, setSheetResult] = useState<any>(null);
+  const [sheetTabs, setSheetTabs] = useState<Array<{ name: string; gid: string }>>([]);
+  const [sheetSelectedGid, setSheetSelectedGid] = useState<string>("");
+  const [sheetTabsLoading, setSheetTabsLoading] = useState(false);
+
   const { data, isLoading, refetch } = trpc.paypal.list.useQuery(
     { projectId: projectId!, page: 1, limit: 500, search: search || undefined, status: (statusFilter !== "ALL" ? statusFilter : undefined) as any, role: (roleFilter !== "ALL" ? roleFilter : undefined) as any },
     { enabled: !!projectId }
@@ -224,8 +238,44 @@ export default function PayPalsPage() {
   const bulkUpdateHolder = trpc.paypal.bulkUpdateHolder.useMutation({ onSuccess: (res) => { invalidate(); setSelectedIds(new Set()); toast.success(`Updated ${res.updated}`); }, onError: (e) => toast.error(e.message) });
   const bulkDelete = trpc.paypal.bulkDelete.useMutation({ onSuccess: (res) => { invalidate(); setSelectedIds(new Set()); toast.success(`Deleted ${res.deleted}`); }, onError: (e) => toast.error(e.message) });
 
+  // ─── Check PP Status ───
+  const [checkingPP, setCheckingPP] = useState(false);
+  const [checkResult, setCheckResult] = useState<any>(null);
+  const checkPPStatus = trpc.paypal.checkStatus.useMutation({
+    onSuccess: (res) => {
+      setCheckingPP(false);
+      setCheckResult(res);
+      invalidate();
+      if (res.suspended > 0 || res.limited > 0) {
+        toast.error(`Phát hiện: ${res.suspended} SUSPENDED, ${res.limited} LIMITED`);
+      } else if (res.checked > 0) {
+        toast.success(`Đã check ${res.checked} PP — Tất cả OK`);
+      } else {
+        toast(res.message || "Không có PP nào có token để check");
+      }
+    },
+    onError: (e) => { setCheckingPP(false); toast.error(e.message); },
+  });
+  const getSheetTabs = trpc.paypal.getSheetTabs.useMutation({
+    onSuccess: (tabs: any) => {
+      setSheetTabsLoading(false);
+      setSheetTabs(tabs);
+      if (tabs.length > 0 && !sheetSelectedGid) setSheetSelectedGid(tabs[0].gid);
+    },
+    onError: (e) => { setSheetTabsLoading(false); toast.error(e.message); },
+  });
+  const importFromSheet = trpc.paypal.importFromSheet.useMutation({
+    onSuccess: (res) => {
+      invalidate();
+      setSheetResult(res);
+      if (res.imported > 0) toast.success(`Imported ${res.imported} PP từ Sheet`);
+      else toast("Không có PP mới nào được import");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const canEdit = currentRole === "ADMIN" || currentRole === "MODERATOR" || currentRole === "USER";
-  const rawItems = data?.items ?? [];
+  const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
   const filteredItems = useMemo(() => {
     if (holderFilter === "ALL") return rawItems;
     if (holderFilter === "Chưa gán") return rawItems.filter((pp: any) => !pp.holder);
@@ -384,7 +434,7 @@ export default function PayPalsPage() {
   return (
     <div className="space-y-3">
       <PinVerifyDialog open={showPinDialog} onClose={() => setShowPinDialog(false)} onVerified={handlePinSuccess}
-        title={t("srv_pin_required")} description="Nhập PIN để truy cập thông tin nhạy cảm" />
+        title={t("srv_pin_required")} description="Nhập PIN để truy cập thông tin nhạy cảm" required={!pinVerified} />
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -464,6 +514,49 @@ export default function PayPalsPage() {
           <button onClick={() => setShowQuickAdd(!showQuickAdd)}
             className={`px-3 py-1.5 rounded text-xs font-medium ${showQuickAdd ? "bg-gray-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
             {showQuickAdd ? "Đóng" : "+ Thêm PP"}
+          </button>
+        )}
+        {canEdit && (
+          <button onClick={() => {
+              setShowSheetImport(true);
+              setSheetResult(null);
+              // Auto-load tabs if URL exists and tabs not loaded
+              if (sheetUrl && sheetTabs.length === 0) {
+                setSheetTabsLoading(true);
+                getSheetTabs.mutate({ projectId: projectId!, sheetUrl });
+              }
+            }}
+            className="px-3 py-1.5 bg-teal-600 text-white rounded text-xs font-medium hover:bg-teal-700 flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Import Sheet
+          </button>
+        )}
+        {canEdit && (
+          <button
+            onClick={() => {
+              setCheckingPP(true);
+              const ids = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
+              checkPPStatus.mutate({ projectId: projectId!, paypalIds: ids });
+            }}
+            disabled={checkingPP}
+            className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {checkingPP ? (
+              <>
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Đang check...
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {selectedIds.size > 0 ? `Check PP (${selectedIds.size})` : "Check PP"}
+              </>
+            )}
           </button>
         )}
       </div>
@@ -777,6 +870,225 @@ export default function PayPalsPage() {
         description="Upload CSV. Required: PP Code, Email."
         templateColumns={["PP Code", "Holder", "Email", "Status", "Role", "Company", "Notes"]}
       />
+
+      {/* Check PP Result Dialog */}
+      {checkResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setCheckResult(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-gray-900">Kết quả Check PP</h3>
+                <button onClick={() => setCheckResult(null)} className="text-gray-400 hover:text-gray-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {(checkResult.durationMs / 1000).toFixed(1)}s
+                {checkResult.updated > 0 && <span className="ml-2 text-orange-600 font-medium">({checkResult.updated} PP đã cập nhật status)</span>}
+              </p>
+            </div>
+            {/* Summary */}
+            <div className="grid grid-cols-5 gap-2 p-4 bg-gray-50 border-b">
+              <div className="text-center">
+                <p className="text-xl font-bold text-gray-800">{checkResult.total}</p>
+                <p className="text-[10px] text-gray-500 uppercase">Tổng</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xl font-bold text-green-600">{checkResult.clean}</p>
+                <p className="text-[10px] text-green-600 uppercase">OK</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xl font-bold text-red-600">{checkResult.suspended}</p>
+                <p className="text-[10px] text-red-600 uppercase">Suspended</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xl font-bold text-yellow-600">{checkResult.limited}</p>
+                <p className="text-[10px] text-yellow-600 uppercase">Limited</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xl font-bold text-gray-400">{checkResult.errors}</p>
+                <p className="text-[10px] text-gray-400 uppercase">Lỗi</p>
+              </div>
+            </div>
+            {/* Result list */}
+            <div className="overflow-y-auto max-h-[50vh] divide-y">
+              {checkResult.results?.filter((r: any) => r.newStatus || r.error).map((r: any, i: number) => (
+                <div key={i} className="px-4 py-2.5 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{r.paypalCode}</span>
+                      {r.newStatus && (
+                        <Badge className={r.newStatus === "SUSPENDED" ? "bg-red-100 text-red-800 text-[10px]" : "bg-yellow-100 text-yellow-800 text-[10px]"}>
+                          {r.newStatus}
+                        </Badge>
+                      )}
+                      {r.error && (
+                        <Badge className="bg-gray-100 text-gray-600 text-[10px]">ERROR</Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {r.alertSubject || r.error || r.emailChecked}
+                    </p>
+                    {r.alertDate && (
+                      <p className="text-[10px] text-gray-400">
+                        {new Date(r.alertDate).toLocaleDateString("vi-VN")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {checkResult.results?.filter((r: any) => r.newStatus || r.error).length === 0 && (
+                <div className="px-4 py-8 text-center text-gray-400 text-sm">
+                  Tất cả PP đều OK - không phát hiện suspend/limit
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sheet Import Dialog */}
+      {showSheetImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowSheetImport(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  <h3 className="text-lg font-bold text-gray-900">Import từ Google Sheet</h3>
+                </div>
+                <button onClick={() => setShowSheetImport(false)} className="text-gray-400 hover:text-gray-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Nhập mã PayPal (cột A) → hệ thống tự lấy dữ liệu từ sheet (userwin, pass, 2FA, emails, tokens)</p>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {/* Sheet URL */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Google Sheet URL</label>
+                <div className="flex gap-2">
+                  <input value={sheetUrl} onChange={(e) => { setSheetUrl(e.target.value); setSheetTabs([]); setSheetSelectedGid(""); }}
+                    className="flex-1 px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                    placeholder="https://docs.google.com/spreadsheets/d/..." />
+                  <button
+                    onClick={() => {
+                      if (!sheetUrl) return;
+                      setSheetTabsLoading(true);
+                      getSheetTabs.mutate({ projectId: projectId!, sheetUrl });
+                    }}
+                    disabled={sheetTabsLoading || !sheetUrl}
+                    className="px-3 py-2 bg-gray-100 border rounded text-xs font-medium hover:bg-gray-200 disabled:opacity-50 shrink-0"
+                  >
+                    {sheetTabsLoading ? "..." : "Load tabs"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">Sheet phải public (Anyone with link can view)</p>
+              </div>
+
+              {/* Sheet Tab Selector */}
+              {sheetTabs.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Chọn sheet tab</label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {sheetTabs.map((tab) => (
+                      <button
+                        key={tab.gid}
+                        onClick={() => setSheetSelectedGid(tab.gid)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                          sheetSelectedGid === tab.gid
+                            ? "bg-teal-600 text-white border-teal-600"
+                            : "bg-white text-gray-700 border-gray-300 hover:border-teal-400 hover:text-teal-700"
+                        }`}
+                      >
+                        {tab.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PP Codes */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Mã PayPal — cột A trong sheet (mỗi dòng 1 mã)</label>
+                <textarea value={sheetPPCodes} onChange={(e) => setSheetPPCodes(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-teal-500 focus:outline-none resize-y"
+                  placeholder={"PP-271\nPP-272\nPP-273\nAE-010\nAE-011"} />
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {sheetPPCodes.split("\n").filter((l) => l.trim()).length} mã PayPal
+                </p>
+              </div>
+
+              {/* Import button */}
+              <button
+                onClick={() => {
+                  const codes = sheetPPCodes.split("\n").map((l) => l.trim()).filter(Boolean);
+                  if (!codes.length) { toast.error("Chưa nhập mã PayPal"); return; }
+                  if (!sheetUrl) { toast.error("Chưa nhập Sheet URL"); return; }
+                  importFromSheet.mutate({
+                    projectId: projectId!,
+                    sheetUrl,
+                    gid: sheetSelectedGid || undefined,
+                    ppCodes: codes,
+                  });
+                }}
+                disabled={importFromSheet.isLoading}
+                className="w-full px-4 py-2.5 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {importFromSheet.isLoading ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    Đang import...
+                  </>
+                ) : (
+                  `Import ${sheetPPCodes.split("\n").filter((l) => l.trim()).length} PP từ Sheet`
+                )}
+              </button>
+
+              {/* Results */}
+              {sheetResult && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="grid grid-cols-4 gap-2 p-3 bg-gray-50 border-b">
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-green-600">{sheetResult.imported}</p>
+                      <p className="text-[10px] text-gray-500">Imported</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-yellow-600">{sheetResult.skipped}</p>
+                      <p className="text-[10px] text-gray-500">Đã tồn tại</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-red-600">{sheetResult.errors?.length || 0}</p>
+                      <p className="text-[10px] text-gray-500">Lỗi</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-gray-400">{sheetResult.totalInSheet}</p>
+                      <p className="text-[10px] text-gray-500">Tổng sheet</p>
+                    </div>
+                  </div>
+                  {sheetResult.results?.length > 0 && (
+                    <div className="divide-y max-h-[200px] overflow-y-auto">
+                      {sheetResult.results.map((r: any, i: number) => (
+                        <div key={i} className="px-3 py-1.5 flex items-center gap-2 text-xs">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${
+                            r.status === "created" ? "bg-green-500" : r.status === "skipped" ? "bg-yellow-500" : "bg-red-500"
+                          }`} />
+                          <span className="font-mono font-medium">{r.ppcode}</span>
+                          <span className="text-gray-400">
+                            {r.status === "created" ? "OK" : r.status === "skipped" ? "Đã tồn tại" : r.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

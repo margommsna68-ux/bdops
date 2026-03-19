@@ -2,23 +2,42 @@ import { z } from "zod";
 import { router, costsProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
+const CATEGORIES = ["SERVER", "IP_PROXY", "GMAIL", "PAYPAL", "OTHER"] as const;
+
+// Auto-generate code: CP-{MM}-{NNN}
+async function generateCode(prisma: any, projectId: string, date: Date): Promise<string> {
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+  const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+  const count = await prisma.costRecord.count({
+    where: { projectId, date: { gte: startOfMonth, lte: endOfMonth } },
+  });
+  return `CP-${mm}-${String(count + 1).padStart(3, "0")}`;
+}
+
 export const costRouter = router({
+  // List costs for a specific month
   list: costsProcedure
     .input(
       z.object({
         projectId: z.string(),
-        dateFrom: z.string().optional(),
-        dateTo: z.string().optional(),
+        year: z.number().optional(),
+        month: z.number().min(1).max(12).optional(),
+        showAll: z.boolean().optional(),
         page: z.number().min(1).default(1),
-        limit: z.number().min(1).max(100).default(50),
+        limit: z.number().min(1).max(500).default(100),
       })
     )
     .query(async ({ ctx, input }) => {
+      const now = new Date();
+      const year = input.year ?? now.getFullYear();
+      const month = input.month ?? (now.getMonth() + 1);
+
       const where: any = { projectId: input.projectId };
-      if (input.dateFrom || input.dateTo) {
-        where.date = {};
-        if (input.dateFrom) where.date.gte = new Date(input.dateFrom);
-        if (input.dateTo) where.date.lte = new Date(input.dateTo);
+      if (!input.showAll) {
+        const startOfMonth = new Date(year, month - 1, 1);
+        const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+        where.date = { gte: startOfMonth, lte: endOfMonth };
       }
 
       const [items, total] = await Promise.all([
@@ -31,7 +50,74 @@ export const costRouter = router({
         ctx.prisma.costRecord.count({ where }),
       ]);
 
-      return { items, total, page: input.page, limit: input.limit };
+      return { items, total, year, month };
+    }),
+
+  // Monthly summary (for a specific month) - grouped by category
+  monthlySummary: costsProcedure
+    .input(z.object({
+      projectId: z.string(),
+      year: z.number(),
+      month: z.number().min(1).max(12),
+    }))
+    .query(async ({ ctx, input }) => {
+      const startOfMonth = new Date(input.year, input.month - 1, 1);
+      const endOfMonth = new Date(input.year, input.month, 0, 23, 59, 59, 999);
+
+      const records = await ctx.prisma.costRecord.findMany({
+        where: {
+          projectId: input.projectId,
+          date: { gte: startOfMonth, lte: endOfMonth },
+        },
+        select: { category: true, amount: true, total: true },
+      });
+
+      const byCategory: Record<string, number> = {};
+      let grandTotal = 0;
+      for (const r of records) {
+        const amt = Number(r.amount) || Number(r.total) || 0;
+        byCategory[r.category] = (byCategory[r.category] ?? 0) + amt;
+        grandTotal += amt;
+      }
+
+      return { byCategory, total: grandTotal, count: records.length };
+    }),
+
+  // Compare two months
+  compare: costsProcedure
+    .input(z.object({
+      projectId: z.string(),
+      year: z.number(),
+      month: z.number().min(1).max(12),
+    }))
+    .query(async ({ ctx, input }) => {
+      const getSummary = async (y: number, m: number) => {
+        const start = new Date(y, m - 1, 1);
+        const end = new Date(y, m, 0, 23, 59, 59, 999);
+        const records = await ctx.prisma.costRecord.findMany({
+          where: { projectId: input.projectId, date: { gte: start, lte: end } },
+          select: { category: true, amount: true, total: true },
+        });
+        const byCategory: Record<string, number> = {};
+        let total = 0;
+        for (const r of records) {
+          const amt = Number(r.amount) || Number(r.total) || 0;
+          byCategory[r.category] = (byCategory[r.category] ?? 0) + amt;
+          total += amt;
+        }
+        return { byCategory, total };
+      };
+
+      // Previous month
+      const prevMonth = input.month === 1 ? 12 : input.month - 1;
+      const prevYear = input.month === 1 ? input.year - 1 : input.year;
+
+      const [current, previous] = await Promise.all([
+        getSummary(input.year, input.month),
+        getSummary(prevYear, prevMonth),
+      ]);
+
+      return { current, previous, prevYear, prevMonth };
     }),
 
   create: moderatorProcedure
@@ -39,24 +125,26 @@ export const costRouter = router({
       z.object({
         projectId: z.string(),
         date: z.string(),
-        serverCost: z.number().optional(),
-        ipCost: z.number().optional(),
-        extraCost: z.number().optional(),
-        total: z.number(),
-        isPrepaid: z.boolean().default(false),
+        category: z.enum(CATEGORIES),
+        amount: z.number().min(0),
         note: z.string().optional(),
-        fundingSource: z.string().optional(),
+        isPrepaid: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Auto-calculate total from components
-      const calculatedTotal = (input.serverCost ?? 0) + (input.ipCost ?? 0) + (input.extraCost ?? 0);
-      const total = calculatedTotal > 0 ? calculatedTotal : input.total;
+      const dateObj = new Date(input.date);
+      const code = await generateCode(ctx.prisma, input.projectId, dateObj);
+
       const result = await ctx.prisma.costRecord.create({
         data: {
-          ...input,
-          total,
-          date: new Date(input.date),
+          projectId: input.projectId,
+          code,
+          date: dateObj,
+          category: input.category,
+          amount: input.amount,
+          total: input.amount,
+          isPrepaid: input.isPrepaid,
+          note: input.note,
         },
       });
       await createAuditLog({
@@ -65,7 +153,7 @@ export const costRouter = router({
         entityId: result.id,
         userId: ctx.user.id,
         projectId: input.projectId,
-        changes: { total: input.total, serverCost: input.serverCost, ipCost: input.ipCost, extraCost: input.extraCost },
+        changes: { code, category: input.category, amount: input.amount },
       });
       return result;
     }),
@@ -75,25 +163,25 @@ export const costRouter = router({
       z.object({
         projectId: z.string(),
         id: z.string(),
-        serverCost: z.number().optional(),
-        ipCost: z.number().optional(),
-        extraCost: z.number().optional(),
-        total: z.number().optional(),
-        isPrepaid: z.boolean().optional(),
+        category: z.enum(CATEGORIES).optional(),
+        amount: z.number().min(0).optional(),
         note: z.string().nullable().optional(),
-        fundingSource: z.string().nullable().optional(),
+        isPrepaid: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { projectId, id, ...data } = input;
       await ctx.prisma.costRecord.findFirstOrThrow({ where: { id, projectId } });
-      const result = await ctx.prisma.costRecord.update({ where: { id }, data });
+      // Sync total with amount
+      const updateData: any = { ...data };
+      if (data.amount !== undefined) updateData.total = data.amount;
+      const result = await ctx.prisma.costRecord.update({ where: { id }, data: updateData });
       await createAuditLog({
         action: "UPDATE",
         entity: "CostRecord",
         entityId: id,
         userId: ctx.user.id,
-        projectId: input.projectId,
+        projectId,
         changes: data,
       });
       return result;
@@ -110,37 +198,9 @@ export const costRouter = router({
         entityId: input.id,
         userId: ctx.user.id,
         projectId: input.projectId,
-        changes: { total: existing.total },
+        changes: { code: existing.code, amount: existing.amount, category: existing.category },
       });
       return result;
-    }),
-
-  monthly: costsProcedure
-    .input(z.object({ projectId: z.string() }))
-    .query(async ({ ctx, input }) => {
-      return ctx.prisma.costRecord.groupBy({
-        by: ["date"],
-        where: { projectId: input.projectId },
-        _sum: { serverCost: true, ipCost: true, extraCost: true, total: true },
-        orderBy: { date: "desc" },
-      });
-    }),
-
-  summary: costsProcedure
-    .input(z.object({ projectId: z.string() }))
-    .query(async ({ ctx, input }) => {
-      const result = await ctx.prisma.costRecord.aggregate({
-        where: { projectId: input.projectId },
-        _sum: { serverCost: true, ipCost: true, extraCost: true, total: true },
-        _count: true,
-      });
-      return {
-        serverCost: result._sum.serverCost ?? 0,
-        ipCost: result._sum.ipCost ?? 0,
-        extraCost: result._sum.extraCost ?? 0,
-        total: result._sum.total ?? 0,
-        count: result._count,
-      };
     }),
 
   bulkImport: moderatorProcedure
@@ -148,13 +208,10 @@ export const costRouter = router({
       projectId: z.string(),
       items: z.array(z.object({
         date: z.string(),
-        serverCost: z.number().optional(),
-        ipCost: z.number().optional(),
-        extraCost: z.number().optional(),
-        total: z.number(),
-        isPrepaid: z.boolean().default(false),
+        category: z.enum(CATEGORIES).default("OTHER"),
+        amount: z.number().min(0),
         note: z.string().optional(),
-        fundingSource: z.string().optional(),
+        isPrepaid: z.boolean().default(false),
       })),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -162,17 +219,18 @@ export const costRouter = router({
       const errors: string[] = [];
       for (const item of input.items) {
         try {
+          const dateObj = new Date(item.date);
+          const code = await generateCode(ctx.prisma, input.projectId, dateObj);
           await ctx.prisma.costRecord.create({
             data: {
               projectId: input.projectId,
-              date: new Date(item.date),
-              serverCost: item.serverCost ?? 0,
-              ipCost: item.ipCost ?? 0,
-              extraCost: item.extraCost ?? 0,
-              total: item.total,
+              code,
+              date: dateObj,
+              category: item.category,
+              amount: item.amount,
+              total: item.amount,
               isPrepaid: item.isPrepaid,
               note: item.note,
-              fundingSource: item.fundingSource,
             },
           });
           imported++;
@@ -183,7 +241,16 @@ export const costRouter = router({
       return { imported, errors: errors.slice(0, 10) };
     }),
 
-  // Server billing summary - calculate from active servers
+  bulkDelete: moderatorProcedure
+    .input(z.object({ projectId: z.string(), ids: z.array(z.string()) }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.costRecord.deleteMany({
+        where: { id: { in: input.ids }, projectId: input.projectId },
+      });
+      return { deleted: input.ids.length };
+    }),
+
+  // Server billing reminder (read-only, no auto-create)
   serverBilling: costsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -197,89 +264,21 @@ export const costRouter = router({
           id: true,
           code: true,
           monthlyCost: true,
-          billingCycle: true,
           expiryDate: true,
           status: true,
           _count: { select: { vms: true } },
         },
-        orderBy: { code: "asc" },
+        orderBy: { expiryDate: "asc" },
       });
 
-      const totalMonthly = servers.reduce(
-        (sum, s) => sum + Number(s.monthlyCost ?? 0),
-        0
-      );
+      const totalMonthly = servers.reduce((sum, s) => sum + Number(s.monthlyCost ?? 0), 0);
 
-      // Servers expiring within 7 days
+      // Due within 7 days
       const now = new Date();
       const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const expiringSoon = servers.filter(
-        (s) => s.expiryDate && new Date(s.expiryDate) <= soon
-      );
+      const dueSoon = servers.filter((s) => s.expiryDate && new Date(s.expiryDate) <= soon);
+      const overdue = servers.filter((s) => s.expiryDate && new Date(s.expiryDate) < now);
 
-      return {
-        servers,
-        totalMonthly,
-        activeCount: servers.length,
-        expiringSoon,
-      };
-    }),
-
-  // Generate cost record from server billing
-  generateFromBilling: moderatorProcedure
-    .input(
-      z.object({
-        projectId: z.string(),
-        date: z.string(),
-        note: z.string().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const servers = await ctx.prisma.server.findMany({
-        where: {
-          projectId: input.projectId,
-          status: { in: ["ACTIVE", "BUILDING", "MAINTENANCE"] },
-          monthlyCost: { not: null },
-        },
-        select: { code: true, monthlyCost: true },
-      });
-
-      const serverCost = servers.reduce(
-        (sum, s) => sum + Number(s.monthlyCost ?? 0),
-        0
-      );
-
-      if (serverCost === 0) {
-        throw new Error("No active servers with billing data");
-      }
-
-      const serverList = servers
-        .map((s) => `${s.code}: $${Number(s.monthlyCost).toFixed(2)}`)
-        .join(", ");
-
-      const result = await ctx.prisma.costRecord.create({
-        data: {
-          projectId: input.projectId,
-          date: new Date(input.date),
-          serverCost,
-          ipCost: 0,
-          extraCost: 0,
-          total: serverCost,
-          isPrepaid: false,
-          note: input.note || `Server billing: ${serverList}`,
-          fundingSource: "Server Billing",
-        },
-      });
-
-      await createAuditLog({
-        action: "CREATE",
-        entity: "CostRecord",
-        entityId: result.id,
-        userId: ctx.user.id,
-        projectId: input.projectId,
-        changes: { serverCost, source: "generateFromBilling", servers: serverList },
-      });
-
-      return result;
+      return { servers, totalMonthly, activeCount: servers.length, dueSoon, overdue };
     }),
 });

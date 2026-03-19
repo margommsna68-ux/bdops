@@ -2,6 +2,7 @@
 
 import { useProjectStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "./NotificationBell";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -36,8 +37,9 @@ export function Header({ onMenuClick }: HeaderProps) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
-        BDOps v1.0
+      <div className="flex items-center gap-3">
+        <NotificationBell />
+        <span className="text-xs text-gray-400 font-medium hidden sm:inline">BDOps v1.0</span>
       </div>
     </header>
   );

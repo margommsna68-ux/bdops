@@ -17,6 +17,7 @@ interface PinVerifyDialogProps {
   onVerified: () => void;
   title?: string;
   description?: string;
+  required?: boolean; // If true, cannot close without verifying PIN
 }
 
 export function PinVerifyDialog({
@@ -25,6 +26,7 @@ export function PinVerifyDialog({
   onVerified,
   title = "PIN Required",
   description = "Enter your PIN to continue",
+  required = false,
 }: PinVerifyDialogProps) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -49,8 +51,8 @@ export function PinVerifyDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { setPin(""); setError(""); onClose(); } }}>
-      <DialogContent className="sm:max-w-sm">
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !required) { setPin(""); setError(""); onClose(); } }}>
+      <DialogContent className="sm:max-w-sm" onPointerDownOutside={required ? (e) => e.preventDefault() : undefined} onEscapeKeyDown={required ? (e) => e.preventDefault() : undefined} hideCloseButton={required}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -73,9 +75,11 @@ export function PinVerifyDialog({
           />
           {error && <p className="text-sm text-red-600 text-center">{error}</p>}
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={onClose}>
-              Cancel
-            </Button>
+            {!required && (
+              <Button variant="outline" className="flex-1" onClick={onClose}>
+                Cancel
+              </Button>
+            )}
             <Button className="flex-1" onClick={handleVerify} disabled={pin.length < 4 || verifyPin.isLoading}>
               {verifyPin.isLoading ? "..." : "Verify"}
             </Button>

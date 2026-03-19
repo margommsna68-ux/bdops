@@ -26,6 +26,10 @@ model User {
   assignedTasks VMTask[]        @relation("TaskAssignee")
   deleteRequestsMade    DeleteRequest[] @relation("DeleteRequestor")
   deleteRequestsReviewed DeleteRequest[] @relation("DeleteReviewer")
+  agentEmails      AgentPaypalEmail[] @relation("AgentEmails")
+  agentWithdrawals Withdrawal[]    @relation("AgentWithdrawals")
+  agentSales       AgentSale[]     @relation("AgentSales")
+  resolvedDisputes Withdrawal[]    @relation("DisputeResolver")
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -44,9 +48,14 @@ model Project {
   withdrawals      Withdrawal[]
   costRecords      CostRecord[]
   profitSplits     ProfitSplit[]
+  partners         Partner[]
   proxyIPs         ProxyIP[]
   gmailAccounts    GmailAccount[]
   deleteRequests   DeleteRequest[]
+  agentPaypalEmails AgentPaypalEmail[]
+  agentSales       AgentSale[]
+  holderMergeTargets HolderMergeTarget[]
+  earnWithdrawals  EarnWithdrawal[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -59,6 +68,11 @@ model ProjectMember {
   projectId       String
   role            ProjectRole @default(USER)
   allowedModules  String[]    @default([])
+  canManageUsers  Boolean     @default(false)
+  managerId       String?
+  maxAutotypeDevices Int      @default(2)
+  manager         ProjectMember?  @relation("TeamMembers", fields: [managerId], references: [id])
+  teamMembers     ProjectMember[] @relation("TeamMembers")
   createdAt       DateTime    @default(now())
 
   @@unique([userId, projectId])
@@ -97,6 +111,7 @@ model Server {
   projectId     String
   vms           VirtualMachine[]
   fundTransactions FundTransaction[]
+  earnWithdrawals EarnWithdrawal[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -144,6 +159,42 @@ enum VMStatus {
   NOT_CONNECTED
   NOT_AVC
   BLOCKED
+}
+
+// ═══════════════════════════════════════
+// EARN APP WITHDRAWAL TRACKING
+// ═══════════════════════════════════════
+
+enum EarnWithdrawalStatus {
+  PENDING
+  WITHDRAWAL
+  PAID
+  SUSPEND
+  PP_LIMIT
+}
+
+model EarnWithdrawal {
+  id        String               @id @default(cuid())
+  vmCodes   String               // e.g. "001-002" or "001"
+  amount    Decimal?             @db.Decimal(12, 2)
+  date      DateTime?
+  time      String?              // "HH:MM" format
+  status    EarnWithdrawalStatus @default(PENDING)
+  notes     String?
+  round     Int                  @default(1)
+  gmail     GmailAccount         @relation(fields: [gmailId], references: [id], onDelete: Cascade)
+  gmailId   String
+  paypal    PayPalAccount?       @relation("EarnWithdrawalPaypal", fields: [paypalId], references: [id], onDelete: SetNull)
+  paypalId  String?
+  server    Server               @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId  String
+  project   Project              @relation(fields: [projectId], references: [id])
+  projectId String
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([projectId, serverId])
+  @@index([gmailId])
 }
 
 model ProxyIP {
@@ -198,11 +249,13 @@ model GmailAccount {
   twoFaCurrent  String?
   twoFaOld      String?
   recoveryEmail String?
+  token         String?
   status        GmailStatus @default(ACTIVE)
   notes         String?
   vms           VirtualMachine[]
   paypal        PayPalAccount? @relation(fields: [paypalId], references: [id], onDelete: SetNull)
   paypalId      String?
+  earnWithdrawals EarnWithdrawal[]
   project       Project     @relation(fields: [projectId], references: [id])
   projectId     String
   createdAt     DateTime    @default(now())
@@ -253,12 +306,29 @@ model PayPalAccount {
   fundsReceived   FundTransaction[]
   withdrawalsFrom Withdrawal[] @relation("WithdrawalSource")
   withdrawalsTo   Withdrawal[] @relation("WithdrawalDest")
+  mergeTargets    HolderMergeTarget[]
+  earnWithdrawals EarnWithdrawal[] @relation("EarnWithdrawalPaypal")
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
   @@unique([code, projectId])
   @@index([projectId, status])
   @@index([projectId, role])
+}
+
+// Holder → Mail gộp assignment (which PP is the merge target for a holder)
+model HolderMergeTarget {
+  id        String       @id @default(cuid())
+  holder    String       // User Win (pp01, pp02...)
+  paypal    PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Cascade)
+  paypalId  String
+  project   Project      @relation(fields: [projectId], references: [id])
+  projectId String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([holder, projectId])
+  @@index([projectId])
 }
 
 model PayPalEmail {
@@ -344,7 +414,20 @@ model Withdrawal {
   sourcePaypalId String
   destPaypal     PayPalAccount?  @relation("WithdrawalDest", fields: [destPaypalId], references: [id], onDelete: SetNull)
   destPaypalId   String?
-  project        Project         @relation(fields: [projectId], references: [id])
+  agentUser      User?           @relation("AgentWithdrawals", fields: [agentUserId], references: [id])
+  agentUserId    String?
+  agentEmail     AgentPaypalEmail? @relation("AgentWithdrawalEmail", fields: [agentEmailId], references: [id])
+  agentEmailId   String?
+  agentConfirmed   Boolean         @default(false)
+  agentDisputed    Boolean         @default(false)
+  disputeNote      String?
+  disputeResolved  Boolean         @default(false)
+  disputeAction    String?         // "OVERRIDE" | "VOID" | "RESEND"
+  adminResolveNote String?
+  resolvedAt       DateTime?
+  resolvedById     String?
+  resolvedBy       User?           @relation("DisputeResolver", fields: [resolvedById], references: [id])
+  project          Project         @relation(fields: [projectId], references: [id])
   projectId      String
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -352,6 +435,7 @@ model Withdrawal {
   @@index([projectId, date])
   @@index([projectId, type])
   @@index([sourcePaypalId])
+  @@index([agentUserId])
 }
 
 enum WithdrawalType {
@@ -361,7 +445,10 @@ enum WithdrawalType {
 
 model CostRecord {
   id            String    @id @default(cuid())
+  code          String?
   date          DateTime
+  category      String    @default("OTHER")
+  amount        Decimal   @default(0) @db.Decimal(12, 2)
   serverCost    Decimal?  @db.Decimal(12, 2)
   ipCost        Decimal?  @db.Decimal(12, 2)
   extraCost     Decimal?  @db.Decimal(12, 2)
@@ -381,6 +468,21 @@ model CostRecord {
 // PROFIT SPLIT
 // ═══════════════════════════════════════
 
+model Partner {
+  id            String      @id @default(cuid())
+  name          String
+  percentage    Decimal     @db.Decimal(5, 2)
+  note          String?
+  active        Boolean     @default(true)
+  project       Project     @relation(fields: [projectId], references: [id])
+  projectId     String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([name, projectId])
+  @@index([projectId])
+}
+
 model ProfitSplit {
   id              String            @id @default(cuid())
   periodStart     DateTime
@@ -388,6 +490,8 @@ model ProfitSplit {
   totalWithdrawal Decimal           @db.Decimal(14, 2)
   totalCost       Decimal           @db.Decimal(14, 2)
   netProfit       Decimal           @db.Decimal(14, 2)
+  usdtRate        Decimal?          @db.Decimal(10, 4)
+  netProfitUsdt   Decimal?          @db.Decimal(14, 2)
   settled         Boolean           @default(false)
   notes           String?
   project         Project           @relation(fields: [projectId], references: [id])
@@ -402,6 +506,8 @@ model SplitAllocation {
   partnerName   String
   percentage    Decimal     @db.Decimal(5, 2)
   amount        Decimal     @db.Decimal(14, 2)
+  amountUsdt    Decimal?    @db.Decimal(14, 2)
+  note          String?
   paid          Boolean     @default(false)
   split         ProfitSplit @relation(fields: [splitId], references: [id], onDelete: Cascade)
   splitId       String
@@ -485,4 +591,64 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@index([projectId])
+}
+
+// ═══════════════════════════════════════
+// AGENT PAYPAL
+// ═══════════════════════════════════════
+
+model AgentPaypalEmail {
+  id          String       @id @default(cuid())
+  email       String
+  label       String?
+  user        User         @relation("AgentEmails", fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  project     Project      @relation(fields: [projectId], references: [id])
+  projectId   String
+  withdrawals Withdrawal[] @relation("AgentWithdrawalEmail")
+  sales       AgentSale[]  @relation("AgentSaleEmail")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([email, projectId])
+  @@index([userId])
+  @@index([projectId])
+}
+
+model AgentSale {
+  id            String           @id @default(cuid())
+  amount        Decimal          @db.Decimal(12, 2)
+  transactionId String
+  exchangeEmail String?
+  notes         String?
+  agentUser     User             @relation("AgentSales", fields: [agentUserId], references: [id])
+  agentUserId   String
+  agentEmail    AgentPaypalEmail @relation("AgentSaleEmail", fields: [agentEmailId], references: [id])
+  agentEmailId  String
+  project       Project          @relation(fields: [projectId], references: [id])
+  projectId     String
+  date          DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([agentUserId])
+  @@index([agentEmailId])
+  @@index([projectId])
+}
+
+// ═══════════════════════════════════════
+// AUTOTYPE SESSIONS
+// ═══════════════════════════════════════
+
+model AutotypeSession {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceId    String   // unique device identifier from AutoType tool
+  deviceName  String?  // optional label (e.g. "PC Van phong 1")
+  lastActiveAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@index([lastActiveAt])
 }

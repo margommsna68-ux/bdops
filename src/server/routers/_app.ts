@@ -15,6 +15,10 @@ import { auditLogRouter } from "./auditLog";
 import { deleteRequestRouter } from "./deleteRequest";
 import { userRouter } from "./user";
 import { paypalEmailRouter } from "./paypalEmail";
+import { agentPPRouter } from "./agentPP";
+import { notificationRouter } from "./notification";
+import { partnerRouter } from "./partner";
+import { earnWithdrawalRouter } from "./earnWithdrawal";
 
 export const appRouter = router({
   project: projectRouter,
@@ -33,6 +37,10 @@ export const appRouter = router({
   deleteRequest: deleteRequestRouter,
   user: userRouter,
   paypalEmail: paypalEmailRouter,
+  agentPP: agentPPRouter,
+  notification: notificationRouter,
+  partner: partnerRouter,
+  earnWithdrawal: earnWithdrawalRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -221,8 +221,23 @@ export const proxyRouter = router({
         return { assigned: 0, message: "No available proxies or VMs to assign" };
       }
 
-      // Shuffle proxies randomly
-      const shuffled = [...available].sort(() => Math.random() - 0.5);
+      // Interleave by subnet for balanced distribution
+      const bySubnet = new Map<string, typeof available>();
+      for (const p of available) {
+        const key = p.subnet || "__none__";
+        if (!bySubnet.has(key)) bySubnet.set(key, []);
+        bySubnet.get(key)!.push(p);
+      }
+      // Shuffle within each subnet, then round-robin pick
+      const buckets = Array.from(bySubnet.values()).map((b) => b.sort(() => Math.random() - 0.5));
+      const shuffled: typeof available = [];
+      let bi = 0;
+      while (shuffled.length < available.length) {
+        const bucket = buckets[bi % buckets.length];
+        if (bucket.length > 0) shuffled.push(bucket.shift()!);
+        bi++;
+        if (buckets.every((b) => b.length === 0)) break;
+      }
       const toAssign = Math.min(shuffled.length, vmsNoProxy.length);
       const userId = ctx.user.id;
 
@@ -268,7 +283,7 @@ export const proxyRouter = router({
       });
     }),
 
-  // Bulk import proxies
+  // Bulk import proxies — accepts full proxy strings (IP:PORT:USER:PASS)
   bulkImport: moderatorProcedure
     .input(
       z.object({
@@ -285,13 +300,17 @@ export const proxyRouter = router({
       let imported = 0;
       for (const p of input.proxies) {
         const parts = p.address.split(":");
+        const host = parts[0] || "";
+        const port = parts[1] ? parseInt(parts[1]) : null;
+        // Auto-detect subnet: IP + first 3 digits of port (e.g. 23.142.16.73-300)
+        const autoSubnet = host && port ? `${host}-${String(port).slice(0, 3)}` : null;
         try {
           await ctx.prisma.proxyIP.create({
             data: {
               address: p.address,
-              host: parts[0],
-              port: parts[1] && !isNaN(parseInt(parts[1])) && parseInt(parts[1]) >= 1 && parseInt(parts[1]) <= 65535 ? parseInt(parts[1]) : null,
-              subnet: p.subnet,
+              host,
+              port: port && port >= 1 && port <= 65535 ? port : null,
+              subnet: p.subnet || autoSubnet,
               status: "AVAILABLE",
               projectId: input.projectId,
             },

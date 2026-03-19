@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { label: "Users", href: "/admin/users", keywords: "user admin member role" },
   { label: "Audit Log", href: "/audit-log", keywords: "audit log history" },
   { label: "Settings", href: "/settings", keywords: "settings config" },
+  { label: "Agent PayPal", href: "/agent-pp", keywords: "agent paypal dai ly đại lý" },
 ];
 
 export function CommandPalette() {

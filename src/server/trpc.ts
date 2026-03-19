@@ -13,6 +13,8 @@ export const APP_MODULES = [
   "INFRASTRUCTURE",
   "COSTS",
   "PROFIT",
+  "AGENT_PP",
+  "AUTOTYPE",
 ] as const;
 
 export type AppModule = (typeof APP_MODULES)[number];
@@ -101,11 +103,11 @@ export function requireRole(minRole: ProjectRole) {
 // Require access to a specific module
 export function requireModule(module: AppModule) {
   return enforceProjectMember.unstable_pipe(({ ctx, next }) => {
-    // ADMIN and MODERATOR have access to all modules
-    if (ctx.role === "ADMIN" || ctx.role === "MODERATOR") {
+    // ADMIN has access to all modules
+    if (ctx.role === "ADMIN") {
       return next({ ctx: { ...ctx, module } });
     }
-    // USER: check allowedModules
+    // MODERATOR and USER: check allowedModules
     const allowedModules: string[] = ctx.membership.allowedModules || [];
     if (!allowedModules.includes(module)) {
       throw new TRPCError({ code: "FORBIDDEN", message: `No access to ${module} module` });
@@ -131,6 +133,7 @@ export const paypalsProcedure = t.procedure.use(requireModule("PAYPALS"));
 export const infrastructureProcedure = t.procedure.use(requireModule("INFRASTRUCTURE"));
 export const costsProcedure = t.procedure.use(requireModule("COSTS"));
 export const profitProcedure = t.procedure.use(requireModule("PROFIT"));
+export const agentPPProcedure = t.procedure.use(requireModule("AGENT_PP"));
 
 // Keep backward compat alias
 export const operatorProcedure = memberProcedure;

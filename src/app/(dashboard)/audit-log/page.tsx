@@ -5,19 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
+import { formatDateTime } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
-
-function formatDateTime(date: Date | string): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("vi-VN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(d);
-}
 
 function timeAgo(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
@@ -155,7 +144,7 @@ export default function AuditLogPage() {
     { enabled: !!projectId }
   );
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data?.items]);
 
   // Client-side search filter
   const filteredItems = useMemo(() => {

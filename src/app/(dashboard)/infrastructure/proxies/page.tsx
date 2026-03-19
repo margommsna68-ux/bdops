@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
 import { exportToCSV } from "@/lib/excel-export";
-import { ImportCSVDialog } from "@/components/forms/ImportCSVDialog";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
@@ -77,6 +76,7 @@ export default function ProxiesPage() {
   const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [pasteText, setPasteText] = useState("");
 
   const { data, isLoading, refetch } = trpc.proxy.list.useQuery(
     { projectId: projectId!, status: (statusFilter !== "ALL" ? statusFilter : undefined) as any, limit: 200 },
@@ -99,7 +99,7 @@ export default function ProxiesPage() {
 
   const countMap = Object.fromEntries((counts ?? []).map((c) => [c.status, c._count]));
   const totalProxies = Object.values(countMap).reduce((a: number, b: any) => a + b, 0);
-  const rawItems = data?.items ?? [];
+  const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
   const searchedItems = search.trim()
     ? rawItems.filter((p: any) => {
         const q = search.toLowerCase();
@@ -113,6 +113,26 @@ export default function ProxiesPage() {
       })
     : rawItems;
   const { sorted: items, sortKey, sortDir, handleSort } = useTableSort(searchedItems);
+
+  // Parse paste: IP:PORT:USER:PASS per line
+  const parsedPaste = useMemo(() => {
+    if (!pasteText.trim()) return [];
+    return pasteText.trim().split("\n").filter((l) => l.trim()).map((line) => {
+      const raw = line.trim();
+      const parts = raw.split(":");
+      const host = parts[0] || "";
+      const port = parts[1] || "";
+      const subnet = host && port ? `${host}-${port.slice(0, 3)}` : "";
+      return { address: raw, host, port, subnet, valid: !!host && !!port };
+    });
+  }, [pasteText]);
+  const validPaste = parsedPaste.filter((r) => r.valid);
+  // Subnet summary from paste
+  const pasteSubnets = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of validPaste) { map.set(r.subnet, (map.get(r.subnet) || 0) + 1); }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [validPaste]);
 
   // ─── Save field ───────────────────────────
   const saveField = (id: string, field: string, value: string) => {
@@ -150,14 +170,19 @@ export default function ProxiesPage() {
     bulkDeleteProxy.mutate({ projectId: projectId!, ids: Array.from(selected) });
   };
 
-  const handleCSVImport = (rows: Record<string, string>[]) => {
-    const proxies = rows.map((row) => ({
-      address: row["Address"] || row["address"] || "",
-      subnet: row["Subnet"] || row["subnet"] || undefined,
-    })).filter((p) => p.address);
-    if (proxies.length === 0) return;
-    bulkImport.mutate({ projectId: projectId!, proxies });
-  };
+  // Subnet color map for table
+  const subnetColors = useMemo(() => {
+    const colors = [
+      "bg-blue-100 text-blue-700", "bg-green-100 text-green-700", "bg-purple-100 text-purple-700",
+      "bg-orange-100 text-orange-700", "bg-pink-100 text-pink-700", "bg-teal-100 text-teal-700",
+      "bg-indigo-100 text-indigo-700", "bg-amber-100 text-amber-700", "bg-cyan-100 text-cyan-700",
+      "bg-rose-100 text-rose-700", "bg-lime-100 text-lime-700", "bg-fuchsia-100 text-fuchsia-700",
+    ];
+    const map = new Map<string, string>();
+    const subnets = Array.from(new Set(rawItems.map((p: any) => p.subnet).filter(Boolean)));
+    subnets.forEach((s, i) => map.set(s, colors[i % colors.length]));
+    return map;
+  }, [rawItems]);
 
   if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
@@ -198,9 +223,9 @@ export default function ProxiesPage() {
               items.map((p: any, i: number) => ({
                 "#": i + 1,
                 [t("info_address")]: p.address ?? "",
+                Subnet: p.subnet ?? "",
                 [t("col_status")]: p.status ?? "",
                 [t("col_vm")]: p.vm?.code ?? "",
-                [t("proxy_subnet")]: p.subnet ?? "",
               })),
               "proxies-export"
             );
@@ -233,15 +258,82 @@ export default function ProxiesPage() {
       )}
       </div>
 
-      {/* Import CSV Dialog */}
-      <ImportCSVDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImport={handleCSVImport}
-        title={t("proxy_import")}
-        description={t("proxy_paste_desc")}
-        templateColumns={["Address", "Subnet"]}
-      />
+      {/* Paste Import Panel */}
+      {showImport && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-indigo-900">Nhập Proxy hàng loạt</h3>
+            <div className="flex items-center gap-3">
+              {pasteSubnets.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-gray-500">Subnet:</span>
+                  {pasteSubnets.map(([subnet, count]) => (
+                    <span key={subnet} className="text-[10px] bg-white border rounded px-1.5 py-0.5 font-mono font-medium">
+                      {subnet} <span className="text-indigo-600">({count})</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="bg-white border rounded-lg px-3 py-1.5 text-sm">
+                <span className="text-gray-500">Hợp lệ: </span>
+                <span className="font-bold text-indigo-700">{validPaste.length}</span>
+                <span className="text-gray-400 text-xs ml-1">/ {parsedPaste.length} dòng</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Paste dữ liệu (mỗi dòng 1 proxy)
+            </label>
+            <p className="text-[10px] text-gray-400 mb-1">Format: IP:PORT:USER:PASS — Subnet tự detect từ IP + port prefix</p>
+            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
+              rows={6} autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+              className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none bg-white resize-y"
+              placeholder={"23.142.16.73:30012:kenan:h7t2m9r4k5pa\n23.142.16.73:30013:kenan:h7t2m9r4k5pa\n23.142.16.73:20266:kenan:h3n9t6m2r5qa\n23.142.16.73:20267:kenan:h3n9t6m2r5qa"} />
+          </div>
+          {parsedPaste.length > 0 && (
+            <div className="bg-white border rounded overflow-x-auto max-h-[200px] overflow-y-auto">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-100 sticky top-0">
+                  <tr>
+                    <th className="px-2 py-1 text-left text-gray-500 w-8">#</th>
+                    <th className="px-2 py-1 text-left text-gray-500">Address</th>
+                    <th className="px-2 py-1 text-left text-gray-500">Subnet</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {parsedPaste.map((row, i) => (
+                    <tr key={i} className={row.valid ? "" : "bg-red-50"}>
+                      <td className="px-2 py-0.5 text-gray-400">{i + 1}</td>
+                      <td className="px-2 py-0.5 font-mono">{row.address || <span className="text-red-400">invalid</span>}</td>
+                      <td className="px-2 py-0.5">
+                        {row.subnet ? <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono font-medium">{row.subnet}</span> : <span className="text-gray-300">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (validPaste.length === 0) return;
+                bulkImport.mutate({
+                  projectId: projectId!,
+                  proxies: validPaste.map((r) => ({ address: r.address })),
+                });
+                setPasteText("");
+              }}
+              disabled={validPaste.length === 0 || bulkImport.isLoading}
+              className="px-4 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {bulkImport.isLoading ? "Đang nhập..." : `Nhập ${validPaste.length} proxy`}
+            </button>
+            <button onClick={() => { setShowImport(false); setPasteText(""); }} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">{t("cancel")}</button>
+          </div>
+        </div>
+      )}
 
       {autoAssign.data && <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">{autoAssign.data.message}</div>}
 
@@ -257,6 +349,7 @@ export default function ProxiesPage() {
                 <th className="px-2 py-2 text-left font-medium text-gray-500 w-8">#</th>
                 {([
                   ["address", t("info_address"), ""],
+                  ["subnet", "Subnet", ""],
                   ["status", t("col_status"), "w-28"],
                   ["vm.code", t("col_vm"), ""],
                 ] as [string, string, string][]).map(([key, label, cls]) => (
@@ -276,6 +369,13 @@ export default function ProxiesPage() {
                   <td className="px-2 py-0.5 text-center"><input type="checkbox" checked={selected.has(proxy.id)} onChange={() => toggleSelect(proxy.id)} className="rounded" /></td>
                   <td className="px-2 py-0.5 text-gray-400">{idx + 1}</td>
                   <td className="px-1 py-0.5">{canEdit ? <EditableCell value={proxy.address ?? ""} onSave={(v) => saveField(proxy.id, "address", v)} mono /> : <span className="font-mono px-2">{proxy.address}</span>}</td>
+                  <td className="px-1 py-0.5">
+                    {proxy.subnet ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${subnetColors.get(proxy.subnet) || "bg-gray-100 text-gray-600"}`}>
+                        {proxy.subnet}
+                      </span>
+                    ) : <span className="text-gray-300 px-2">—</span>}
+                  </td>
                   <td className="px-1 py-0.5">
                     {canEdit ? (
                       <select value={proxy.status} onChange={(e) => updateProxy.mutate({ projectId: projectId!, id: proxy.id, status: e.target.value as any })} className={`text-xs px-2 py-1 rounded border-0 font-medium cursor-pointer w-full ${statusColors[proxy.status] ?? ""}`}>
