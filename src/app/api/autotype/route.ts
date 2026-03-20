@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { decrypt } from "@/lib/encryption";
+import { decrypt, encrypt } from "@/lib/encryption";
 
 // --- Token helpers ---
 
@@ -396,6 +396,120 @@ export async function POST(request: Request) {
         });
       }
       return NextResponse.json({ valid: true });
+    }
+
+    // =====================
+    // ACTION: updatePassword — operator updates password from autotype app
+    // =====================
+    if (action === "updatePassword") {
+      const { token, holder, vmppCode, newPassword, pin } = body as {
+        action: string;
+        token: string;
+        holder: string;
+        vmppCode: string;
+        newPassword: string;
+        pin: string;
+      };
+
+      if (!token || !holder || !vmppCode || !newPassword || !pin) {
+        return NextResponse.json(
+          { error: "Thieu thong tin (token, holder, vmppCode, newPassword, pin)" },
+          { status: 400 }
+        );
+      }
+
+      // Verify token
+      const tokenData = verifyToken(token);
+      if (!tokenData) {
+        return NextResponse.json(
+          { error: "Token het han, dang nhap lai" },
+          { status: 401 }
+        );
+      }
+
+      // Get user + verify PIN
+      const updateUser = await prisma.user.findUnique({
+        where: { id: tokenData.userId },
+        select: { id: true, name: true, username: true, pin: true },
+      });
+      if (!updateUser) {
+        return NextResponse.json({ error: "User deleted" }, { status: 401 });
+      }
+      if (!updateUser.pin) {
+        return NextResponse.json({ error: "User chua co PIN" }, { status: 403 });
+      }
+      const pinValid = await bcrypt.compare(pin, updateUser.pin);
+      if (!pinValid) {
+        return NextResponse.json({ error: "Sai PIN" }, { status: 401 });
+      }
+
+      // Find PayPalAccount (same logic as credentials action)
+      let paypal = await prisma.payPalAccount.findFirst({
+        where: {
+          projectId: { in: tokenData.projectIds },
+          holder: { equals: holder, mode: "insensitive" },
+          vmppCode: { equals: vmppCode, mode: "insensitive" },
+        },
+        include: {
+          emails: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        },
+      });
+      if (!paypal) {
+        paypal = await prisma.payPalAccount.findFirst({
+          where: {
+            projectId: { in: tokenData.projectIds },
+            holder: { equals: holder, mode: "insensitive" },
+            vmppCode: { contains: vmppCode, mode: "insensitive" },
+          },
+          include: {
+            emails: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+          },
+        });
+      }
+      if (!paypal) {
+        paypal = await prisma.payPalAccount.findFirst({
+          where: {
+            projectId: { in: tokenData.projectIds },
+            vmppCode: { contains: vmppCode, mode: "insensitive" },
+          },
+          include: {
+            emails: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+          },
+        });
+      }
+
+      if (!paypal) {
+        return NextResponse.json(
+          { error: `Khong tim thay PP voi holder="${holder}" vmpp="${vmppCode}"` },
+          { status: 404 }
+        );
+      }
+
+      // Encrypt new password
+      const encryptedPassword = encrypt(newPassword);
+
+      // Update PayPalEmail (primary) if exists, otherwise update legacy PayPalAccount
+      const primaryEmail = paypal.emails.find((e) => e.isPrimary);
+      const firstEmail = paypal.emails[0];
+      const emailRecord = primaryEmail || firstEmail;
+
+      if (emailRecord) {
+        await prisma.payPalEmail.update({
+          where: { id: emailRecord.id },
+          data: { password: encryptedPassword },
+        });
+      } else {
+        // Legacy: update PayPalAccount.password directly
+        await prisma.payPalAccount.update({
+          where: { id: paypal.id },
+          data: { password: encryptedPassword },
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "Da cap nhat password",
+      });
     }
 
     // =====================
