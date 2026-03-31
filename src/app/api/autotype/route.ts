@@ -4,13 +4,32 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt } from "@/lib/encryption";
 
+// --- Rate limiter (in-memory) ---
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const MAX_LOGIN_ATTEMPTS = 5;
+
+function checkRateLimit(key: string): { allowed: boolean; remaining: number; retryAfterSec: number } {
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
+    return { allowed: true, remaining: MAX_LOGIN_ATTEMPTS - 1, retryAfterSec: 0 };
+  }
+  entry.count++;
+  if (entry.count > MAX_LOGIN_ATTEMPTS) {
+    return { allowed: false, remaining: 0, retryAfterSec: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  return { allowed: true, remaining: MAX_LOGIN_ATTEMPTS - entry.count, retryAfterSec: 0 };
+}
+
 // --- Token helpers ---
 
 function createToken(userId: string, projectIds: string[]): string {
   const payload = JSON.stringify({
     userId,
     projectIds,
-    exp: Date.now() + 180 * 24 * 60 * 60 * 1000, // 6 months
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
   });
   const key = process.env.ENCRYPTION_KEY!;
   const hmac = crypto.createHmac("sha256", key).update(payload).digest("hex");
@@ -28,7 +47,11 @@ function verifyToken(
       .createHmac("sha256", key)
       .update(payload)
       .digest("hex");
-    if (hmac !== expected) return null;
+    // Timing-safe comparison to prevent timing attacks
+    if (hmac.length !== expected.length) return null;
+    const hmacBuf = Buffer.from(hmac, "hex");
+    const expectedBuf = Buffer.from(expected, "hex");
+    if (!crypto.timingSafeEqual(hmacBuf, expectedBuf)) return null;
     const data = JSON.parse(payload);
     if (data.exp < Date.now()) return null;
     return data;
@@ -72,6 +95,15 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Missing username, password, or pin" },
           { status: 400 }
+        );
+      }
+
+      // Rate limiting by username
+      const rl = checkRateLimit(`login:${username.toLowerCase()}`);
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { error: `Qua nhieu lan thu. Vui long doi ${rl.retryAfterSec}s.` },
+          { status: 429 }
         );
       }
 
@@ -308,36 +340,22 @@ export async function POST(request: Request) {
         );
       }
 
-      // Try to get credentials from PayPalEmail first (primary, or first available)
+      // Get PayPal email from PayPalEmail table (primary, or first available)
       const primaryEmail = paypalAccount.emails.find((e) => e.isPrimary);
       const firstEmail = paypalAccount.emails[0];
       const emailRecord = primaryEmail || firstEmail;
 
-      let email: string | null = null;
-      let password: string | null = null;
-      let twoFa: string | null = null;
-      let hotmailToken: string | null = null;
+      // PayPal credentials — ALWAYS from PayPalAccount (the PayPal login)
+      const password = safeDecrypt(paypalAccount.password);
+      const twoFa = safeDecrypt(paypalAccount.twoFa);
 
-      if (emailRecord) {
-        email = emailRecord.email;
-        password = safeDecrypt(emailRecord.password);
-        twoFa = safeDecrypt(emailRecord.twoFa);
-        hotmailToken = safeDecrypt(emailRecord.hotmailToken);
-      }
+      // Email address — from PayPalEmail record, fallback to PayPalAccount.primaryEmail
+      const email = emailRecord?.email || paypalAccount.primaryEmail;
 
-      // Fall back to legacy PayPalAccount fields if PayPalEmail has no credentials
-      if (!email) {
-        email = paypalAccount.primaryEmail;
-      }
-      if (!password) {
-        password = safeDecrypt(paypalAccount.password);
-      }
-      if (!twoFa) {
-        twoFa = safeDecrypt(paypalAccount.twoFa);
-      }
-      if (!hotmailToken) {
-        hotmailToken = safeDecrypt(paypalAccount.hotmailToken);
-      }
+      // Email credentials (hotmail/gmail) — from PayPalEmail record, fallback to PayPalAccount
+      const hotmailToken = (emailRecord ? safeDecrypt(emailRecord.hotmailToken) : null)
+        || safeDecrypt(paypalAccount.hotmailToken);
+      const emailPassword = emailRecord ? safeDecrypt(emailRecord.password) : null;
 
       // Lookup merge target (mail gộp) for this holder — search across allowed projects
       let mergeEmail: string | null = null;
@@ -359,6 +377,7 @@ export async function POST(request: Request) {
         password,
         twoFa,
         hotmailToken,
+        emailPassword,
         mergeEmail,
       });
     }
@@ -493,15 +512,16 @@ export async function POST(request: Request) {
       const firstEmail = paypal.emails[0];
       const emailRecord = primaryEmail || firstEmail;
 
+      // Always update PayPalAccount (legacy field) so main listing page sees it
+      await prisma.payPalAccount.update({
+        where: { id: paypal.id },
+        data: { password: encryptedPassword },
+      });
+
+      // Also update PayPalEmail if exists (detail page reads from here)
       if (emailRecord) {
         await prisma.payPalEmail.update({
           where: { id: emailRecord.id },
-          data: { password: encryptedPassword },
-        });
-      } else {
-        // Legacy: update PayPalAccount.password directly
-        await prisma.payPalAccount.update({
-          where: { id: paypal.id },
           data: { password: encryptedPassword },
         });
       }
