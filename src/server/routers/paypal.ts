@@ -5,11 +5,10 @@ import { encrypt, decrypt } from "@/lib/encryption";
 import { createAuditLog } from "@/lib/audit";
 import { checkBatchPP, checkSinglePP, readMailbox, readEmailContent } from "@/lib/pp-checker";
 import { fetchSheetData, fetchSheetTabs } from "@/lib/sheet-import";
-
-// ─── Helpers ───
-function isValidEmail(v: string | null | undefined): boolean {
-  return !!v && v.includes("@") && v.includes(".") && v.length > 5;
-}
+import { runPayPalTokenHealthCheck, type PayPalTokenInfo } from "@/lib/paypal-health";
+import { updateProjectPaypalHealthState, type TokenHealthRecord, type AutoCheckSummary } from "@/lib/paypal-health-store";
+import { saveEditHistoryBatch } from "@/lib/edit-history";
+import { extractEmails, isSingleValidEmail, getMissingFields } from "@/lib/pp-data-utils";
 
 // ─── Global Uniqueness Check ───
 // PP Code, Email, VMPP Code must be unique across ALL projects
@@ -69,10 +68,17 @@ export const paypalRouter = router({
       if (input.status) where.status = input.status;
       if (input.role) where.role = input.role;
       if (input.search) {
-        where.OR = [
-          { code: { contains: input.search, mode: "insensitive" } },
-          { primaryEmail: { contains: input.search, mode: "insensitive" } },
+        const terms = input.search.split(/[\s,;\n]+/).map((s) => s.trim()).filter(Boolean);
+        const buildTermOR = (term: string) => [
+          { code: { contains: term, mode: "insensitive" as const } },
+          { primaryEmail: { contains: term, mode: "insensitive" as const } },
+          { vmppCode: { contains: term, mode: "insensitive" as const } },
         ];
+        if (terms.length > 1) {
+          where.OR = terms.map((term) => ({ OR: buildTermOR(term) }));
+        } else if (terms.length === 1) {
+          where.OR = buildTermOR(terms[0]);
+        }
       }
 
       const [items, total, fundAggs, withdrawalAggs, lastFundDates] = await Promise.all([
@@ -82,20 +88,13 @@ export const paypalRouter = router({
           take: input.limit,
           orderBy: { createdAt: "desc" },
           include: {
-            gmails: {
-              select: {
-                id: true,
-                email: true,
-                status: true,
-                vms: { select: { id: true, code: true }, take: 1 },
-              },
-            },
             emails: {
               select: { id: true, email: true, isPrimary: true },
               orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+              take: 3,
             },
             _count: {
-              select: { fundsReceived: true, withdrawalsFrom: true, gmails: true, emails: true },
+              select: { fundsReceived: true, withdrawalsFrom: true, emails: true },
             },
           },
         }),
@@ -122,15 +121,63 @@ export const paypalRouter = router({
       const withdrawMap = new Map(withdrawalAggs.map((w) => [w.sourcePaypalId, Number(w._sum.amount ?? 0)]));
       const lastFundMap = new Map(lastFundDates.map((f) => [f.paypalId, f._max.date]));
 
-      const enrichedItems = items.map((pp) => ({
-        ...pp,
-        totalReceived: fundMap.get(pp.id) ?? 0,
-        totalWithdrawn: withdrawMap.get(pp.id) ?? 0,
-        balance: (fundMap.get(pp.id) ?? 0) - (withdrawMap.get(pp.id) ?? 0),
-        lastFundDate: lastFundMap.get(pp.id) ?? null,
-      }));
+      const enrichedItems = items.map((pp) => {
+        const hasPassword = !!pp.password;
+        const hasTwoFa = !!pp.twoFa;
+        const emailCount = pp._count.emails;
+        const missingFields = getMissingFields({ hasPassword, hasTwoFa, emailCount });
+        return {
+          ...pp,
+          totalReceived: fundMap.get(pp.id) ?? 0,
+          totalWithdrawn: withdrawMap.get(pp.id) ?? 0,
+          balance: (fundMap.get(pp.id) ?? 0) - (withdrawMap.get(pp.id) ?? 0),
+          lastFundDate: lastFundMap.get(pp.id) ?? null,
+          hasPassword,
+          hasTwoFa,
+          hasToken: !!pp.hotmailToken,
+          missingFields,
+          isComplete: missingFields.length === 0,
+        };
+      });
 
-      return { items: enrichedItems, total, page: input.page, limit: input.limit };
+      // Resolve creator names for PPs
+      const ppCreatorIds = Array.from(new Set(enrichedItems.map((p) => p.createdById).filter(Boolean))) as string[];
+      const ppCreators = ppCreatorIds.length > 0 ? await ctx.prisma.user.findMany({
+        where: { id: { in: ppCreatorIds as string[] } },
+        select: { id: true, name: true, username: true },
+      }) : [];
+      const ppCreatorMap = new Map(ppCreators.map((u) => [u.id, u.name || u.username || "?"]));
+      const finalItems = enrichedItems.map((p) => ({ ...p, createdByName: p.createdById ? ppCreatorMap.get(p.createdById) || null : null }));
+
+      // Health overview from DB (not in-memory — survives restarts)
+      const [totalAll, healthCounts] = await Promise.all([
+        ctx.prisma.payPalAccount.count({ where: { projectId: input.projectId } }),
+        ctx.prisma.payPalAccount.groupBy({
+          by: ["tokenHealthStatus"],
+          where: { projectId: input.projectId, tokenHealthStatus: { not: null } },
+          _count: true,
+        }),
+      ]);
+      const hMap = new Map(healthCounts.map((h) => [h.tokenHealthStatus, h._count]));
+      const checkedCount = healthCounts.reduce((s, h) => s + h._count, 0);
+      // Get last check time from most recently checked PP
+      const lastChecked = await ctx.prisma.payPalAccount.findFirst({
+        where: { projectId: input.projectId, tokenHealthCheckedAt: { not: null } },
+        orderBy: { tokenHealthCheckedAt: "desc" },
+        select: { tokenHealthCheckedAt: true },
+      });
+      const healthOverview = {
+        total: totalAll,
+        healthy: hMap.get("HEALTHY") ?? 0,
+        invalid: hMap.get("INVALID") ?? 0,
+        errors: hMap.get("ERROR") ?? 0,
+        missing: hMap.get("MISSING") ?? 0,
+        noData: Math.max(0, totalAll - checkedCount),
+        lastCheckAt: lastChecked?.tokenHealthCheckedAt?.toISOString() ?? null,
+        cronExpression: process.env.PAYPAL_AUTO_CHECK_CRON || "*/30 * * * *",
+      };
+
+      return { items: finalItems, total, page: input.page, limit: input.limit, healthOverview };
     }),
 
   getById: paypalsProcedure
@@ -219,8 +266,8 @@ export const paypalRouter = router({
   nextCode: paypalsProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { code: true } });
-      const prefix = project?.code || "PP";
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { code: true, settings: true } });
+      const prefix = (project?.settings as any)?.ppPrefix || project?.code || "PP";
       const count = await ctx.prisma.payPalAccount.count({ where: { projectId: input.projectId } });
       return { nextCode: `${prefix}-${String(count + 1).padStart(3, "0")}`, prefix };
     }),
@@ -248,10 +295,10 @@ export const paypalRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { password, twoFa, hotmailToken, ...rest } = input;
-      // Auto-generate code if not provided, using project code prefix
+      // Auto-generate code if not provided, using ppPrefix from project settings
       if (!rest.code) {
-        const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { code: true } });
-        const prefix = project?.code || "PP";
+        const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { code: true, settings: true } });
+        const prefix = (project?.settings as any)?.ppPrefix || project?.code || "PP";
         const count = await ctx.prisma.payPalAccount.count({ where: { projectId: input.projectId } });
         rest.code = `${prefix}-${String(count + 1).padStart(3, "0")}`;
       }
@@ -265,7 +312,7 @@ export const paypalRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: dupErrors.join("; ") });
       }
 
-      const data: any = { ...rest };
+      const data: any = { ...rest, createdById: (ctx.user as any).id };
       if (password) data.password = encrypt(password);
       if (twoFa) data.twoFa = encrypt(twoFa);
       if (hotmailToken) data.hotmailToken = encrypt(hotmailToken);
@@ -336,6 +383,20 @@ export const paypalRouter = router({
       if (limitedAt !== undefined) data.limitedAt = limitedAt ? new Date(limitedAt) : null;
 
       const result = await ctx.prisma.payPalAccount.update({ where: { id }, data });
+
+      // Save edit history for undo (30 days)
+      const trackFields = ["code", "primaryEmail", "holder", "vmppCode", "status", "notes", "limitNote", "company"];
+      const changes: Record<string, { old: any; new: any }> = {};
+      const restAny = rest as any;
+      for (const f of trackFields) {
+        if (restAny[f] !== undefined && (existing as any)[f] !== restAny[f]) {
+          changes[f] = { old: (existing as any)[f], new: restAny[f] };
+        }
+      }
+      if (Object.keys(changes).length > 0) {
+        await saveEditHistoryBatch({ entity: "PayPalAccount", entityId: id, changes, userId: (ctx.user as any).id, projectId });
+      }
+
       await createAuditLog({
         action: "UPDATE",
         entity: "PayPalAccount",
@@ -619,15 +680,15 @@ export const paypalRouter = router({
           code: true,
           primaryEmail: true,
           status: true,
+          hotmailToken: true, // legacy field
           emails: {
-            where: { hotmailToken: { not: null } },
-            select: { id: true, email: true, hotmailToken: true },
-            take: 1,
+            select: { id: true, email: true, hotmailToken: true, isPrimary: true },
+            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], // primary first
           },
         },
       });
 
-      // Also check legacy hotmailToken on PayPalAccount itself
+      // Resolve token: primary email first → other emails → legacy PP field
       const accounts: Array<{
         paypalId: string;
         paypalCode: string;
@@ -639,32 +700,28 @@ export const paypalRouter = router({
         let token: string | null = null;
         let email = pp.primaryEmail;
 
-        // Try PayPalEmail first
-        if (pp.emails.length > 0 && pp.emails[0].hotmailToken) {
-          try {
-            token = decrypt(pp.emails[0].hotmailToken);
-            email = pp.emails[0].email;
-          } catch { /* skip */ }
+        // 1) Try primary email's token first
+        const primaryEmail = pp.emails.find((e: any) => e.isPrimary && e.hotmailToken);
+        if (primaryEmail?.hotmailToken) {
+          try { token = decrypt(primaryEmail.hotmailToken); email = primaryEmail.email; } catch { /* skip */ }
         }
 
+        // 2) Try any other email with token
         if (!token) {
-          // Try legacy field on PayPalAccount
-          const ppFull = await ctx.prisma.payPalAccount.findUnique({
-            where: { id: pp.id },
-            select: { hotmailToken: true },
-          });
-          if (ppFull?.hotmailToken) {
-            try { token = decrypt(ppFull.hotmailToken); } catch { /* skip */ }
+          for (const em of pp.emails) {
+            if (em.hotmailToken) {
+              try { token = decrypt(em.hotmailToken); email = em.email; break; } catch { /* skip */ }
+            }
           }
         }
 
+        // 3) Fallback to legacy field on PayPalAccount
+        if (!token && pp.hotmailToken) {
+          try { token = decrypt(pp.hotmailToken); } catch { /* skip */ }
+        }
+
         if (token) {
-          accounts.push({
-            paypalId: pp.id,
-            paypalCode: pp.code,
-            email,
-            refreshToken: token,
-          });
+          accounts.push({ paypalId: pp.id, paypalCode: pp.code, email, refreshToken: token });
         }
       }
 
@@ -679,11 +736,10 @@ export const paypalRouter = router({
       // Run batch check
       const summary = await checkBatchPP(accounts);
 
-      // Auto-update status for detected PPs
+      // Auto-update status + case note for detected PPs (single update per PP)
       let updated = 0;
       for (const r of summary.results) {
         if (r.newStatus && !r.error) {
-          // Only update if current status is ACTIVE (don't downgrade SUSPENDED to LIMITED)
           const currentPP = pps.find((p) => p.id === r.paypalId);
           if (!currentPP) continue;
 
@@ -692,32 +748,25 @@ export const paypalRouter = router({
             (r.newStatus === "LIMITED" && currentPP.status === "ACTIVE");
 
           if (shouldUpdate) {
-            const data: any = { status: r.newStatus };
-            if (r.newStatus === "SUSPENDED") data.suspendedAt = r.alertDate ? new Date(r.alertDate) : new Date();
-            if (r.newStatus === "LIMITED") data.limitedAt = r.alertDate ? new Date(r.alertDate) : new Date();
-
-            await ctx.prisma.payPalAccount.update({
-              where: { id: r.paypalId },
-              data,
-            });
-
-            // Add case note
-            const pp = await ctx.prisma.payPalAccount.findUnique({
+            // Fetch current caseHistory first
+            const ppFresh = await ctx.prisma.payPalAccount.findUnique({
               where: { id: r.paypalId },
               select: { caseHistory: true },
             });
-            const history = Array.isArray(pp?.caseHistory) ? [...(pp!.caseHistory as any[])] : [];
+            const history = Array.isArray(ppFresh?.caseHistory) ? [...(ppFresh!.caseHistory as any[])] : [];
             history.push({
               date: new Date().toISOString(),
               type: r.newStatus === "SUSPENDED" ? "suspend" : "limit",
-              note: `[Auto-check] ${r.alertSubject || r.alertType}`,
+              note: `[Auto-check] ${r.alertSubject || r.alertType} | ${r.emailsScanned || 0} emails scanned`,
               docsLink: null,
             });
-            await ctx.prisma.payPalAccount.update({
-              where: { id: r.paypalId },
-              data: { caseHistory: history },
-            });
 
+            // Single update: status + dates + case note
+            const data: any = { status: r.newStatus, caseHistory: history };
+            if (r.newStatus === "SUSPENDED") data.suspendedAt = r.alertDate ? new Date(r.alertDate) : new Date();
+            if (r.newStatus === "LIMITED") data.limitedAt = r.alertDate ? new Date(r.alertDate) : new Date();
+
+            await ctx.prisma.payPalAccount.update({ where: { id: r.paypalId }, data });
             updated++;
           }
         }
@@ -993,7 +1042,10 @@ export const paypalRouter = router({
             if (row.ppcode) updateData.vmppCode = row.ppcode;
             if (row.passPaypal) updateData.password = encrypt(row.passPaypal);
             if (row.twoFa) updateData.twoFa = encrypt(row.twoFa);
-            if (isValidEmail(row.email1)) updateData.primaryEmail = row.email1;
+            // NEW: only set primaryEmail if row.email1 is a single valid email.
+            // Multi-email handling happens later when iterating email entries.
+            const email1Extracted = extractEmails(row.email1);
+            if (email1Extracted.length > 0) updateData.primaryEmail = email1Extracted[0];
 
             if (Object.keys(updateData).length > 0) {
               await ctx.prisma.payPalAccount.update({ where: { id: existing.id }, data: updateData });
@@ -1007,7 +1059,7 @@ export const paypalRouter = router({
             ];
             let emailsAdded = 0;
             for (const entry of emailEntries) {
-              if (!isValidEmail(entry.email)) continue;
+              if (extractEmails(entry.email).length === 0) continue;
               // Check email globally — not just within this PP
               const exists = await ctx.prisma.payPalEmail.findFirst({
                 where: { email: entry.email },
@@ -1042,7 +1094,7 @@ export const paypalRouter = router({
 
         try {
           // Global uniqueness check for new PP
-          const allEmails = [row.email1, row.email2, row.email3].filter(isValidEmail);
+          const allEmails = [row.email1, row.email2, row.email3].flatMap(extractEmails);
           const dupErrors = await checkGlobalUnique(ctx.prisma, {
             code: ppCode,
             vmppCode: row.ppcode || undefined,
@@ -1054,7 +1106,7 @@ export const paypalRouter = router({
             continue;
           }
 
-          const primaryEmail = (isValidEmail(row.email1) ? row.email1 : null) || (isValidEmail(row.email2) ? row.email2 : null) || (isValidEmail(row.email3) ? row.email3 : null) || `${ppCode}@unknown.com`;
+          const primaryEmail = allEmails[0] || `${ppCode}@unknown.com`;
 
           const ppData: any = {
             code: ppCode,
@@ -1080,7 +1132,7 @@ export const paypalRouter = router({
 
           let primarySet = false;
           for (const entry of emailEntries) {
-            if (!isValidEmail(entry.email)) continue;
+            if (extractEmails(entry.email).length === 0) continue;
             const emailData: any = {
               email: entry.email,
               isPrimary: !primarySet,
@@ -1117,5 +1169,161 @@ export const paypalRouter = router({
       });
 
       return { imported, skipped, errors: errors.slice(0, 20), results, totalInSheet: allRows.length };
+    }),
+
+  // ─── Refresh Token Health (Bulk) ───
+  refreshTokenHealth: paypalsProcedure
+    .input(z.object({
+      projectId: z.string(),
+      paypalIds: z.array(z.string()).optional(), // if empty, check all with token
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const where: any = { projectId: input.projectId };
+      if (input.paypalIds && input.paypalIds.length > 0) {
+        where.id = { in: input.paypalIds };
+      }
+
+      const pps = await ctx.prisma.payPalAccount.findMany({
+        where,
+        select: {
+          id: true,
+          code: true,
+          primaryEmail: true,
+          hotmailToken: true,
+          emails: {
+            where: { hotmailToken: { not: null } },
+            select: { email: true, hotmailToken: true },
+            take: 1,
+          },
+        },
+      });
+
+      const tokens: PayPalTokenInfo[] = [];
+
+      for (const pp of pps) {
+        let token: string | null = null;
+        let email = pp.primaryEmail;
+
+        if (pp.emails.length > 0 && pp.emails[0].hotmailToken) {
+          try { token = decrypt(pp.emails[0].hotmailToken); email = pp.emails[0].email; } catch {}
+        }
+        if (!token && pp.hotmailToken) {
+          try { token = decrypt(pp.hotmailToken); } catch {}
+        }
+
+        if (token) {
+          tokens.push({ paypalId: pp.id, paypalCode: pp.code, email, rawToken: token });
+        }
+      }
+
+      // Mark PPs without token as MISSING (batch update, not N+1)
+      const tokenPPIds = new Set(tokens.map((t) => t.paypalId));
+      const missingPPIds = pps.filter((pp) => !tokenPPIds.has(pp.id)).map((pp) => pp.id);
+      if (missingPPIds.length > 0) {
+        await ctx.prisma.payPalAccount.updateMany({
+          where: { id: { in: missingPPIds } },
+          data: { tokenHealthStatus: "MISSING", tokenHealthCheckedAt: new Date(), tokenHealthError: null },
+        });
+      }
+
+      if (tokens.length === 0) {
+        return {
+          total: pps.length, healthy: 0, invalid: 0, errors: 0, missing: pps.length,
+          results: [], durationMs: 0, message: "Không có PP nào có token",
+        };
+      }
+
+      const summary = await runPayPalTokenHealthCheck(tokens);
+
+      // Batch update DB by status group (not N+1)
+      const statusGroups: Record<string, string[]> = {};
+      for (const r of summary.results) {
+        const key = `${r.status}|||${r.error || ""}`;
+        if (!statusGroups[key]) statusGroups[key] = [];
+        statusGroups[key].push(r.paypalId);
+      }
+      for (const key of Object.keys(statusGroups)) {
+        const [status, error] = key.split("|||");
+        try {
+          await ctx.prisma.payPalAccount.updateMany({
+            where: { id: { in: statusGroups[key] } },
+            data: { tokenHealthStatus: status, tokenHealthCheckedAt: new Date(), tokenHealthError: error || null },
+          });
+        } catch { /* skip */ }
+      }
+
+      // Update in-memory state
+      const records: TokenHealthRecord[] = summary.results.map((r) => ({
+        paypalId: r.paypalId,
+        status: r.status,
+        error: r.error,
+        checkedAt: r.checkedAt,
+      }));
+      const autoSummary: AutoCheckSummary = {
+        lastRunAt: new Date().toISOString(),
+        totalChecked: summary.total,
+        healthy: summary.healthy,
+        invalid: summary.invalid,
+        errors: summary.errors,
+        missing: missingPPIds.length,
+        durationMs: summary.durationMs,
+        cronExpression: process.env.PAYPAL_AUTO_CHECK_CRON || "*/30 * * * *",
+      };
+      updateProjectPaypalHealthState(input.projectId, autoSummary, records);
+
+      await createAuditLog({
+        action: "REFRESH_TOKEN_HEALTH",
+        entity: "PayPalAccount",
+        entityId: input.projectId,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { total: summary.total, healthy: summary.healthy, invalid: summary.invalid, errors: summary.errors },
+      });
+
+      return { ...summary, missing: missingPPIds.length };
+    }),
+
+  // ─── Update Workflow Status ───
+  updateWorkflowStatus: paypalsProcedure
+    .input(z.object({
+      projectId: z.string(),
+      id: z.string(),
+      workflowStatus: z.enum(["updocs", "appeal", "resolved"]).nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const pp = await ctx.prisma.payPalAccount.findFirstOrThrow({
+        where: { id: input.id, projectId: input.projectId },
+      });
+
+      const data: any = { workflowStatus: input.workflowStatus };
+
+      // If resolved + LIMITED → auto-reactivate. SUSPENDED stays (permanent, 180-day countdown)
+      if (input.workflowStatus === "resolved" && pp.status === "LIMITED") {
+        data.status = "ACTIVE";
+        data.limitedAt = null;
+      }
+
+      // Add case note in same update (Bug #5 fix: avoid race condition)
+      const history = Array.isArray(pp.caseHistory) ? [...(pp.caseHistory as any[])] : [];
+      history.push({
+        date: new Date().toISOString(),
+        type: input.workflowStatus || "note",
+        note: `Workflow: ${input.workflowStatus || "cleared"}`,
+        docsLink: null,
+      });
+      data.caseHistory = history;
+
+      const result = await ctx.prisma.payPalAccount.update({ where: { id: input.id }, data });
+
+      await createAuditLog({
+        action: "UPDATE_WORKFLOW",
+        entity: "PayPalAccount",
+        entityId: input.id,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { workflowStatus: input.workflowStatus },
+      });
+
+      return result;
     }),
 });
