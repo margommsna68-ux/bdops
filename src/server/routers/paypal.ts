@@ -1410,4 +1410,113 @@ export const paypalRouter = router({
 
       return result;
     }),
+
+  // ─── Scan for broken PayPalEmail records (multi-email in one cell) ───
+  scanBrokenEmails: paypalsProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Requires ADMIN or MODERATOR role" });
+      }
+      const all = await ctx.prisma.payPalEmail.findMany({
+        where: { projectId: input.projectId },
+        include: { paypal: { select: { id: true, code: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+
+      const broken = all
+        .map((e) => ({
+          id: e.id,
+          ppId: e.paypal.id,
+          ppCode: e.paypal.code,
+          originalEmail: e.email,
+          extractedEmails: extractEmails(e.email),
+          isPrimary: e.isPrimary,
+        }))
+        .filter((e) => !isSingleValidEmail(e.originalEmail) && e.extractedEmails.length >= 1);
+
+      return broken;
+    }),
+
+  // ─── Fix broken PayPalEmail records by splitting into multiple rows ───
+  fixBrokenEmails: paypalsProcedure
+    .input(z.object({
+      projectId: z.string(),
+      items: z.array(z.object({
+        emailId: z.string(),
+        extractedEmails: z.array(z.string().min(1)),
+      })).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Requires ADMIN or MODERATOR role" });
+      }
+
+      let fixed = 0;
+      let newEmails = 0;
+      const errors: string[] = [];
+
+      for (const item of input.items) {
+        if (item.extractedEmails.length === 0) continue;
+        try {
+          const existing = await ctx.prisma.payPalEmail.findFirst({
+            where: { id: item.emailId, projectId: input.projectId },
+          });
+          if (!existing) {
+            errors.push(`${item.emailId}: not found`);
+            continue;
+          }
+          // Re-check against current state (avoid race with concurrent edits)
+          if (isSingleValidEmail(existing.email)) {
+            continue; // already fixed
+          }
+
+          const [firstEmail, ...rest] = item.extractedEmails;
+
+          // Update the existing row to use the first extracted email (keeps credentials)
+          await ctx.prisma.payPalEmail.update({
+            where: { id: existing.id },
+            data: { email: firstEmail },
+          });
+
+          // Create new rows for remaining emails (no credentials — must be filled manually)
+          for (const email of rest) {
+            try {
+              await ctx.prisma.payPalEmail.create({
+                data: {
+                  email,
+                  isPrimary: false,
+                  paypalId: existing.paypalId,
+                  projectId: input.projectId,
+                },
+              });
+              newEmails++;
+            } catch { /* duplicate email in same project — skip */ }
+          }
+
+          // Sync PayPalAccount.primaryEmail if this was the primary
+          if (existing.isPrimary) {
+            await ctx.prisma.payPalAccount.update({
+              where: { id: existing.paypalId },
+              data: { primaryEmail: firstEmail },
+            });
+          }
+
+          fixed++;
+        } catch (e: any) {
+          errors.push(`${item.emailId}: ${e.message}`);
+        }
+      }
+
+      await createAuditLog({
+        action: "FIX_BROKEN_EMAILS",
+        entity: "PayPalEmail",
+        entityId: input.projectId,
+        userId: (ctx.user as any).id,
+        projectId: input.projectId,
+        changes: { fixed, newEmails, errorCount: errors.length },
+      });
+
+      return { fixed, newEmails, errors: errors.slice(0, 10) };
+    }),
 });
