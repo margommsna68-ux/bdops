@@ -995,9 +995,13 @@ export const paypalRouter = router({
       }
 
       let imported = 0;
+      let updated = 0;
       let skipped = 0;
+      let emailsCreatedTotal = 0;
+      let emailsUpdatedTotal = 0;
+      const allChanges: Array<{ ppCode: string; email?: string; fields: string[] }> = [];
       const errors: string[] = [];
-      const results: Array<{ ppcode: string; status: "created" | "skipped" | "error"; message?: string }> = [];
+      const results: Array<{ ppcode: string; status: "created" | "updated" | "skipped" | "error"; message?: string }> = [];
 
       for (const code of input.ppCodes) {
         const trimmed = code.trim();
@@ -1035,36 +1039,63 @@ export const paypalRouter = router({
           });
         }
         if (existing) {
-          // PP exists → always sync data from sheet (sheet = source of truth)
+          // PP exists → compare sheet vs DB, update only if different (sheet = source of truth)
           try {
             const updateData: any = {};
+            const accountChangedFields: string[] = [];
+
             if (row.userwin) updateData.holder = row.userwin.toUpperCase();
             if (row.ppcode) updateData.vmppCode = row.ppcode;
-            if (row.passPaypal) updateData.password = encrypt(row.passPaypal);
-            if (row.twoFa) updateData.twoFa = encrypt(row.twoFa);
-            // NEW: only set primaryEmail if row.email1 is a single valid email.
-            // Multi-email handling happens later when iterating email entries.
+
+            // Compare-first for PP-level password + 2FA
+            const currentPPPass = existing.password ? decrypt(existing.password) : null;
+            const currentPPTwoFa = existing.twoFa ? decrypt(existing.twoFa) : null;
+            if (row.passPaypal && row.passPaypal !== currentPPPass) {
+              updateData.password = encrypt(row.passPaypal);
+              accountChangedFields.push("password");
+            }
+            if (row.twoFa && row.twoFa !== currentPPTwoFa) {
+              updateData.twoFa = encrypt(row.twoFa);
+              accountChangedFields.push("twoFa");
+            }
+
+            // Sync primaryEmail if row.email1 has a valid email
             const email1Extracted = extractEmails(row.email1);
-            if (email1Extracted.length > 0) updateData.primaryEmail = email1Extracted[0];
+            if (email1Extracted.length > 0 && email1Extracted[0] !== existing.primaryEmail) {
+              updateData.primaryEmail = email1Extracted[0];
+              accountChangedFields.push("primaryEmail");
+            }
 
             if (Object.keys(updateData).length > 0) {
               await ctx.prisma.payPalAccount.update({ where: { id: existing.id }, data: updateData });
             }
+            if (accountChangedFields.length > 0) {
+              allChanges.push({ ppCode, fields: accountChangedFields });
+            }
 
-            // Add missing emails
-            const emailEntries = [
+            // Expand each email cell via extractEmails — handles multi-email cells.
+            // Each (email, pass, token) entry from the sheet is split into one per extracted email.
+            const sheetEntries: Array<{ email: string; pass: string; token: string }> = [];
+            for (const src of [
               { email: row.email1, pass: row.passEmail1, token: row.tokenEmail1 },
               { email: row.email2, pass: row.passEmail2, token: row.tokenEmail2 },
               { email: row.email3, pass: row.passEmail3, token: row.tokenEmail3 },
-            ];
+            ]) {
+              for (const e of extractEmails(src.email)) {
+                sheetEntries.push({ email: e, pass: src.pass || "", token: src.token || "" });
+              }
+            }
+
             let emailsAdded = 0;
-            for (const entry of emailEntries) {
-              if (extractEmails(entry.email).length === 0) continue;
-              // Check email globally — not just within this PP
-              const exists = await ctx.prisma.payPalEmail.findFirst({
-                where: { email: entry.email },
+            let emailsUpdated = 0;
+            const emailChanges: Array<{ email: string; fields: string[] }> = [];
+
+            for (const entry of sheetEntries) {
+              const existingEmail = await ctx.prisma.payPalEmail.findFirst({
+                where: { email: entry.email, projectId: input.projectId },
               });
-              if (!exists) {
+
+              if (!existingEmail) {
                 const emailData: any = {
                   email: entry.email,
                   isPrimary: false,
@@ -1073,14 +1104,52 @@ export const paypalRouter = router({
                 };
                 if (entry.pass) emailData.password = encrypt(entry.pass);
                 if (entry.token) emailData.hotmailToken = encrypt(entry.token);
-                try { await ctx.prisma.payPalEmail.create({ data: emailData }); emailsAdded++; } catch {}
+                try {
+                  await ctx.prisma.payPalEmail.create({ data: emailData });
+                  emailsAdded++;
+                } catch { /* skip duplicate */ }
+                continue;
+              }
+
+              // Email exists — compare + update changed credentials
+              const currentPass = existingEmail.password ? decrypt(existingEmail.password) : null;
+              const currentToken = existingEmail.hotmailToken ? decrypt(existingEmail.hotmailToken) : null;
+
+              const emailUpdates: any = {};
+              const changedFields: string[] = [];
+              if (entry.pass && entry.pass !== currentPass) {
+                emailUpdates.password = encrypt(entry.pass);
+                changedFields.push("password");
+              }
+              if (entry.token && entry.token !== currentToken) {
+                emailUpdates.hotmailToken = encrypt(entry.token);
+                changedFields.push("token");
+              }
+
+              if (Object.keys(emailUpdates).length > 0) {
+                await ctx.prisma.payPalEmail.update({
+                  where: { id: existingEmail.id },
+                  data: emailUpdates,
+                });
+                emailsUpdated++;
+                emailChanges.push({ email: entry.email, fields: changedFields });
               }
             }
 
-            const changes = Object.keys(updateData).length + emailsAdded;
-            if (changes > 0) {
-              imported++;
-              results.push({ ppcode: ppCode, status: "created", message: `Updated: ${Object.keys(updateData).join(",")}${emailsAdded > 0 ? ` +${emailsAdded} emails` : ""}` });
+            for (const c of emailChanges) {
+              allChanges.push({ ppCode, email: c.email, fields: c.fields });
+            }
+            emailsCreatedTotal += emailsAdded;
+            emailsUpdatedTotal += emailsUpdated;
+
+            const changeCount = accountChangedFields.length + emailsAdded + emailsUpdated;
+            if (changeCount > 0) {
+              updated++;
+              const parts: string[] = [];
+              if (accountChangedFields.length > 0) parts.push(accountChangedFields.join(","));
+              if (emailsAdded > 0) parts.push(`+${emailsAdded} emails`);
+              if (emailsUpdated > 0) parts.push(`~${emailsUpdated} emails`);
+              results.push({ ppcode: ppCode, status: "updated", message: parts.join(" ") || "changed" });
             } else {
               skipped++;
               results.push({ ppcode: ppCode, status: "skipped", message: "Đã đầy đủ" });
@@ -1123,16 +1192,20 @@ export const paypalRouter = router({
 
           const pp = await ctx.prisma.payPalAccount.create({ data: ppData });
 
-          // Create emails (up to 3)
-          const emailEntries = [
+          // Expand multi-email cells: one PayPalEmail row per extracted email
+          const newSheetEntries: Array<{ email: string; pass: string; token: string }> = [];
+          for (const src of [
             { email: row.email1, pass: row.passEmail1, token: row.tokenEmail1 },
             { email: row.email2, pass: row.passEmail2, token: row.tokenEmail2 },
             { email: row.email3, pass: row.passEmail3, token: row.tokenEmail3 },
-          ];
+          ]) {
+            for (const e of extractEmails(src.email)) {
+              newSheetEntries.push({ email: e, pass: src.pass || "", token: src.token || "" });
+            }
+          }
 
           let primarySet = false;
-          for (const entry of emailEntries) {
-            if (extractEmails(entry.email).length === 0) continue;
+          for (const entry of newSheetEntries) {
             const emailData: any = {
               email: entry.email,
               isPrimary: !primarySet,
@@ -1144,14 +1217,15 @@ export const paypalRouter = router({
             try {
               await ctx.prisma.payPalEmail.create({ data: emailData });
               primarySet = true;
-            } catch { /* skip duplicate email */ }
+              emailsCreatedTotal++;
+            } catch { /* skip duplicate */ }
           }
 
           imported++;
           results.push({
             ppcode: ppCode,
             status: "created",
-            message: `holder=${row.userwin || "—"}, emails=${[row.email1, row.email2, row.email3].filter(Boolean).length}`,
+            message: `holder=${row.userwin || "—"}, emails=${newSheetEntries.length}`,
           });
         } catch (e: any) {
           errors.push(`${ppCode}: ${e.message}`);
@@ -1165,10 +1239,20 @@ export const paypalRouter = router({
         entityId: input.projectId,
         userId: (ctx.user as any).id,
         projectId: input.projectId,
-        changes: { source: "google_sheet", imported, skipped, errors: errors.length, codes: input.ppCodes },
+        changes: { source: "google_sheet", imported, updated, skipped, emailsCreated: emailsCreatedTotal, emailsUpdated: emailsUpdatedTotal, errors: errors.length, codes: input.ppCodes },
       });
 
-      return { imported, skipped, errors: errors.slice(0, 20), results, totalInSheet: allRows.length };
+      return {
+        imported,
+        updated,
+        skipped,
+        emailsCreated: emailsCreatedTotal,
+        emailsUpdated: emailsUpdatedTotal,
+        changes: allChanges,
+        errors: errors.slice(0, 20),
+        results,
+        totalInSheet: allRows.length,
+      };
     }),
 
   // ─── Refresh Token Health (Bulk) ───
