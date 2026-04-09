@@ -26,6 +26,9 @@ export const paypalEmailRouter = router({
       return emails.map((e) => ({
         ...e,
         totalReceived: fundMap.get(e.id) ?? 0,
+        hasPassword: !!e.password,
+        hasTwoFa: !!e.twoFa,
+        hasToken: !!e.hotmailToken,
       }));
     }),
 

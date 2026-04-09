@@ -182,9 +182,10 @@ function PPAccountSecret({ ppId, field, projectId, pinVerified, onNeedPin, canEd
 }
 
 // ─── Secret Field (reveal + copy + inline edit) ─────────
-function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdit, onSaved }: {
+function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdit, onSaved, hasData }: {
   emailId: string; field: "password" | "twoFa" | "hotmailToken"; projectId: string;
   pinVerified: boolean; onNeedPin: () => void; canEdit?: boolean; onSaved?: () => void;
+  hasData?: boolean;
 }) {
   const [revealed, setRevealed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -297,6 +298,20 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdi
           )}
         </div>
         <span className="font-mono text-[11px] break-all leading-tight text-gray-800 select-all bg-gray-50 px-1.5 py-1 rounded block">{revealed}</span>
+      </div>
+    );
+  }
+
+  // Field is empty → show NODATA badge with + add button
+  if (hasData === false) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <NoDataBadge variant="required" />
+        {canEdit && (
+          <button onClick={handleEdit} disabled={loading} className="text-xs text-blue-600 hover:underline" title="Add">
+            + add
+          </button>
+        )}
       </div>
     );
   }
@@ -791,16 +806,16 @@ export default function PayPalDetailPage() {
                     </td>
                     <td className="py-2 pr-2">
                       <SecretField emailId={email.id} field="password" projectId={projectId!}
-                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
+                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} hasData={email.hasPassword} />
                     </td>
                     <td className="py-2 pr-2">
                       <SecretField emailId={email.id} field="twoFa" projectId={projectId!}
-                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
+                        pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} hasData={email.hasTwoFa} />
                     </td>
                     <td className="py-2 pr-2">
                       <div className="flex items-center gap-1.5">
                         <SecretField emailId={email.id} field="hotmailToken" projectId={projectId!}
-                          pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} />
+                          pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={invalidate} hasData={email.hasToken} />
                         <button
                           onClick={() => {
                             setMailboxLoading(true);

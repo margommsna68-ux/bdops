@@ -575,86 +575,97 @@ export default function PayPalsPage() {
   );
   const ppPrefix = nextCodeData?.prefix || "";
 
-  // Smart parse: auto-detect fields from each part
-  const parsedLines = useMemo(() => {
+  // Smart parse: one PP per source line. If a line has multiple emails, they all belong to that same PP.
+  type ParsedPP = {
+    ppCode: string;
+    holder: string;
+    vmppCode: string;
+    emails: string[]; // one or more emails for this single PP
+    password: string;
+    twoFa: string;
+    warnings: string[];
+  };
+  const parsedLines = useMemo<ParsedPP[]>(() => {
     const isPPCode = (s: string) => /^[A-Z]{1,5}-\d{1,5}$/i.test(s) || /^[A-Z]{1,5}-[A-Z]{0,3}\d{1,5}[A-Z]?$/i.test(s);
     const isVMPP = (s: string) => /^(PP-?)?[A-Z]{0,3}\d{2,5}[A-Z]?$/i.test(s) && extractEmails(s).length === 0;
     const isHolder = (s: string) => /^PP\d{2}$/i.test(s) || BUILTIN_HOLDERS.includes(s.toUpperCase());
     const is2FA = (s: string) => /^[A-Z0-9]{4}\s[A-Z0-9]{4}\s[A-Z0-9]{4}\s[A-Z0-9]{4}$/i.test(s) || /^[A-Z0-9]{16,20}$/i.test(s);
 
-    return quickEmails.split("\n").map((line) => line.trim()).filter(Boolean).flatMap((line) => {
+    return quickEmails.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
       const sep = line.includes("\t") ? "\t" : line.includes("|") ? "|" : null;
       const parts = sep ? line.split(sep).map((p) => p.trim()) : [line];
 
-      const base: { ppCode: string; holder: string; vmppCode: string; email: string; password: string; twoFa: string; warnings: string[] } = {
-        ppCode: "", holder: "", vmppCode: "", email: "", password: "", twoFa: "", warnings: [],
+      const result: ParsedPP = {
+        ppCode: "", holder: "", vmppCode: "", emails: [], password: "", twoFa: "", warnings: [],
       };
       const unmatched: string[] = [];
-      let allEmails: string[] = [];
 
       for (const p of parts) {
         if (!p) continue;
         const extracted = extractEmails(p);
         if (extracted.length > 0) {
-          allEmails = allEmails.concat(extracted);
+          result.emails.push(...extracted);
           continue;
         }
-        if (isPPCode(p) && !base.ppCode) base.ppCode = p;
-        else if (isHolder(p) && !base.holder) base.holder = p.toUpperCase();
-        else if (is2FA(p) && !base.twoFa) base.twoFa = p;
-        else if (isVMPP(p) && !base.vmppCode) base.vmppCode = p;
+        if (isPPCode(p) && !result.ppCode) result.ppCode = p;
+        else if (isHolder(p) && !result.holder) result.holder = p.toUpperCase();
+        else if (is2FA(p) && !result.twoFa) result.twoFa = p;
+        else if (isVMPP(p) && !result.vmppCode) result.vmppCode = p;
         else unmatched.push(p);
       }
 
-      if (unmatched.length > 0 && !base.password) {
-        base.password = unmatched.sort((a, b) => b.length - a.length)[0];
-        unmatched.splice(unmatched.indexOf(base.password), 1);
+      if (unmatched.length > 0 && !result.password) {
+        result.password = unmatched.sort((a, b) => b.length - a.length)[0];
+        unmatched.splice(unmatched.indexOf(result.password), 1);
       }
-      if (unmatched.length > 0 && !base.vmppCode) base.vmppCode = unmatched[0];
+      if (unmatched.length > 0 && !result.vmppCode) result.vmppCode = unmatched[0];
 
-      if (base.ppCode && ppPrefix && !base.ppCode.toUpperCase().startsWith(ppPrefix.toUpperCase())) {
-        base.warnings.push(`Mã PP "${base.ppCode}" không đúng prefix "${ppPrefix}"`);
+      if (result.ppCode && ppPrefix && !result.ppCode.toUpperCase().startsWith(ppPrefix.toUpperCase())) {
+        result.warnings.push(`Mã PP "${result.ppCode}" không đúng prefix "${ppPrefix}"`);
       }
 
-      // Dedupe emails across the line
-      allEmails = Array.from(new Set(allEmails));
+      // Dedupe emails within this one PP
+      result.emails = Array.from(new Set(result.emails));
 
-      // If no emails extracted, return one row with empty email (preserves existing error UX).
-      if (allEmails.length === 0) return [{ ...base, email: "" }];
-
-      // One row per extracted email. First row keeps ppCode/password/twoFa; subsequent rows auto.
-      return allEmails.map((email, idx) => ({
-        ...base,
-        ppCode: idx === 0 ? base.ppCode : "",
-        email,
-        password: idx === 0 ? base.password : "",
-        twoFa: idx === 0 ? base.twoFa : "",
-        warnings: idx === 0 ? base.warnings : [],
-      }));
+      return result;
     });
   }, [quickEmails, ppPrefix]);
 
-  const validLines = parsedLines.filter((p) => p.email.includes("@"));
+  const validLines = parsedLines.filter((p) => p.emails.length > 0);
   const warningLines = parsedLines.filter((p) => p.warnings.length > 0);
 
   const saveQuickAdd = async () => {
     if (!validLines.length) { toast.error("Không có email hợp lệ"); return; }
     setSavingQuick(true);
     let created = 0;
+    let extraEmails = 0;
     try {
       for (const row of validLines) {
-        await trpcVanilla.paypal.create.mutate({
+        // Create PP with the first email as primary
+        const primary = row.emails[0];
+        const pp: any = await trpcVanilla.paypal.create.mutate({
           projectId: projectId!,
           code: row.ppCode || undefined,
-          primaryEmail: row.email,
+          primaryEmail: primary,
           holder: row.holder || quickHolder || undefined,
           vmppCode: row.vmppCode || undefined,
           password: row.password || undefined,
           twoFa: row.twoFa || undefined,
         });
         created++;
+
+        // Add additional emails as PayPalEmail rows for the same PP
+        const rest = row.emails.slice(1);
+        if (rest.length > 0 && pp?.id) {
+          await trpcVanilla.paypalEmail.bulkCreate.mutate({
+            projectId: projectId!,
+            paypalId: pp.id,
+            items: rest.map((email) => ({ email, isPrimary: false })),
+          });
+          extraEmails += rest.length;
+        }
       }
-      toast.success(`Đã tạo ${created} PayPal`);
+      toast.success(`Đã tạo ${created} PayPal${extraEmails > 0 ? ` (+${extraEmails} email phụ)` : ""}`);
       setQuickEmails("");
       setQuickHolder("");
       setShowQuickAdd(false);
@@ -1010,14 +1021,27 @@ export default function PayPalsPage() {
                 </thead>
                 <tbody className="divide-y">
                   {parsedLines.map((row, i) => (
-                    <tr key={i} className={!row.email.includes("@") ? "bg-red-50" : row.warnings.length > 0 ? "bg-orange-50" : ""}>
-                      <td className="px-2 py-0.5 text-gray-400">{i + 1}</td>
-                      <td className="px-2 py-0.5 font-mono font-medium text-blue-700">{row.ppCode || <span className="text-gray-300 text-[10px]">auto</span>}</td>
-                      <td className="px-2 py-0.5 font-medium">{row.holder || quickHolder || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-2 py-0.5 font-mono">{row.vmppCode || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-2 py-0.5 font-mono">{row.email || <span className="text-red-400">thiếu email</span>}</td>
-                      <td className="px-2 py-0.5">{row.password ? "••••" : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-2 py-0.5">{row.twoFa ? "••••" : <span className="text-gray-300">—</span>}</td>
+                    <tr key={i} className={row.emails.length === 0 ? "bg-red-50" : row.warnings.length > 0 ? "bg-orange-50" : ""}>
+                      <td className="px-2 py-0.5 text-gray-400 align-top">{i + 1}</td>
+                      <td className="px-2 py-0.5 font-mono font-medium text-blue-700 align-top">{row.ppCode || <span className="text-gray-300 text-[10px]">auto</span>}</td>
+                      <td className="px-2 py-0.5 font-medium align-top">{row.holder || quickHolder || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-2 py-0.5 font-mono align-top">{row.vmppCode || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-2 py-0.5 font-mono align-top">
+                        {row.emails.length === 0 ? (
+                          <span className="text-red-400">thiếu email</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {row.emails.map((e, idx) => (
+                              <div key={e} className={idx === 0 ? "font-medium" : "text-gray-500"}>
+                                {e}
+                                {idx === 0 && row.emails.length > 1 && <span className="ml-1 text-[8px] bg-blue-100 text-blue-700 px-1 rounded">primary</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-0.5 align-top">{row.password ? "••••" : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-2 py-0.5 align-top">{row.twoFa ? "••••" : <span className="text-gray-300">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>
