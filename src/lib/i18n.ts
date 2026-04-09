@@ -127,6 +127,25 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "pp_gmails": { en: "Gmails", vi: "Gmail" },
   "pp_txns": { en: "Txns", vi: "GD" },
 
+  // ─── PayPal Data Integrity ───
+  "pp_missing_data": { en: "Add data", vi: "Bổ sung data" },
+  "pp_missing_data_tooltip": { en: "Missing required fields", vi: "Thiếu dữ liệu bắt buộc" },
+  "pp_missing_password": { en: "password", vi: "mật khẩu" },
+  "pp_missing_twofa": { en: "2FA", vi: "2FA" },
+  "pp_missing_email": { en: "email", vi: "email" },
+  "pp_nodata_badge": { en: "NODATA", vi: "NODATA" },
+  "pp_fix_broken_emails": { en: "Fix Broken Emails", vi: "Sửa email bị chèn" },
+  "pp_scan_broken_emails": { en: "Scan for broken emails", vi: "Quét email bị chèn" },
+  "pp_broken_emails_found": { en: "Broken emails found", vi: "Email bị chèn đã tìm thấy" },
+  "pp_broken_emails_none": { en: "No broken emails found.", vi: "Không có email nào bị chèn." },
+  "pp_fix_all": { en: "Fix All", vi: "Sửa tất cả" },
+  "pp_original_email": { en: "Original", vi: "Email gốc" },
+  "pp_split_into": { en: "Split into", vi: "Tách thành" },
+  "pp_fix_success": { en: "Fixed {count} records, created {created} new emails", vi: "Đã sửa {count} bản ghi, tạo {created} email mới" },
+  "pp_import_changes_title": { en: "Import changes detected", vi: "Phát hiện thay đổi từ import" },
+  "pp_import_no_changes": { en: "No changes — all data already up to date.", vi: "Không có thay đổi — dữ liệu đã mới nhất." },
+  "pp_import_changes_field": { en: "Field", vi: "Trường" },
+
   // ─── Withdrawals ───
   "wd_title": { en: "Xử lý tiền PayPal", vi: "Xử lý tiền PayPal" },
   "wd_subtitle": { en: "Gộp PayPal hoặc bán trực tiếp", vi: "Gộp PayPal hoặc bán trực tiếp" },
