@@ -10,6 +10,7 @@ import { trpcVanilla } from "@/lib/trpc-vanilla";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { PinVerifyDialog } from "@/components/PinVerify";
+import { NoDataBadge } from "@/components/NoDataBadge";
 import toast from "react-hot-toast";
 
 // ─── Copy Button ─────────
@@ -25,6 +26,158 @@ function CopyBtn({ value }: { value: string }) {
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
       )}
     </button>
+  );
+}
+
+// ─── Editable Field (click to edit, Enter to save) ─────────
+function EditableField({ value, onSave, canEdit, mono, textClass, required }: { value: string; onSave: (v: string) => void; canEdit?: boolean; mono?: boolean; textClass?: string; required?: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const save = () => { setEditing(false); if (draft !== value) onSave(draft); };
+  if (editing && canEdit) {
+    return (
+      <div className="flex items-center gap-1">
+        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+          onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
+          className={`flex-1 px-2 py-1 border border-blue-400 rounded bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none ${textClass || "text-sm"} ${mono ? "font-mono" : ""}`} />
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 group">
+      {value ? (
+        <span className={`break-all ${textClass || "text-sm"} ${mono ? "font-mono" : ""}`}>{value}</span>
+      ) : (
+        <NoDataBadge variant={required ? "required" : "optional"} />
+      )}
+      {value && <CopyBtn value={value} />}
+      {canEdit && (
+        <button onClick={() => { setDraft(value); setEditing(true); }} className="text-gray-300 hover:text-blue-600 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" title="Edit">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── PP Account Secret (uses paypal.getCredentials) ─────────
+function PPAccountSecret({ ppId, field, projectId, pinVerified, onNeedPin, canEdit, onSaved, required, hasData }: {
+  ppId: string; field: "password" | "twoFa" | "hotmailToken"; projectId: string;
+  pinVerified: boolean; onNeedPin: () => void; canEdit?: boolean; onSaved?: () => void;
+  required?: boolean; hasData?: boolean;
+}) {
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const fetchCred = (): Promise<string> =>
+    trpcVanilla.paypal.getCredentials.query({ projectId, id: ppId })
+      .then((c: any) => c?.[field] ?? "");
+
+  const handleReveal = () => {
+    if (!pinVerified) { onNeedPin(); return; }
+    setLoading(true);
+    fetchCred().then((v) => setRevealed(v || "—")).catch(() => toast.error("Failed")).finally(() => setLoading(false));
+  };
+  const handleCopy = () => {
+    if (!pinVerified) { onNeedPin(); return; }
+    setCopying(true);
+    fetchCred().then((v) => {
+      if (v) { navigator.clipboard.writeText(v); toast.success("Copied!"); } else toast.error("Empty");
+    }).catch(() => toast.error("Failed")).finally(() => setCopying(false));
+  };
+  const handleEdit = () => {
+    if (!pinVerified) { onNeedPin(); return; }
+    setLoading(true);
+    fetchCred().then((v) => { setDraft(v === "—" ? "" : (v || "")); setEditing(true); }).catch(() => toast.error("Failed")).finally(() => setLoading(false));
+  };
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload: any = { projectId, id: ppId };
+      payload[field] = draft || null;
+      await trpcVanilla.paypal.update.mutate(payload);
+      toast.success("Đã lưu"); setEditing(false); setRevealed(null); onSaved?.();
+    } catch (e: any) { toast.error(e.message || "Lỗi"); } finally { setSaving(false); }
+  };
+
+  if (editing) {
+    const isLong = field === "hotmailToken";
+    return (
+      <div className={isLong ? "space-y-1" : "flex items-center gap-1"}>
+        {isLong ? (
+          <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            rows={3} className="w-full px-1.5 py-1 border border-blue-400 rounded text-[10px] font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y" />
+        ) : (
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }}
+            className="px-1.5 py-0.5 border border-blue-400 rounded text-xs font-mono w-[200px] focus:ring-1 focus:ring-blue-500 focus:outline-none" />
+        )}
+        <div className="flex items-center gap-1">
+          <button onClick={handleSave} disabled={saving} className="text-green-600 hover:text-green-800 shrink-0">
+            {saving ? <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          </button>
+          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (revealed !== null) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <CopyBtn value={revealed === "—" ? "" : revealed} />
+          <button onClick={() => setRevealed(null)} className="text-gray-400 hover:text-gray-600 shrink-0" title="Hide">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243" /></svg>
+          </button>
+          {canEdit && (
+            <button onClick={handleEdit} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            </button>
+          )}
+        </div>
+        <span className="font-mono text-[11px] break-all leading-tight text-gray-800 select-all bg-gray-50 px-1.5 py-1 rounded block">{revealed}</span>
+      </div>
+    );
+  }
+
+  // Field has no data — show NoDataBadge instead of reveal UI
+  if (hasData === false) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <NoDataBadge variant={required ? "required" : "optional"} />
+        {canEdit && (
+          <button onClick={handleEdit} disabled={loading} className="text-xs text-blue-600 hover:underline" title="Add">
+            + add
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button onClick={handleReveal} disabled={loading} className="text-gray-400 hover:text-blue-600 text-xs flex items-center gap-0.5">
+        {loading ? <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>}
+        <span>••••</span>
+      </button>
+      <button onClick={handleCopy} disabled={copying} className="text-gray-400 hover:text-blue-600 shrink-0" title="Copy">
+        {copying ? <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
+      </button>
+      {canEdit && (
+        <button onClick={handleEdit} disabled={loading} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -131,17 +284,19 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdi
 
   if (revealed !== null) {
     return (
-      <div className="flex items-center gap-1.5">
-        <span className="font-mono text-xs truncate max-w-[180px]">{revealed}</span>
-        <CopyBtn value={revealed === "—" ? "" : revealed} />
-        <button onClick={() => setRevealed(null)} className="text-gray-400 hover:text-gray-600 shrink-0" title="Hide">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243" /></svg>
-        </button>
-        {canEdit && (
-          <button onClick={handleEdit} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <CopyBtn value={revealed === "—" ? "" : revealed} />
+          <button onClick={() => setRevealed(null)} className="text-gray-400 hover:text-gray-600 shrink-0" title="Hide">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243" /></svg>
           </button>
-        )}
+          {canEdit && (
+            <button onClick={handleEdit} className="text-gray-400 hover:text-blue-600 shrink-0" title="Edit">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            </button>
+          )}
+        </div>
+        <span className="font-mono text-[11px] break-all leading-tight text-gray-800 select-all bg-gray-50 px-1.5 py-1 rounded block">{revealed}</span>
       </div>
     );
   }
@@ -368,8 +523,15 @@ export default function PayPalDetailPage() {
 
       <div className="flex items-center gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{pp.code}</h1>
-          <p className="text-gray-500">{pp.primaryEmail}</p>
+          {canEdit ? (
+            <EditableField value={pp.code} canEdit onSave={(v) => {
+              if (!v.trim()) { toast.error("Mã PP không được trống"); return; }
+              updatePaypal.mutate({ projectId: projectId!, id: pp.id, code: v.trim() });
+            }} mono textClass="text-2xl font-bold text-gray-900" />
+          ) : (
+            <h1 className="text-2xl font-bold text-gray-900">{pp.code}</h1>
+          )}
+          <p className="text-gray-500 text-sm">{pp.primaryEmail}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Badge className="bg-green-100 text-green-800">{pp.status}</Badge>
@@ -501,6 +663,30 @@ export default function PayPalDetailPage() {
       })()}
 
       {/* ═══════════════════════════════════════ */}
+      {/* PAYPAL ACCOUNT CREDENTIALS */}
+      {/* ═══════════════════════════════════════ */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold mb-4">Thông tin PayPal Account</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-[10px] font-medium text-gray-400 uppercase mb-1">Primary Email</label>
+            <EditableField value={pp.primaryEmail} canEdit={canEdit} onSave={(v) => {
+              if (v && v.includes("@")) updatePaypal.mutate({ projectId: projectId!, id: pp.id, primaryEmail: v });
+              else toast.error("Email không hợp lệ");
+            }} mono required />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Password PayPal</label>
+            <PPAccountSecret ppId={pp.id} field="password" projectId={projectId!} pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={() => invalidate()} required hasData={(pp as any).hasPassword} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">2FA Code</label>
+            <PPAccountSecret ppId={pp.id} field="twoFa" projectId={projectId!} pinVerified={pinVerified} onNeedPin={() => setShowPinDialog(true)} canEdit={canEdit} onSaved={() => invalidate()} required hasData={(pp as any).hasTwoFa} />
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════ */}
       {/* EMAILS MANAGEMENT */}
       {/* ═══════════════════════════════════════ */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -584,9 +770,13 @@ export default function PayPalDetailPage() {
                       <div className="flex items-center gap-1.5">
                         {editingEmail?.id === email.id ? (
                           <input value={editingEmail.email} onChange={(e) => setEditingEmail({ ...editingEmail, email: e.target.value })}
-                            className="px-1.5 py-0.5 border rounded text-xs w-[200px]" />
+                            onKeyDown={(e) => { if (e.key === "Enter") updateEmail.mutate({ projectId: projectId!, id: email.id, email: editingEmail.email !== email.email ? editingEmail.email : undefined, notes: editingEmail.notes !== email.notes ? editingEmail.notes : undefined }); }}
+                            className="px-1.5 py-0.5 border border-blue-400 rounded text-xs font-mono w-[220px] focus:ring-1 focus:ring-blue-500 focus:outline-none" autoFocus />
                         ) : (
-                          <span className="font-mono text-xs">{email.email}</span>
+                          <span className={`font-mono text-xs ${canEdit ? "cursor-pointer hover:text-blue-600 hover:bg-blue-50 px-1 py-0.5 rounded" : ""}`}
+                            onClick={canEdit ? () => setEditingEmail({ id: email.id, email: email.email, notes: email.notes }) : undefined}>
+                            {email.email}
+                          </span>
                         )}
                         <CopyBtn value={email.email} />
                       </div>

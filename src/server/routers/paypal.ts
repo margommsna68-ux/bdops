@@ -259,6 +259,9 @@ export const paypalRouter = router({
           Number(totalReceived._sum.amount ?? 0) -
           Number(totalWithdrawn._sum.amount ?? 0),
         earnAppUsage: Object.values(earnAppUsage),
+        hasPassword: !!pp.password,
+        hasTwoFa: !!pp.twoFa,
+        hasToken: !!pp.hotmailToken,
       };
     }),
 
