@@ -7,10 +7,11 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useProjectStore } from "@/lib/store";
 import { useSettingsStore } from "@/lib/settings-store";
 import { useT } from "@/lib/i18n";
+import { isCollectorOnly } from "@/lib/collector-utils";
 import type { AppModule } from "@/server/trpc";
 
 type NavItem =
-  | { href: string; labelKey: string; icon: string; module?: AppModule | null; adminOnly?: boolean }
+  | { href: string; labelKey: string; icon: string; module?: AppModule | null; adminOnly?: boolean; infraOnly?: boolean }
   | { type: "separator"; labelKey: string };
 
 const navItems: NavItem[] = [
@@ -18,15 +19,15 @@ const navItems: NavItem[] = [
   { href: "/dashboard", labelKey: "nav_dashboard", icon: "D", module: null },
   // ─── Vận Hành ───
   { type: "separator", labelKey: "nav_operations" },
-  { href: "/infrastructure/vms", labelKey: "nav_vms", icon: "E", module: "INFRASTRUCTURE" },
+  { href: "/infrastructure/vms", labelKey: "nav_vms", icon: "E", module: "INFRASTRUCTURE", infraOnly: true },
   { href: "/funds", labelKey: "nav_fund_tracking", icon: "$", module: "FUNDS" },
   { href: "/withdrawals", labelKey: "nav_withdrawals", icon: "W", module: "WITHDRAWALS" },
   // ─── Hạ Tầng ───
   { type: "separator", labelKey: "nav_infrastructure" },
-  { href: "/infrastructure/servers", labelKey: "nav_servers", icon: "S", module: "INFRASTRUCTURE" },
-  { href: "/infrastructure/proxies", labelKey: "nav_proxies", icon: "I", module: "INFRASTRUCTURE" },
+  { href: "/infrastructure/servers", labelKey: "nav_servers", icon: "S", module: "INFRASTRUCTURE", infraOnly: true },
+  { href: "/infrastructure/proxies", labelKey: "nav_proxies", icon: "I", module: "INFRASTRUCTURE", infraOnly: true },
   { href: "/paypals", labelKey: "nav_paypal_accounts", icon: "P", module: "PAYPALS" },
-  { href: "/gmails", labelKey: "nav_gmails", icon: "G", module: "INFRASTRUCTURE" },
+  { href: "/gmails", labelKey: "nav_gmails", icon: "G", module: "INFRASTRUCTURE", infraOnly: true },
   // ─── Tài Chính ───
   { type: "separator", labelKey: "nav_finance" },
   { href: "/agent-pp", labelKey: "nav_agent_pp", icon: "A", module: "AGENT_PP" },
@@ -49,13 +50,14 @@ interface SidebarProps {
 export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const { currentRole, currentModules, currentProjectCode } = useProjectStore();
+  const { currentRole, currentModules, currentProjectCode, currentProjectType } = useProjectStore();
   const theme = useSettingsStore((s) => s.theme);
   const t = useT();
 
   const isAdmin = currentRole === "ADMIN";
   const isModerator = currentRole === "MODERATOR";
   const isAdminOrMod = isAdmin || isModerator;
+  const collectorOnly = isCollectorOnly(currentRole, currentModules);
 
   const isGolden = theme === "golden";
   const accentBg = isGolden ? "bg-amber-500" : "bg-[#2563eb]";
@@ -67,8 +69,18 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
     return currentModules.includes(module);
   };
 
+  const isPaypalOnly = currentProjectType === "PAYPAL_ONLY";
+
+  // When no project selected (all deleted), show dashboard + admin + settings
+  const noProject = !currentRole;
+
   const filteredItems = navItems.filter((item) => {
     if ("type" in item) return true;
+    if (noProject) {
+      // Only show dashboard, admin links, settings when no project
+      return item.href === "/dashboard" || item.href === "/settings" || item.adminOnly;
+    }
+    if (item.infraOnly && isPaypalOnly) return false;
     if (item.adminOnly) return isAdminOrMod;
     return hasModuleAccess(item.module);
   });
@@ -90,22 +102,22 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   const userInitial = userName.charAt(0).toUpperCase();
 
   return (
-    <aside className={`${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-200`}>
+    <aside className={`${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-300 border-r border-gray-800/40`}>
       {/* ─── Header ─── */}
-      <div className="p-4 border-b border-gray-700/50 flex items-center justify-between">
+      <div className="p-4 border-b border-gray-700/30 flex items-center justify-between">
         {!collapsed && (
           <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-lg ${isGolden ? "bg-amber-500" : "bg-blue-600"} flex items-center justify-center text-sm font-bold`}>
+            <div className={`w-9 h-9 rounded-xl ${isGolden ? "bg-gradient-to-br from-amber-400 to-amber-600" : "bg-gradient-to-br from-blue-500 to-blue-700"} flex items-center justify-center text-sm font-bold shadow-lg`}>
               B
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight">BDOps</h1>
-              <p className="text-[10px] text-gray-400 leading-none">Operations Management</p>
+              <p className="text-[10px] text-gray-400/70 leading-none">Operations Management</p>
             </div>
           </div>
         )}
         {collapsed && (
-          <div className={`w-8 h-8 rounded-lg ${isGolden ? "bg-amber-500" : "bg-blue-600"} flex items-center justify-center text-sm font-bold mx-auto`}>
+          <div className={`w-9 h-9 rounded-xl ${isGolden ? "bg-gradient-to-br from-amber-400 to-amber-600" : "bg-gradient-to-br from-blue-500 to-blue-700"} flex items-center justify-center text-sm font-bold mx-auto shadow-lg`}>
             B
           </div>
         )}
@@ -133,13 +145,13 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
         )}
       </div>
 
-      {/* ─── Project Switcher ─── */}
-      {!collapsed && (
+      {/* ─── Project Switcher (hidden for collector-only users) ─── */}
+      {!collectorOnly && !collapsed && (
         <div className="p-3 border-b border-gray-700/50">
           <ProjectSwitcher />
         </div>
       )}
-      {collapsed && currentProjectCode && (
+      {!collectorOnly && collapsed && currentProjectCode && (
         <div className="p-2 border-b border-gray-700/50 flex justify-center">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isGolden ? "bg-amber-500/20 text-amber-300" : "bg-blue-600/20 text-blue-400"}`}>
             {currentProjectCode}
@@ -169,16 +181,16 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               href={item.href}
               onClick={onNavigate}
               title={collapsed ? t(item.labelKey) : undefined}
-              className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-150 ${
+              className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${
                 isActive
-                  ? `${accentBg} text-white font-medium shadow-sm`
-                  : "text-gray-300 hover:bg-[#1e293b] hover:text-white"
+                  ? `${accentBg} text-white font-medium shadow-md shadow-blue-500/20`
+                  : "text-gray-300 hover:bg-white/[0.06] hover:text-white"
               }`}
             >
-              <span className={`w-6 h-6 flex items-center justify-center text-xs font-mono rounded-md shrink-0 ${
+              <span className={`w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${
                 isActive
-                  ? "bg-white/20"
-                  : "bg-white/5"
+                  ? "bg-white/25"
+                  : "bg-white/[0.07]"
               }`}>
                 {item.icon}
               </span>
@@ -229,7 +241,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
-              <span>Đăng xuất</span>
+              <span>{t("sign_out")}</span>
             </button>
           </div>
         ) : (
@@ -246,7 +258,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
                 signOut({ callbackUrl: "/login" });
               }}
               className="text-gray-400 hover:text-white transition-colors p-1"
-              title="Đăng xuất"
+              title={t("sign_out")}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, agentPPProcedure } from "../trpc";
+import { router, agentPPProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
 export const agentPPRouter = router({
@@ -51,6 +51,54 @@ export const agentPPRouter = router({
       }
       await ctx.prisma.agentPaypalEmail.delete({ where: { id: input.id } });
       return { success: true };
+    }),
+
+  // Admin: add email for any user
+  adminAddEmail: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      userId: z.string(),
+      email: z.string().min(1), // email or link
+      label: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.prisma.agentPaypalEmail.create({
+        data: { email: input.email, label: input.label, userId: input.userId, projectId: input.projectId },
+      });
+      await createAuditLog({ action: "CREATE", entity: "AgentPaypalEmail" as any, entityId: result.id, userId: (ctx.user as any).id, projectId: input.projectId, changes: { email: input.email, forUser: input.userId } });
+      return result;
+    }),
+
+  // Admin: update email/link
+  adminUpdateEmail: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      id: z.string(),
+      email: z.string().min(1).optional(),
+      label: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { projectId, id, ...data } = input;
+      await ctx.prisma.agentPaypalEmail.findFirstOrThrow({ where: { id, projectId } });
+      return ctx.prisma.agentPaypalEmail.update({ where: { id }, data });
+    }),
+
+  // Admin: remove email for any user
+  adminRemoveEmail: moderatorProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.agentPaypalEmail.delete({ where: { id: input.id } });
+      return { success: true };
+    }),
+
+  // Admin: list emails for a specific user
+  adminListEmails: moderatorProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.agentPaypalEmail.findMany({
+        where: { userId: input.userId, projectId: input.projectId },
+        orderBy: { createdAt: "desc" },
+      });
     }),
 
   // ═══ Agent's Transactions ═══
@@ -106,7 +154,7 @@ export const agentPPRouter = router({
       });
       const myEmailIds = myEmails.map((e) => e.id);
 
-      const [received, sold] = await Promise.all([
+      const [received, sold, salesBreakdown] = await Promise.all([
         ctx.prisma.withdrawal.aggregate({
           where: {
             projectId: input.projectId,
@@ -121,19 +169,39 @@ export const agentPPRouter = router({
             projectId: input.projectId,
             agentUserId: ctx.user.id,
           },
-          _sum: { amount: true },
+          _sum: { amount: true, agentEarning: true },
           _count: true,
+        }),
+        // Split net amount by withdrawn flag: withdrawn=true → already paid to team, false → still owed
+        ctx.prisma.agentSale.groupBy({
+          by: ["withdrawn"],
+          where: {
+            projectId: input.projectId,
+            agentUserId: ctx.user.id,
+          },
+          _sum: { netAmount: true },
         }),
       ]);
 
       const totalReceived = Number(received._sum.amount ?? 0);
       const totalSold = Number(sold._sum.amount ?? 0);
+      const totalCommission = Number(sold._sum.agentEarning ?? 0);
+      const paidToTeam = Number(
+        salesBreakdown.find((g) => g.withdrawn === true)?._sum.netAmount ?? 0
+      );
+      const owedToTeam = Number(
+        salesBreakdown.find((g) => g.withdrawn === false)?._sum.netAmount ?? 0
+      );
 
       return {
         emails: myEmails,
         totalReceived,
         totalSold,
         balance: totalReceived - totalSold,
+        totalCommission,
+        paidToTeam,
+        owedToTeam,
+        fundRemaining: totalReceived - totalSold,
         transactionCount: received._count,
         saleCount: sold._count,
       };
@@ -276,6 +344,8 @@ export const agentPPRouter = router({
       projectId: z.string(),
       agentEmailId: z.string(),
       amount: z.number().positive(),
+      feePercent: z.number().min(0).max(100).default(3),
+      paypalFee: z.number().min(0).default(0),
       transactionId: z.string().min(1),
       exchangeEmail: z.string().optional(),
       notes: z.string().optional(),
@@ -287,9 +357,18 @@ export const agentPPRouter = router({
         where: { id: input.agentEmailId, userId: ctx.user.id, projectId: input.projectId },
       });
 
+      // Calculate: afterPPFee = gross - paypalFee, agentEarning = afterPPFee * feePercent/100, net = afterPPFee - agentEarning
+      const afterPPFee = input.amount - input.paypalFee;
+      const agentEarning = afterPPFee * input.feePercent / 100;
+      const netAmount = afterPPFee - agentEarning;
+
       const result = await ctx.prisma.agentSale.create({
         data: {
           amount: input.amount,
+          feePercent: input.feePercent,
+          paypalFee: input.paypalFee,
+          netAmount: Math.max(0, netAmount),
+          agentEarning: Math.max(0, agentEarning),
           transactionId: input.transactionId,
           exchangeEmail: input.exchangeEmail || null,
           notes: input.notes || null,
@@ -308,6 +387,41 @@ export const agentPPRouter = router({
         changes: { amount: input.amount, transactionId: input.transactionId, email: email.email },
       });
       return result;
+    }),
+
+  // Agent marks sale as withdrawn
+  markWithdrawn: agentPPProcedure
+    .input(z.object({ projectId: z.string(), id: z.string(), withdrawn: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const sale = await ctx.prisma.agentSale.findFirstOrThrow({
+        where: { id: input.id, projectId: input.projectId },
+      });
+      // Agent can only mark own sales (unless admin)
+      if (sale.agentUserId !== ctx.user.id && ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+        throw new Error("Chỉ được đánh dấu giao dịch của mình");
+      }
+      return ctx.prisma.agentSale.update({
+        where: { id: input.id },
+        data: { withdrawn: input.withdrawn, withdrawnAt: input.withdrawn ? new Date() : null },
+      });
+    }),
+
+  // Agent earnings summary
+  myEarnings: agentPPProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const sales = await ctx.prisma.agentSale.findMany({
+        where: { agentUserId: ctx.user.id, projectId: input.projectId },
+        select: { agentEarning: true, withdrawn: true, date: true },
+      });
+      const totalEarning = sales.reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
+      const totalWithdrawn = sales.filter((s) => s.withdrawn).reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
+      const pending = totalEarning - totalWithdrawn;
+      // This month
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEarning = sales.filter((s) => new Date(s.date) >= monthStart).reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
+      return { totalEarning, totalWithdrawn, pending, monthEarning, totalSales: sales.length };
     }),
 
   deleteSale: agentPPProcedure
@@ -423,7 +537,7 @@ export const agentPPRouter = router({
     }),
 
   // ═══ Admin: All Agents Overview ═══
-  allAgents: agentPPProcedure
+  allAgents: moderatorProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Get all agent emails grouped by user
@@ -494,5 +608,54 @@ export const agentPPRouter = router({
         orderBy: [{ user: { name: "asc" } }, { email: "asc" }],
       });
       return emails;
+    }),
+
+  // Admin: Today's activity summary
+  todayActivity: moderatorProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      // Adjust for VN timezone (UTC+7)
+      const vnTodayStart = new Date(`${todayStart.toISOString().split("T")[0]}T00:00:00+07:00`);
+
+      // Today's withdrawals (sales to agents)
+      const todayWithdrawals = await ctx.prisma.withdrawal.findMany({
+        where: {
+          projectId: input.projectId,
+          type: "EXCHANGE",
+          date: { gte: vnTodayStart },
+        },
+        include: {
+          agentEmail: { include: { user: { select: { id: true, name: true, username: true } } } },
+          sourcePaypal: { select: { code: true } },
+        },
+        orderBy: { date: "desc" },
+      });
+
+      // Today's agent sales
+      const todaySales = await ctx.prisma.agentSale.findMany({
+        where: {
+          projectId: input.projectId,
+          date: { gte: vnTodayStart },
+        },
+        include: {
+          agentUser: { select: { id: true, name: true, username: true } },
+          agentEmail: { select: { email: true } },
+        },
+        orderBy: { date: "desc" },
+      });
+
+      const totalWithdrawals = todayWithdrawals.reduce((s, w) => s + Number(w.amount), 0);
+      const totalSales = todaySales.reduce((s, s2) => s + Number(s2.amount), 0);
+
+      return {
+        todayWithdrawals,
+        todaySales,
+        totalWithdrawals,
+        totalSales,
+        countWithdrawals: todayWithdrawals.length,
+        countSales: todaySales.length,
+      };
     }),
 });

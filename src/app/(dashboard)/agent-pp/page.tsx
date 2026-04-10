@@ -8,6 +8,8 @@ import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { useSettingsStore } from "@/lib/settings-store";
+import { isCollectorOnly } from "@/lib/collector-utils";
 import { usePinAction } from "@/components/PinVerify";
 import toast from "react-hot-toast";
 
@@ -15,8 +17,11 @@ export default function AgentPPPage() {
   const t = useT();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const currentRole = useProjectStore((s) => s.currentRole);
+  const currentModules = useProjectStore((s) => s.currentModules);
+  const language = useSettingsStore((s) => s.language);
   const isAdminOrMod = currentRole === "ADMIN" || currentRole === "MODERATOR";
   const isAdminOnly = currentRole === "ADMIN";
+  const collectorOnly = isCollectorOnly(currentRole, currentModules);
 
   const [page, setPage] = useState(1);
   const [salesPage, setSalesPage] = useState(1);
@@ -31,6 +36,8 @@ export default function AgentPPPage() {
   const [showSellForm, setShowSellForm] = useState(false);
   const [sellEmailId, setSellEmailId] = useState("");
   const [sellAmount, setSellAmount] = useState("");
+  const [sellFeePercent, setSellFeePercent] = useState("3");
+  const [sellPaypalFee, setSellPaypalFee] = useState("0");
   const [sellTxId, setSellTxId] = useState("");
   const [sellExchangeEmail, setSellExchangeEmail] = useState("");
   const [sellNotes, setSellNotes] = useState("");
@@ -60,6 +67,19 @@ export default function AgentPPPage() {
     { projectId: projectId! },
     { enabled: !!projectId && isAdminOrMod }
   );
+  const { data: todayActivity } = trpc.agentPP.todayActivity.useQuery(
+    { projectId: projectId! },
+    { enabled: !!projectId && isAdminOrMod }
+  );
+
+  const { data: myEarnings } = trpc.agentPP.myEarnings.useQuery(
+    { projectId: projectId! },
+    { enabled: !!projectId }
+  );
+  const markWithdrawn = trpc.agentPP.markWithdrawn.useMutation({
+    onSuccess: () => { refetchSales(); refetchBalance(); toast.success(t("collector_updated")); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const isCollector = (emails ?? []).length > 0;
   // Admin sees global stats, collectors see their own
@@ -80,7 +100,7 @@ export default function AgentPPPage() {
   const createSale = trpc.agentPP.createSale.useMutation({
     onSuccess: () => {
       refetchSales(); refetchBalance();
-      setSellAmount(""); setSellTxId(""); setSellExchangeEmail(""); setSellNotes("");
+      setSellAmount(""); setSellFeePercent("3"); setSellPaypalFee("0"); setSellTxId(""); setSellExchangeEmail(""); setSellNotes("");
       setShowSellForm(false);
       toast.success(t("agpp_sale_created"));
     },
@@ -109,11 +129,19 @@ export default function AgentPPPage() {
       projectId: projectId!,
       agentEmailId: sellEmailId,
       amount: parseFloat(sellAmount),
+      feePercent: parseFloat(sellFeePercent) || 3,
+      paypalFee: parseFloat(sellPaypalFee) || 0,
       transactionId: sellTxId,
       exchangeEmail: sellExchangeEmail || undefined,
       notes: sellNotes || undefined,
     });
   };
+
+  // Calculate net preview
+  const grossAmt = parseFloat(sellAmount) || 0;
+  const feePct = parseFloat(sellFeePercent) || 3;
+  const ppFee = parseFloat(sellPaypalFee) || 0;
+  const netPreview = grossAmt - ppFee - (grossAmt * feePct / 100);
 
   const bal = displayBalance?.balance ?? 0;
 
@@ -127,7 +155,7 @@ export default function AgentPPPage() {
         </div>
         {isAdminOrMod && !isCollector && (
           <Badge className="bg-blue-100 text-blue-700 text-xs px-3 py-1">
-            Admin View
+            {t("collector_admin_view")}
           </Badge>
         )}
       </div>
@@ -135,77 +163,139 @@ export default function AgentPPPage() {
       {/* ══ Hero Balance ══ */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
         <div className="p-5">
-          {/* Top row: 3 balance metrics */}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            {/* Left: Tổng nhận */}
-            <div className="text-center min-w-[120px]">
-              <div className="text-xs font-semibold text-gray-400 uppercase mb-1">{t("agpp_total_received")}</div>
-              <div className="text-xl font-bold text-green-600">{formatCurrency(displayBalance?.totalReceived ?? 0)}</div>
-            </div>
-
-            {/* Center: Số dư - HERO */}
-            <div className="text-center flex-1">
-              <div className="text-xs font-semibold text-gray-400 uppercase mb-1">{t("agpp_remaining")}</div>
-              <div className={`text-4xl font-extrabold ${bal >= 0 ? "text-blue-600" : "text-red-600"}`}>
-                {formatCurrency(bal)}
+          {collectorOnly ? (
+            /* Collector-only: 5 metric cards */
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="text-center py-3 bg-green-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">{t("collector_total_received")}</div>
+                <div className="text-xl font-bold text-green-700">{formatCurrency(displayBalance?.totalReceived ?? 0)}</div>
               </div>
-              {isCollector && (
-                <div className="mt-2">
-                  <Button
-                    size="sm"
-                    className="bg-orange-600 hover:bg-orange-700 h-8 px-5 text-sm font-semibold"
-                    onClick={() => { setShowSellForm(!showSellForm); if (!showSellForm) setActiveTab("sold"); }}
-                  >
-                    {showSellForm ? t("cancel") : t("agpp_sell_title")}
-                  </Button>
-                </div>
-              )}
+              <div className="text-center py-3 bg-purple-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-purple-600 uppercase mb-1">{t("collector_commission")}</div>
+                <div className="text-xl font-bold text-purple-700">{formatCurrency((displayBalance as any)?.totalCommission ?? 0)}</div>
+              </div>
+              <div className="text-center py-3 bg-emerald-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-emerald-600 uppercase mb-1">{t("collector_paid_team")}</div>
+                <div className="text-xl font-bold text-emerald-700">{formatCurrency((displayBalance as any)?.paidToTeam ?? 0)}</div>
+              </div>
+              <div className="text-center py-3 bg-amber-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-amber-600 uppercase mb-1">{t("collector_owed_team")}</div>
+                <div className="text-xl font-bold text-amber-700">{formatCurrency((displayBalance as any)?.owedToTeam ?? 0)}</div>
+              </div>
+              <div className="text-center py-3 bg-blue-50 rounded-lg relative">
+                <div className="text-[10px] font-semibold text-blue-600 uppercase mb-1">{t("collector_fund_remaining")}</div>
+                <div className={`text-xl font-bold ${bal >= 0 ? "text-blue-700" : "text-red-600"}`}>{formatCurrency(bal)}</div>
+                {isCollector && (
+                  <button onClick={() => { setShowSellForm(!showSellForm); if (!showSellForm) setActiveTab("sold"); }}
+                    className={`mt-2 px-3 py-1 rounded text-[10px] font-semibold transition-colors ${showSellForm ? "bg-gray-200 text-gray-600" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
+                    {showSellForm ? t("collector_close") : t("collector_sell_fund")}
+                  </button>
+                )}
+              </div>
             </div>
-
-            {/* Right: Đã bán */}
-            <div className="text-center min-w-[120px]">
-              <div className="text-xs font-semibold text-gray-400 uppercase mb-1">{t("agpp_total_sold")}</div>
-              <div className="text-xl font-bold text-orange-600">{formatCurrency(displayBalance?.totalSold ?? 0)}</div>
+          ) : (
+            /* Admin/Moderator/Multi-module user: legacy 3-col layout */
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center py-3 bg-green-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">{t("collector_total_received")}</div>
+                <div className="text-xl font-bold text-green-700">{formatCurrency(displayBalance?.totalReceived ?? 0)}</div>
+              </div>
+              <div className="text-center py-3 bg-orange-50 rounded-lg">
+                <div className="text-[10px] font-semibold text-orange-600 uppercase mb-1">{t("collector_total_sold")}</div>
+                <div className="text-xl font-bold text-orange-700">{formatCurrency(displayBalance?.totalSold ?? 0)}</div>
+              </div>
+              <div className="text-center py-3 bg-blue-50 rounded-lg relative">
+                <div className="text-[10px] font-semibold text-blue-600 uppercase mb-1">{t("collector_balance_remaining")}</div>
+                <div className={`text-2xl font-extrabold ${bal >= 0 ? "text-blue-700" : "text-red-600"}`}>{formatCurrency(bal)}</div>
+                {isCollector && (
+                  <button onClick={() => { setShowSellForm(!showSellForm); if (!showSellForm) setActiveTab("sold"); }}
+                    className={`mt-2 px-4 py-1 rounded text-xs font-semibold transition-colors ${showSellForm ? "bg-gray-200 text-gray-600" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
+                    {showSellForm ? t("collector_close") : t("collector_sell_fund")}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Email tags row - chỉ hiện cho collector */}
+          {/* Email & Link section */}
           {isCollector && (
-            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-medium text-gray-500">PP Emails:</span>
-              {(emails ?? []).map((em: any) => (
-                <span key={em.id} className="inline-flex items-center gap-1 bg-gray-100 border rounded-full px-2.5 py-0.5 text-xs text-gray-700">
-                  {em.email}
-                  {em.label && <span className="text-gray-400">({em.label})</span>}
-                  <button onClick={() => {
-                    if (window.confirm(`Remove ${em.email}?`))
-                      removeEmail.mutate({ projectId: projectId!, id: em.id });
-                  }} className="text-red-400 hover:text-red-600 ml-0.5">&times;</button>
-                </span>
-              ))}
-              {!showEmailForm ? (
-                <button onClick={() => setShowEmailForm(true)}
-                  className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5 text-xs text-blue-600 hover:bg-blue-100">
-                  + {t("agpp_add_email")}
-                </button>
-              ) : (
-                <div className="flex items-center gap-1.5 ml-1">
+            <div className="mt-4 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-500">{t("collector_emails_and_links")}</span>
+                {!showEmailForm && (
+                  <button onClick={() => setShowEmailForm(true)} className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold">{t("collector_add")}</button>
+                )}
+              </div>
+              {/* List */}
+              <div className="space-y-1.5">
+                {(emails ?? []).map((em: any) => {
+                  const isL = em.email.startsWith("http://") || em.email.startsWith("https://");
+                  return (
+                    <div key={em.id} className="flex items-center justify-between group py-1 px-2 rounded hover:bg-gray-50 -mx-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isL ? (
+                          <svg className="w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        )}
+                        {isL ? (
+                          <a href={em.email} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate">{em.email}</a>
+                        ) : (
+                          <span className="text-xs font-mono text-gray-700 truncate">{em.email}</span>
+                        )}
+                        {em.label && <span className="text-[10px] text-gray-400">({em.label})</span>}
+                      </div>
+                      <button onClick={() => { if (window.confirm(t("collector_delete_email_confirm").replace("{email}", em.email))) removeEmail.mutate({ projectId: projectId!, id: em.id }); }}
+                        className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Add form */}
+              {showEmailForm && (
+                <div className="flex items-center gap-1.5 mt-2">
                   <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="email@paypal.com" className="h-7 text-xs w-44"
+                    placeholder={t("collector_email_placeholder")} className="h-7 text-xs flex-1"
                     onKeyDown={(e) => { if (e.key === "Enter" && newEmail) addEmail.mutate({ projectId: projectId!, email: newEmail, label: newLabel || undefined }); }} />
                   <Input value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder={t("agpp_label_placeholder")} className="h-7 text-xs w-24" />
-                  <Button size="sm" className="h-7 text-xs px-2" disabled={!newEmail || addEmail.isLoading}
+                    placeholder={t("collector_note_placeholder")} className="h-7 text-xs w-20" />
+                  <Button size="sm" className="h-7 text-xs px-3" disabled={!newEmail || addEmail.isLoading}
                     onClick={() => addEmail.mutate({ projectId: projectId!, email: newEmail, label: newLabel || undefined })}>
-                    {t("agpp_add_email")}
+                    {t("collector_add_btn")}
                   </Button>
-                  <button onClick={() => { setShowEmailForm(false); setNewEmail(""); setNewLabel(""); }}
-                    className="text-gray-400 hover:text-gray-600 text-xs">&times;</button>
+                  <button onClick={() => { setShowEmailForm(false); setNewEmail(""); setNewLabel(""); }} className="text-gray-400 hover:text-gray-600">&times;</button>
                 </div>
               )}
             </div>
           )}
         </div>
+
+        {/* Agent Earnings Summary (only for admin/multi-module users — collector-only already sees this in Hero) */}
+        {isCollector && myEarnings && !collectorOnly && (
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-500 mb-2">{t("collector_my_commission")}</div>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="text-center py-2 bg-purple-50 rounded">
+                <div className="text-[10px] text-purple-600 uppercase">{t("collector_this_month")}</div>
+                <div className="text-sm font-bold text-purple-700">{formatCurrency(myEarnings.monthEarning)}</div>
+              </div>
+              <div className="text-center py-2 bg-green-50 rounded">
+                <div className="text-[10px] text-green-600 uppercase">{t("collector_total")}</div>
+                <div className="text-sm font-bold text-green-700">{formatCurrency(myEarnings.totalEarning)}</div>
+              </div>
+              <div className="text-center py-2 bg-gray-50 rounded">
+                <div className="text-[10px] text-gray-500 uppercase">{t("collector_withdrawn")}</div>
+                <div className="text-sm font-bold text-gray-600">{formatCurrency(myEarnings.totalWithdrawn)}</div>
+              </div>
+              <div className="text-center py-2 bg-amber-50 rounded">
+                <div className="text-[10px] text-amber-600 uppercase">{t("collector_pending_withdraw")}</div>
+                <div className="text-sm font-bold text-amber-700">{formatCurrency(myEarnings.pending)}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Sell Form - slides in under hero (chỉ collector) */}
         {isCollector && showSellForm && (
@@ -214,11 +304,11 @@ export default function AgentPPPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-600 mb-1 block">
-                    Email PP <span className="text-red-500">*</span>
+                    {t("collector_email_pp")} <span className="text-red-500">*</span>
                   </label>
                   <select value={sellEmailId} onChange={(e) => setSellEmailId(e.target.value)}
                     className="w-full h-9 text-sm border rounded-md px-2 bg-white">
-                    <option value="">-- Chọn --</option>
+                    <option value="">{t("collector_select")}</option>
                     {(emails ?? []).map((em: any) => (
                       <option key={em.id} value={em.id}>
                         {em.email}{em.label ? ` (${em.label})` : ""}
@@ -228,7 +318,7 @@ export default function AgentPPPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 mb-1 block">
-                    Email Exchange
+                    {t("collector_email_exchange")}
                   </label>
                   <Input value={sellExchangeEmail} onChange={(e) => setSellExchangeEmail(e.target.value)}
                     placeholder="exchange@email.com" className="h-9 text-sm" />
@@ -241,6 +331,28 @@ export default function AgentPPPage() {
                     onChange={(e) => setSellAmount(e.target.value)}
                     placeholder="0.00" className="h-9 text-sm" />
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">{t("collector_fee_agent")}</label>
+                    <Input type="number" step="0.1" min="0" max="100" value={sellFeePercent}
+                      onChange={(e) => setSellFeePercent(e.target.value)}
+                      placeholder="3" className="h-9 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">{t("collector_paypal_fee")}</label>
+                    <Input type="number" step="0.01" min="0" value={sellPaypalFee}
+                      onChange={(e) => setSellPaypalFee(e.target.value)}
+                      placeholder="0.00" className="h-9 text-sm" />
+                  </div>
+                </div>
+                {grossAmt > 0 && (
+                  <div className="bg-gray-50 border rounded px-3 py-2 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-500">{t("collector_gross")}</span><span className="font-mono">${grossAmt.toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">- PP Fee</span><span className="font-mono text-red-600">-${ppFee.toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">- Agent {feePct}%</span><span className="font-mono text-red-600">-${(grossAmt * feePct / 100).toFixed(2)}</span></div>
+                    <div className="flex justify-between border-t mt-1 pt-1 font-semibold"><span>{t("collector_net")}</span><span className={`font-mono ${netPreview >= 0 ? "text-green-700" : "text-red-700"}`}>${netPreview.toFixed(2)}</span></div>
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-medium text-gray-600 mb-1 block">
                     TX ID <span className="text-red-500">*</span>
@@ -325,18 +437,21 @@ export default function AgentPPPage() {
                         <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
                         <td className="px-3 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
                         <td className="px-3 py-2 text-xs">
-                          {w.agentEmail?.email ?? "—"}
-                          {w.agentEmail?.label && <span className="text-gray-400 ml-1">({w.agentEmail.label})</span>}
+                          {(() => {
+                            const val = w.agentEmail?.email ?? "—";
+                            const isL = val.startsWith("http://") || val.startsWith("https://");
+                            return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
+                          })()}
                         </td>
                         <td className="px-3 py-2 font-semibold text-green-700">{formatCurrency(w.amount)}</td>
                         <td className="px-3 py-2 text-xs font-mono text-gray-500">{w.transactionId || w.withdrawCode || "—"}</td>
                         <td className="px-3 py-2">
                           {w.disputeResolved && w.disputeAction === "OVERRIDE" ? (
-                            <Badge className="bg-blue-100 text-blue-800 text-xs" title={w.adminResolveNote || ""}>Admin xác nhận</Badge>
+                            <Badge className="bg-blue-100 text-blue-800 text-xs" title={w.adminResolveNote || ""}>{t("collector_admin_confirmed")}</Badge>
                           ) : w.agentConfirmed ? (
                             <Badge className="bg-green-100 text-green-800 text-xs">{t("agpp_confirmed")}</Badge>
                           ) : w.agentDisputed ? (
-                            <Badge className="bg-red-100 text-red-800 text-xs" title={w.disputeNote}>Đang khiếu nại</Badge>
+                            <Badge className="bg-red-100 text-red-800 text-xs" title={w.disputeNote}>{t("collector_disputing")}</Badge>
                           ) : (
                             <Badge variant="outline" className="border-yellow-500 text-yellow-700 text-xs">{t("agpp_pending")}</Badge>
                           )}
@@ -364,10 +479,10 @@ export default function AgentPPPage() {
                               <div className="text-[10px]">
                                 {w.disputeAction === "OVERRIDE" ? (
                                   <span className="text-blue-600" title={w.adminResolveNote || ""}>
-                                    {w.resolvedBy?.name || "Admin"}: Đã gửi đúng
+                                    {w.resolvedBy?.name || "Admin"}: {t("collector_sent_correctly")}
                                   </span>
                                 ) : (
-                                  <span className="text-gray-500">Đã hủy bởi {w.resolvedBy?.name || "Admin"}</span>
+                                  <span className="text-gray-500">{t("collector_cancelled_by")} {w.resolvedBy?.name || "Admin"}</span>
                                 )}
                               </div>
                             )}
@@ -375,8 +490,8 @@ export default function AgentPPPage() {
                               <button
                                 onClick={() => requirePin(
                                   () => deleteWithdrawal.mutate({ projectId: projectId!, id: w.id }),
-                                  "Xóa giao dịch",
-                                  `Xóa ${formatCurrency(w.amount)} — ${w.sourcePaypal?.code ?? ""}?`
+                                  t("collector_delete_tx"),
+                                  t("collector_delete_tx_confirm").replace("{amount}", formatCurrency(w.amount)).replace("{code}", w.sourcePaypal?.code ?? "")
                                 )}
                                 className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600 ml-1"
                                 title={t("delete")}
@@ -414,38 +529,50 @@ export default function AgentPPPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
-                    {isAdminOrMod && <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Collector</th>}
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Email PP</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Email Exchange</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_amount")}</th>
+                    {isAdminOrMod && <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_role_label")}</th>}
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_pp")}</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_exchange")}</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Fee%</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("collector_col_commission")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">TX ID</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_sell_notes")}</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">{t("collector_paid_team")}</th>
                     <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {salesLoading ? (
-                    <tr><td colSpan={isAdminOrMod ? 8 : 7} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                    <tr><td colSpan={isAdminOrMod ? 11 : 10} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
                   ) : salesItems.length === 0 ? (
-                    <tr><td colSpan={isAdminOrMod ? 8 : 7} className="text-center py-8 text-gray-400">{t("agpp_no_sales")}</td></tr>
+                    <tr><td colSpan={isAdminOrMod ? 11 : 10} className="text-center py-8 text-gray-400">{t("agpp_no_sales")}</td></tr>
                   ) : (
                     salesItems.map((s: any) => (
                       <tr key={s.id} className="hover:bg-gray-50">
                         <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(s.date)}</td>
                         {isAdminOrMod && <td className="px-3 py-2 text-xs font-medium text-gray-800">{s.agentUser?.name || s.agentUser?.username || "—"}</td>}
                         <td className="px-3 py-2 text-xs">
-                          {s.agentEmail?.email ?? "—"}
-                          {s.agentEmail?.label && <span className="text-gray-400 ml-1">({s.agentEmail.label})</span>}
+                          {(() => {
+                            const val = s.agentEmail?.email ?? "—";
+                            const isL = val.startsWith("http://") || val.startsWith("https://");
+                            return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-600">{s.exchangeEmail || "—"}</td>
-                        <td className="px-3 py-2 font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-500">{s.feePercent ? `${Number(s.feePercent)}%` : "—"}</td>
+                        <td className="px-3 py-2 text-right text-xs font-semibold text-purple-700">{s.agentEarning ? formatCurrency(Number(s.agentEarning)) : "—"}</td>
                         <td className="px-3 py-2 text-xs font-mono text-gray-500">{s.transactionId}</td>
-                        <td className="px-3 py-2 text-xs text-gray-500 max-w-[200px] truncate" title={s.notes || ""}>{s.notes || "—"}</td>
+                        <td className="px-3 py-2 text-center">
+                          <button onClick={() => markWithdrawn.mutate({ projectId: projectId!, id: s.id, withdrawn: !s.withdrawn })}
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-pointer ${s.withdrawn ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500 hover:bg-amber-100 hover:text-amber-700"}`}>
+                            {s.withdrawn ? t("collector_mark_paid") : t("collector_mark_pending")}
+                          </button>
+                        </td>
                         <td className="px-3 py-2 text-center">
                           <button onClick={() => requirePin(
                             () => deleteSale.mutate({ projectId: projectId!, id: s.id }),
-                            "Xóa lần bán",
-                            `Xóa ${formatCurrency(s.amount)}?`
+                            t("collector_delete_sale"),
+                            t("collector_delete_sale_confirm").replace("{amount}", formatCurrency(s.amount))
                           )} className="text-red-400 hover:text-red-600 text-xs">&times;</button>
                         </td>
                       </tr>
@@ -481,15 +608,78 @@ export default function AgentPPPage() {
                   <span className="text-lg font-bold text-green-700">{formatCurrency(ag.totalReceived)}</span>
                 </div>
                 <div className="space-y-1">
-                  {ag.emails.map((em: any) => (
-                    <div key={em.id} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">{em.email}</span>
-                      <span className="text-green-600 font-medium">{formatCurrency(em.totalReceived)}</span>
-                    </div>
-                  ))}
+                  {ag.emails.map((em: any) => {
+                    const isLink = em.email.startsWith("http://") || em.email.startsWith("https://");
+                    return (
+                      <div key={em.id} className="flex items-center justify-between text-xs gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {isLink ? (
+                            <svg className="w-3 h-3 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                          ) : (
+                            <svg className="w-3 h-3 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                          )}
+                          {isLink ? (
+                            <a href={em.email} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">{em.email}</a>
+                          ) : (
+                            <span className="text-gray-600 truncate">{em.email}</span>
+                          )}
+                        </div>
+                        <span className="text-green-600 font-medium shrink-0">{formatCurrency(em.totalReceived)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Admin: Today Activity ══ */}
+      {isAdminOrMod && todayActivity && (todayActivity.countWithdrawals > 0 || todayActivity.countSales > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">{t("collector_today_activity")}</h3>
+            <div className="flex gap-3 text-xs">
+              <span className="text-green-700 font-semibold">{todayActivity.countWithdrawals} {t("collector_received_count")} • {formatCurrency(todayActivity.totalWithdrawals)}</span>
+              <span className="text-orange-700 font-semibold">{todayActivity.countSales} {t("collector_sold_count")} • {formatCurrency(todayActivity.totalSales)}</span>
+            </div>
+          </div>
+          <div className="overflow-auto max-h-[300px]">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left text-gray-500">{t("collector_time")}</th>
+                  <th className="px-3 py-2 text-left text-gray-500">{t("collector_type")}</th>
+                  <th className="px-3 py-2 text-left text-gray-500">{t("collector_agent")}</th>
+                  <th className="px-3 py-2 text-left text-gray-500">{t("collector_email_or_link")}</th>
+                  <th className="px-3 py-2 text-right text-gray-500">{t("collector_amount")}</th>
+                  <th className="px-3 py-2 text-left text-gray-500">{t("collector_tx_code")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {todayActivity.todayWithdrawals.map((w: any) => (
+                  <tr key={`w-${w.id}`} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(w.date).toLocaleTimeString(language === "vi" ? "vi-VN" : "en-US", { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="px-3 py-2"><span className="bg-green-100 text-green-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{t("collector_type_received")}</span></td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{w.agentEmail?.user?.name || w.agentEmail?.user?.username || "—"}</td>
+                    <td className="px-3 py-2 text-gray-600">{w.agentEmail?.email || "—"}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
+                    <td className="px-3 py-2 font-mono text-gray-400">{w.transactionId || w.withdrawCode || "—"}</td>
+                  </tr>
+                ))}
+                {todayActivity.todaySales.map((s: any) => (
+                  <tr key={`s-${s.id}`} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(s.date).toLocaleTimeString(language === "vi" ? "vi-VN" : "en-US", { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="px-3 py-2"><span className="bg-orange-100 text-orange-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{t("collector_type_sold")}</span></td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{s.agentUser?.name || s.agentUser?.username || "—"}</td>
+                    <td className="px-3 py-2 text-gray-600">{s.agentEmail?.email || "—"}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
+                    <td className="px-3 py-2 font-mono text-gray-400">{s.transactionId}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -511,7 +701,7 @@ export default function AgentPPPage() {
                   onChange={(e) => setDisputeNote(e.target.value)}
                   className="w-full border rounded-lg p-2 text-sm mt-1"
                   rows={3}
-                  placeholder="Không thấy giao dịch này trong PayPal..."
+                  placeholder={t("collector_dispute_placeholder")}
                 />
               </div>
               <div className="flex justify-end gap-2">
