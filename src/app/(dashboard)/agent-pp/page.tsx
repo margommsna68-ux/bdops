@@ -494,7 +494,11 @@ export default function AgentPPPage() {
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_pp_agent")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_transaction_id")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-green-700 whitespace-nowrap">{t("collector_gross_amount")}</th>
-                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">{t("collector_transaction_fee")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">
+                      {singleCollectorName
+                        ? `Fee PP (${singleCollectorName} note)`
+                        : `Fee PP (${t("collector_agent_label")} note)`}
+                    </th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap">{t("collector_net_amount")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">
                       {singleCollectorName
