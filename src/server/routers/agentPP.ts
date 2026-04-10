@@ -345,12 +345,13 @@ export const agentPPRouter = router({
     }),
 
   // ═══ Agent Confirm/Dispute ═══
-  // ═══ Update paypalFee note on an incoming Withdrawal ═══
+  // ═══ Update collector meta (paypalFee, collectorNote) on an incoming Withdrawal ═══
   updatePaypalFee: agentPPProcedure
     .input(z.object({
       projectId: z.string(),
       id: z.string(),
-      paypalFee: z.number().nullable(),
+      paypalFee: z.number().nullable().optional(),
+      collectorNote: z.string().nullable().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
@@ -363,9 +364,12 @@ export const agentPPRouter = router({
         });
         if (!email) throw new Error("Not your transaction");
       }
+      const data: any = {};
+      if (input.paypalFee !== undefined) data.paypalFee = input.paypalFee;
+      if (input.collectorNote !== undefined) data.collectorNote = input.collectorNote;
       const result = await ctx.prisma.withdrawal.update({
         where: { id: input.id },
-        data: { paypalFee: input.paypalFee },
+        data,
       });
       await createAuditLog({
         action: "UPDATE",
@@ -373,7 +377,7 @@ export const agentPPRouter = router({
         entityId: input.id,
         userId: ctx.user.id,
         projectId: input.projectId,
-        changes: { paypalFee: input.paypalFee },
+        changes: data,
       });
       return result;
     }),

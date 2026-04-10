@@ -420,6 +420,7 @@ model Withdrawal {
   date           DateTime
   amount         Decimal         @db.Decimal(12, 2)
   paypalFee      Decimal?        @db.Decimal(12, 2)
+  collectorNote  String?
   transactionId  String?
   type           WithdrawalType
   agent          String?

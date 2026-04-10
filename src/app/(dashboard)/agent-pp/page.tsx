@@ -91,9 +91,18 @@ export default function AgentPPPage() {
       if (prev) {
         utils.agentPP.myTransactions.setData(queryInput, {
           ...prev,
-          items: prev.items.map((it: any) =>
-            it.id === vars.id ? { ...it, paypalFee: vars.paypalFee, matchedPaypalFee: vars.paypalFee } : it
-          ),
+          items: prev.items.map((it: any) => {
+            if (it.id !== vars.id) return it;
+            const patched: any = { ...it };
+            if (vars.paypalFee !== undefined) {
+              patched.paypalFee = vars.paypalFee;
+              patched.matchedPaypalFee = vars.paypalFee;
+            }
+            if (vars.collectorNote !== undefined) {
+              patched.collectorNote = vars.collectorNote;
+            }
+            return patched;
+          }),
         });
       }
       return { prev };
@@ -106,6 +115,8 @@ export default function AgentPPPage() {
   });
   const [editingFeeId, setEditingFeeId] = useState<string | null>(null);
   const [editingFeeValue, setEditingFeeValue] = useState<string>("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState<string>("");
 
   const isCollector = (emails ?? []).length > 0;
   // Admin sees global stats, collectors see their own
@@ -443,44 +454,52 @@ export default function AgentPPPage() {
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
-                    {collectorOnly && <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_project_col")}</th>}
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_source_pp")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_agent_email")}</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 w-24">{t("collector_paypal_fee_col")}</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-20">{t("collector_fee_percent_col")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_transaction_id")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_status")}</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-32"></th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">{t("col_date")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_project_col")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_pp_code")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_pp_agent")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_transaction_id")}</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_gross_amount")}</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 w-24">{t("collector_transaction_fee")}</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_net_amount")}</th>
+                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 w-24">{t("collector_fee_percent_col")}</th>
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_total_after_fee")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("col_status")}</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 w-32">{t("collector_note")}</th>
+                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 w-24"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {isLoading ? (
-                    <tr><td colSpan={collectorOnly ? 10 : 9} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                    <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
                   ) : items.length === 0 ? (
-                    <tr><td colSpan={collectorOnly ? 10 : 9} className="text-center py-8 text-gray-400">{t("agpp_no_transactions")}</td></tr>
+                    <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t("agpp_no_transactions")}</td></tr>
                   ) : (
-                    items.map((w: any) => (
+                    items.map((w: any) => {
+                      const gross = Number(w.amount ?? 0);
+                      const fee = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : 0;
+                      const netAmount = gross - fee;
+                      const feePct = Number(w.collectorFeePercent ?? 0);
+                      const totalAfterFee = netAmount * (1 - feePct / 100);
+                      return (
                       <tr key={w.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
-                        {collectorOnly && (
-                          <td className="px-3 py-2 text-xs">
-                            {w.project?.code ? (
-                              <span className="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{w.project.code}</span>
-                            ) : "—"}
-                          </td>
-                        )}
-                        <td className="px-3 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
-                        <td className="px-3 py-2 text-xs">
+                        <td className="px-2 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
+                        <td className="px-2 py-2 text-xs">
+                          {w.project?.code ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{w.project.code}</span>
+                          ) : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
+                        <td className="px-2 py-2 text-xs">
                           {(() => {
                             const val = w.agentEmail?.email ?? "—";
                             const isL = val.startsWith("http://") || val.startsWith("https://");
-                            return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
+                            return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block max-w-[180px]">{val}</a> : <span className="truncate block max-w-[180px]">{val}</span>;
                           })()}
                         </td>
-                        <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
-                        <td className="px-3 py-2 text-right text-xs text-gray-600 w-24">
+                        <td className="px-2 py-2 text-xs font-mono text-gray-500 whitespace-nowrap">{w.transactionId || w.withdrawCode || "—"}</td>
+                        <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{formatCurrency(gross)}</td>
+                        <td className="px-2 py-2 text-right text-xs text-gray-600 w-24">
                           <div className="h-6 flex items-center justify-end">
                             {w.isPaypalLink ? (
                               editingFeeId === w.id ? (
@@ -492,19 +511,13 @@ export default function AgentPPPage() {
                                   value={editingFeeValue}
                                   onChange={(e) => setEditingFeeValue(e.target.value)}
                                   onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      (e.currentTarget as HTMLInputElement).blur(); // triggers onBlur which saves
-                                    }
-                                    if (e.key === "Escape") {
-                                      setEditingFeeId(null);
-                                      setEditingFeeValue("");
-                                    }
+                                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                                    if (e.key === "Escape") { setEditingFeeId(null); setEditingFeeValue(""); }
                                   }}
                                   onBlur={() => {
                                     const raw = editingFeeValue.trim();
                                     const val = raw === "" ? null : parseFloat(raw);
                                     const current = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : null;
-                                    // Only mutate if value actually changed — avoid useless refetch/flash
                                     if (val !== current) {
                                       updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
                                     }
@@ -531,11 +544,17 @@ export default function AgentPPPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-600">
-                          {`${Number(w.collectorFeePercent ?? 0)}%`}
+                        <td className="px-2 py-2 text-right text-xs font-mono text-gray-700 whitespace-nowrap">{formatCurrency(netAmount)}</td>
+                        <td className="px-2 py-2 text-center text-xs">
+                          <div className="leading-tight">
+                            <div className="text-gray-800 font-medium truncate" title={w.collectorName || ""}>
+                              {t("collector_agent_label")}: {w.collectorName || "—"}
+                            </div>
+                            <div className="text-purple-700 font-bold">{feePct}%</div>
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-xs font-mono text-gray-500">{w.transactionId || w.withdrawCode || "—"}</td>
-                        <td className="px-3 py-2">
+                        <td className="px-2 py-2 text-right text-xs font-mono font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(totalAfterFee)}</td>
+                        <td className="px-2 py-2">
                           {w.disputeResolved && w.disputeAction === "OVERRIDE" ? (
                             <Badge className="bg-blue-100 text-blue-800 text-xs" title={w.adminResolveNote || ""}>{t("collector_admin_confirmed")}</Badge>
                           ) : w.agentConfirmed ? (
@@ -546,7 +565,43 @@ export default function AgentPPPage() {
                             <Badge variant="outline" className="border-yellow-500 text-yellow-700 text-xs">{t("agpp_pending")}</Badge>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-2 py-2 text-xs w-32">
+                          {editingNoteId === w.id ? (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={editingNoteValue}
+                              onChange={(e) => setEditingNoteValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                                if (e.key === "Escape") { setEditingNoteId(null); setEditingNoteValue(""); }
+                              }}
+                              onBlur={() => {
+                                const raw = editingNoteValue.trim();
+                                const val = raw === "" ? null : raw;
+                                const current = w.collectorNote ?? null;
+                                if (val !== current) {
+                                  updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, collectorNote: val });
+                                }
+                                setEditingNoteId(null);
+                              }}
+                              className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="note..."
+                            />
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEditingNoteId(w.id);
+                                setEditingNoteValue(w.collectorNote ?? "");
+                              }}
+                              className="w-full h-6 text-left px-1 hover:bg-blue-50 rounded cursor-pointer truncate text-gray-600"
+                              title={w.collectorNote || "Click to add note"}
+                            >
+                              {w.collectorNote || <span className="text-gray-300">+</span>}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-center">
                           <div className="flex gap-1 justify-center items-center">
                             {!w.agentConfirmed && !w.agentDisputed && !w.disputeResolved && (
                               <>
@@ -594,7 +649,8 @@ export default function AgentPPPage() {
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>

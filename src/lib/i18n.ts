@@ -201,6 +201,14 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "collector_dispute_placeholder": { en: "Transaction not found in PayPal...", vi: "Không thấy giao dịch này trong PayPal..." },
   "collector_updated": { en: "Updated", vi: "Đã cập nhật" },
   "collector_ok_short": { en: "OK", vi: "OK" },
+  "collector_pp_code": { en: "PP Code", vi: "PP Code" },
+  "collector_pp_agent": { en: "PP Agent", vi: "PP Agent" },
+  "collector_gross_amount": { en: "Gross Amount", vi: "Gross Amount" },
+  "collector_transaction_fee": { en: "Transaction fee", vi: "Transaction fee" },
+  "collector_net_amount": { en: "Net Amount", vi: "Net Amount" },
+  "collector_total_after_fee": { en: "Total After Fee", vi: "Total After Fee" },
+  "collector_note": { en: "Note", vi: "Ghi chú" },
+  "collector_agent_label": { en: "Agent", vi: "Agent" },
   "sign_out": { en: "Sign out", vi: "Đăng xuất" },
 
   // ─── Withdrawals ───
