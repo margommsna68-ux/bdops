@@ -29,6 +29,7 @@ export default function AgentPPPage() {
   const [newLabel, setNewLabel] = useState("");
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [disputeId, setDisputeId] = useState<string | null>(null);
+  const [disputeTargetProjectId, setDisputeTargetProjectId] = useState<string | null>(null);
   const [disputeNote, setDisputeNote] = useState("");
   const [activeTab, setActiveTab] = useState<"received" | "sold">("received");
 
@@ -95,7 +96,7 @@ export default function AgentPPPage() {
     onSuccess: () => { refetchTx(); toast.success(t("agpp_confirmed")); },
   });
   const disputeTx = trpc.agentPP.disputeTransaction.useMutation({
-    onSuccess: () => { refetchTx(); setDisputeId(null); setDisputeNote(""); toast.success(t("agpp_disputed")); },
+    onSuccess: () => { refetchTx(); setDisputeId(null); setDisputeTargetProjectId(null); setDisputeNote(""); toast.success(t("agpp_disputed")); },
   });
   const createSale = trpc.agentPP.createSale.useMutation({
     onSuccess: () => {
@@ -418,23 +419,33 @@ export default function AgentPPPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
+                    {collectorOnly && <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_project_col")}</th>}
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_source_pp")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_agent_email")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_amount")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">TX ID</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("collector_paypal_fee_col")}</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">{t("collector_fee_percent_col")}</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_transaction_id")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_status")}</th>
                     <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-32"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {isLoading ? (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                    <tr><td colSpan={collectorOnly ? 10 : 9} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
                   ) : items.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t("agpp_no_transactions")}</td></tr>
+                    <tr><td colSpan={collectorOnly ? 10 : 9} className="text-center py-8 text-gray-400">{t("agpp_no_transactions")}</td></tr>
                   ) : (
                     items.map((w: any) => (
                       <tr key={w.id} className="hover:bg-gray-50">
                         <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
+                        {collectorOnly && (
+                          <td className="px-3 py-2 text-xs">
+                            {w.project?.code ? (
+                              <span className="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{w.project.code}</span>
+                            ) : "—"}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
                         <td className="px-3 py-2 text-xs">
                           {(() => {
@@ -443,7 +454,13 @@ export default function AgentPPPage() {
                             return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
                           })()}
                         </td>
-                        <td className="px-3 py-2 font-semibold text-green-700">{formatCurrency(w.amount)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-600">
+                          {w.matchedPaypalFee != null ? formatCurrency(Number(w.matchedPaypalFee)) : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600">
+                          {w.collectorFeePercent != null ? `${Number(w.collectorFeePercent)}%` : <span className="text-gray-300">—</span>}
+                        </td>
                         <td className="px-3 py-2 text-xs font-mono text-gray-500">{w.transactionId || w.withdrawCode || "—"}</td>
                         <td className="px-3 py-2">
                           {w.disputeResolved && w.disputeAction === "OVERRIDE" ? (
@@ -461,11 +478,11 @@ export default function AgentPPPage() {
                             {!w.agentConfirmed && !w.agentDisputed && !w.disputeResolved && (
                               <>
                                 <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-green-500 text-green-700"
-                                  onClick={() => confirmReceived.mutate({ projectId: projectId!, id: w.id })}>
+                                  onClick={() => confirmReceived.mutate({ projectId: w.projectId ?? projectId!, id: w.id })}>
                                   {t("agpp_confirm_received")}
                                 </Button>
                                 <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-red-400 text-red-600"
-                                  onClick={() => { setDisputeId(w.id); setDisputeNote(""); }}>
+                                  onClick={() => { setDisputeId(w.id); setDisputeTargetProjectId(w.projectId ?? projectId!); setDisputeNote(""); }}>
                                   {t("agpp_dispute")}
                                 </Button>
                               </>
@@ -708,7 +725,7 @@ export default function AgentPPPage() {
                 <Button variant="outline" size="sm" onClick={() => setDisputeId(null)}>{t("cancel")}</Button>
                 <Button size="sm" disabled={!disputeNote.trim() || disputeTx.isLoading}
                   className="bg-red-600 hover:bg-red-700"
-                  onClick={() => disputeTx.mutate({ projectId: projectId!, id: disputeId, note: disputeNote })}>
+                  onClick={() => disputeTx.mutate({ projectId: disputeTargetProjectId ?? projectId!, id: disputeId, note: disputeNote })}>
                   {t("agpp_dispute")}
                 </Button>
               </div>

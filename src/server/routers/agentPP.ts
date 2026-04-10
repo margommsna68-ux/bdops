@@ -111,19 +111,20 @@ export const agentPPRouter = router({
     .query(async ({ ctx, input }) => {
       const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
 
-      // Get this user's agent email IDs
-      const myEmails = await ctx.prisma.agentPaypalEmail.findMany({
-        where: { userId: ctx.user.id, projectId: input.projectId },
-        select: { id: true },
-      });
+      // Non-admin: fetch ALL user's agent emails across ALL projects (cross-project visibility)
+      const myEmails = isAdmin
+        ? []
+        : await ctx.prisma.agentPaypalEmail.findMany({
+            where: { userId: ctx.user.id },
+            select: { id: true },
+          });
       const myEmailIds = myEmails.map((e) => e.id);
 
-      // If not admin, only show own transactions
-      const where: any = {
-        projectId: input.projectId,
-        type: "EXCHANGE",
-        ...(isAdmin ? {} : { agentEmailId: { in: myEmailIds } }),
-      };
+      // Admin: still scoped to current project.
+      // Collector: cross-project — all withdrawals targeting any of their agent emails.
+      const where: any = isAdmin
+        ? { projectId: input.projectId, type: "EXCHANGE" }
+        : { type: "EXCHANGE", agentEmailId: { in: myEmailIds } };
 
       const [items, total] = await Promise.all([
         ctx.prisma.withdrawal.findMany({
@@ -134,14 +135,79 @@ export const agentPPRouter = router({
           include: {
             sourcePaypal: { select: { code: true } },
             agentUser: { select: { name: true, username: true } },
-            agentEmail: { select: { email: true, label: true } },
+            agentEmail: {
+              select: {
+                email: true,
+                label: true,
+                user: { select: { id: true, name: true, username: true } },
+              },
+            },
             resolvedBy: { select: { name: true, username: true } },
+            project: { select: { id: true, code: true, name: true } },
           },
         }),
         ctx.prisma.withdrawal.count({ where }),
       ]);
 
-      return { items, total, page: input.page };
+      // Enrich: attach matching AgentSale (paypalFee) and collector's agentFeePercent
+      // - Match sale by (transactionId, agentEmailId) to find paypalFee for each row
+      // - Look up ProjectMember.agentFeePercent for the user who owns the agentEmail
+      const saleKeys = items
+        .filter((w) => w.transactionId && w.agentEmailId)
+        .map((w) => ({ transactionId: w.transactionId!, agentEmailId: w.agentEmailId! }));
+
+      const matchingSales =
+        saleKeys.length === 0
+          ? []
+          : await ctx.prisma.agentSale.findMany({
+              where: { OR: saleKeys },
+              select: { transactionId: true, agentEmailId: true, paypalFee: true, feePercent: true },
+            });
+      const saleMap = new Map(
+        matchingSales.map((s) => [`${s.transactionId}:${s.agentEmailId}`, s])
+      );
+
+      // Build map of (userId, projectId) → agentFeePercent for all rows we need
+      const memberKeys = new Set<string>();
+      for (const w of items) {
+        const uid = (w as any).agentEmail?.user?.id;
+        if (uid && w.projectId) memberKeys.add(`${uid}|${w.projectId}`);
+      }
+      const memberKeyList = Array.from(memberKeys).map((k) => {
+        const [userId, projectId] = k.split("|");
+        return { userId, projectId };
+      });
+      const memberRows =
+        memberKeyList.length === 0
+          ? []
+          : await ctx.prisma.projectMember.findMany({
+              where: { OR: memberKeyList },
+              select: { userId: true, projectId: true, agentFeePercent: true },
+            });
+      const memberMap = new Map(
+        memberRows.map((m) => [`${m.userId}|${m.projectId}`, m.agentFeePercent])
+      );
+
+      const enrichedItems = items.map((w) => {
+        const sale = w.transactionId && w.agentEmailId
+          ? saleMap.get(`${w.transactionId}:${w.agentEmailId}`)
+          : undefined;
+        const uid = (w as any).agentEmail?.user?.id;
+        const memberFeePercent = uid && w.projectId ? memberMap.get(`${uid}|${w.projectId}`) : null;
+        const collectorName =
+          (w as any).agentEmail?.user?.name ||
+          (w as any).agentEmail?.user?.username ||
+          null;
+        return {
+          ...w,
+          matchedPaypalFee: sale?.paypalFee ?? null,
+          // % Paypal collector: member-level (per project/user), fallback to sale's feePercent
+          collectorFeePercent: memberFeePercent ?? sale?.feePercent ?? null,
+          collectorName,
+        };
+      });
+
+      return { items: enrichedItems, total, page: input.page };
     }),
 
   // ═══ Agent Balance ═══

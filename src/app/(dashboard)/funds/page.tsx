@@ -12,6 +12,8 @@ import { trpcVanilla } from "@/lib/trpc-vanilla";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { exportToCSV, parseCSV } from "@/lib/excel-export";
+import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
+import { PageHistory } from "@/components/PageHistory";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
@@ -50,15 +52,178 @@ function makeQuickRow(serverId = "", vmId = ""): QuickRow {
 }
 
 const DEFAULT_WIDTHS: Record<string, number> = {
-  checkbox: 40, date: 160, server: 130, vm: 110, paypal: 180,
-  amount: 110, txid: 150, status: 100, company: 120, notes: 140, actions: 60,
+  checkbox: 40, date: 145, server: 130, vm: 110,
+  paypal: 90, emails: 200, holder: 80, vmppCode: 90,
+  amount: 100, txid: 140, status: 90, company: 110, notes: 130, createdBy: 80, actions: 50,
 };
+
+// ═══ PAYPAL_ONLY Fund Quick Add ═══
+function PPOnlyFundPanel({ projectId }: { projectId: string }) {
+  const [ppCodes, setPpCodes] = useState("");
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const utils = trpc.useUtils();
+
+  const codes = ppCodes.split(/[\n,;\s]+/).map((s) => s.trim()).filter(Boolean);
+
+  const lookup = trpc.fund.lookupPPCodes.useQuery(
+    { projectId, codes },
+    { enabled: codes.length > 0, staleTime: 10000 }
+  );
+
+  const quickAdd = trpc.fund.quickAddByPPCode.useMutation({
+    onSuccess: (res) => {
+      setSaving(false);
+      toast.success(`Đã tạo ${res.created} fund records`);
+      setPpCodes("");
+      setAmounts({});
+      setNotes({});
+      utils.fund.list.invalidate();
+    },
+    onError: (e) => { setSaving(false); toast.error(e.message); },
+  });
+
+  const handleSave = () => {
+    const items = (lookup.data || [])
+      .filter((pp: any) => amounts[pp.id] && parseFloat(amounts[pp.id]) > 0)
+      .map((pp: any) => ({ paypalId: pp.id, amount: parseFloat(amounts[pp.id]), notes: notes[pp.id] || undefined }));
+    if (!items.length) { toast.error("Chưa nhập amount"); return; }
+    setSaving(true);
+    quickAdd.mutate({ projectId, items });
+  };
+
+  const copyEmail = (email: string) => { navigator.clipboard.writeText(email); toast.success("Copied!"); };
+
+  const removePP = (ppCode: string) => {
+    // Remove matching code/email from textarea
+    const lines = ppCodes.split(/\n/).filter((line) => {
+      const trimmed = line.trim().toLowerCase();
+      return trimmed && trimmed !== ppCode.toLowerCase();
+    });
+    setPpCodes(lines.join("\n"));
+  };
+
+  const filledCount = Object.values(amounts).filter((v) => parseFloat(v) > 0).length;
+  const totalAmount = Object.values(amounts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      {/* Header + textarea */}
+      <div className="px-4 py-3 border-b">
+        <h3 className="text-sm font-semibold text-gray-800 mb-2">Thêm Fund nhanh</h3>
+        <textarea value={ppCodes} onChange={(e) => setPpCodes(e.target.value)} rows={5}
+          className="w-full px-3 py-2 border border-gray-200 rounded text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+          placeholder={"Paste mã PP mỗi dòng 1 mã:\nPP-001\nPP-002\nPP-003\nPP-004\nPP-005"} />
+        {codes.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded text-xs font-semibold text-blue-700">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+              {codes.length} mã nhập
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded text-xs font-semibold text-green-700">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {lookup.data?.length ?? 0} PP tìm thấy
+            </span>
+            {lookup.data && codes.length > 0 && (lookup.data.length < codes.length) && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 border border-orange-200 rounded text-xs font-semibold text-orange-600">
+                {codes.length - lookup.data.length} không khớp
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Table — kiểu bảng cũ */}
+      {lookup.data && lookup.data.length > 0 && (
+        <div className="overflow-auto max-h-[420px]">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 sticky top-0 z-10 border-b">
+              <tr>
+                <th className="px-3 py-2 text-left text-gray-500 w-8">#</th>
+                <th className="px-3 py-2 text-left text-gray-500">Mã PP</th>
+                <th className="px-3 py-2 text-left text-gray-500" style={{maxWidth:160}}>Email</th>
+                <th className="px-3 py-2 text-left text-gray-500">User Win</th>
+                <th className="px-3 py-2 text-left text-gray-500">Mã VMPP</th>
+                <th className="px-3 py-2 text-center text-gray-500 w-16">Trạng thái</th>
+                <th className="px-3 py-2 text-right text-gray-500 w-24">Số tiền</th>
+                <th className="px-3 py-2 text-left text-gray-500" style={{minWidth:180}}>Ghi chú</th>
+                <th className="px-3 py-2 w-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {lookup.data.map((pp: any, idx: number) => {
+                const allEmails = pp.emails?.length > 0 ? pp.emails.map((e: any) => e.email) : [pp.primaryEmail];
+                return (
+                  <tr key={pp.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
+                    <td className="px-3 py-2 font-mono font-semibold text-blue-700 whitespace-nowrap">{pp.code}</td>
+                    <td className="px-3 py-2" style={{maxWidth:160}}>
+                      {allEmails.map((email: string, i: number) => (
+                        <div key={i} className="flex items-center gap-1 group/e">
+                          <span className="font-mono text-[10px] text-gray-500 truncate">{email}</span>
+                          <button onClick={() => copyEmail(email)} className="opacity-0 group-hover/e:opacity-100 text-gray-400 hover:text-blue-600 shrink-0">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                          </button>
+                        </div>
+                      ))}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{pp.holder || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-gray-400 whitespace-nowrap">{pp.vmppCode || "—"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${pp.status === "ACTIVE" ? "bg-green-100 text-green-700" : pp.status === "LIMITED" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{pp.status}</span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input type="number" step="0.01" min="0" value={amounts[pp.id] || ""}
+                        onChange={(e) => setAmounts((prev) => ({ ...prev, [pp.id]: e.target.value }))}
+                        className="w-full h-7 px-2 border border-gray-300 rounded text-xs font-mono text-right focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+                        placeholder="0.00" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input type="text" value={notes[pp.id] || ""}
+                        onChange={(e) => setNotes((prev) => ({ ...prev, [pp.id]: e.target.value }))}
+                        className="w-full h-7 px-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                        placeholder="ghi chú..." />
+                    </td>
+                    <td className="px-1 py-1.5 text-center">
+                      <button onClick={() => removePP(pp.code)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors" title="Xóa PP này">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {codes.length > 0 && lookup.data && lookup.data.length === 0 && (
+        <p className="px-4 py-4 text-xs text-orange-600 text-center">Không tìm thấy PP nào khớp</p>
+      )}
+
+      {/* Footer */}
+      {lookup.data && lookup.data.length > 0 && (
+        <div className="px-4 py-2.5 border-t bg-gray-50 flex items-center justify-between">
+          <span className="text-xs"><span className="font-bold text-blue-600">{filledCount}</span><span className="text-gray-400">/{lookup.data.length} PP đã nhập</span> <span className="text-gray-300 mx-1">|</span> <span className="font-mono font-bold text-green-600">${totalAmount.toFixed(2)}</span></span>
+          <button onClick={handleSave} disabled={saving || filledCount === 0}
+            className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {saving ? "Đang lưu..." : `Lưu ${filledCount} Fund`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function FundsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
+  const projectType = useProjectStore((s) => s.currentProjectType);
   const [page, setPage] = useState(1);
+  const [showHistory, setShowHistory] = useState(false);
   const [search, setSearch] = useState("");
   const [confirmed, setConfirmed] = useState<boolean | undefined>(undefined);
+  const [statusFilter, setStatusFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filterServerId, setFilterServerId] = useState("");
@@ -133,6 +298,7 @@ export default function FundsPage() {
   const { data, isLoading } = trpc.fund.list.useQuery({
     projectId: projectId!, page, limit: 50,
     search: search || undefined, confirmed,
+    failed: statusFilter === "failed" ? true : undefined,
     dateFrom: dateFrom || undefined, dateTo: dateTo || undefined,
     serverId: filterServerId || undefined,
   }, { enabled: !!projectId });
@@ -151,6 +317,18 @@ export default function FundsPage() {
     onSuccess: (r) => { toast.success(`${r.confirmed} confirmed`); setSelected(new Set()); invalidateAll(); },
   });
   const bulkImport = trpc.fund.bulkImport.useMutation();
+
+  // Auto confirm
+  const [autoConfirmResult, setAutoConfirmResult] = useState<any>(null);
+  const autoConfirm = trpc.fund.autoConfirm.useMutation({
+    onSuccess: (res) => {
+      setAutoConfirmResult(res);
+      invalidateAll();
+      if (res.confirmed > 0) toast.success(`Đã xác nhận ${res.confirmed}/${res.total} fund`);
+      else toast("Không tìm thấy payment phù hợp — cần check tay");
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const { data: unconfirmedData } = trpc.fund.unconfirmed.useQuery(
     { projectId: projectId! }, { enabled: !!projectId }
   );
@@ -167,7 +345,8 @@ export default function FundsPage() {
   const serverTotalMap = new Map((serverTotals ?? []).map((s) => [s.serverId, s]));
 
   const unconfirmedCount = unconfirmedData?.length ?? 0;
-  const items = data?.items ?? [];
+  const rawItems = data?.items ?? [];
+  const { sorted: items, sortKey, sortDir, handleSort } = useTableSort(rawItems);
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
 
@@ -213,8 +392,10 @@ export default function FundsPage() {
   // Today summary computed
   const todayCount = todaySummary?.count ?? 0;
   const todayTotal = todaySummary?.totalAmount ?? 0;
-  const todayUnconfirmed = todaySummary?.funds?.filter((f: any) => !f.confirmed) ?? [];
+  const todayUnconfirmed = todaySummary?.funds?.filter((f: any) => !f.confirmed && !f.failed) ?? [];
   const todayUnconfirmedTotal = todayUnconfirmed.reduce((s: number, f: any) => s + Number(f.amount), 0);
+  const todayFailed = todaySummary?.funds?.filter((f: any) => f.failed) ?? [];
+  const todayFailedTotal = todayFailed.reduce((s: number, f: any) => s + Number(f.amount), 0);
 
   // ═══ Selection ═══
   const allSelected = items.length > 0 && items.every((i: any) => selected.has(i.id));
@@ -244,8 +425,12 @@ export default function FundsPage() {
   const bulkUnconfirmSelected = async () => {
     if (!projectId || selected.size === 0) return;
     const ids = Array.from(selected);
-    for (const id of ids) await updateFund.mutateAsync({ projectId, id, confirmed: false });
-    toast.success(`${ids.length} unconfirmed`);
+    let count = 0;
+    for (const id of ids) {
+      try { await updateFund.mutateAsync({ projectId, id, confirmed: false }); count++; } catch {}
+    }
+    if (count > 0) toast.success(`${count} unconfirmed`);
+    if (count < ids.length) toast.error(`${ids.length - count} failed`);
     setSelected(new Set()); invalidateAll();
   };
   const bulkDeleteSelected = async () => {
@@ -254,7 +439,8 @@ export default function FundsPage() {
     const ids = Array.from(selected);
     let count = 0;
     for (const id of ids) { try { await deleteFund.mutateAsync({ projectId, id }); count++; } catch {} }
-    toast.success(`${count} deleted`);
+    if (count > 0) toast.success(`${count} deleted`);
+    if (count < ids.length) toast.error(`${ids.length - count} failed`);
     setSelected(new Set()); invalidateAll();
   };
 
@@ -385,12 +571,16 @@ export default function FundsPage() {
 
   if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
-  const ResizeTh = ({ col, children }: { col: string; children: React.ReactNode }) => (
-    <th className="relative px-2 py-2 text-left text-xs font-medium text-gray-500 select-none"
-      style={{ width: colWidths[col], minWidth: 40 }}>
-      {children}
+  const ResizeTh = ({ col, children, sortField }: { col: string; children: React.ReactNode; sortField?: string }) => (
+    <th className={`relative px-2 py-2 text-left text-xs font-medium text-gray-500 select-none ${sortField ? "cursor-pointer hover:text-gray-700" : ""}`}
+      style={{ width: colWidths[col], minWidth: 40 }}
+      onClick={sortField ? () => handleSort(sortField) : undefined}>
+      <span className="flex items-center gap-1">
+        {children}
+        {sortField && <SortIcon active={sortKey === sortField} direction={sortDir} />}
+      </span>
       <div className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-10 group/handle flex items-center justify-center"
-        onMouseDown={(e) => onResizeStart(col, e)}>
+        onMouseDown={(e) => { e.stopPropagation(); onResizeStart(col, e); }}>
         <div className="w-[3px] h-5 rounded-full bg-gray-200 group-hover/handle:bg-blue-500 group-active/handle:bg-blue-600 transition-colors" />
       </div>
     </th>
@@ -415,13 +605,15 @@ export default function FundsPage() {
               Confirmed: f.confirmed ? "Yes" : "No", Company: f.company, Notes: f.notes ?? "",
             })), "funds-export");
           }} disabled={!items.length}>{t("funds_export_csv")}</Button>
-          <Button size="sm" onClick={() => setShowQuickAddPopup(true)}>{t("funds_quick_add")}</Button>
+          {projectType !== "PAYPAL_ONLY" && (
+            <Button size="sm" onClick={() => setShowQuickAddPopup(true)}>{t("funds_quick_add")}</Button>
+          )}
         </div>
       </div>
 
       {/* Summary Dashboard */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100">
+        <div className="grid grid-cols-2 lg:grid-cols-5 divide-x divide-gray-100">
           {/* Today */}
           <div className="px-5 py-4 relative">
             <div className="flex items-center gap-2 mb-2">
@@ -467,11 +659,28 @@ export default function FundsPage() {
             </div>
             <div className="text-xs text-emerald-600 mt-1">{confirmedTotal?.count ?? 0} {t("dash_transactions")}</div>
           </div>
+
+          {/* Failed / Không về */}
+          <div className="px-5 py-4 bg-gradient-to-br from-red-50 to-white">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Không về</span>
+            </div>
+            <div className={`text-2xl font-bold ${todayFailed.length > 0 ? "text-red-600" : "text-gray-400"}`}>
+              {todayFailed.length > 0 ? formatCurrency(Number(todayFailedTotal)) : "$0"}
+            </div>
+            <div className="text-xs text-red-500 mt-1">{todayFailed.length} mã</div>
+          </div>
         </div>
       </div>
 
-      {/* Quick Add popup */}
-      {showQuickAddPopup && (
+      {/* PAYPAL_ONLY Quick Add */}
+      {projectType === "PAYPAL_ONLY" && projectId && (
+        <PPOnlyFundPanel projectId={projectId} />
+      )}
+
+      {/* Quick Add popup (FULL projects only) */}
+      {projectType !== "PAYPAL_ONLY" && showQuickAddPopup && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <span className="font-medium text-sm text-blue-900">{t("funds_qa_title")}</span>
@@ -508,15 +717,64 @@ export default function FundsPage() {
           <span className="text-sm font-medium text-blue-800">{selected.size} {t("selected")}</span>
           <div className="flex gap-2 ml-auto">
             <Button size="sm" variant="outline" className="h-7 text-xs border-green-500 text-green-700 hover:bg-green-50" onClick={bulkConfirmSelected}>{t("confirm")}</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs border-purple-500 text-purple-700 hover:bg-purple-50"
+              disabled={autoConfirm.isLoading}
+              onClick={() => {
+                if (!projectId) return;
+                const ids = Array.from(selected);
+                autoConfirm.mutate({ projectId, fundIds: ids });
+              }}>
+              {autoConfirm.isLoading ? "Đang quét..." : "Auto Xác Nhận"}
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs border-yellow-500 text-yellow-700 hover:bg-yellow-50" onClick={bulkUnconfirmSelected}>{t("unconfirm")}</Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs border-red-400 text-red-600 hover:bg-red-50" onClick={bulkDeleteSelected}>{t("delete")}</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs border-red-500 text-red-600 hover:bg-red-50" onClick={async () => {
+              if (!projectId || selected.size === 0) return;
+              const ids = Array.from(selected);
+              let count = 0;
+              for (const id of ids) { try { await updateFund.mutateAsync({ projectId, id, failed: true }); count++; } catch {} }
+              if (count > 0) toast.success(`${count} đã đánh dấu không về`);
+              setSelected(new Set()); invalidateAll();
+            }}>Không về</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs border-gray-300 text-red-600 hover:bg-red-50" onClick={bulkDeleteSelected}>{t("delete")}</Button>
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelected(new Set())}>{t("deselect")}</Button>
           </div>
         </div>
       )}
 
-      {/* Server Filter Cards */}
-      <div className="bg-white rounded-lg border p-3">
+      {/* Auto Confirm Result Dialog */}
+      {autoConfirmResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setAutoConfirmResult(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-900">Kết quả Auto Xác Nhận</h3>
+              <button onClick={() => setAutoConfirmResult(null)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 p-3 bg-gray-50 border-b text-center">
+              <div><p className="text-lg font-bold text-green-600">{autoConfirmResult.confirmed}</p><p className="text-[10px] text-gray-500">Đã xác nhận</p></div>
+              <div><p className="text-lg font-bold text-orange-500">{autoConfirmResult.notFound}</p><p className="text-[10px] text-gray-500">Không tìm thấy</p></div>
+              <div><p className="text-lg font-bold text-red-500">{autoConfirmResult.errors}</p><p className="text-[10px] text-gray-500">Lỗi</p></div>
+            </div>
+            <div className="overflow-y-auto max-h-[50vh] divide-y">
+              {autoConfirmResult.results?.map((r: any, i: number) => (
+                <div key={i} className={`px-4 py-2.5 ${r.status === "confirmed" ? "bg-green-50/50" : ""}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${r.status === "confirmed" ? "bg-green-500" : r.status === "not_found" ? "bg-orange-400" : "bg-red-400"}`} />
+                    <span className="text-sm font-semibold">{r.ppCode}</span>
+                    {r.txId && <span className="text-[10px] font-mono text-gray-400">{r.txId}</span>}
+                    {r.emailAmount && <span className="text-xs font-mono font-semibold text-green-700 ml-auto">${r.emailAmount.toFixed(2)}</span>}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 ml-4">{r.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Server Filter Cards (hide for PAYPAL_ONLY) */}
+      {projectType !== "PAYPAL_ONLY" && <div className="bg-white rounded-lg border p-3">
         <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
           {/* All servers card */}
           <button
@@ -559,7 +817,7 @@ export default function FundsPage() {
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* Filters */}
       <div className="bg-white rounded-lg border p-3">
@@ -571,19 +829,48 @@ export default function FundsPage() {
           <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className="w-36 h-8 text-sm" />
           <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="w-36 h-8 text-sm" />
           <div className="flex gap-1">
-            {[
-              { label: "Today", fn: () => { const d = getLocalDate(); setDateFrom(d); setDateTo(d); setPage(1); } },
-              { label: "7d", fn: () => { const d = new Date(); d.setDate(d.getDate() - 7); setDateFrom(getLocalDate()); setDateTo(getLocalDate()); setPage(1); } },
-              { label: "Month", fn: () => { const d = new Date(); setDateFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setDateTo(getLocalDate()); setPage(1); } },
-              { label: "Clear", fn: () => { setDateFrom(""); setDateTo(""); setPage(1); } },
-            ].map((p) => (
-              <button key={p.label} onClick={p.fn} className="px-2 py-1 text-xs rounded border bg-gray-50 hover:bg-gray-100 text-gray-600">{p.label}</button>
-            ))}
+            {(() => {
+              const today = getLocalDate();
+              const d7 = new Date(); d7.setDate(d7.getDate() - 7);
+              const from7d = `${d7.getFullYear()}-${String(d7.getMonth() + 1).padStart(2, "0")}-${String(d7.getDate()).padStart(2, "0")}`;
+              const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+
+              const presets = [
+                { label: "Hôm nay", from: today, to: today },
+                { label: "7 ngày", from: from7d, to: today },
+                { label: "Tháng này", from: monthStart, to: today },
+                { label: "Tất cả", from: "", to: "" },
+              ];
+
+              return presets.map((p) => {
+                const isActive = dateFrom === p.from && dateTo === p.to;
+                return (
+                  <button key={p.label} onClick={() => { setDateFrom(p.from); setDateTo(p.to); setPage(1); }}
+                    className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
+                      isActive
+                        ? "bg-blue-600 text-white border border-blue-600"
+                        : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+                    }`}>
+                    {p.label}
+                  </button>
+                );
+              });
+            })()}
           </div>
-          <select value={confirmed === undefined ? "" : String(confirmed)} onChange={(e) => { setConfirmed(e.target.value === "" ? undefined : e.target.value === "true"); setPage(1); }} className="px-2 py-1 border rounded text-sm h-8">
-            <option value="">All</option>
-            <option value="true">Confirmed</option>
-            <option value="false">Unconfirmed</option>
+          <select value={confirmed === undefined ? (statusFilter || "") : `c:${confirmed}`}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "failed") { setConfirmed(undefined); setStatusFilter("failed"); }
+              else if (v === "c:true") { setConfirmed(true); setStatusFilter(""); }
+              else if (v === "c:false") { setConfirmed(false); setStatusFilter(""); }
+              else { setConfirmed(undefined); setStatusFilter(""); }
+              setPage(1);
+            }}
+            className="px-2 py-1 border rounded text-sm h-8">
+            <option value="">Tất cả</option>
+            <option value="c:true">Đã xác nhận</option>
+            <option value="c:false">Chờ xác nhận</option>
+            <option value="failed">Không về</option>
           </select>
         </div>
       </div>
@@ -595,15 +882,19 @@ export default function FundsPage() {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-2 py-2" style={{ width: colWidths.checkbox }}><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded" /></th>
-                <ResizeTh col="date">{t("col_date")}</ResizeTh>
-                <ResizeTh col="server">{t("col_server")}</ResizeTh>
-                <ResizeTh col="vm">{t("col_vm")}</ResizeTh>
-                <ResizeTh col="paypal">{t("col_paypal")}</ResizeTh>
-                <ResizeTh col="amount">{t("col_amount")}</ResizeTh>
-                <ResizeTh col="txid">{t("col_tx_id")}</ResizeTh>
-                <ResizeTh col="status">{t("col_status")}</ResizeTh>
-                <ResizeTh col="company">{t("col_company")}</ResizeTh>
+                <ResizeTh col="date" sortField="date">{t("col_date")}</ResizeTh>
+                {projectType !== "PAYPAL_ONLY" && <ResizeTh col="server">Server</ResizeTh>}
+                {projectType !== "PAYPAL_ONLY" && <ResizeTh col="vm">VM</ResizeTh>}
+                <ResizeTh col="paypal" sortField="paypal.code">PP Code</ResizeTh>
+                <ResizeTh col="emails">Emails</ResizeTh>
+                <ResizeTh col="holder" sortField="paypal.holder">User Win</ResizeTh>
+                <ResizeTh col="vmppCode">VMPP</ResizeTh>
+                <ResizeTh col="amount" sortField="amount">{t("col_amount")}</ResizeTh>
+                <ResizeTh col="txid" sortField="transactionId">{t("col_tx_id")}</ResizeTh>
+                <ResizeTh col="status" sortField="confirmed">{t("col_status")}</ResizeTh>
+                <ResizeTh col="company" sortField="company">{t("col_company")}</ResizeTh>
                 <ResizeTh col="notes">{t("col_notes")}</ResizeTh>
+                <ResizeTh col="createdBy">Người tạo</ResizeTh>
                 <th className="px-2 py-2" style={{ width: colWidths.actions }}></th>
               </tr>
             </thead>
@@ -611,7 +902,7 @@ export default function FundsPage() {
               {/* Save All bar */}
               {quickRows.length > 0 && (
                 <tr className="bg-green-100 border-b border-green-200">
-                  <td colSpan={11} className="px-3 py-1.5">
+                  <td colSpan={projectType === "PAYPAL_ONLY" ? 13 : 15} className="px-3 py-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-green-800">{quickRows.length} {t("new_rows")}</span>
                       <div className="flex gap-2">
@@ -645,9 +936,9 @@ export default function FundsPage() {
 
               {/* Data rows */}
               {isLoading ? (
-                <tr><td colSpan={11} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                <tr><td colSpan={projectType === "PAYPAL_ONLY" ? 13 : 15} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
               ) : items.length === 0 && quickRows.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-8 text-gray-400">{t("funds_no_tx")}</td></tr>
+                <tr><td colSpan={projectType === "PAYPAL_ONLY" ? 13 : 15} className="text-center py-8 text-gray-400">{t("funds_no_tx")}</td></tr>
               ) : (
                 items.map((item: any) => (
                   <tr key={item.id} className={`hover:bg-gray-50 group ${selected.has(item.id) ? "bg-blue-50" : ""}`}>
@@ -656,7 +947,8 @@ export default function FundsPage() {
                     </td>
                     <td className="px-2 py-1.5 text-gray-600 text-xs whitespace-nowrap overflow-hidden">{formatDateTime(item.date)}</td>
 
-                    {/* Server */}
+                    {/* Server (hide for PAYPAL_ONLY) */}
+                    {projectType !== "PAYPAL_ONLY" && (
                     <td className="px-2 py-1.5 overflow-visible">
                       {editingServer === item.id ? (
                         <Combobox options={[{ value: "", label: "— None —" }, ...serverOptions]}
@@ -669,8 +961,10 @@ export default function FundsPage() {
                         </span>
                       )}
                     </td>
+                    )}
 
-                    {/* VM */}
+                    {/* VM (hide for PAYPAL_ONLY) */}
+                    {projectType !== "PAYPAL_ONLY" && (
                     <td className="px-2 py-1.5 overflow-visible">
                       <span className="text-gray-700 text-xs cursor-pointer hover:bg-blue-50 hover:text-blue-700 px-1.5 py-0.5 rounded inline-flex items-center gap-1 border border-transparent hover:border-blue-200 transition-all"
                         onClick={() => item.serverId ? setVmPickerFor({ rowId: item.id, serverId: item.serverId, type: "data" }) : toast.error("Select server first")}>
@@ -678,36 +972,41 @@ export default function FundsPage() {
                         <svg className="w-2.5 h-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" /></svg>
                       </span>
                     </td>
+                    )}
 
-                    {/* PayPal */}
+                    {/* PP Code */}
                     <td className="px-2 py-1 overflow-visible">
-                      <div className="group/pp">
-                        <span className="font-semibold text-xs cursor-pointer hover:bg-purple-50 hover:text-purple-700 px-1.5 py-0.5 rounded inline-flex items-center gap-1 border border-transparent hover:border-purple-200 transition-all text-purple-700"
-                          onClick={() => setPpPickerFor({ rowId: item.id, type: "data" })}>
-                          {item.paypal?.code ?? <span className="text-gray-300">—</span>}
-                          <svg className="w-2.5 h-2.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
-                        </span>
-                        {(() => {
-                          const selectedEmail = ppSelectedEmail[item.id];
-                          const emails = ppEmailMap.get(item.paypalId ?? "") ?? [];
-                          const displayEmail = selectedEmail || emails[0];
-                          if (!displayEmail) return null;
-                          return (
-                            <div className="flex items-center gap-0.5 mt-0.5 pl-1">
-                              <span className="text-[10px] text-gray-500 truncate max-w-[140px]" title={emails.join("\n")}>
-                                {displayEmail}
-                              </span>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(displayEmail); toast.success("Copied!"); }}
-                                className="opacity-0 group-hover/pp:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity shrink-0 p-0.5"
-                                title="Copy email">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                      <span className="font-semibold text-xs cursor-pointer hover:bg-purple-50 hover:text-purple-700 px-1.5 py-0.5 rounded inline-flex items-center gap-1 border border-transparent hover:border-purple-200 transition-all text-purple-700"
+                        onClick={() => setPpPickerFor({ rowId: item.id, type: "data" })}>
+                        {item.paypal?.code ?? <span className="text-gray-300">—</span>}
+                        <svg className="w-2.5 h-2.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
+                      </span>
+                    </td>
+
+                    {/* Emails */}
+                    <td className="px-2 py-1">
+                      <div className="space-y-0.5">
+                        {item.paypal?.emails && item.paypal.emails.length > 0 ? (
+                          item.paypal.emails.map((em: any, ei: number) => (
+                            <div key={ei} className="flex items-center gap-0.5 group/em">
+                              <span className="text-[10px] text-gray-600 font-mono truncate">{em.email}</span>
+                              <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(em.email); toast.success("Copied!"); }}
+                                className="opacity-0 group-hover/em:opacity-100 text-gray-400 hover:text-blue-600 shrink-0 p-0.5">
+                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                               </button>
                             </div>
-                          );
-                        })()}
+                          ))
+                        ) : item.paypal?.primaryEmail ? (
+                          <span className="text-[10px] text-gray-600 font-mono">{item.paypal.primaryEmail}</span>
+                        ) : <span className="text-gray-300 text-[10px]">—</span>}
                       </div>
                     </td>
+
+                    {/* Holder */}
+                    <td className="px-2 py-1 text-xs text-gray-600">{item.paypal?.holder || "—"}</td>
+
+                    {/* VMPP Code */}
+                    <td className="px-2 py-1 text-xs font-mono text-gray-500">{item.paypal?.vmppCode || "—"}</td>
 
                     {/* Amount */}
                     <td className="px-2 py-1.5 overflow-hidden">
@@ -743,11 +1042,30 @@ export default function FundsPage() {
 
                     {/* Status */}
                     <td className="px-2 py-1.5">
-                      <button onClick={() => toggleConfirm(item)} className="cursor-pointer">
-                        {item.confirmed
-                          ? <Badge className="bg-green-100 text-green-800 hover:bg-green-200 text-xs">{t("confirmed")}</Badge>
-                          : <Badge variant="outline" className="border-yellow-500 text-yellow-700 hover:bg-yellow-50 text-xs">{t("unconfirmed")}</Badge>}
-                      </button>
+                      <div className="flex flex-col gap-0.5">
+                        {item.failed ? (
+                          <Badge className="bg-red-100 text-red-700 text-[10px] cursor-pointer hover:bg-red-200"
+                            onClick={() => updateFund.mutate({ projectId: projectId!, id: item.id, failed: false })}>
+                            Không về
+                          </Badge>
+                        ) : item.confirmed ? (
+                          <Badge className="bg-green-100 text-green-800 text-[10px] cursor-pointer hover:bg-green-200"
+                            onClick={() => toggleConfirm(item)}>
+                            {t("confirmed")}
+                          </Badge>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Badge variant="outline" className="border-yellow-500 text-yellow-700 hover:bg-yellow-50 text-[10px] cursor-pointer"
+                              onClick={() => toggleConfirm(item)}>
+                              {t("confirm")}
+                            </Badge>
+                            <Badge variant="outline" className="border-red-400 text-red-500 hover:bg-red-50 text-[10px] cursor-pointer"
+                              onClick={() => updateFund.mutate({ projectId: projectId!, id: item.id, failed: true })}>
+                              ✕
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     {/* Company */}
@@ -768,6 +1086,9 @@ export default function FundsPage() {
                         </span>
                       )}
                     </td>
+
+                    {/* Người tạo */}
+                    <td className="px-2 py-1.5 text-[10px] text-gray-400">{(item as any).createdByName || "—"}</td>
 
                     {/* Actions */}
                     <td className="px-2 py-1.5 text-center">
@@ -883,6 +1204,16 @@ export default function FundsPage() {
           setPpPickerFor(null);
         }}
       />
+      {/* History */}
+      
+      
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? "Ẩn lịch sử" : "Lịch sử"}
+      </button>
+      <PageHistory entity="FundTransaction" show={showHistory} />
     </div>
   );
 }
