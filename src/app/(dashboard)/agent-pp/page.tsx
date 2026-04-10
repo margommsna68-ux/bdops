@@ -81,9 +81,28 @@ export default function AgentPPPage() {
     onSuccess: () => { refetchSales(); refetchBalance(); toast.success(t("collector_updated")); },
     onError: (e) => toast.error(e.message),
   });
+  const utils = trpc.useUtils();
   const updatePaypalFee = trpc.agentPP.updatePaypalFee.useMutation({
-    onSuccess: () => { refetchTx(); toast.success(t("collector_updated")); },
-    onError: (e) => toast.error(e.message),
+    // Optimistic update — patch the cached list immediately so row doesn't flicker/jump
+    onMutate: async (vars) => {
+      const queryInput = { projectId: projectId!, page };
+      await utils.agentPP.myTransactions.cancel(queryInput);
+      const prev = utils.agentPP.myTransactions.getData(queryInput);
+      if (prev) {
+        utils.agentPP.myTransactions.setData(queryInput, {
+          ...prev,
+          items: prev.items.map((it: any) =>
+            it.id === vars.id ? { ...it, paypalFee: vars.paypalFee, matchedPaypalFee: vars.paypalFee } : it
+          ),
+        });
+      }
+      return { prev };
+    },
+    onError: (e, _vars, ctx) => {
+      if (ctx?.prev) utils.agentPP.myTransactions.setData({ projectId: projectId!, page }, ctx.prev);
+      toast.error(e.message);
+    },
+    onSuccess: () => { toast.success(t("collector_updated")); },
   });
   const [editingFeeId, setEditingFeeId] = useState<string | null>(null);
   const [editingFeeValue, setEditingFeeValue] = useState<string>("");
@@ -474,15 +493,21 @@ export default function AgentPPPage() {
                                   onChange={(e) => setEditingFeeValue(e.target.value)}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
-                                      const val = editingFeeValue.trim() === "" ? null : parseFloat(editingFeeValue);
-                                      updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
-                                      setEditingFeeId(null);
+                                      (e.currentTarget as HTMLInputElement).blur(); // triggers onBlur which saves
                                     }
-                                    if (e.key === "Escape") setEditingFeeId(null);
+                                    if (e.key === "Escape") {
+                                      setEditingFeeId(null);
+                                      setEditingFeeValue("");
+                                    }
                                   }}
                                   onBlur={() => {
-                                    const val = editingFeeValue.trim() === "" ? null : parseFloat(editingFeeValue);
-                                    updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
+                                    const raw = editingFeeValue.trim();
+                                    const val = raw === "" ? null : parseFloat(raw);
+                                    const current = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : null;
+                                    // Only mutate if value actually changed — avoid useless refetch/flash
+                                    if (val !== current) {
+                                      updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
+                                    }
                                     setEditingFeeId(null);
                                   }}
                                   className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"

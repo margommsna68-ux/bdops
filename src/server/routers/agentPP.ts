@@ -131,7 +131,9 @@ export const agentPPRouter = router({
           where,
           skip: (input.page - 1) * input.limit,
           take: input.limit,
-          orderBy: { date: "desc" },
+          // Stable sort: primary by date desc, secondary by createdAt desc, tertiary by id
+          // Without secondary/tertiary, rows with identical date jump around between refetches
+          orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }],
           include: {
             sourcePaypal: { select: { code: true } },
             agentUser: { select: { name: true, username: true } },
