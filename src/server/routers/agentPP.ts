@@ -198,11 +198,17 @@ export const agentPPRouter = router({
           (w as any).agentEmail?.user?.name ||
           (w as any).agentEmail?.user?.username ||
           null;
+        // Detect if agent destination is a PayPal link (vs bank link / plain email)
+        const emailVal = (w as any).agentEmail?.email ?? "";
+        const isPaypalLink =
+          emailVal.toLowerCase().includes("paypal.me") ||
+          emailVal.toLowerCase().includes("paypal.com");
         return {
           ...w,
           matchedPaypalFee: sale?.paypalFee ?? null,
-          // % Paypal collector: member-level (per project/user), fallback to sale's feePercent
-          collectorFeePercent: memberFeePercent ?? sale?.feePercent ?? null,
+          isPaypalLink,
+          // % collector: pre-set in user membership (fallback 0 if not set)
+          collectorFeePercent: Number(memberFeePercent ?? sale?.feePercent ?? 0),
           collectorName,
         };
       });

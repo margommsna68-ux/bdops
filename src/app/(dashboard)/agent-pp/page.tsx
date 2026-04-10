@@ -456,10 +456,16 @@ export default function AgentPPPage() {
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
                         <td className="px-3 py-2 text-right text-xs text-gray-600">
-                          {w.matchedPaypalFee != null ? formatCurrency(Number(w.matchedPaypalFee)) : <span className="text-gray-300">—</span>}
+                          {w.isPaypalLink ? (
+                            w.matchedPaypalFee != null
+                              ? formatCurrency(Number(w.matchedPaypalFee))
+                              : <span className="text-gray-300">—</span>
+                          ) : (
+                            <span className="text-gray-200">N/A</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600">
-                          {w.collectorFeePercent != null ? `${Number(w.collectorFeePercent)}%` : <span className="text-gray-300">—</span>}
+                          {`${Number(w.collectorFeePercent ?? 0)}%`}
                         </td>
                         <td className="px-3 py-2 text-xs font-mono text-gray-500">{w.transactionId || w.withdrawCode || "—"}</td>
                         <td className="px-3 py-2">
