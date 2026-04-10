@@ -154,6 +154,14 @@ export default function AgentPPPage() {
   const items = txData?.items ?? [];
   const total = txData?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
+  // If all visible rows are for a single collector, we can hoist the name + %
+  // into the "Collector fee" header so cells only show the $ amount.
+  const uniqueCollectors = new Set(
+    items.map((w: any) => w.collectorName).filter(Boolean)
+  );
+  const singleCollector = uniqueCollectors.size === 1 ? items.find((w: any) => w.collectorName) : null;
+  const singleCollectorName = (singleCollector as any)?.collectorName ?? null;
+  const singleCollectorPct = singleCollector ? Number((singleCollector as any).collectorFeePercent ?? 0) : null;
   const salesItems = salesData?.items ?? [];
   const salesTotal = salesData?.total ?? 0;
   const salesTotalPages = Math.ceil(salesTotal / 50);
@@ -462,7 +470,14 @@ export default function AgentPPPage() {
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-green-700 whitespace-nowrap">{t("collector_gross_amount")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">{t("collector_transaction_fee")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap">{t("collector_net_amount")}</th>
-                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">{t("collector_fee_percent_col")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">
+                      {t("collector_fee_percent_col")}
+                      {singleCollectorName && (
+                        <span className="block text-[10px] font-normal text-purple-600 mt-0.5">
+                          {singleCollectorName} {singleCollectorPct}%
+                        </span>
+                      )}
+                    </th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-emerald-700 whitespace-nowrap">{t("collector_total_after_fee")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_status")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap w-32">{t("collector_note")}</th>
@@ -547,12 +562,18 @@ export default function AgentPPPage() {
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono text-gray-700 whitespace-nowrap">{formatCurrency(netAmount)}</td>
                         <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
-                          <div className="leading-tight">
-                            <div className="text-gray-700 font-medium truncate" title={w.collectorName || ""}>
-                              {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
-                            </div>
+                          {singleCollectorName ? (
+                            /* Header already shows collector name + %, cell only shows amount */
                             <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
-                          </div>
+                          ) : (
+                            /* Mixed collectors → show name + % per row */
+                            <div className="leading-tight">
+                              <div className="text-gray-700 font-medium truncate" title={w.collectorName || ""}>
+                                {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
+                              </div>
+                              <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(totalAfterFee)}</td>
                         <td className="px-2 py-2">
