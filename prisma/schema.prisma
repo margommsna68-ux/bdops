@@ -30,14 +30,21 @@ model User {
   agentWithdrawals Withdrawal[]    @relation("AgentWithdrawals")
   agentSales       AgentSale[]     @relation("AgentSales")
   resolvedDisputes Withdrawal[]    @relation("DisputeResolver")
+  editHistory   EditHistory[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+enum ProjectType {
+  FULL
+  PAYPAL_ONLY
 }
 
 model Project {
   id               String          @id @default(cuid())
   name             String
   code             String          @unique
+  type             ProjectType     @default(FULL)
   description      String?
   settings         Json?
   members          ProjectMember[]
@@ -56,6 +63,7 @@ model Project {
   agentSales       AgentSale[]
   holderMergeTargets HolderMergeTarget[]
   earnWithdrawals  EarnWithdrawal[]
+  editHistory      EditHistory[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -71,6 +79,7 @@ model ProjectMember {
   canManageUsers  Boolean     @default(false)
   managerId       String?
   maxAutotypeDevices Int      @default(2)
+  agentFeePercent Decimal?    @db.Decimal(5, 2) // % agent nhận (default 3%)
   manager         ProjectMember?  @relation("TeamMembers", fields: [managerId], references: [id])
   teamMembers     ProjectMember[] @relation("TeamMembers")
   createdAt       DateTime    @default(now())
@@ -298,7 +307,11 @@ model PayPalAccount {
   docsLink        String?      // Link docs (Google Drive, etc.)
   suspendedAt     DateTime?    // Ngày bị suspend vĩnh viễn
   limitedAt       DateTime?    // Ngày bị limit (cần updocs)
+  workflowStatus  String?      // updocs | appeal | resolved
   caseHistory     Json?        // [{date, type, note, docsLink}] - lịch sử xử lý
+  tokenHealthStatus    String?  // HEALTHY | INVALID | ERROR | MISSING
+  tokenHealthCheckedAt DateTime?
+  tokenHealthError     String?
   project         Project      @relation(fields: [projectId], references: [id])
   projectId       String
   emails          PayPalEmail[]
@@ -308,6 +321,7 @@ model PayPalAccount {
   withdrawalsTo   Withdrawal[] @relation("WithdrawalDest")
   mergeTargets    HolderMergeTarget[]
   earnWithdrawals EarnWithdrawal[] @relation("EarnWithdrawalPaypal")
+  createdById     String?      // user who created this PP
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -375,6 +389,7 @@ model FundTransaction {
   amount        Decimal       @db.Decimal(12, 2)
   transactionId String
   confirmed     Boolean       @default(false)
+  failed        Boolean       @default(false)  // Không về
   company       String        @default("Bright Data Ltd.")
   notes         String?
   paypal        PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Cascade)
@@ -387,6 +402,7 @@ model FundTransaction {
   vmId          String?
   project       Project       @relation(fields: [projectId], references: [id])
   projectId     String
+  createdById   String?       // user who created this fund
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -403,6 +419,7 @@ model Withdrawal {
   id             String          @id @default(cuid())
   date           DateTime
   amount         Decimal         @db.Decimal(12, 2)
+  paypalFee      Decimal?        @db.Decimal(12, 2)
   transactionId  String?
   type           WithdrawalType
   agent          String?
@@ -617,7 +634,13 @@ model AgentPaypalEmail {
 
 model AgentSale {
   id            String           @id @default(cuid())
-  amount        Decimal          @db.Decimal(12, 2)
+  amount        Decimal          @db.Decimal(12, 2)  // gross amount
+  feePercent    Decimal?         @db.Decimal(5, 2)   // agent fee % (default 3%)
+  paypalFee     Decimal?         @db.Decimal(12, 2)  // PayPal transfer fee (agent notes)
+  netAmount     Decimal?         @db.Decimal(12, 2)  // net = amount - paypalFee - (amount * feePercent/100)
+  agentEarning  Decimal?         @db.Decimal(12, 2)  // tiền agent nhận = (amount - paypalFee) * feePercent/100
+  withdrawn     Boolean          @default(false)     // agent đã rút tiền chưa
+  withdrawnAt   DateTime?                            // ngày rút
   transactionId String
   exchangeEmail String?
   notes         String?
@@ -634,6 +657,30 @@ model AgentSale {
   @@index([agentUserId])
   @@index([agentEmailId])
   @@index([projectId])
+}
+
+// ═══════════════════════════════════════
+// EDIT HISTORY (30-day undo)
+// ═══════════════════════════════════════
+
+model EditHistory {
+  id          String   @id @default(cuid())
+  entity      String   // "PayPalAccount", "FundTransaction", "PayPalEmail", etc.
+  entityId    String   // ID of the record edited
+  field       String   // field name that was changed
+  oldValue    String?  // previous value (as string)
+  newValue    String?  // new value (as string)
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  project     Project  @relation(fields: [projectId], references: [id])
+  projectId   String
+  reverted    Boolean  @default(false)
+  revertedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([entityId, entity])
+  @@index([projectId, createdAt])
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════

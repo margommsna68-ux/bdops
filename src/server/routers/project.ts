@@ -30,11 +30,20 @@ export const projectRouter = router({
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
-      const membership = await ctx.prisma.projectMember.findFirst({
-        where: { userId, projectId: input.projectId },
-        select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true },
-      });
-      return membership ?? { id: "", role: "USER" as const, allowedModules: [] as string[], canManageUsers: false, managerId: null };
+      const [membership, project] = await Promise.all([
+        ctx.prisma.projectMember.findFirst({
+          where: { userId, projectId: input.projectId },
+          select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true },
+        }),
+        ctx.prisma.project.findUnique({
+          where: { id: input.projectId },
+          select: { type: true },
+        }),
+      ]);
+      return {
+        ...(membership ?? { id: "", role: "USER" as const, allowedModules: [] as string[], canManageUsers: false, managerId: null }),
+        projectType: project?.type ?? "FULL",
+      };
     }),
 
   getById: protectedProcedure
@@ -75,6 +84,7 @@ export const projectRouter = router({
       z.object({
         name: z.string().min(1),
         code: z.string().min(1).max(10),
+        type: z.enum(["FULL", "PAYPAL_ONLY"]).default("FULL"),
         description: z.string().optional(),
       })
     )
@@ -124,6 +134,7 @@ export const projectRouter = router({
         data: {
           name: input.name,
           code: input.code.toUpperCase(),
+          type: input.type,
           description: input.description,
           members: {
             create: { userId, role: "ADMIN" },
@@ -148,6 +159,10 @@ export const projectRouter = router({
 
       return ctx.prisma.project.findMany({
         include: {
+          members: {
+            include: { user: { select: { id: true, name: true, username: true } } },
+            orderBy: { role: "asc" },
+          },
           _count: {
             select: {
               members: true,
@@ -268,11 +283,20 @@ export const projectRouter = router({
       return { wiped: true, code: project?.code };
     }),
 
+  // Get project settings (user win list etc)
+  getSettings: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { settings: true } });
+      return (project?.settings || {}) as any;
+    }),
+
   update: adminProcedure
     .input(
       z.object({
         projectId: z.string(),
         name: z.string().min(1).optional(),
+        type: z.enum(["FULL", "PAYPAL_ONLY"]).optional(),
         description: z.string().optional(),
         settings: z.any().optional(),
       })
@@ -376,7 +400,7 @@ export const projectRouter = router({
       return member;
     }),
 
-  addMember: adminProcedure
+  addMember: protectedProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -386,11 +410,25 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.prisma.user.findUnique({
-        where: { email: input.email },
+      const callerId = (ctx.user as any).id;
+      // Caller must be ADMIN in at least one project
+      const callerAdmin = await ctx.prisma.projectMember.findFirst({
+        where: { userId: callerId, role: "ADMIN" },
       });
+      if (!callerAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Chỉ ADMIN mới thêm member" });
+      }
+
+      const user = await ctx.prisma.user.findUnique({ where: { email: input.email } });
       if (!user) {
-        throw new Error("User not found. Create the user first.");
+        throw new TRPCError({ code: "NOT_FOUND", message: "User không tồn tại. Tạo user trước." });
+      }
+      // Check not already member
+      const existing = await ctx.prisma.projectMember.findFirst({
+        where: { userId: user.id, projectId: input.projectId },
+      });
+      if (existing) {
+        throw new TRPCError({ code: "CONFLICT", message: "User đã là thành viên project này" });
       }
       return ctx.prisma.projectMember.create({
         data: {
@@ -412,7 +450,8 @@ export const projectRouter = router({
         allowedModules: z.array(z.enum(APP_MODULES as unknown as [string, ...string[]])).optional(),
         canManageUsers: z.boolean().optional(),
         managerId: z.string().nullable().optional(),
-        maxAutotypeDevices: z.number().int().min(1).max(20).optional(),
+        maxAutotypeDevices: z.number().int().min(0).max(999).optional(),
+        agentFeePercent: z.number().min(0).max(100).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -430,7 +469,8 @@ export const projectRouter = router({
           where: { userId: callerId, projectId: input.projectId },
           select: { id: true, allowedModules: true },
         });
-        if (!target || target.managerId !== callerMember?.id) {
+        // Verify target belongs to the same project (prevent cross-project IDOR)
+        if (!target || target.projectId !== input.projectId || target.managerId !== callerMember?.id) {
           throw new TRPCError({ code: "FORBIDDEN", message: "Bạn chỉ quản lý user trong nhóm của mình" });
         }
         // Can only set USER role
@@ -457,6 +497,7 @@ export const projectRouter = router({
       if (input.canManageUsers !== undefined) data.canManageUsers = input.canManageUsers;
       if (input.managerId !== undefined) data.managerId = input.managerId;
       if (input.maxAutotypeDevices !== undefined) data.maxAutotypeDevices = input.maxAutotypeDevices;
+      if (input.agentFeePercent !== undefined) data.agentFeePercent = input.agentFeePercent;
       const result = await ctx.prisma.projectMember.update({
         where: { id: input.memberId },
         data,
@@ -503,6 +544,21 @@ export const projectRouter = router({
         },
         select: { id: true, email: true, username: true, name: true, createdAt: true },
         orderBy: { createdAt: "desc" },
+      });
+    }),
+
+  // All users in system (for quick-add to project)
+  allSystemUsers: protectedProcedure
+    .query(async ({ ctx }) => {
+      const userId = (ctx.user as any).id;
+      const isAdmin = await ctx.prisma.projectMember.findFirst({ where: { userId, role: "ADMIN" } });
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
+      return ctx.prisma.user.findMany({
+        select: {
+          id: true, email: true, username: true, name: true,
+          memberships: { select: { projectId: true, role: true } },
+        },
+        orderBy: { name: "asc" },
       });
     }),
 

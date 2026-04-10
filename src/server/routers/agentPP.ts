@@ -203,9 +203,11 @@ export const agentPPRouter = router({
         const isPaypalLink =
           emailVal.toLowerCase().includes("paypal.me") ||
           emailVal.toLowerCase().includes("paypal.com");
+        // Fee Paypal: prefer directly-noted paypalFee on Withdrawal, fallback to matching sale
+        const paypalFeeValue = (w as any).paypalFee ?? sale?.paypalFee ?? null;
         return {
           ...w,
-          matchedPaypalFee: sale?.paypalFee ?? null,
+          matchedPaypalFee: paypalFeeValue,
           isPaypalLink,
           // % collector: pre-set in user membership (fallback 0 if not set)
           collectorFeePercent: Number(memberFeePercent ?? sale?.feePercent ?? 0),
@@ -319,6 +321,39 @@ export const agentPPRouter = router({
     }),
 
   // ═══ Agent Confirm/Dispute ═══
+  // ═══ Update paypalFee note on an incoming Withdrawal ═══
+  updatePaypalFee: agentPPProcedure
+    .input(z.object({
+      projectId: z.string(),
+      id: z.string(),
+      paypalFee: z.number().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
+        where: { id: input.id, projectId: input.projectId },
+      });
+      // Ownership check for non-admin: must own the agent email
+      if (ctx.role !== "ADMIN" && ctx.role !== "MODERATOR" && wd.agentEmailId) {
+        const email = await ctx.prisma.agentPaypalEmail.findFirst({
+          where: { id: wd.agentEmailId, userId: ctx.user.id },
+        });
+        if (!email) throw new Error("Not your transaction");
+      }
+      const result = await ctx.prisma.withdrawal.update({
+        where: { id: input.id },
+        data: { paypalFee: input.paypalFee },
+      });
+      await createAuditLog({
+        action: "UPDATE",
+        entity: "Withdrawal",
+        entityId: input.id,
+        userId: ctx.user.id,
+        projectId: input.projectId,
+        changes: { paypalFee: input.paypalFee },
+      });
+      return result;
+    }),
+
   confirmReceived: agentPPProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {

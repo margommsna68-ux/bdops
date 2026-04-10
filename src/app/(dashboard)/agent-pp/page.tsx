@@ -81,6 +81,12 @@ export default function AgentPPPage() {
     onSuccess: () => { refetchSales(); refetchBalance(); toast.success(t("collector_updated")); },
     onError: (e) => toast.error(e.message),
   });
+  const updatePaypalFee = trpc.agentPP.updatePaypalFee.useMutation({
+    onSuccess: () => { refetchTx(); toast.success(t("collector_updated")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const [editingFeeId, setEditingFeeId] = useState<string | null>(null);
+  const [editingFeeValue, setEditingFeeValue] = useState<string>("");
 
   const isCollector = (emails ?? []).length > 0;
   // Admin sees global stats, collectors see their own
@@ -457,9 +463,45 @@ export default function AgentPPPage() {
                         <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
                         <td className="px-3 py-2 text-right text-xs text-gray-600">
                           {w.isPaypalLink ? (
-                            w.matchedPaypalFee != null
-                              ? formatCurrency(Number(w.matchedPaypalFee))
-                              : <span className="text-gray-300">—</span>
+                            editingFeeId === w.id ? (
+                              <div className="flex items-center gap-1 justify-end">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  autoFocus
+                                  value={editingFeeValue}
+                                  onChange={(e) => setEditingFeeValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      const val = editingFeeValue.trim() === "" ? null : parseFloat(editingFeeValue);
+                                      updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
+                                      setEditingFeeId(null);
+                                    }
+                                    if (e.key === "Escape") setEditingFeeId(null);
+                                  }}
+                                  onBlur={() => {
+                                    const val = editingFeeValue.trim() === "" ? null : parseFloat(editingFeeValue);
+                                    updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
+                                    setEditingFeeId(null);
+                                  }}
+                                  className="w-16 h-6 text-xs px-1.5 border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditingFeeId(w.id);
+                                  setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
+                                }}
+                                className="font-mono hover:bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer"
+                                title="Click to note fee"
+                              >
+                                {w.matchedPaypalFee != null
+                                  ? formatCurrency(Number(w.matchedPaypalFee))
+                                  : <span className="text-gray-300">+</span>}
+                              </button>
+                            )
                           ) : (
                             <span className="text-gray-200">N/A</span>
                           )}
