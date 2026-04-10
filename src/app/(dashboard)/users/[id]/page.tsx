@@ -122,20 +122,27 @@ export default function UserDetailPage() {
           <p className="text-sm text-gray-500">{user.email} • @{user.username}</p>
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          {/* Project selector — switch between projects where this user is a member */}
+          {/* Project selector — pill buttons, click to switch */}
           {user.memberships && user.memberships.length > 0 && (
-            <select
-              value={projectId ?? ""}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="h-8 px-2 text-xs border rounded-md bg-white font-medium text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              title="Chọn project để xem"
-            >
-              {user.memberships.map((m: any) => (
-                <option key={m.projectId} value={m.projectId}>
-                  {m.project.code} — {m.project.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex gap-1.5 items-center">
+              {user.memberships.map((m: any) => {
+                const active = projectId === m.projectId;
+                return (
+                  <button
+                    key={m.projectId}
+                    onClick={() => setSelectedProjectId(m.projectId)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                        : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300"
+                    }`}
+                    title={m.project.name}
+                  >
+                    {m.project.code}
+                  </button>
+                );
+              })}
+            </div>
           )}
           {membership && <Badge className={ROLE_COLORS[membership.role]}>{membership.role}</Badge>}
           <Badge variant="outline">{user.hasPin ? "PIN ✓" : "Chưa PIN"}</Badge>
