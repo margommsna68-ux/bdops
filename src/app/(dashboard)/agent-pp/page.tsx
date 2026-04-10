@@ -451,22 +451,22 @@ export default function AgentPPPage() {
         {activeTab === "received" && (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+              <table className="min-w-full text-sm table-auto">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">{t("col_date")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_project_col")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_pp_code")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_pp_agent")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("collector_transaction_id")}</th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_gross_amount")}</th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 w-24">{t("collector_transaction_fee")}</th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_net_amount")}</th>
-                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 w-24">{t("collector_fee_percent_col")}</th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500">{t("collector_total_after_fee")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500">{t("col_status")}</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 w-32">{t("collector_note")}</th>
-                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 w-24"></th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_date")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_project_col")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_pp_code")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_pp_agent")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_transaction_id")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-green-700 whitespace-nowrap">{t("collector_gross_amount")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">{t("collector_transaction_fee")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap">{t("collector_net_amount")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">{t("collector_fee_percent_col")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-emerald-700 whitespace-nowrap">{t("collector_total_after_fee")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_status")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap w-32">{t("collector_note")}</th>
+                    <th className="px-2 py-2 text-center text-[11px] font-semibold text-gray-600 w-24"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -480,7 +480,8 @@ export default function AgentPPPage() {
                       const fee = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : 0;
                       const netAmount = gross - fee;
                       const feePct = Number(w.collectorFeePercent ?? 0);
-                      const totalAfterFee = netAmount * (1 - feePct / 100);
+                      const commissionAmount = netAmount * (feePct / 100);
+                      const totalAfterFee = netAmount - commissionAmount;
                       return (
                       <tr key={w.id} className="hover:bg-gray-50">
                         <td className="px-2 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
@@ -531,11 +532,11 @@ export default function AgentPPPage() {
                                     setEditingFeeId(w.id);
                                     setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
                                   }}
-                                  className="w-full h-6 font-mono hover:bg-blue-50 rounded cursor-pointer text-right px-1 truncate"
+                                  className="w-full h-6 font-mono hover:bg-blue-50 rounded cursor-pointer text-right px-1 truncate text-red-600"
                                   title="Click to note fee"
                                 >
                                   {w.matchedPaypalFee != null
-                                    ? formatCurrency(Number(w.matchedPaypalFee))
+                                    ? `-${formatCurrency(Number(w.matchedPaypalFee))}`
                                     : <span className="text-gray-300">+</span>}
                                 </button>
                               )
@@ -545,12 +546,12 @@ export default function AgentPPPage() {
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono text-gray-700 whitespace-nowrap">{formatCurrency(netAmount)}</td>
-                        <td className="px-2 py-2 text-center text-xs">
+                        <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
                           <div className="leading-tight">
-                            <div className="text-gray-800 font-medium truncate" title={w.collectorName || ""}>
-                              {t("collector_agent_label")}: {w.collectorName || "—"}
+                            <div className="text-gray-700 font-medium truncate" title={w.collectorName || ""}>
+                              {t("collector_agent_label")}: {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
                             </div>
-                            <div className="text-purple-700 font-bold">{feePct}%</div>
+                            <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(totalAfterFee)}</td>
