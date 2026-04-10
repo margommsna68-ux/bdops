@@ -155,13 +155,39 @@ export default function AgentPPPage() {
   const total = txData?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
   // If all visible rows are for a single collector, we can hoist the name + %
-  // into the "Collector fee" header so cells only show the $ amount.
+  // into the "Fee" header so cells only show the $ amount.
   const uniqueCollectors = new Set(
     items.map((w: any) => w.collectorName).filter(Boolean)
   );
   const singleCollector = uniqueCollectors.size === 1 ? items.find((w: any) => w.collectorName) : null;
   const singleCollectorName = (singleCollector as any)?.collectorName ?? null;
   const singleCollectorPct = singleCollector ? Number((singleCollector as any).collectorFeePercent ?? 0) : null;
+
+  // Compute hero totals from the transaction items (single source of truth with the table).
+  // Collector-only users want these numbers to match the rows exactly.
+  const heroTotals = items.reduce(
+    (acc: any, w: any) => {
+      const gross = Number(w.amount ?? 0);
+      const fee = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : 0;
+      const net = gross - fee;
+      const pct = Number(w.collectorFeePercent ?? 0);
+      const commission = net * (pct / 100);
+      const totalAfterFee = net - commission;
+      acc.received += gross;
+      acc.commission += commission;
+      acc.totalAfterFee += totalAfterFee;
+      return acc;
+    },
+    { received: 0, commission: 0, totalAfterFee: 0 }
+  );
+  // For now: Paid to team = 0 (no per-transaction paid flag yet).
+  // Owed to team = total Net-After-Fee (all unpaid).
+  // Fund remaining = Received - Paid (still sitting in collector's PP).
+  const heroReceived = heroTotals.received;
+  const heroCommission = heroTotals.commission;
+  const heroPaidToTeam = 0;
+  const heroOwedToTeam = heroTotals.totalAfterFee - heroPaidToTeam;
+  const heroFundRemaining = heroReceived - heroPaidToTeam;
   const salesItems = salesData?.items ?? [];
   const salesTotal = salesData?.total ?? 0;
   const salesTotalPages = Math.ceil(salesTotal / 50);
@@ -209,27 +235,27 @@ export default function AgentPPPage() {
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
         <div className="p-5">
           {collectorOnly ? (
-            /* Collector-only: 5 metric cards */
+            /* Collector-only: 5 metric cards — totals computed from visible transactions */
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="text-center py-3 bg-green-50 rounded-lg">
                 <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">{t("collector_total_received")}</div>
-                <div className="text-xl font-bold text-green-700">{formatCurrency(displayBalance?.totalReceived ?? 0)}</div>
+                <div className="text-xl font-bold text-green-700">{formatCurrency(heroReceived)}</div>
               </div>
               <div className="text-center py-3 bg-purple-50 rounded-lg">
                 <div className="text-[10px] font-semibold text-purple-600 uppercase mb-1">{t("collector_commission")}</div>
-                <div className="text-xl font-bold text-purple-700">{formatCurrency((displayBalance as any)?.totalCommission ?? 0)}</div>
+                <div className="text-xl font-bold text-purple-700">{formatCurrency(heroCommission)}</div>
               </div>
               <div className="text-center py-3 bg-emerald-50 rounded-lg">
                 <div className="text-[10px] font-semibold text-emerald-600 uppercase mb-1">{t("collector_paid_team")}</div>
-                <div className="text-xl font-bold text-emerald-700">{formatCurrency((displayBalance as any)?.paidToTeam ?? 0)}</div>
+                <div className="text-xl font-bold text-emerald-700">{formatCurrency(heroPaidToTeam)}</div>
               </div>
               <div className="text-center py-3 bg-amber-50 rounded-lg">
                 <div className="text-[10px] font-semibold text-amber-600 uppercase mb-1">{t("collector_owed_team")}</div>
-                <div className="text-xl font-bold text-amber-700">{formatCurrency((displayBalance as any)?.owedToTeam ?? 0)}</div>
+                <div className="text-xl font-bold text-amber-700">{formatCurrency(heroOwedToTeam)}</div>
               </div>
               <div className="text-center py-3 bg-blue-50 rounded-lg relative">
                 <div className="text-[10px] font-semibold text-blue-600 uppercase mb-1">{t("collector_fund_remaining")}</div>
-                <div className={`text-xl font-bold ${bal >= 0 ? "text-blue-700" : "text-red-600"}`}>{formatCurrency(bal)}</div>
+                <div className={`text-xl font-bold ${heroFundRemaining >= 0 ? "text-blue-700" : "text-red-600"}`}>{formatCurrency(heroFundRemaining)}</div>
                 {isCollector && (
                   <button onClick={() => { setShowSellForm(!showSellForm); if (!showSellForm) setActiveTab("sold"); }}
                     className={`mt-2 px-3 py-1 rounded text-[10px] font-semibold transition-colors ${showSellForm ? "bg-gray-200 text-gray-600" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
@@ -471,12 +497,9 @@ export default function AgentPPPage() {
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">{t("collector_transaction_fee")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap">{t("collector_net_amount")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">
-                      {t("collector_fee_percent_col")}
-                      {singleCollectorName && (
-                        <span className="block text-[10px] font-normal text-purple-600 mt-0.5">
-                          {singleCollectorName} {singleCollectorPct}%
-                        </span>
-                      )}
+                      {singleCollectorName
+                        ? `Fee ${singleCollectorName} ${singleCollectorPct}%`
+                        : t("collector_fee_percent_col")}
                     </th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-emerald-700 whitespace-nowrap">{t("collector_total_after_fee")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_status")}</th>
