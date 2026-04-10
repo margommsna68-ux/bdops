@@ -549,7 +549,7 @@ export default function AgentPPPage() {
                         <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
                           <div className="leading-tight">
                             <div className="text-gray-700 font-medium truncate" title={w.collectorName || ""}>
-                              {t("collector_agent_label")}: {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
+                              {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
                             </div>
                             <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
                           </div>

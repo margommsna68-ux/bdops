@@ -268,7 +268,7 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "agpp_source_pp": { en: "Source PP", vi: "PP nguồn" },
   "agpp_agent_email": { en: "PP Collector", vi: "PP Collector" },
   "collector_paypal_fee_col": { en: "Fee Paypal", vi: "Fee Paypal" },
-  "collector_fee_percent_col": { en: "% collector", vi: "% collector" },
+  "collector_fee_percent_col": { en: "Collector fee", vi: "Collector fee" },
   "collector_transaction_id": { en: "Transaction ID", vi: "Transaction ID" },
   "collector_project_col": { en: "Project", vi: "Project" },
   "agpp_total_sold": { en: "Total Sold", vi: "Đã bán" },
