@@ -23,11 +23,22 @@ type MockTx = {
   ppAgent: string;
   transactionId: string;
   gross: number;
-  feePP: number;
+  feePP: number | null;  // null = chưa confirm, không null = đã confirm
   note: string;
   paidToTeam: boolean;
   paidBatchId: string | null;
   paidAt: string | null;
+};
+
+type PaymentBatch = {
+  id: string;
+  date: string;
+  bankTxId: string;
+  note: string;
+  txCount: number;
+  totalPaid: number;       // total paid to team
+  totalCommission: number; // commission kept
+  txIds: string[];
 };
 
 function buildMock(): MockTx[] {
@@ -39,8 +50,8 @@ function buildMock(): MockTx[] {
     return iso(d);
   };
   return [
-    { id: "1", date: daysAgo(0), project: "AE", ppCode: "AE-018", ppAgent: "https://paypal.me/marua01", transactionId: "19X64127HH558342E", gross: 20.31, feePP: 1.39, note: "", paidToTeam: false, paidBatchId: null, paidAt: null },
-    { id: "2", date: daysAgo(0), project: "AE", ppCode: "AE-019", ppAgent: "https://paypal.me/marua01", transactionId: "7BK92384PL201837W", gross: 45.00, feePP: 1.91, note: "", paidToTeam: false, paidBatchId: null, paidAt: null },
+    { id: "1", date: daysAgo(0), project: "AE", ppCode: "AE-018", ppAgent: "https://paypal.me/marua01", transactionId: "19X64127HH558342E", gross: 20.31, feePP: null, note: "", paidToTeam: false, paidBatchId: null, paidAt: null },
+    { id: "2", date: daysAgo(0), project: "AE", ppCode: "AE-019", ppAgent: "https://paypal.me/marua01", transactionId: "7BK92384PL201837W", gross: 45.00, feePP: null, note: "", paidToTeam: false, paidBatchId: null, paidAt: null },
     { id: "3", date: daysAgo(0), project: "DN", ppCode: "DN-042", ppAgent: "https://paypal.me/marua02", transactionId: "3HY71829UJ498201K", gross: 28.68, feePP: 1.53, note: "note test", paidToTeam: false, paidBatchId: null, paidAt: null },
     { id: "4", date: daysAgo(1), project: "AE", ppCode: "AE-015", ppAgent: "https://paypal.me/marua01", transactionId: "0AB92837OP449283X", gross: 60.00, feePP: 2.34, note: "", paidToTeam: true, paidBatchId: "batch-1", paidAt: daysAgo(1) },
     { id: "5", date: daysAgo(2), project: "AE", ppCode: "AE-012", ppAgent: "https://paypal.me/marua01", transactionId: "5PL84729QW163829J", gross: 35.20, feePP: 1.72, note: "", paidToTeam: true, paidBatchId: "batch-1", paidAt: daysAgo(1) },
@@ -61,6 +72,28 @@ type Period = "today" | "week" | "month" | "all" | "custom";
 
 export default function AgentPPDemoPage() {
   const [txs, setTxs] = useState<MockTx[]>(buildMock);
+  const [batches, setBatches] = useState<PaymentBatch[]>([
+    {
+      id: "batch-1",
+      date: new Date(Date.now() - 86400000).toISOString(),
+      bankTxId: "FT25041012345",
+      note: "Chuyển team đợt 1",
+      txCount: 3,
+      totalPaid: 139.13,
+      totalCommission: 4.30,
+      txIds: ["4", "5", "6"],
+    },
+    {
+      id: "batch-2",
+      date: new Date(Date.now() - 4 * 86400000).toISOString(),
+      bankTxId: "FT25040612999",
+      note: "",
+      txCount: 2,
+      totalPaid: 61.76,
+      totalCommission: 1.91,
+      txIds: ["7", "8"],
+    },
+  ]);
   const [period, setPeriod] = useState<Period>("month");
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
@@ -69,7 +102,13 @@ export default function AgentPPDemoPage() {
   const [editingFeeValue, setEditingFeeValue] = useState<string>("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteValue, setEditingNoteValue] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "unpaid" | "paid">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unpaid" | "paid" | "unconfirmed">("all");
+  // Pay team dialog
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [payBankTxId, setPayBankTxId] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
 
   // ─── Filter by period ───────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -93,7 +132,8 @@ export default function AgentPPDemoPage() {
         }
       }
       // Status filter
-      if (statusFilter === "unpaid" && t.paidToTeam) return false;
+      if (statusFilter === "unconfirmed" && t.feePP !== null) return false;
+      if (statusFilter === "unpaid" && (t.paidToTeam || t.feePP === null)) return false;
       if (statusFilter === "paid" && !t.paidToTeam) return false;
       return true;
     });
@@ -101,22 +141,27 @@ export default function AgentPPDemoPage() {
 
   // ─── Computed per row ───────────────────────────────────────────
   const enriched = filtered.map((t) => {
-    const net = t.gross - t.feePP;
+    const confirmed = t.feePP !== null;
+    const fee = t.feePP ?? 0;
+    const net = t.gross - fee;
     const commission = net * (COLLECTOR_PCT / 100);
     const totalAfterFee = net - commission;
-    return { ...t, net, commission, totalAfterFee };
+    return { ...t, fee, net, commission, totalAfterFee, confirmed };
   });
 
   // ─── Hero totals (over filtered) ────────────────────────────────
   const totals = enriched.reduce(
     (acc, t) => {
       acc.received += t.gross;
-      acc.fees += t.feePP;
+      acc.fees += t.fee;
       acc.net += t.net;
       acc.commissionEarned += t.commission;
       acc.totalAfterFee += t.totalAfterFee;
       acc.txCount += 1;
-      if (t.paidToTeam) {
+      if (!t.confirmed) {
+        acc.unconfirmedCount += 1;
+        acc.unconfirmedAmount += t.gross;
+      } else if (t.paidToTeam) {
         acc.paidToTeam += t.totalAfterFee;
         acc.commissionRealized += t.commission;
         acc.paidCount += 1;
@@ -127,7 +172,7 @@ export default function AgentPPDemoPage() {
       }
       return acc;
     },
-    { received: 0, fees: 0, net: 0, commissionEarned: 0, commissionRealized: 0, commissionPending: 0, totalAfterFee: 0, paidToTeam: 0, owedToTeam: 0, txCount: 0, paidCount: 0, unpaidCount: 0 }
+    { received: 0, fees: 0, net: 0, commissionEarned: 0, commissionRealized: 0, commissionPending: 0, totalAfterFee: 0, paidToTeam: 0, owedToTeam: 0, txCount: 0, paidCount: 0, unpaidCount: 0, unconfirmedCount: 0, unconfirmedAmount: 0 }
   );
 
   // ─── Selection totals (appear when rows selected) ───────────────
@@ -159,17 +204,45 @@ export default function AgentPPDemoPage() {
   };
   const clearSelection = () => setSelectedIds(new Set());
 
-  const markAsPaid = () => {
+  const openPayDialog = () => {
+    setPayBankTxId("");
+    setPayNote("");
+    setPayDialogOpen(true);
+  };
+
+  const confirmPayBatch = () => {
+    if (!payBankTxId.trim()) {
+      alert("Nhập Bank Transaction ID");
+      return;
+    }
     const batchId = `batch-${Date.now()}`;
     const now = new Date().toISOString();
+    // Compute batch totals from selected
+    const selected = enriched.filter((t) => selectedIds.has(t.id) && !t.paidToTeam && t.confirmed);
+    const totalPaid = selected.reduce((s, t) => s + t.totalAfterFee, 0);
+    const totalCommission = selected.reduce((s, t) => s + t.commission, 0);
+    // Create new batch
+    const newBatch: PaymentBatch = {
+      id: batchId,
+      date: now,
+      bankTxId: payBankTxId.trim(),
+      note: payNote.trim(),
+      txCount: selected.length,
+      totalPaid,
+      totalCommission,
+      txIds: selected.map((t) => t.id),
+    };
+    setBatches((prev) => [newBatch, ...prev]);
+    // Mark txs as paid
     setTxs((prev) =>
       prev.map((t) =>
-        selectedIds.has(t.id) && !t.paidToTeam
+        selectedIds.has(t.id) && !t.paidToTeam && t.feePP !== null
           ? { ...t, paidToTeam: true, paidBatchId: batchId, paidAt: now }
           : t
       )
     );
     setSelectedIds(new Set());
+    setPayDialogOpen(false);
   };
 
   const unmarkPaid = (id: string) => {
@@ -179,7 +252,7 @@ export default function AgentPPDemoPage() {
   };
 
   const updateFee = (id: string, fee: number | null) => {
-    setTxs((prev) => prev.map((t) => (t.id === id ? { ...t, feePP: fee ?? 0 } : t)));
+    setTxs((prev) => prev.map((t) => (t.id === id ? { ...t, feePP: fee } : t)));
   };
   const updateNote = (id: string, note: string) => {
     setTxs((prev) => prev.map((t) => (t.id === id ? { ...t, note } : t)));
@@ -249,14 +322,20 @@ export default function AgentPPDemoPage() {
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <div className="text-center py-3 bg-green-50 rounded-lg">
-            <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">Nhận</div>
+            <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">Tổng nhận</div>
             <div className="text-xl font-bold text-green-700">{formatCurrency(totals.received)}</div>
             <div className="text-[10px] text-green-600 mt-0.5">{totals.txCount} giao dịch</div>
           </div>
-          <div className="text-center py-3 bg-red-50 rounded-lg">
-            <div className="text-[10px] font-semibold text-red-600 uppercase mb-1">Phí PP</div>
-            <div className="text-xl font-bold text-red-700">-{formatCurrency(totals.fees)}</div>
-            <div className="text-[10px] text-red-600 mt-0.5">PayPal fees</div>
+          <div className={`text-center py-3 rounded-lg ${totals.unconfirmedCount > 0 ? "bg-orange-50 ring-2 ring-orange-300" : "bg-gray-50"}`}>
+            <div className={`text-[10px] font-semibold uppercase mb-1 ${totals.unconfirmedCount > 0 ? "text-orange-700" : "text-gray-500"}`}>
+              Chưa confirm
+            </div>
+            <div className={`text-xl font-bold ${totals.unconfirmedCount > 0 ? "text-orange-700" : "text-gray-500"}`}>
+              {formatCurrency(totals.unconfirmedAmount)}
+            </div>
+            <div className={`text-[10px] mt-0.5 ${totals.unconfirmedCount > 0 ? "text-orange-600" : "text-gray-400"}`}>
+              {totals.unconfirmedCount} cần nhập fee
+            </div>
           </div>
           <div className="text-center py-3 bg-purple-50 rounded-lg">
             <div className="text-[10px] font-semibold text-purple-600 uppercase mb-1">Commission {COLLECTOR_PCT}%</div>
@@ -275,7 +354,7 @@ export default function AgentPPDemoPage() {
           </div>
           <div className="text-center py-3 bg-blue-50 rounded-lg">
             <div className="text-[10px] font-semibold text-blue-600 uppercase mb-1">Fund còn trong PP</div>
-            <div className="text-xl font-bold text-blue-700">{formatCurrency(totals.owedToTeam + totals.commissionPending)}</div>
+            <div className="text-xl font-bold text-blue-700">{formatCurrency(totals.owedToTeam + totals.commissionPending + totals.unconfirmedAmount)}</div>
             <div className="text-[10px] text-blue-600 mt-0.5">chưa xử lý</div>
           </div>
         </div>
@@ -300,18 +379,19 @@ export default function AgentPPDemoPage() {
       {/* ─── Status filter tabs ─── */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
         <div className="flex items-center justify-between px-4 py-3 border-b">
-          <div className="flex gap-1">
+          <div className="flex gap-1 flex-wrap">
             {[
               { key: "all", label: `Tất cả (${enriched.length})` },
+              { key: "unconfirmed", label: `⏳ Chưa confirm (${totals.unconfirmedCount})`, color: totals.unconfirmedCount > 0 ? "bg-orange-100 text-orange-700" : "" },
               { key: "unpaid", label: `Chưa trả team (${totals.unpaidCount})` },
               { key: "paid", label: `Đã trả team (${totals.paidCount})` },
-            ].map((s) => (
+            ].map((s: any) => (
               <button
                 key={s.key}
                 onClick={() => setStatusFilter(s.key as any)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   statusFilter === s.key
-                    ? "bg-blue-100 text-blue-700"
+                    ? s.color || "bg-blue-100 text-blue-700"
                     : "text-gray-500 hover:bg-gray-50"
                 }`}
               >
@@ -319,12 +399,12 @@ export default function AgentPPDemoPage() {
               </button>
             ))}
           </div>
-          {totals.unpaidCount > 0 && statusFilter !== "paid" && (
+          {totals.unpaidCount > 0 && statusFilter !== "paid" && statusFilter !== "unconfirmed" && (
             <button
               onClick={selectAllUnpaid}
               className="text-xs text-blue-600 hover:underline"
             >
-              Chọn tất cả chưa trả
+              Chọn tất cả confirmed & chưa trả
             </button>
           )}
         </div>
@@ -350,9 +430,9 @@ export default function AgentPPDemoPage() {
               <Button
                 size="sm"
                 className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs"
-                onClick={markAsPaid}
+                onClick={openPayDialog}
               >
-                ✓ Mark đã trả team ({formatCurrency(selectionTotals.totalAfterFee)})
+                → Chuyển team ({formatCurrency(selectionTotals.totalAfterFee)})
               </Button>
               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={clearSelection}>
                 Hủy chọn
@@ -401,10 +481,14 @@ export default function AgentPPDemoPage() {
                 enriched.map((t) => (
                   <tr
                     key={t.id}
-                    className={`hover:bg-gray-50 ${t.paidToTeam ? "bg-emerald-50/30" : ""}`}
+                    className={`hover:bg-gray-50 ${
+                      !t.confirmed ? "bg-orange-50/40" : t.paidToTeam ? "bg-emerald-50/30" : ""
+                    }`}
                   >
                     <td className="px-3 py-2 text-center">
-                      {!t.paidToTeam ? (
+                      {!t.confirmed ? (
+                        <span className="text-orange-400" title="Chưa confirm (chưa nhập fee)">⏳</span>
+                      ) : !t.paidToTeam ? (
                         <input
                           type="checkbox"
                           checked={selectedIds.has(t.id)}
@@ -449,24 +533,46 @@ export default function AgentPPDemoPage() {
                           }}
                           className="w-full h-6 text-xs px-1 border border-blue-400 rounded text-right font-mono"
                         />
+                      ) : !t.confirmed ? (
+                        <button
+                          onClick={() => {
+                            setEditingFeeId(t.id);
+                            setEditingFeeValue("");
+                          }}
+                          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-2 py-0.5 rounded text-[10px] shadow-sm"
+                          title="Nhập fee để confirm giao dịch"
+                        >
+                          + Nhập fee
+                        </button>
                       ) : (
                         <button
                           onClick={() => {
+                            if (t.paidToTeam) return;
                             setEditingFeeId(t.id);
                             setEditingFeeValue(String(t.feePP));
                           }}
                           className="text-red-600 hover:bg-blue-50 rounded px-1"
                           disabled={t.paidToTeam}
                         >
-                          -{formatCurrency(t.feePP)}
+                          -{formatCurrency(t.fee)}
                         </button>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono text-gray-700 whitespace-nowrap">{formatCurrency(t.net)}</td>
-                    <td className="px-2 py-2 text-right font-mono font-semibold text-purple-700 whitespace-nowrap">{formatCurrency(t.commission)}</td>
-                    <td className="px-2 py-2 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">{formatCurrency(t.totalAfterFee)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-gray-700 whitespace-nowrap">
+                      {t.confirmed ? formatCurrency(t.net) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono font-semibold text-purple-700 whitespace-nowrap">
+                      {t.confirmed ? formatCurrency(t.commission) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">
+                      {t.confirmed ? formatCurrency(t.totalAfterFee) : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-2 py-2 text-center">
-                      {t.paidToTeam ? (
+                      {!t.confirmed ? (
+                        <Badge variant="outline" className="border-orange-500 text-orange-700 text-[10px]">
+                          Chờ confirm
+                        </Badge>
+                      ) : t.paidToTeam ? (
                         <button
                           onClick={() => unmarkPaid(t.id)}
                           className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700"
@@ -534,16 +640,152 @@ export default function AgentPPDemoPage() {
         )}
       </div>
 
+      {/* ─── Payment History ─── */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <button
+          onClick={() => setShowHistory(!showHistory)}
+          className="w-full px-4 py-3 border-b flex items-center justify-between hover:bg-gray-50"
+        >
+          <h3 className="text-sm font-semibold text-gray-800">
+            📜 Lịch sử chuyển team ({batches.length} batch)
+          </h3>
+          <span className="text-xs text-gray-500">{showHistory ? "▲ Ẩn" : "▼ Xem"}</span>
+        </button>
+        {showHistory && (
+          <div className="divide-y">
+            {batches.length === 0 ? (
+              <p className="p-6 text-center text-sm text-gray-400">Chưa có batch nào.</p>
+            ) : (
+              batches.map((b) => {
+                const isExpanded = expandedBatchId === b.id;
+                const batchTxs = txs.filter((t) => b.txIds.includes(t.id));
+                return (
+                  <div key={b.id} className="px-4 py-3">
+                    <button
+                      onClick={() => setExpandedBatchId(isExpanded ? null : b.id)}
+                      className="w-full flex items-center justify-between hover:bg-gray-50 rounded px-2 py-1 -mx-2"
+                    >
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-gray-600">{new Date(b.date).toLocaleDateString("vi-VN")}</span>
+                        <span className="font-mono text-blue-700">{b.bankTxId}</span>
+                        <span className="text-gray-500">{b.txCount} giao dịch</span>
+                        {b.note && <span className="text-gray-400 italic">{b.note}</span>}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-emerald-700 font-bold">{formatCurrency(b.totalPaid)}</span>
+                        <span className="text-purple-700 text-xs">Commission: {formatCurrency(b.totalCommission)}</span>
+                        <span className="text-gray-400">{isExpanded ? "▲" : "▼"}</span>
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="mt-2 ml-4 bg-gray-50 rounded p-2">
+                        <div className="text-[11px] font-semibold text-gray-600 mb-1">Các giao dịch trong batch:</div>
+                        <div className="space-y-1">
+                          {batchTxs.map((bt) => (
+                            <div key={bt.id} className="flex items-center justify-between text-xs">
+                              <span className="font-mono text-gray-500">{bt.transactionId}</span>
+                              <span className="text-gray-600">{bt.ppCode}</span>
+                              <span className="font-semibold text-green-700">{formatCurrency(bt.gross)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Legend */}
       <div className="bg-white rounded-lg border p-4 text-xs space-y-1">
-        <div className="font-semibold text-gray-700 mb-2">Cách dùng demo:</div>
-        <div>• Click tab <strong>Kỳ xem</strong> để filter theo thời gian (Hôm nay / Tuần / Tháng / Custom)</div>
-        <div>• Click tab <strong>Chưa trả / Đã trả</strong> để lọc trạng thái</div>
-        <div>• Tick checkbox nhiều row → bulk action bar hiện → click <strong>Mark đã trả team</strong></div>
-        <div>• Click ô <strong>Fee PP</strong> để sửa phí (chỉ row chưa trả)</div>
-        <div>• Click ô <strong>Note</strong> để thêm ghi chú</div>
-        <div>• Click badge <strong>✓ Đã trả</strong> để unmark (quay lại trạng thái chờ)</div>
+        <div className="font-semibold text-gray-700 mb-2">Flow mới (theo yêu cầu):</div>
+        <div>1. Khi giao dịch vào → hiện status <strong className="text-orange-700">⏳ Chờ confirm</strong> (hàng nền cam)</div>
+        <div>2. Click nút <strong className="text-orange-700">+ Nhập fee</strong> → gõ phí PP → Enter → <strong>tự động confirm</strong> luôn</div>
+        <div>3. Tick checkbox nhiều row đã confirm → click <strong>Chuyển team</strong> → popup dialog</div>
+        <div>4. Trong dialog: nhập <strong>Bank TX ID</strong> (mã chuyển khoản) + Note → <strong>Xác nhận chuyển</strong></div>
+        <div>5. Cả batch được mark đã trả + tạo record trong <strong>Lịch sử chuyển team</strong></div>
+        <div>6. Click vào batch trong history → expand xem chi tiết các giao dịch</div>
       </div>
+
+      {/* ─── Pay Team Dialog ─── */}
+      {payDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setPayDialogOpen(false)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">Chuyển tiền cho team</h3>
+              <p className="text-xs text-gray-500 mt-1">Ghi nhận batch chuyển khoản cho team</p>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Summary */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500 mb-2">Tóm tắt batch</div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <div className="text-[10px] text-gray-500">Số giao dịch</div>
+                    <div className="font-bold">{selectionTotals.count}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-gray-500">Tổng gross</div>
+                    <div className="font-bold text-green-700">{formatCurrency(selectionTotals.gross)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-gray-500">Commission (giữ lại)</div>
+                    <div className="font-bold text-purple-700">{formatCurrency(selectionTotals.commission)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-gray-500">Chuyển team</div>
+                    <div className="font-bold text-emerald-700 text-lg">{formatCurrency(selectionTotals.totalAfterFee)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bank TX ID */}
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">
+                  Bank Transaction ID <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={payBankTxId}
+                  onChange={(e) => setPayBankTxId(e.target.value)}
+                  placeholder="VD: FT25041012345"
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <p className="text-[10px] text-gray-500 mt-1">Mã giao dịch khi anh chuyển khoản cho team qua bank</p>
+              </div>
+
+              {/* Note */}
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Note (optional)</label>
+                <input
+                  type="text"
+                  value={payNote}
+                  onChange={(e) => setPayNote(e.target.value)}
+                  placeholder="VD: Đợt 1 tháng 4"
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPayDialogOpen(false)}>
+                Hủy
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={confirmPayBatch}
+                disabled={!payBankTxId.trim()}
+              >
+                ✓ Xác nhận chuyển {formatCurrency(selectionTotals.totalAfterFee)}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
