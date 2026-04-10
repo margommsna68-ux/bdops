@@ -429,8 +429,8 @@ export default function AgentPPPage() {
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_source_pp")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_agent_email")}</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("collector_paypal_fee_col")}</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">{t("collector_fee_percent_col")}</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 w-24">{t("collector_paypal_fee_col")}</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-20">{t("collector_fee_percent_col")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_transaction_id")}</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_status")}</th>
                     <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-32"></th>
@@ -461,10 +461,10 @@ export default function AgentPPPage() {
                           })()}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
-                        <td className="px-3 py-2 text-right text-xs text-gray-600">
-                          {w.isPaypalLink ? (
-                            editingFeeId === w.id ? (
-                              <div className="flex items-center gap-1 justify-end">
+                        <td className="px-3 py-2 text-right text-xs text-gray-600 w-24">
+                          <div className="h-6 flex items-center justify-end">
+                            {w.isPaypalLink ? (
+                              editingFeeId === w.id ? (
                                 <input
                                   type="number"
                                   step="0.01"
@@ -485,26 +485,26 @@ export default function AgentPPPage() {
                                     updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
                                     setEditingFeeId(null);
                                   }}
-                                  className="w-16 h-6 text-xs px-1.5 border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
                                 />
-                              </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setEditingFeeId(w.id);
+                                    setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
+                                  }}
+                                  className="w-full h-6 font-mono hover:bg-blue-50 rounded cursor-pointer text-right px-1 truncate"
+                                  title="Click to note fee"
+                                >
+                                  {w.matchedPaypalFee != null
+                                    ? formatCurrency(Number(w.matchedPaypalFee))
+                                    : <span className="text-gray-300">+</span>}
+                                </button>
+                              )
                             ) : (
-                              <button
-                                onClick={() => {
-                                  setEditingFeeId(w.id);
-                                  setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
-                                }}
-                                className="font-mono hover:bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer"
-                                title="Click to note fee"
-                              >
-                                {w.matchedPaypalFee != null
-                                  ? formatCurrency(Number(w.matchedPaypalFee))
-                                  : <span className="text-gray-300">+</span>}
-                              </button>
-                            )
-                          ) : (
-                            <span className="text-gray-200">N/A</span>
-                          )}
+                              <span className="text-gray-200">N/A</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600">
                           {`${Number(w.collectorFeePercent ?? 0)}%`}
@@ -527,7 +527,7 @@ export default function AgentPPPage() {
                               <>
                                 <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-green-500 text-green-700"
                                   onClick={() => confirmReceived.mutate({ projectId: w.projectId ?? projectId!, id: w.id })}>
-                                  {t("agpp_confirm_received")}
+                                  {t("collector_ok_short")}
                                 </Button>
                                 <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 border-red-400 text-red-600"
                                   onClick={() => { setDisputeId(w.id); setDisputeTargetProjectId(w.projectId ?? projectId!); setDisputeNote(""); }}>

@@ -200,6 +200,7 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "collector_type_sold": { en: "Sold", vi: "Bán" },
   "collector_dispute_placeholder": { en: "Transaction not found in PayPal...", vi: "Không thấy giao dịch này trong PayPal..." },
   "collector_updated": { en: "Updated", vi: "Đã cập nhật" },
+  "collector_ok_short": { en: "OK", vi: "OK" },
   "sign_out": { en: "Sign out", vi: "Đăng xuất" },
 
   // ─── Withdrawals ───

@@ -167,33 +167,49 @@ export const agentPPRouter = router({
         matchingSales.map((s) => [`${s.transactionId}:${s.agentEmailId}`, s])
       );
 
-      // Build map of (userId, projectId) → agentFeePercent for all rows we need
-      const memberKeys = new Set<string>();
+      // Build map: userId → { byProject: Map<projectId, fee>, any: first non-null fee }
+      // We look up by exact (userId, projectId) first; if not set in that project,
+      // fall back to ANY project where this user has a % set.
+      const userIds = new Set<string>();
       for (const w of items) {
         const uid = (w as any).agentEmail?.user?.id;
-        if (uid && w.projectId) memberKeys.add(`${uid}|${w.projectId}`);
+        if (uid) userIds.add(uid);
       }
-      const memberKeyList = Array.from(memberKeys).map((k) => {
-        const [userId, projectId] = k.split("|");
-        return { userId, projectId };
-      });
       const memberRows =
-        memberKeyList.length === 0
+        userIds.size === 0
           ? []
           : await ctx.prisma.projectMember.findMany({
-              where: { OR: memberKeyList },
+              where: { userId: { in: Array.from(userIds) } },
               select: { userId: true, projectId: true, agentFeePercent: true },
             });
-      const memberMap = new Map(
-        memberRows.map((m) => [`${m.userId}|${m.projectId}`, m.agentFeePercent])
-      );
+      // userFees[userId] = { byProject: Map, fallback: Decimal | null }
+      const userFees = new Map<string, { byProject: Map<string, any>; fallback: any }>();
+      for (const m of memberRows) {
+        let entry = userFees.get(m.userId);
+        if (!entry) {
+          entry = { byProject: new Map(), fallback: null };
+          userFees.set(m.userId, entry);
+        }
+        entry.byProject.set(m.projectId, m.agentFeePercent);
+        if (entry.fallback == null && m.agentFeePercent != null) {
+          entry.fallback = m.agentFeePercent;
+        }
+      }
 
       const enrichedItems = items.map((w) => {
         const sale = w.transactionId && w.agentEmailId
           ? saleMap.get(`${w.transactionId}:${w.agentEmailId}`)
           : undefined;
         const uid = (w as any).agentEmail?.user?.id;
-        const memberFeePercent = uid && w.projectId ? memberMap.get(`${uid}|${w.projectId}`) : null;
+        // Lookup %: exact project match → user's fallback (any project) → sale → 0
+        let memberFeePercent: any = null;
+        if (uid) {
+          const userEntry = userFees.get(uid);
+          if (userEntry) {
+            memberFeePercent =
+              userEntry.byProject.get(w.projectId) ?? userEntry.fallback ?? null;
+          }
+        }
         const collectorName =
           (w as any).agentEmail?.user?.name ||
           (w as any).agentEmail?.user?.username ||
@@ -205,12 +221,18 @@ export const agentPPRouter = router({
           emailVal.toLowerCase().includes("paypal.com");
         // Fee Paypal: prefer directly-noted paypalFee on Withdrawal, fallback to matching sale
         const paypalFeeValue = (w as any).paypalFee ?? sale?.paypalFee ?? null;
+        // Explicit Decimal → number conversion
+        const feePercentNum =
+          memberFeePercent != null
+            ? Number(memberFeePercent.toString())
+            : sale?.feePercent != null
+              ? Number(sale.feePercent.toString())
+              : 0;
         return {
           ...w,
           matchedPaypalFee: paypalFeeValue,
           isPaypalLink,
-          // % collector: pre-set in user membership (fallback 0 if not set)
-          collectorFeePercent: Number(memberFeePercent ?? sale?.feePercent ?? 0),
+          collectorFeePercent: feePercentNum,
           collectorName,
         };
       });
