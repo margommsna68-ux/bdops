@@ -793,4 +793,158 @@ export const agentPPRouter = router({
         countSales: todaySales.length,
       };
     }),
+
+  // ═══════════════════════════════════════════════════════════════
+  // COLLECTOR WALLET + EXPENSES
+  // ═══════════════════════════════════════════════════════════════
+
+  // Wallet balance: sum(net received across ALL projects) - sum(all expenses)
+  walletBalance: agentPPProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx }) => {
+      const userId = ctx.user.id;
+      // All my agent emails across all projects
+      const myEmails = await ctx.prisma.agentPaypalEmail.findMany({
+        where: { userId },
+        select: { id: true },
+      });
+      const myEmailIds = myEmails.map((e) => e.id);
+
+      // All incoming withdrawals (cross-project)
+      const withdrawals = await ctx.prisma.withdrawal.findMany({
+        where: {
+          type: "EXCHANGE",
+          agentEmailId: { in: myEmailIds },
+        },
+        select: { amount: true, paypalFee: true },
+      });
+      // Net received = sum(gross - fee) for confirmed (fee != null)
+      let netReceived = 0;
+      for (const w of withdrawals) {
+        if (w.paypalFee != null) {
+          netReceived += Number(w.amount) - Number(w.paypalFee);
+        }
+      }
+
+      // All my expenses (cross-project)
+      const expenses = await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: userId },
+        select: { amount: true, type: true },
+      });
+      const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
+      const breakdown = { TEAM_PAYMENT: 0, BILL: 0, OTHER: 0 } as Record<string, number>;
+      for (const e of expenses) {
+        breakdown[e.type] = (breakdown[e.type] ?? 0) + Number(e.amount);
+      }
+
+      return {
+        netReceived,
+        totalExpenses,
+        walletBalance: netReceived - totalExpenses,
+        breakdown,
+      };
+    }),
+
+  // List collector's expenses (cross-project for collector-only users)
+  listExpenses: agentPPProcedure
+    .input(z.object({ projectId: z.string(), limit: z.number().min(1).max(500).default(100) }))
+    .query(async ({ ctx, input }) => {
+      const items = await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: ctx.user.id },
+        orderBy: { date: "desc" },
+        take: input.limit,
+        include: {
+          project: { select: { id: true, code: true, name: true } },
+          withdrawals: { select: { id: true, transactionId: true, amount: true, sourcePaypal: { select: { code: true } } } },
+        },
+      });
+      return items;
+    }),
+
+  // Create a new expense (optionally links withdrawals)
+  createExpense: agentPPProcedure
+    .input(z.object({
+      projectId: z.string(),
+      type: z.enum(["TEAM_PAYMENT", "BILL", "OTHER"]),
+      amount: z.number().positive(),
+      referenceId: z.string().min(1),
+      note: z.string().optional(),
+      linkedWithdrawalIds: z.array(z.string()).default([]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Verify linked withdrawals belong to this collector (via agentEmail ownership)
+      if (input.linkedWithdrawalIds.length > 0) {
+        const wds = await ctx.prisma.withdrawal.findMany({
+          where: { id: { in: input.linkedWithdrawalIds } },
+          select: { id: true, agentEmailId: true, agentEmail: { select: { userId: true } } },
+        });
+        const owned = wds.every((w) => w.agentEmail && w.agentEmail.userId === ctx.user.id);
+        if (!owned && ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+          throw new Error("Some withdrawals don't belong to you");
+        }
+      }
+
+      const now = new Date();
+      const expense = await ctx.prisma.collectorExpense.create({
+        data: {
+          date: now,
+          type: input.type,
+          amount: input.amount,
+          referenceId: input.referenceId,
+          note: input.note || null,
+          collectorId: ctx.user.id,
+          projectId: input.projectId,
+          withdrawals: input.linkedWithdrawalIds.length > 0
+            ? { connect: input.linkedWithdrawalIds.map((id) => ({ id })) }
+            : undefined,
+        },
+      });
+
+      // Mark linked withdrawals as paid
+      if (input.linkedWithdrawalIds.length > 0) {
+        await ctx.prisma.withdrawal.updateMany({
+          where: { id: { in: input.linkedWithdrawalIds } },
+          data: { paidToTeam: true, paidAt: now, expenseId: expense.id },
+        });
+      }
+
+      await createAuditLog({
+        action: "CREATE",
+        entity: "CollectorExpense",
+        entityId: expense.id,
+        userId: ctx.user.id,
+        projectId: input.projectId,
+        changes: { type: input.type, amount: input.amount, linkedCount: input.linkedWithdrawalIds.length },
+      });
+
+      return expense;
+    }),
+
+  // Delete expense (unlinks linked withdrawals)
+  deleteExpense: agentPPProcedure
+    .input(z.object({ projectId: z.string(), id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const exp = await ctx.prisma.collectorExpense.findFirstOrThrow({
+        where: { id: input.id },
+      });
+      // Ownership check: collector or admin
+      if (exp.collectorId !== ctx.user.id && ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+        throw new Error("Not your expense");
+      }
+      // Unlink withdrawals (revert paid flag)
+      await ctx.prisma.withdrawal.updateMany({
+        where: { expenseId: input.id },
+        data: { paidToTeam: false, paidAt: null, expenseId: null },
+      });
+      await ctx.prisma.collectorExpense.delete({ where: { id: input.id } });
+      await createAuditLog({
+        action: "DELETE",
+        entity: "CollectorExpense",
+        entityId: input.id,
+        userId: ctx.user.id,
+        projectId: input.projectId,
+        changes: {},
+      });
+      return { deleted: true };
+    }),
 });

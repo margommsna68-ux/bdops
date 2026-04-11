@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { type Prisma } from "@prisma/client";
 
 export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "DELETE_APPROVED" | "SETTLE" | "RECALCULATE" | "BULK_UPDATE" | "BULK_DELETE" | "IMPORT" | "ASSIGN" | "UNASSIGN" | "ADD_NOTE" | "DELETE_NOTE" | "RESET_PIN" | "RESET_PASSWORD" | "STATUS_CHANGE" | "CHECK_PP_STATUS" | "REFRESH_TOKEN_HEALTH" | "UPDATE_WORKFLOW" | "FIX_BROKEN_EMAILS";
-export type AuditEntity = "FundTransaction" | "Withdrawal" | "CostRecord" | "ProfitSplit" | "SplitAllocation" | "PayPalAccount" | "Server" | "VirtualMachine" | "ProxyIP" | "GmailAccount" | "VMTask" | "User" | "ProjectMember" | "PayPalEmail" | "Project" | "EarnWithdrawal";
+export type AuditEntity = "FundTransaction" | "Withdrawal" | "CostRecord" | "ProfitSplit" | "SplitAllocation" | "PayPalAccount" | "Server" | "VirtualMachine" | "ProxyIP" | "GmailAccount" | "VMTask" | "User" | "ProjectMember" | "PayPalEmail" | "Project" | "EarnWithdrawal" | "CollectorExpense";
 
 export async function createAuditLog(params: {
   action: AuditAction;

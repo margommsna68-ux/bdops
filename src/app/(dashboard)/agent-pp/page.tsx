@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/settings-store";
 import { isCollectorOnly } from "@/lib/collector-utils";
 import { usePinAction } from "@/components/PinVerify";
+import { CollectorWalletView } from "./_CollectorWalletView";
 import toast from "react-hot-toast";
 
 export default function AgentPPPage() {
@@ -193,6 +194,11 @@ export default function AgentPPPage() {
   const salesTotalPages = Math.ceil(salesTotal / 50);
 
   if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
+
+  // Collector-only users: show the new wallet-centric view
+  if (collectorOnly) {
+    return <CollectorWalletView projectId={projectId} />;
+  }
 
   const handleSellSubmit = () => {
     if (!sellEmailId || !sellAmount || !sellTxId) return;

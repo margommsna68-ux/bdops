@@ -30,6 +30,7 @@ model User {
   agentWithdrawals Withdrawal[]    @relation("AgentWithdrawals")
   agentSales       AgentSale[]     @relation("AgentSales")
   resolvedDisputes Withdrawal[]    @relation("DisputeResolver")
+  collectorExpenses CollectorExpense[] @relation("CollectorExpenses")
   editHistory   EditHistory[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -61,6 +62,7 @@ model Project {
   deleteRequests   DeleteRequest[]
   agentPaypalEmails AgentPaypalEmail[]
   agentSales       AgentSale[]
+  collectorExpenses CollectorExpense[]
   holderMergeTargets HolderMergeTarget[]
   earnWithdrawals  EarnWithdrawal[]
   editHistory      EditHistory[]
@@ -421,6 +423,10 @@ model Withdrawal {
   amount         Decimal         @db.Decimal(12, 2)
   paypalFee      Decimal?        @db.Decimal(12, 2)
   collectorNote  String?
+  paidToTeam     Boolean         @default(false)
+  paidAt         DateTime?
+  expense        CollectorExpense? @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  expenseId      String?
   transactionId  String?
   type           WithdrawalType
   agent          String?
@@ -657,6 +663,29 @@ model AgentSale {
 
   @@index([agentUserId])
   @@index([agentEmailId])
+  @@index([projectId])
+}
+
+// ═══════════════════════════════════════
+// COLLECTOR EXPENSES (wallet outflow)
+// ═══════════════════════════════════════
+
+model CollectorExpense {
+  id             String       @id @default(cuid())
+  date           DateTime     @default(now())
+  type           String       // "TEAM_PAYMENT" | "BILL" | "OTHER"
+  amount         Decimal      @db.Decimal(12, 2)
+  referenceId    String       // Bank TX ID, invoice number, or any audit reference
+  note           String?
+  collector      User         @relation("CollectorExpenses", fields: [collectorId], references: [id])
+  collectorId    String
+  project        Project      @relation(fields: [projectId], references: [id])
+  projectId      String
+  withdrawals    Withdrawal[] // linked withdrawals (optional, 0..N)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([collectorId, date])
   @@index([projectId])
 }
 
