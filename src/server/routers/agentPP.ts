@@ -106,7 +106,7 @@ export const agentPPRouter = router({
     .input(z.object({
       projectId: z.string(),
       page: z.number().min(1).default(1),
-      limit: z.number().min(1).max(100).default(50),
+      limit: z.number().min(1).max(1000).default(50),
     }))
     .query(async ({ ctx, input }) => {
       const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
@@ -818,12 +818,11 @@ export const agentPPRouter = router({
         },
         select: { amount: true, paypalFee: true },
       });
-      // Net received = sum(gross - fee) for confirmed (fee != null)
+      // Net received = sum(gross − fee). Missing fee treated as 0 (legacy rows).
       let netReceived = 0;
       for (const w of withdrawals) {
-        if (w.paypalFee != null) {
-          netReceived += Number(w.amount) - Number(w.paypalFee);
-        }
+        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
+        netReceived += Number(w.amount) - fee;
       }
 
       // All my expenses (cross-project)
