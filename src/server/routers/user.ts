@@ -234,6 +234,7 @@ export const userRouter = router({
           canManageUsers: m.canManageUsers,
           managerId: m.managerId,
           maxAutotypeDevices: m.maxAutotypeDevices,
+          agentFeePercent: m.agentFeePercent ? Number(m.agentFeePercent) : null,
           hasPin: !!m.user.pin,
           isOnline: m.user.lastActiveAt ? m.user.lastActiveAt > fiveMinAgo : false,
           lastActiveAt: m.user.lastActiveAt,
@@ -245,5 +246,130 @@ export const userRouter = router({
           })),
         };
       });
+    }),
+
+  // User detail page
+  getDetail: moderatorProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const user = await ctx.prisma.user.findUniqueOrThrow({
+        where: { id: input.userId },
+        select: {
+          id: true, email: true, username: true, name: true, pin: true, lastActiveAt: true, createdAt: true,
+          memberships: {
+            include: { project: { select: { id: true, code: true, name: true } } },
+          },
+        },
+      });
+
+      // Current project membership
+      const membership = user.memberships.find((m) => m.projectId === input.projectId);
+
+      // Agent emails
+      const agentEmails = await ctx.prisma.agentPaypalEmail.findMany({
+        where: { userId: input.userId, projectId: input.projectId },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // Agent sales stats
+      const agentSales = await ctx.prisma.agentSale.findMany({
+        where: { agentUserId: input.userId, projectId: input.projectId },
+        orderBy: { date: "desc" },
+        take: 50,
+        include: { agentEmail: { select: { email: true } } },
+      });
+      const totalEarning = agentSales.reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
+      const totalWithdrawn = agentSales.filter((s) => s.withdrawn).reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
+      const totalSold = agentSales.reduce((s, r) => s + Number(r.amount), 0);
+
+      // AutoType sessions
+      const sessions = await ctx.prisma.autotypeSession.findMany({
+        where: { userId: input.userId },
+        orderBy: { lastActiveAt: "desc" },
+        take: 20,
+      });
+
+      // Edit history by this user
+      const editHistory = await ctx.prisma.editHistory.findMany({
+        where: { userId: input.userId, projectId: input.projectId },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      });
+
+      // Fund transactions created/confirmed (recent)
+      const recentFunds = await ctx.prisma.fundTransaction.findMany({
+        where: { projectId: input.projectId },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        select: { id: true, amount: true, confirmed: true, date: true, transactionId: true, paypal: { select: { code: true } } },
+      });
+
+      // Collector expenses (cross-project for admin view)
+      const collectorExpenses = await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: input.userId },
+        orderBy: { date: "desc" },
+        take: 50,
+        include: {
+          project: { select: { id: true, code: true } },
+          withdrawals: { select: { id: true, transactionId: true, amount: true } },
+        },
+      });
+
+      // Agent withdrawals (cross-project, where this user is recipient)
+      const agentEmailIds = (await ctx.prisma.agentPaypalEmail.findMany({
+        where: { userId: input.userId },
+        select: { id: true },
+      })).map((e) => e.id);
+      const agentWithdrawals = agentEmailIds.length > 0 ? await ctx.prisma.withdrawal.findMany({
+        where: {
+          type: "EXCHANGE",
+          OR: [
+            { agentEmailId: { in: agentEmailIds } },
+            { agentUserId: input.userId },
+          ],
+        },
+        orderBy: { date: "desc" },
+        take: 50,
+        select: {
+          id: true, date: true, amount: true, paypalFee: true, paypalFeeSetAt: true,
+          transactionId: true, collectorNote: true, paidToTeam: true, projectId: true,
+          sourcePaypal: { select: { code: true } },
+          project: { select: { code: true } },
+          agentEmail: { select: { email: true } },
+        },
+      }) : [];
+
+      return {
+        user: { ...user, hasPin: !!user.pin, pin: undefined },
+        membership,
+        agentEmails,
+        agentSales,
+        agentStats: { totalEarning, totalWithdrawn, pending: totalEarning - totalWithdrawn, totalSold, count: agentSales.length },
+        sessions,
+        editHistory,
+        recentFunds: recentFunds.slice(0, 50),
+        collectorExpenses,
+        agentWithdrawals,
+      };
+    }),
+
+  // Reset PIN for a user
+  resetPin: moderatorProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.user.update({ where: { id: input.userId }, data: { pin: null } });
+      await createAuditLog({ action: "RESET_PIN", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
+      return { success: true };
+    }),
+
+  // Reset password for a user
+  resetPassword: moderatorProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const newPassword = Math.random().toString(36).slice(2, 10);
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await ctx.prisma.user.update({ where: { id: input.userId }, data: { password: hashed } });
+      await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
+      return { newPassword };
     }),
 });

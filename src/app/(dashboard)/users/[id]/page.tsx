@@ -100,6 +100,8 @@ export default function UserDetailPage() {
   if (!data) return <p className="p-8">Không tìm thấy user.</p>;
 
   const { user, membership, agentEmails, agentSales, agentStats, sessions, editHistory } = data;
+  const collectorExpenses = (data as any).collectorExpenses ?? [];
+  const agentWithdrawals = (data as any).agentWithdrawals ?? [];
   const hasAgent = editRole === "ADMIN" || editModules.includes("AGENT_PP");
   const hasAutotype = editRole === "ADMIN" || editModules.includes("AUTOTYPE");
 
@@ -314,6 +316,24 @@ export default function UserDetailPage() {
         </div>
       )}
 
+      {/* ═══ Admin: Collector Withdrawals (PP Fee) ═══ */}
+      {isAdmin && hasAgent && agentWithdrawals.length > 0 && (
+        <AdminWithdrawalsSection
+          projectId={projectId!}
+          withdrawals={agentWithdrawals}
+          onChange={refetch}
+        />
+      )}
+
+      {/* ═══ Admin: Collector Expenses ═══ */}
+      {isAdmin && hasAgent && collectorExpenses.length > 0 && (
+        <AdminExpensesSection
+          projectId={projectId!}
+          expenses={collectorExpenses}
+          onChange={refetch}
+        />
+      )}
+
       {/* ═══ AutoType Section ═══ */}
       {hasAutotype && (
         <div className="bg-white rounded-lg border overflow-hidden">
@@ -384,6 +404,182 @@ export default function UserDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADMIN-ONLY: Collector Withdrawals Section — edit PP fee (bypasses 24h lock)
+// ═══════════════════════════════════════════════════════════════════════
+function AdminWithdrawalsSection({
+  projectId, withdrawals, onChange,
+}: {
+  projectId: string;
+  withdrawals: any[];
+  onChange: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const updateFee = trpc.agentPP.updatePaypalFee.useMutation({
+    onSuccess: () => { onChange(); toast.success("PP fee updated (admin override)"); setEditingId(null); },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteW = trpc.withdrawal.delete.useMutation({
+    onSuccess: () => { onChange(); toast.success("Withdrawal deleted"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  return (
+    <div className="bg-white rounded-lg border overflow-hidden">
+      <div className="px-4 py-3 border-b bg-amber-50 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-amber-900">⚠ Admin — Agent Withdrawals ({withdrawals.length})</h2>
+        <span className="text-[10px] text-amber-700">Bypass 24h lock</span>
+      </div>
+      <div className="overflow-auto max-h-[320px]">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="px-2 py-2 text-left text-gray-500">Date</th>
+              <th className="px-2 py-2 text-left text-gray-500">Project</th>
+              <th className="px-2 py-2 text-left text-gray-500">Source PP</th>
+              <th className="px-2 py-2 text-left text-gray-500">TX ID</th>
+              <th className="px-2 py-2 text-right text-gray-500">Amount</th>
+              <th className="px-2 py-2 text-right text-gray-500">PP Fee</th>
+              <th className="px-2 py-2 text-center text-gray-500">Locked?</th>
+              <th className="px-2 py-2 text-center text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {withdrawals.map((w: any) => {
+              const locked = w.paypalFeeSetAt && (Date.now() - new Date(w.paypalFeeSetAt).getTime() > 24 * 3600 * 1000);
+              return (
+                <tr key={w.id} className="hover:bg-gray-50">
+                  <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap">{new Date(w.date).toLocaleDateString("en-US")}</td>
+                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{w.project?.code ?? "—"}</Badge></td>
+                  <td className="px-2 py-1.5 font-medium">{w.sourcePaypal?.code ?? "—"}</td>
+                  <td className="px-2 py-1.5 font-mono text-gray-500 truncate max-w-[120px]">{w.transactionId || "—"}</td>
+                  <td className="px-2 py-1.5 text-right font-semibold text-green-700">{formatCurrency(Number(w.amount))}</td>
+                  <td className="px-2 py-1.5 text-right">
+                    {editingId === w.id ? (
+                      <input
+                        type="number" step="0.01" autoFocus
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        onBlur={() => {
+                          const v = editingValue.trim() === "" ? null : parseFloat(editingValue);
+                          updateFee.mutate({ projectId: w.projectId ?? projectId, id: w.id, paypalFee: v });
+                        }}
+                        className="w-20 h-6 text-xs px-1 border border-blue-400 rounded text-right font-mono"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => { setEditingId(w.id); setEditingValue(w.paypalFee != null ? String(Number(w.paypalFee)) : ""); }}
+                        className="text-red-600 hover:bg-blue-50 rounded px-1"
+                      >
+                        {w.paypalFee != null ? `-${formatCurrency(Number(w.paypalFee))}` : "+ set"}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    {locked ? <span className="text-red-500 text-[10px]">🔒 locked</span> : <span className="text-green-500 text-[10px]">unlocked</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <button
+                      onClick={() => { if (confirm("Delete this withdrawal?")) deleteW.mutate({ projectId: w.projectId ?? projectId, id: w.id }); }}
+                      className="text-red-400 hover:text-red-600 text-[10px]"
+                    >Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADMIN-ONLY: Collector Expenses Section — delete any (bypasses 24h lock)
+// ═══════════════════════════════════════════════════════════════════════
+function AdminExpensesSection({
+  projectId, expenses, onChange,
+}: {
+  projectId: string;
+  expenses: any[];
+  onChange: () => void;
+}) {
+  const deleteExp = trpc.agentPP.deleteExpense.useMutation({
+    onSuccess: () => { onChange(); toast.success("Expense deleted (admin override)"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const typeLabel: Record<string, string> = {
+    TEAM_PAYMENT: "→ Team",
+    BILL: "🧾 Bill",
+    OTHER: "◇ Other",
+  };
+  const typeColor: Record<string, string> = {
+    TEAM_PAYMENT: "bg-emerald-100 text-emerald-700",
+    BILL: "bg-blue-100 text-blue-700",
+    OTHER: "bg-gray-100 text-gray-700",
+  };
+
+  return (
+    <div className="bg-white rounded-lg border overflow-hidden">
+      <div className="px-4 py-3 border-b bg-amber-50 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-amber-900">⚠ Admin — Collector Expenses ({expenses.length})</h2>
+        <span className="text-[10px] text-amber-700">Bypass 24h lock</span>
+      </div>
+      <div className="overflow-auto max-h-[320px]">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="px-2 py-2 text-left text-gray-500">Date</th>
+              <th className="px-2 py-2 text-left text-gray-500">Project</th>
+              <th className="px-2 py-2 text-left text-gray-500">Type</th>
+              <th className="px-2 py-2 text-left text-gray-500">Reference</th>
+              <th className="px-2 py-2 text-left text-gray-500">Note</th>
+              <th className="px-2 py-2 text-center text-gray-500">Linked</th>
+              <th className="px-2 py-2 text-right text-gray-500">Amount</th>
+              <th className="px-2 py-2 text-center text-gray-500">Locked?</th>
+              <th className="px-2 py-2 text-center text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {expenses.map((e: any) => {
+              const locked = e.createdAt && (Date.now() - new Date(e.createdAt).getTime() > 24 * 3600 * 1000);
+              return (
+                <tr key={e.id} className="hover:bg-gray-50">
+                  <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap">{new Date(e.date).toLocaleDateString("en-US")}</td>
+                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{e.project?.code ?? "—"}</Badge></td>
+                  <td className="px-2 py-1.5">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${typeColor[e.type] || "bg-gray-100 text-gray-700"}`}>
+                      {typeLabel[e.type] || e.type}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-blue-700 truncate max-w-[140px]">{e.referenceId}</td>
+                  <td className="px-2 py-1.5 text-gray-500 italic truncate max-w-[150px]">{e.note || "—"}</td>
+                  <td className="px-2 py-1.5 text-center text-gray-500">{e.withdrawals?.length ?? 0}</td>
+                  <td className="px-2 py-1.5 text-right font-bold text-red-600">-{formatCurrency(Number(e.amount))}</td>
+                  <td className="px-2 py-1.5 text-center">
+                    {locked ? <span className="text-red-500 text-[10px]">🔒 locked</span> : <span className="text-green-500 text-[10px]">unlocked</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <button
+                      onClick={() => { if (confirm("Delete this expense? Linked transactions will return to pending.")) deleteExp.mutate({ projectId: e.projectId ?? projectId, id: e.id }); }}
+                      className="text-red-400 hover:text-red-600 text-[10px]"
+                    >Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

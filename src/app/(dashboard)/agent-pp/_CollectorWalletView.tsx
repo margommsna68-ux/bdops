@@ -200,7 +200,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
     });
   }, [items, period, customFrom, customTo, statusFilter]);
 
+  const LOCK_MS = 24 * 60 * 60 * 1000;
   const enriched = useMemo(() => {
+    const now = Date.now();
     const arr = filtered.map((t: any) => {
       const confirmed = t.matchedPaypalFee != null;
       const fee = confirmed ? Number(t.matchedPaypalFee) : 0;
@@ -209,7 +211,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
       const pct = Number(t.collectorFeePercent ?? 0);
       const commission = net * (pct / 100);
       const totalAfterFee = net - commission;
-      return { ...t, gross, fee, net, commission, totalAfterFee, pct, confirmed };
+      // 24h edit lock for PP fee
+      const feeLocked = t.paypalFeeSetAt && (now - new Date(t.paypalFeeSetAt).getTime() > LOCK_MS);
+      return { ...t, gross, fee, net, commission, totalAfterFee, pct, confirmed, feeLocked };
     });
     const dir = sortDir === "asc" ? 1 : -1;
     arr.sort((a: any, b: any) => {
@@ -589,6 +593,14 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                           >
                             {t("cell_enter_fee")}
                           </button>
+                        ) : tx.feeLocked ? (
+                          <span
+                            className="text-red-600 font-mono px-1 cursor-not-allowed opacity-70 flex items-center gap-1 justify-end"
+                            title="Locked — 24h edit window expired. Contact admin."
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                            -{formatCurrency(tx.fee)}
+                          </span>
                         ) : (
                           <button
                             onClick={() => { setEditingFeeId(tx.id); setEditingFeeValue(String(tx.fee)); }}
@@ -772,6 +784,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 sortedExpenses.map((exp: any) => {
                   const isExpanded = expandedExpenseId === exp.id;
                   const style = EXPENSE_STYLES[exp.type as ExpenseType] ?? EXPENSE_STYLES.OTHER;
+                  const expenseLocked = exp.createdAt && (Date.now() - new Date(exp.createdAt).getTime() > LOCK_MS);
                   return (
                     <div key={exp.id} className="px-4 py-3">
                       <div className="flex items-center justify-between gap-2">
@@ -790,16 +803,25 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                           </div>
                           <span className="text-red-600 font-bold text-sm">-{formatCurrency(Number(exp.amount))}</span>
                         </button>
-                        <button
-                          onClick={() => {
-                            // Skip confirm — PIN dialog IS the confirmation
-                            requirePinForDelete(() => {
-                              deleteExpenseMut.mutate({ projectId, id: exp.id });
-                            });
-                          }}
-                          className="text-gray-300 hover:text-red-500 px-1"
-                          title={t("history_delete_title")}
-                        >×</button>
+                        {expenseLocked ? (
+                          <span
+                            className="text-gray-300 px-1 cursor-not-allowed"
+                            title="Locked — 24h window expired. Contact admin."
+                          >
+                            <svg className="w-3.5 h-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              // Skip confirm — PIN dialog IS the confirmation
+                              requirePinForDelete(() => {
+                                deleteExpenseMut.mutate({ projectId, id: exp.id });
+                              });
+                            }}
+                            className="text-gray-300 hover:text-red-500 px-1"
+                            title={t("history_delete_title")}
+                          >×</button>
+                        )}
                       </div>
                       {isExpanded && exp.withdrawals?.length > 0 && (
                         <div className="mt-2 ml-4 bg-gray-50 rounded p-2">

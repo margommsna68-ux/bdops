@@ -353,6 +353,8 @@ export const agentPPRouter = router({
 
   // ═══ Agent Confirm/Dispute ═══
   // ═══ Update collector meta (paypalFee, collectorNote) on an incoming Withdrawal ═══
+  // PP fee has a 24-hour edit lock for collectors after first entry.
+  // Admin/Moderator can always edit (bypass the lock).
   updatePaypalFee: agentPPProcedure
     .input(z.object({
       projectId: z.string(),
@@ -364,15 +366,33 @@ export const agentPPRouter = router({
       const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
         where: { id: input.id, projectId: input.projectId },
       });
+      const isAdminOrMod = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
+
       // Ownership check for non-admin: must own the agent email
-      if (ctx.role !== "ADMIN" && ctx.role !== "MODERATOR" && wd.agentEmailId) {
+      if (!isAdminOrMod && wd.agentEmailId) {
         const email = await ctx.prisma.agentPaypalEmail.findFirst({
           where: { id: wd.agentEmailId, userId: ctx.user.id },
         });
         if (!email) throw new Error("Not your transaction");
       }
+
+      // 24h edit lock for PP fee (non-admin only)
+      if (input.paypalFee !== undefined && !isAdminOrMod && wd.paypalFeeSetAt) {
+        const age = Date.now() - new Date(wd.paypalFeeSetAt).getTime();
+        const LOCK_MS = 24 * 60 * 60 * 1000;
+        if (age > LOCK_MS) {
+          throw new Error("PP fee is locked after 24 hours. Contact admin to modify.");
+        }
+      }
+
       const data: any = {};
-      if (input.paypalFee !== undefined) data.paypalFee = input.paypalFee;
+      if (input.paypalFee !== undefined) {
+        data.paypalFee = input.paypalFee;
+        // Stamp the first-set timestamp so the 24h clock starts here
+        if (!wd.paypalFeeSetAt && input.paypalFee !== null) {
+          data.paypalFeeSetAt = new Date();
+        }
+      }
       if (input.collectorNote !== undefined) data.collectorNote = input.collectorNote;
       const result = await ctx.prisma.withdrawal.update({
         where: { id: input.id },
@@ -1054,15 +1074,27 @@ export const agentPPRouter = router({
     }),
 
   // Delete expense (unlinks linked withdrawals)
+  // 24h lock for collectors. Admin/Moderator can always delete.
   deleteExpense: agentPPProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const exp = await ctx.prisma.collectorExpense.findFirstOrThrow({
         where: { id: input.id },
       });
+      const isAdminOrMod = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
+
       // Ownership check: collector or admin
-      if (exp.collectorId !== ctx.user.id && ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
+      if (exp.collectorId !== ctx.user.id && !isAdminOrMod) {
         throw new Error("Not your expense");
+      }
+
+      // 24h edit lock (non-admin only)
+      if (!isAdminOrMod) {
+        const age = Date.now() - new Date(exp.createdAt).getTime();
+        const LOCK_MS = 24 * 60 * 60 * 1000;
+        if (age > LOCK_MS) {
+          throw new Error("Expense is locked after 24 hours. Contact admin to modify.");
+        }
       }
       // Unlink withdrawals (revert paid flag)
       await ctx.prisma.withdrawal.updateMany({
