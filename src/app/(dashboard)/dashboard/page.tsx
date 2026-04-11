@@ -444,17 +444,31 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Your PayPal emails & links — inline editable */}
+            {/* Your PayPal emails & links — inline editable, deduplicated across projects */}
+            {(() => {
+              // Deduplicate by email string (user-level view, not project-level)
+              const dedupedMap = new Map<string, any[]>();
+              for (const em of (agentStats.emails as any[])) {
+                const key = em.email.toLowerCase();
+                if (!dedupedMap.has(key)) dedupedMap.set(key, []);
+                dedupedMap.get(key)!.push(em);
+              }
+              const deduped = Array.from(dedupedMap.values()).map((group) => ({
+                ...group[0],
+                allIds: group.map((g) => g.id),
+                allProjectIds: group.map((g) => g.projectId).filter(Boolean),
+              }));
+              return (
             <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-medium text-gray-900">{t("agd_your_emails")}</h2>
-                <span className="text-xs text-gray-400">{agentStats.emails.length}</span>
+                <span className="text-xs text-gray-400">{deduped.length}</span>
               </div>
               <div className="space-y-2">
-                {agentStats.emails.map((em: any) => {
+                {deduped.map((em: any) => {
                   const isLink = em.email.startsWith("http://") || em.email.startsWith("https://");
                   return (
-                    <div key={em.id} className="group flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100 hover:bg-gray-100">
+                    <div key={em.email} className="group flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100 hover:bg-gray-100">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isLink ? "bg-blue-100" : "bg-orange-100"}`}>
                         {isLink ? (
                           <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -477,7 +491,12 @@ export default function DashboardPage() {
                       <button
                         onClick={() => {
                           if (window.confirm(t("agd_email_remove_confirm").replace("{email}", em.email))) {
-                            removeAgentEmail.mutate({ projectId: projectId!, id: em.id });
+                            // Remove all records with this email (across projects)
+                            for (let i = 0; i < em.allIds.length; i++) {
+                              const id = em.allIds[i];
+                              const pid = em.allProjectIds[i] ?? projectId!;
+                              removeAgentEmail.mutate({ projectId: pid, id });
+                            }
                           }
                         }}
                         className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
@@ -520,6 +539,8 @@ export default function DashboardPage() {
                 </Button>
               </div>
             </div>
+              );
+            })()}
           </div>
 
           {/* Recent Transactions + Recent Sales */}
