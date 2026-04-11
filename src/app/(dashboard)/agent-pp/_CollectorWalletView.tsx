@@ -730,7 +730,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                         </button>
                         <button
                           onClick={() => {
-                            if (!confirm(t("history_delete_confirm"))) return;
+                            // Skip confirm — PIN dialog IS the confirmation
                             requirePinForDelete(() => {
                               deleteExpenseMut.mutate({ projectId, id: exp.id });
                             });

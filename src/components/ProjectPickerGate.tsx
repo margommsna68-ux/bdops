@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useProjectStore } from "@/lib/store";
 import { trpc } from "@/lib/trpc";
@@ -32,33 +31,30 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const router = useRouter();
-  const pathname = usePathname();
+  // Detect collector-only user (only has AGENT_PP module)
+  const isCollectorOnlyUser = (() => {
+    if (!memberships.length) return false;
+    // If ALL memberships are collector-only (role=USER + AGENT_PP only) → treat as collector
+    return memberships.every((m: any) => {
+      if (m.role === "ADMIN" || m.role === "MODERATOR") return false;
+      const mods: string[] = m.allowedModules || [];
+      return mods.length === 1 && mods[0] === "AGENT_PP";
+    });
+  })();
 
-  // Auto-select if only 1 project
+  // Auto-select first project for:
+  // - Users with only 1 project
+  // - Collector-only users (skip project picker entirely — go directly to dashboard)
   useEffect(() => {
-    if (projects && projects.length === 1 && !currentProjectId) {
+    if (!projects || projects.length === 0 || currentProjectId) return;
+    if (projects.length === 1 || isCollectorOnlyUser) {
       selectProject(projects[0].id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects?.length, currentProjectId]);
+  }, [projects?.length, currentProjectId, isCollectorOnlyUser]);
 
-  // Agent-only user: if user only has AGENT_PP module → redirect to /agent-pp
-  // Whitelist allowed routes: /agent-pp/*, /dashboard, /settings (collectors need navigation access)
-  useEffect(() => {
-    if (!currentProjectId || !memberships.length) return;
-    const allowedPrefixes = ["/agent-pp", "/dashboard", "/settings"];
-    if (pathname && allowedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return;
-    const membership = memberships.find((m: any) => m.projectId === currentProjectId);
-    if (!membership) return;
-    const modules: string[] = membership.allowedModules || [];
-    const role = membership.role;
-    // Only redirect if: not ADMIN/MOD, and only has AGENT_PP module
-    if (role !== "ADMIN" && role !== "MODERATOR" && modules.length > 0 && modules.every((m: string) => m === "AGENT_PP")) {
-      router.replace("/agent-pp");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProjectId, memberships.length, pathname]);
+  // NOTE: No auto-redirect to /agent-pp. Collector users land on /dashboard by default
+  // and can navigate to /agent-pp / /settings via sidebar.
 
   // Already has a project selected → skip
   if (currentProjectId && dismissed) return <>{children}</>;
