@@ -5,7 +5,7 @@
 // Wallet-centric: received → wallet balance → flexible expenses (team/bill/other)
 // ═══════════════════════════════════════════════════════════════════════
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
@@ -84,28 +84,19 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   const [historySortKey, setHistorySortKey] = useState<"date" | "amount" | "type" | "ref">("date");
   const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
 
-  // ─── PIN verification (page-level, once per session) ───
-  const [pinVerified, setPinVerified] = useState(() => {
-    if (typeof window !== "undefined") return sessionStorage.getItem("collector_pin_ok") === "1";
-    return false;
-  });
+  // ─── PIN verification for destructive actions only (not on page entry) ───
+  // Login already triggers PinGate globally — no need to re-prompt on page mount.
+  // But delete ALWAYS requires PIN re-entry (per delete action).
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [pendingPinAction, setPendingPinAction] = useState<(() => void) | null>(null);
 
-  useEffect(() => {
-    if (projectId && !pinVerified) setShowPinDialog(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
   const handlePinSuccess = () => {
-    setPinVerified(true);
-    sessionStorage.setItem("collector_pin_ok", "1");
     setShowPinDialog(false);
     if (pendingPinAction) { pendingPinAction(); setPendingPinAction(null); }
   };
 
-  const requirePinOnce = (action: () => void) => {
-    if (pinVerified) { action(); return; }
+  // Always prompts PIN — no session cache. Used for destructive actions (delete).
+  const requirePinForDelete = (action: () => void) => {
     setPendingPinAction(() => action);
     setShowPinDialog(true);
   };
@@ -739,10 +730,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                         </button>
                         <button
                           onClick={() => {
-                            requirePinOnce(() => {
-                              if (confirm(t("history_delete_confirm"))) {
-                                deleteExpenseMut.mutate({ projectId, id: exp.id });
-                              }
+                            if (!confirm(t("history_delete_confirm"))) return;
+                            requirePinForDelete(() => {
+                              deleteExpenseMut.mutate({ projectId, id: exp.id });
                             });
                           }}
                           className="text-gray-300 hover:text-red-500 px-1"
@@ -773,7 +763,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
         })()}
       </div>
 
-      {/* ─── PIN verification dialog (page-level) ─── */}
+      {/* ─── PIN verification dialog (only when deleting) ─── */}
       <PinVerifyDialog
         open={showPinDialog}
         onClose={() => {
@@ -781,9 +771,8 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
           setPendingPinAction(null);
         }}
         onVerified={handlePinSuccess}
-        title="PIN Required"
-        description="Enter your PIN to continue"
-        required={!pinVerified}
+        title="PIN Required to Delete"
+        description="Enter your PIN to confirm deletion"
       />
 
       {/* ─── Expense Dialog ─── */}
