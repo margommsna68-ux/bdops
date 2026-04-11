@@ -668,28 +668,31 @@ export const agentPPRouter = router({
       }
 
       // Compute totals with per-row fee % (match /agent-pp wallet math)
-      // Need projectId per withdrawal for fee lookup — refetch with that field
+      // Only CONFIRMED rows (paypalFee != null) contribute to net/commission/totalAfterFee
       const withdrawalsFull = await ctx.prisma.withdrawal.findMany({
         where: baseWhere,
         select: { amount: true, paypalFee: true, projectId: true },
       });
       let grossReceived = 0;
+      let grossConfirmed = 0;
       let totalFees = 0;
       let totalCommission = 0;
       let totalAfterFee = 0;
       for (const w of withdrawalsFull) {
         const gross = Number(w.amount);
-        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
+        grossReceived += gross;
+        if (w.paypalFee == null) continue;
+        const fee = Number(w.paypalFee);
         const net = gross - fee;
         const pct = feeByProject.get(w.projectId) ?? fallbackPct;
         const commission = net * (pct / 100);
         const taf = net - commission;
-        grossReceived += gross;
+        grossConfirmed += gross;
         totalFees += fee;
         totalCommission += commission;
         totalAfterFee += taf;
       }
-      const netReceived = grossReceived - totalFees;
+      const netReceived = grossConfirmed - totalFees;
       const totalExpenses = allExpenses.reduce((s, e) => s + Number(e.amount), 0);
       const walletBalance = totalAfterFee - totalExpenses;
 
@@ -880,23 +883,29 @@ export const agentPPRouter = router({
       }
 
       // Compute per-row totals
+      // Only CONFIRMED rows (paypalFee != null) contribute to net/commission/totalAfterFee.
+      // Unconfirmed rows count toward grossReceived but NOT toward wallet calculations —
+      // this matches the table display (unconfirmed cells show "—" for net/commission/TAF).
       let grossReceived = 0;
+      let grossConfirmed = 0;
       let totalFees = 0;
       let totalCommission = 0;
       let totalAfterFee = 0;
       for (const w of withdrawals) {
         const gross = Number(w.amount);
-        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
+        grossReceived += gross;
+        if (w.paypalFee == null) continue; // skip unconfirmed
+        const fee = Number(w.paypalFee);
         const net = gross - fee;
         const pct = feeByProject.get(w.projectId) ?? fallbackPct;
         const commission = net * (pct / 100);
         const taf = net - commission;
-        grossReceived += gross;
+        grossConfirmed += gross;
         totalFees += fee;
         totalCommission += commission;
         totalAfterFee += taf;
       }
-      const netReceived = grossReceived - totalFees;
+      const netReceived = grossConfirmed - totalFees;
 
       // All my expenses (cross-project)
       const expenses = await ctx.prisma.collectorExpense.findMany({

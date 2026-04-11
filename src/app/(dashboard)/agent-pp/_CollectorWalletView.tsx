@@ -84,15 +84,15 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   // ─── Queries ────────────────────────────────────────────────────
   const { data: txData, isLoading } = trpc.agentPP.myTransactions.useQuery(
     { projectId, page: 1, limit: 500 },
-    { enabled: !!projectId }
+    { enabled: !!projectId, refetchOnMount: "always", staleTime: 0 }
   );
   const { data: wallet } = trpc.agentPP.walletBalance.useQuery(
     { projectId },
-    { enabled: !!projectId }
+    { enabled: !!projectId, refetchOnMount: "always", staleTime: 0 }
   );
   const { data: expenses } = trpc.agentPP.listExpenses.useQuery(
     { projectId, limit: 100 },
-    { enabled: !!projectId }
+    { enabled: !!projectId, refetchOnMount: "always", staleTime: 0 }
   );
 
   // ─── Mutations ──────────────────────────────────────────────────
