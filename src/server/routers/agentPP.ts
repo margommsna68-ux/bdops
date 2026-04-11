@@ -655,6 +655,7 @@ export const agentPPRouter = router({
       ]);
 
       // Fetch per-project fee % for wallet math (cross-project)
+      // Only insert into map if agentFeePercent is non-null, so lookup can fall back properly.
       const memberRows = await ctx.prisma.projectMember.findMany({
         where: isAdmin ? { userId: ctx.user.id, projectId: input.projectId } : { userId: ctx.user.id },
         select: { projectId: true, agentFeePercent: true },
@@ -662,7 +663,8 @@ export const agentPPRouter = router({
       const feeByProject = new Map<string, number>();
       let fallbackPct = 0;
       for (const m of memberRows) {
-        const pct = m.agentFeePercent != null ? Number(m.agentFeePercent.toString()) : 0;
+        if (m.agentFeePercent == null) continue;
+        const pct = Number(m.agentFeePercent.toString());
         feeByProject.set(m.projectId, pct);
         if (fallbackPct === 0 && pct > 0) fallbackPct = pct;
       }
@@ -684,7 +686,9 @@ export const agentPPRouter = router({
         if (w.paypalFee == null) continue;
         const fee = Number(w.paypalFee);
         const net = gross - fee;
-        const pct = feeByProject.get(w.projectId) ?? fallbackPct;
+        const pct = feeByProject.has(w.projectId)
+          ? (feeByProject.get(w.projectId) as number)
+          : fallbackPct;
         const commission = net * (pct / 100);
         const taf = net - commission;
         grossConfirmed += gross;
@@ -870,6 +874,7 @@ export const agentPPRouter = router({
       });
 
       // Fetch user's ProjectMember rows for agentFeePercent lookup (cross-project)
+      // Only insert into map if agentFeePercent is non-null, so lookup can fall back properly.
       const memberRows = await ctx.prisma.projectMember.findMany({
         where: { userId },
         select: { projectId: true, agentFeePercent: true },
@@ -877,7 +882,8 @@ export const agentPPRouter = router({
       const feeByProject = new Map<string, number>();
       let fallbackPct = 0;
       for (const m of memberRows) {
-        const pct = m.agentFeePercent != null ? Number(m.agentFeePercent.toString()) : 0;
+        if (m.agentFeePercent == null) continue;
+        const pct = Number(m.agentFeePercent.toString());
         feeByProject.set(m.projectId, pct);
         if (fallbackPct === 0 && pct > 0) fallbackPct = pct;
       }
@@ -897,7 +903,10 @@ export const agentPPRouter = router({
         if (w.paypalFee == null) continue; // skip unconfirmed
         const fee = Number(w.paypalFee);
         const net = gross - fee;
-        const pct = feeByProject.get(w.projectId) ?? fallbackPct;
+        // Match myTransactions: exact project match → fallback (any project) → 0
+        const pct = feeByProject.has(w.projectId)
+          ? (feeByProject.get(w.projectId) as number)
+          : fallbackPct;
         const commission = net * (pct / 100);
         const taf = net - commission;
         grossConfirmed += gross;
