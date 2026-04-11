@@ -44,10 +44,11 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
   }, [projects?.length, currentProjectId]);
 
   // Agent-only user: if user only has AGENT_PP module → redirect to /agent-pp
-  // (unless they're already under /agent-pp/* which includes sub-routes like /agent-pp/demo)
+  // Whitelist allowed routes: /agent-pp/*, /dashboard, /settings (collectors need navigation access)
   useEffect(() => {
     if (!currentProjectId || !memberships.length) return;
-    if (pathname?.startsWith("/agent-pp")) return; // already on an allowed sub-route
+    const allowedPrefixes = ["/agent-pp", "/dashboard", "/settings"];
+    if (pathname && allowedPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return;
     const membership = memberships.find((m: any) => m.projectId === currentProjectId);
     if (!membership) return;
     const modules: string[] = membership.allowedModules || [];

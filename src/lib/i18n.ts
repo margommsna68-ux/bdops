@@ -201,6 +201,106 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "collector_dispute_placeholder": { en: "Transaction not found in PayPal...", vi: "Không thấy giao dịch này trong PayPal..." },
   "collector_updated": { en: "Updated", vi: "Đã cập nhật" },
   "collector_ok_short": { en: "OK", vi: "OK" },
+
+  // ─── Wallet view ───
+  "wallet_title": { en: "Wallet (current balance)", vi: "Wallet (tiền đang nắm)" },
+  "wallet_record_expense": { en: "+ Record expense", vi: "+ Ghi khoản chi" },
+  "wallet_net_received": { en: "Net received", vi: "Net nhận" },
+  "wallet_total_spent": { en: "Total spent", vi: "Đã chi" },
+  "wallet_transfer_team": { en: "Transfer to team", vi: "Chuyển team" },
+  "wallet_pay_bill": { en: "Pay bill", vi: "Thanh toán bill" },
+  "wallet_other": { en: "Other", vi: "Chi khác" },
+
+  // ─── Period filter ───
+  "period_label": { en: "View period:", vi: "Kỳ xem:" },
+  "period_all": { en: "All time", vi: "Tất cả" },
+  "period_today": { en: "Today", vi: "Hôm nay" },
+  "period_week": { en: "This week", vi: "Tuần này" },
+  "period_month": { en: "This month", vi: "Tháng này" },
+  "period_custom": { en: "Custom", vi: "Custom" },
+
+  // ─── Period stats ───
+  "stats_title": { en: "Period summary", vi: "Thống kê kỳ" },
+  "stats_received": { en: "Received", vi: "Tổng nhận" },
+  "stats_unconfirmed": { en: "Unconfirmed", vi: "Chưa confirm" },
+  "stats_unconfirmed_sub": { en: "need fee entry", vi: "cần nhập fee" },
+  "stats_commission_earned": { en: "Commission", vi: "Commission" },
+  "stats_commission_earned_sub": { en: "earned", vi: "đã earn" },
+  "stats_pending": { en: "Pending", vi: "Chưa xử lý" },
+  "stats_processed": { en: "Processed", vi: "Đã xử lý" },
+  "stats_txns": { en: "transactions", vi: "giao dịch" },
+
+  // ─── Status filter tabs ───
+  "filter_all": { en: "All", vi: "Tất cả" },
+  "filter_unconfirmed": { en: "⏳ Unconfirmed", vi: "⏳ Chưa confirm" },
+  "filter_pending": { en: "Pending", vi: "Chưa xử lý" },
+  "filter_processed": { en: "Processed", vi: "Đã xử lý" },
+  "filter_select_all_pending": { en: "Select all pending", vi: "Chọn tất cả chưa xử lý" },
+
+  // ─── Bulk action bar ───
+  "bulk_selected": { en: "Selected", vi: "Đã chọn" },
+  "bulk_gross": { en: "Gross:", vi: "Gross:" },
+  "bulk_to_pay_team": { en: "To pay team:", vi: "Để chi team:" },
+  "bulk_commission_kept": { en: "Commission kept:", vi: "Commission giữ:" },
+  "bulk_record_expense_btn": { en: "+ Record expense", vi: "+ Ghi chi" },
+  "bulk_cancel": { en: "Cancel", vi: "Hủy" },
+
+  // ─── Table headers ───
+  "th_date": { en: "Date", vi: "Date" },
+  "th_project": { en: "Project", vi: "Project" },
+  "th_pp_code": { en: "PP Code", vi: "PP Code" },
+  "th_pp_agent": { en: "PP Agent", vi: "PP Agent" },
+  "th_tx_id": { en: "Transaction ID", vi: "Transaction ID" },
+  "th_gross": { en: "Gross", vi: "Gross" },
+  "th_net": { en: "Net", vi: "Net" },
+  "th_collector_fee_multi": { en: "Collector fee", vi: "Collector fee" },
+  "th_total_after_fee": { en: "Total after fee", vi: "Total after fee" },
+  "th_status": { en: "Status", vi: "Status" },
+  "th_note": { en: "Note", vi: "Note" },
+
+  // ─── Table cells ───
+  "cell_loading": { en: "Loading...", vi: "Đang tải..." },
+  "cell_no_transactions": { en: "No transactions", vi: "Không có giao dịch" },
+  "cell_enter_fee": { en: "+ Enter fee", vi: "+ Nhập fee" },
+  "cell_add_note": { en: "+ note", vi: "+ note" },
+  "badge_unconfirmed": { en: "Pending fee", vi: "Chờ confirm" },
+  "badge_processed": { en: "✓ Processed", vi: "✓ Đã xử lý" },
+  "badge_pending": { en: "Pending", vi: "Chờ xử lý" },
+
+  // ─── Expense history ───
+  "history_title": { en: "📜 Expense history", vi: "📜 Lịch sử chi" },
+  "history_hide": { en: "▲ Hide", vi: "▲ Ẩn" },
+  "history_show": { en: "▼ Show", vi: "▼ Xem" },
+  "history_empty": { en: "No expenses yet.", vi: "Chưa có khoản chi nào." },
+  "history_linked_label": { en: "Linked transactions:", vi: "Giao dịch liên kết:" },
+  "history_delete_confirm": { en: "Delete this expense?", vi: "Xóa khoản chi này?" },
+  "history_delete_title": { en: "Delete", vi: "Xóa" },
+  "history_linked_count": { en: "transactions", vi: "giao dịch" },
+
+  // ─── Expense dialog ───
+  "dlg_title": { en: "Record expense", vi: "Ghi khoản chi" },
+  "dlg_subtitle": { en: "Record an outgoing payment from your wallet", vi: "Ghi nhận tiền chi ra từ wallet" },
+  "dlg_type_label": { en: "Expense type", vi: "Loại chi" },
+  "dlg_amount_label": { en: "Amount", vi: "Số tiền chi" },
+  "dlg_amount_hint_wallet": { en: "Current wallet:", vi: "Wallet hiện có:" },
+  "dlg_amount_hint_after": { en: "after expense:", vi: "sau chi:" },
+  "dlg_ref_label": { en: "Reference ID", vi: "Mã tham chiếu" },
+  "dlg_ref_placeholder_bill": { en: "e.g. INV-2026-042", vi: "VD: INV-2026-042" },
+  "dlg_ref_placeholder_bank": { en: "e.g. FT25041012345", vi: "VD: FT25041012345" },
+  "dlg_link_question": { en: "Link with selected transactions?", vi: "Link với giao dịch đã chọn?" },
+  "dlg_link_yes": { en: "✓ Yes — mark as processed", vi: "✓ Có — mark đã xử lý" },
+  "dlg_link_no": { en: "No — deduct wallet only", vi: "Không — chỉ trừ wallet" },
+  "dlg_note_label": { en: "Note (optional)", vi: "Ghi chú (optional)" },
+  "dlg_note_placeholder": { en: "e.g. Round 1 April / Electricity bill", vi: "VD: Đợt 1 tháng 4 / Tiền điện" },
+  "dlg_cancel": { en: "Cancel", vi: "Hủy" },
+  "dlg_save": { en: "✓ Save expense", vi: "✓ Lưu khoản chi" },
+  "dlg_saving": { en: "Saving...", vi: "Đang lưu..." },
+
+  // ─── Toasts / errors ───
+  "toast_expense_saved": { en: "Expense saved", vi: "Đã lưu khoản chi" },
+  "toast_deleted": { en: "Deleted", vi: "Đã xóa" },
+  "toast_enter_amount": { en: "Enter amount", vi: "Nhập số tiền" },
+  "toast_enter_ref": { en: "Enter reference ID", vi: "Nhập mã tham chiếu" },
   "collector_pp_code": { en: "PP Code", vi: "PP Code" },
   "collector_pp_agent": { en: "PP Agent", vi: "PP Agent" },
   "collector_gross_amount": { en: "Gross Amount", vi: "Gross Amount" },
