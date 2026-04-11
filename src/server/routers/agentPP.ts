@@ -608,18 +608,12 @@ export const agentPPRouter = router({
         : { collectorId: ctx.user.id };
 
       const [
-        allWithdrawals,
         allExpenses,
         todayReceived,
         pendingCount, disputedCount, confirmedCount,
         recentTransactions,
         recentSales,
       ] = await Promise.all([
-        // All withdrawals (for net received + gross total)
-        ctx.prisma.withdrawal.findMany({
-          where: baseWhere,
-          select: { amount: true, paypalFee: true },
-        }),
         // All expenses
         ctx.prisma.collectorExpense.findMany({
           where: expenseWhere,
@@ -660,34 +654,66 @@ export const agentPPRouter = router({
         }),
       ]);
 
-      // Compute totals from withdrawals list (match /agent-pp wallet math)
+      // Fetch per-project fee % for wallet math (cross-project)
+      const memberRows = await ctx.prisma.projectMember.findMany({
+        where: isAdmin ? { userId: ctx.user.id, projectId: input.projectId } : { userId: ctx.user.id },
+        select: { projectId: true, agentFeePercent: true },
+      });
+      const feeByProject = new Map<string, number>();
+      let fallbackPct = 0;
+      for (const m of memberRows) {
+        const pct = m.agentFeePercent != null ? Number(m.agentFeePercent.toString()) : 0;
+        feeByProject.set(m.projectId, pct);
+        if (fallbackPct === 0 && pct > 0) fallbackPct = pct;
+      }
+
+      // Compute totals with per-row fee % (match /agent-pp wallet math)
+      // Need projectId per withdrawal for fee lookup — refetch with that field
+      const withdrawalsFull = await ctx.prisma.withdrawal.findMany({
+        where: baseWhere,
+        select: { amount: true, paypalFee: true, projectId: true },
+      });
       let grossReceived = 0;
       let totalFees = 0;
-      for (const w of allWithdrawals) {
-        grossReceived += Number(w.amount);
-        if (w.paypalFee != null) totalFees += Number(w.paypalFee);
+      let totalCommission = 0;
+      let totalAfterFee = 0;
+      for (const w of withdrawalsFull) {
+        const gross = Number(w.amount);
+        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
+        const net = gross - fee;
+        const pct = feeByProject.get(w.projectId) ?? fallbackPct;
+        const commission = net * (pct / 100);
+        const taf = net - commission;
+        grossReceived += gross;
+        totalFees += fee;
+        totalCommission += commission;
+        totalAfterFee += taf;
       }
       const netReceived = grossReceived - totalFees;
       const totalExpenses = allExpenses.reduce((s, e) => s + Number(e.amount), 0);
-      const walletBalance = netReceived - totalExpenses;
+      const walletBalance = totalAfterFee - totalExpenses;
 
       return {
         emails: myEmails,
-        totalReceived: grossReceived,          // legacy name, now = gross
+        totalReceived: netReceived,            // display: net received (gross - fee)
         totalSold: totalExpenses,              // legacy name, now = total expenses
-        balance: walletBalance,                 // now = wallet balance (net - expenses)
-        transactionCount: allWithdrawals.length,
-        saleCount: allExpenses.length,          // legacy name, now = expenses count
+        balance: walletBalance,                // = totalAfterFee − expenses (team's money)
+        transactionCount: withdrawalsFull.length,
+        saleCount: allExpenses.length,         // legacy name, now = expenses count
+        grossReceived,
         netReceived,
+        totalFees,
+        totalCommission,
+        totalAfterFee,
         totalExpenses,
         walletBalance,
         todayReceived: { amount: Number(todayReceived._sum.amount ?? 0), count: todayReceived._count },
-        todaySold: { amount: 0, count: 0 },     // legacy field kept for compatibility
+        todaySold: { amount: 0, count: 0 },    // legacy field kept for compatibility
         pendingCount,
         disputedCount,
         confirmedCount,
         recentTransactions,
-        recentSales,                            // actually expenses now, kept name for UI compat
+        recentSales,                           // actually expenses now, kept name for UI compat
       };
     }),
 
@@ -818,7 +844,8 @@ export const agentPPRouter = router({
   // COLLECTOR WALLET + EXPENSES
   // ═══════════════════════════════════════════════════════════════
 
-  // Wallet balance: sum(net received across ALL projects) - sum(all expenses)
+  // Wallet balance: TotalAfterFee (team's share) − all expenses
+  // Note: Commission is collector's own money, NOT part of wallet (wallet = money owed to team).
   walletBalance: agentPPProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx }) => {
@@ -836,14 +863,40 @@ export const agentPPRouter = router({
           type: "EXCHANGE",
           agentEmailId: { in: myEmailIds },
         },
-        select: { amount: true, paypalFee: true },
+        select: { amount: true, paypalFee: true, projectId: true },
       });
-      // Net received = sum(gross − fee). Missing fee treated as 0 (legacy rows).
-      let netReceived = 0;
-      for (const w of withdrawals) {
-        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
-        netReceived += Number(w.amount) - fee;
+
+      // Fetch user's ProjectMember rows for agentFeePercent lookup (cross-project)
+      const memberRows = await ctx.prisma.projectMember.findMany({
+        where: { userId },
+        select: { projectId: true, agentFeePercent: true },
+      });
+      const feeByProject = new Map<string, number>();
+      let fallbackPct = 0;
+      for (const m of memberRows) {
+        const pct = m.agentFeePercent != null ? Number(m.agentFeePercent.toString()) : 0;
+        feeByProject.set(m.projectId, pct);
+        if (fallbackPct === 0 && pct > 0) fallbackPct = pct;
       }
+
+      // Compute per-row totals
+      let grossReceived = 0;
+      let totalFees = 0;
+      let totalCommission = 0;
+      let totalAfterFee = 0;
+      for (const w of withdrawals) {
+        const gross = Number(w.amount);
+        const fee = w.paypalFee != null ? Number(w.paypalFee) : 0;
+        const net = gross - fee;
+        const pct = feeByProject.get(w.projectId) ?? fallbackPct;
+        const commission = net * (pct / 100);
+        const taf = net - commission;
+        grossReceived += gross;
+        totalFees += fee;
+        totalCommission += commission;
+        totalAfterFee += taf;
+      }
+      const netReceived = grossReceived - totalFees;
 
       // All my expenses (cross-project)
       const expenses = await ctx.prisma.collectorExpense.findMany({
@@ -856,10 +909,17 @@ export const agentPPRouter = router({
         breakdown[e.type] = (breakdown[e.type] ?? 0) + Number(e.amount);
       }
 
+      // Wallet = team's share (totalAfterFee) − all expenses
+      const walletBalance = totalAfterFee - totalExpenses;
+
       return {
+        grossReceived,
+        totalFees,
         netReceived,
+        totalCommission,
+        totalAfterFee,
         totalExpenses,
-        walletBalance: netReceived - totalExpenses,
+        walletBalance,
         breakdown,
       };
     }),

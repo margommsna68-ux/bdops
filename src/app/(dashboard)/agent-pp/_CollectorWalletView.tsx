@@ -227,9 +227,10 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   };
 
   // ─── Totals (filtered) ──────────────────────────────────────────
+  // "received" stat = Net (gross − fee), per user spec.
   const totals = enriched.reduce(
     (acc: any, t: any) => {
-      acc.received += t.gross;
+      acc.received += t.confirmed ? t.net : t.gross;
       acc.commissionEarned += t.confirmed ? t.commission : 0;
       acc.txCount += 1;
       if (!t.confirmed) { acc.unconfirmedCount++; acc.unconfirmedAmount += t.gross; }
@@ -312,7 +313,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
 
   // ─── Render ─────────────────────────────────────────────────────
   const walletBalance = wallet?.walletBalance ?? 0;
-  const netReceived = wallet?.netReceived ?? 0;
+  const totalAfterFee = (wallet as any)?.totalAfterFee ?? 0;
   const totalExpenses = wallet?.totalExpenses ?? 0;
   const breakdown = wallet?.breakdown ?? { TEAM_PAYMENT: 0, BILL: 0, OTHER: 0 };
 
@@ -325,7 +326,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
             <div className="text-[11px] font-semibold text-blue-200 uppercase tracking-wider">💰 {t("wallet_title")}</div>
             <div className="text-4xl font-bold mt-1">{formatCurrency(walletBalance)}</div>
             <div className="text-xs text-blue-200 mt-1">
-              = {t("wallet_net_received")} {formatCurrency(netReceived)} − {t("wallet_total_spent")} {formatCurrency(totalExpenses)}
+              = {t("wallet_team_share")} {formatCurrency(totalAfterFee)} − {t("wallet_total_spent")} {formatCurrency(totalExpenses)}
             </div>
           </div>
           <Button
@@ -489,7 +490,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 <SortTh label={t("th_tx_id")} k="transactionId" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-gray-600" align="left" />
                 <SortTh label={t("th_gross")} k="gross" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-green-700" align="right" />
                 <SortTh
-                  label={singleCollectorName ? `PP Fee (${singleCollectorName})` : "PP Fee"}
+                  label={singleCollectorName ? `PP Fee (${singleCollectorName} note)` : "PP Fee (Agent note)"}
                   k="feePP" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-red-600" align="right"
                 />
                 <SortTh label={t("th_net")} k="net" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-gray-700" align="right" />
