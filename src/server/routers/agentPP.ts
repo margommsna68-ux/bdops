@@ -121,10 +121,17 @@ export const agentPPRouter = router({
       const myEmailIds = myEmails.map((e) => e.id);
 
       // Admin: still scoped to current project.
-      // Collector: cross-project — all withdrawals targeting any of their agent emails.
+      // Collector: cross-project — match BY agent email OR BY agentUserId (safer fallback
+      // if email record was deleted but withdrawal still points to user).
       const where: any = isAdmin
         ? { projectId: input.projectId, type: "EXCHANGE" }
-        : { type: "EXCHANGE", agentEmailId: { in: myEmailIds } };
+        : {
+            type: "EXCHANGE",
+            OR: [
+              { agentEmailId: { in: myEmailIds } },
+              { agentUserId: ctx.user.id },
+            ],
+          };
 
       const [items, total] = await Promise.all([
         ctx.prisma.withdrawal.findMany({
@@ -598,10 +605,24 @@ export const agentPPRouter = router({
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
-      // Base where (cross-project for non-admin, scoped for admin)
+      // Base where (cross-project for non-admin, scoped for admin).
+      // Match by email OR directly by user id for robustness (handles orphaned withdrawals).
       const baseWhere: any = isAdmin
-        ? { projectId: input.projectId, type: "EXCHANGE" as const, agentEmailId: { in: myEmailIds } }
-        : { type: "EXCHANGE" as const, agentEmailId: { in: myEmailIds } };
+        ? {
+            projectId: input.projectId,
+            type: "EXCHANGE" as const,
+            OR: [
+              { agentEmailId: { in: myEmailIds } },
+              { agentUserId: ctx.user.id },
+            ],
+          }
+        : {
+            type: "EXCHANGE" as const,
+            OR: [
+              { agentEmailId: { in: myEmailIds } },
+              { agentUserId: ctx.user.id },
+            ],
+          };
 
       const expenseWhere: any = isAdmin
         ? { projectId: input.projectId, collectorId: ctx.user.id }
@@ -864,11 +885,26 @@ export const agentPPRouter = router({
       });
       const myEmailIds = myEmails.map((e) => e.id);
 
-      // All incoming withdrawals (cross-project)
+      // Auto-heal: backfill agentUserId on withdrawals that have our agent email but null user id
+      if (myEmailIds.length > 0) {
+        await ctx.prisma.withdrawal.updateMany({
+          where: {
+            type: "EXCHANGE",
+            agentEmailId: { in: myEmailIds },
+            agentUserId: null,
+          },
+          data: { agentUserId: userId },
+        });
+      }
+
+      // All incoming withdrawals (cross-project) — match by email OR directly by user id
       const withdrawals = await ctx.prisma.withdrawal.findMany({
         where: {
           type: "EXCHANGE",
-          agentEmailId: { in: myEmailIds },
+          OR: [
+            { agentEmailId: { in: myEmailIds } },
+            { agentUserId: userId },
+          ],
         },
         select: { amount: true, paypalFee: true, projectId: true },
       });
