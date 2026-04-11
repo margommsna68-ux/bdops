@@ -103,13 +103,13 @@ export default function DashboardPage() {
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">{t("dash_title")}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t("dash_title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{t("dash_subtitle")}</p>
         </div>
         {quickActions.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             {quickActions.map((a) => (
-              <Link key={a.href} href={a.href} className={`px-4 py-2 ${a.color} text-white rounded-lg text-sm font-medium transition-colors`}>
+              <Link key={a.href} href={a.href} className={`px-4 py-2 ${a.color} text-white rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5`}>
                 {a.label}
               </Link>
             ))}
@@ -172,7 +172,7 @@ export default function DashboardPage() {
 
       {/* ── Money Flow Hero ── */}
       {showFinance && !isLoading && data && (
-        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 rounded-2xl shadow-lg overflow-hidden">
+        <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 rounded-2xl shadow-xl ring-1 ring-white/10 overflow-hidden">
           <div className="px-6 py-5">
             <h2 className="text-blue-100 text-sm font-medium mb-4">{t("dash_money_flow")}</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -351,29 +351,24 @@ export default function DashboardPage() {
                 <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
                   <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_received")}</p>
                   <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency(agentStats.totalReceived)}</p>
-                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.transactionCount} GD</p>
+                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.transactionCount} {t("stats_txns")}</p>
                 </div>
                 <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
-                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_sold")}</p>
+                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_expenses")}</p>
                   <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency(agentStats.totalSold)}</p>
-                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.saleCount} GD</p>
+                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.saleCount}</p>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Agent Today + Status row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <StatCard
               title={t("agd_today_received")}
               value={formatCurrency(agentStats.todayReceived.amount)}
               subtitle={`${agentStats.todayReceived.count} ${t("agd_transactions")}`}
               trend={agentStats.todayReceived.count > 0 ? "up" : "neutral"}
-            />
-            <StatCard
-              title={t("agd_today_sold")}
-              value={formatCurrency(agentStats.todaySold.amount)}
-              subtitle={`${agentStats.todaySold.count} ${t("agd_transactions")}`}
             />
             <StatCard
               title={t("agd_pending")}
@@ -494,26 +489,26 @@ export default function DashboardPage() {
               {agentStats.recentSales.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden">
                   <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-gray-900">{t("agd_recent_sales")}</h2>
+                    <h2 className="text-sm font-semibold text-gray-900">{t("agd_recent_expenses")}</h2>
                     <Link href="/agent-pp" className="text-xs text-orange-600 hover:text-orange-700 font-medium">
                       {t("dash_view")} &rarr;
                     </Link>
                   </div>
                   <div className="divide-y">
-                    {agentStats.recentSales.map((sale: any) => (
-                      <div key={sale.id} className="px-5 py-3 flex items-center gap-3">
+                    {agentStats.recentSales.map((exp: any) => (
+                      <div key={exp.id} className="px-5 py-3 flex items-center gap-3">
                         <div className="w-2 h-2 rounded-full shrink-0 bg-orange-500" />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-900">{formatCurrency(sale.amount)}</span>
-                            {sale.exchangeEmail && <span className="text-[10px] text-gray-400 truncate">{sale.exchangeEmail}</span>}
+                            <span className="text-sm font-medium text-gray-900">-{formatCurrency(Number(exp.amount))}</span>
+                            <span className="text-[10px] text-gray-400">{exp.type === "TEAM_PAYMENT" ? "→ team" : exp.type === "BILL" ? "🧾 bill" : "◇ other"}</span>
                           </div>
                           <p className="text-[11px] text-gray-500 truncate">
-                            {sale.agentEmail?.email} &middot; {formatDate(sale.date)}
+                            {exp.referenceId} &middot; {formatDate(exp.date)}
                           </p>
                         </div>
-                        {sale.transactionId && (
-                          <span className="text-[10px] font-mono text-gray-400 max-w-[80px] truncate">{sale.transactionId}</span>
+                        {exp.note && (
+                          <span className="text-[10px] text-gray-400 italic max-w-[100px] truncate">{exp.note}</span>
                         )}
                       </div>
                     ))}

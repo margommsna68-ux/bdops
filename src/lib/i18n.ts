@@ -855,9 +855,11 @@ const translations: Record<string, Record<AppLanguage, string>> = {
 
   // ─── Agent Dashboard ───
   "agd_title": { en: "Agent Dashboard", vi: "Bảng điều khiển Đại lý" },
-  "agd_balance": { en: "Available Balance", vi: "Số dư khả dụng" },
+  "agd_balance": { en: "Wallet balance", vi: "Số dư Wallet" },
   "agd_total_received": { en: "Total Received", vi: "Tổng nhận" },
   "agd_total_sold": { en: "Total Sold", vi: "Tổng đã bán" },
+  "agd_total_expenses": { en: "Total Expenses", vi: "Tổng đã chi" },
+  "agd_recent_expenses": { en: "Recent expenses", vi: "Chi gần đây" },
   "agd_today_received": { en: "Received Today", vi: "Nhận hôm nay" },
   "agd_today_sold": { en: "Sold Today", vi: "Bán hôm nay" },
   "agd_pending": { en: "Pending", vi: "Chờ xác nhận" },

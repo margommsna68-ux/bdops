@@ -581,9 +581,15 @@ export const agentPPRouter = router({
   dashboardStats: agentPPProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
+
+      // Non-admin collector: pull emails cross-project (so dashboard matches /agent-pp wallet view)
+      // Admin/Moderator: scope to current project
       const myEmails = await ctx.prisma.agentPaypalEmail.findMany({
-        where: { userId: ctx.user.id, projectId: input.projectId },
-        select: { id: true, email: true, label: true },
+        where: isAdmin
+          ? { userId: ctx.user.id, projectId: input.projectId }
+          : { userId: ctx.user.id },
+        select: { id: true, email: true, label: true, projectId: true },
       });
       const myEmailIds = myEmails.map((e) => e.id);
 
@@ -592,47 +598,53 @@ export const agentPPRouter = router({
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
+      // Base where (cross-project for non-admin, scoped for admin)
+      const baseWhere: any = isAdmin
+        ? { projectId: input.projectId, type: "EXCHANGE" as const, agentEmailId: { in: myEmailIds } }
+        : { type: "EXCHANGE" as const, agentEmailId: { in: myEmailIds } };
+
+      const expenseWhere: any = isAdmin
+        ? { projectId: input.projectId, collectorId: ctx.user.id }
+        : { collectorId: ctx.user.id };
+
       const [
-        totalReceived, totalSold,
-        todayReceived, todaySold,
+        allWithdrawals,
+        allExpenses,
+        todayReceived,
         pendingCount, disputedCount, confirmedCount,
-        recentTransactions, recentSales,
+        recentTransactions,
+        recentSales,
       ] = await Promise.all([
-        // Total received
+        // All withdrawals (for net received + gross total)
+        ctx.prisma.withdrawal.findMany({
+          where: baseWhere,
+          select: { amount: true, paypalFee: true },
+        }),
+        // All expenses
+        ctx.prisma.collectorExpense.findMany({
+          where: expenseWhere,
+          select: { amount: true },
+        }),
+        // Today received (gross sum)
         ctx.prisma.withdrawal.aggregate({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds } },
-          _sum: { amount: true }, _count: true,
-        }),
-        // Total sold
-        ctx.prisma.agentSale.aggregate({
-          where: { projectId: input.projectId, agentUserId: ctx.user.id },
-          _sum: { amount: true }, _count: true,
-        }),
-        // Today received
-        ctx.prisma.withdrawal.aggregate({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds }, date: { gte: today, lt: tomorrow } },
-          _sum: { amount: true }, _count: true,
-        }),
-        // Today sold
-        ctx.prisma.agentSale.aggregate({
-          where: { projectId: input.projectId, agentUserId: ctx.user.id, date: { gte: today, lt: tomorrow } },
+          where: { ...baseWhere, date: { gte: today, lt: tomorrow } },
           _sum: { amount: true }, _count: true,
         }),
         // Pending (not confirmed, not disputed)
         ctx.prisma.withdrawal.count({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds }, agentConfirmed: false, agentDisputed: false },
+          where: { ...baseWhere, agentConfirmed: false, agentDisputed: false },
         }),
         // Disputed
         ctx.prisma.withdrawal.count({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds }, agentDisputed: true },
+          where: { ...baseWhere, agentDisputed: true },
         }),
         // Confirmed
         ctx.prisma.withdrawal.count({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds }, agentConfirmed: true },
+          where: { ...baseWhere, agentConfirmed: true },
         }),
         // Recent 5 transactions
         ctx.prisma.withdrawal.findMany({
-          where: { projectId: input.projectId, type: "EXCHANGE", agentEmailId: { in: myEmailIds } },
+          where: baseWhere,
           orderBy: { date: "desc" },
           take: 5,
           include: {
@@ -640,34 +652,42 @@ export const agentPPRouter = router({
             agentEmail: { select: { email: true, label: true } },
           },
         }),
-        // Recent 5 sales
-        ctx.prisma.agentSale.findMany({
-          where: { projectId: input.projectId, agentUserId: ctx.user.id },
+        // Recent 5 expenses (replaces "sales")
+        ctx.prisma.collectorExpense.findMany({
+          where: expenseWhere,
           orderBy: { date: "desc" },
           take: 5,
-          include: {
-            agentEmail: { select: { email: true, label: true } },
-          },
         }),
       ]);
 
-      const rcvd = Number(totalReceived._sum.amount ?? 0);
-      const sold = Number(totalSold._sum.amount ?? 0);
+      // Compute totals from withdrawals list (match /agent-pp wallet math)
+      let grossReceived = 0;
+      let totalFees = 0;
+      for (const w of allWithdrawals) {
+        grossReceived += Number(w.amount);
+        if (w.paypalFee != null) totalFees += Number(w.paypalFee);
+      }
+      const netReceived = grossReceived - totalFees;
+      const totalExpenses = allExpenses.reduce((s, e) => s + Number(e.amount), 0);
+      const walletBalance = netReceived - totalExpenses;
 
       return {
         emails: myEmails,
-        totalReceived: rcvd,
-        totalSold: sold,
-        balance: rcvd - sold,
-        transactionCount: totalReceived._count,
-        saleCount: totalSold._count,
+        totalReceived: grossReceived,          // legacy name, now = gross
+        totalSold: totalExpenses,              // legacy name, now = total expenses
+        balance: walletBalance,                 // now = wallet balance (net - expenses)
+        transactionCount: allWithdrawals.length,
+        saleCount: allExpenses.length,          // legacy name, now = expenses count
+        netReceived,
+        totalExpenses,
+        walletBalance,
         todayReceived: { amount: Number(todayReceived._sum.amount ?? 0), count: todayReceived._count },
-        todaySold: { amount: Number(todaySold._sum.amount ?? 0), count: todaySold._count },
+        todaySold: { amount: 0, count: 0 },     // legacy field kept for compatibility
         pendingCount,
         disputedCount,
         confirmedCount,
         recentTransactions,
-        recentSales,
+        recentSales,                            // actually expenses now, kept name for UI compat
       };
     }),
 
