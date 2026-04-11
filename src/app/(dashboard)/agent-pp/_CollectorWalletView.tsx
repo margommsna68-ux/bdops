@@ -81,8 +81,10 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
 
   const [showHistory, setShowHistory] = useState(true);
   const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
-  const [historySortKey, setHistorySortKey] = useState<"date" | "amount" | "type" | "ref">("date");
+  const [historySortKey, setHistorySortKey] = useState<"date" | "amount">("date");
   const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
+  const [historyTypeFilter, setHistoryTypeFilter] = useState<"all" | ExpenseType>("all");
+  const [historySearch, setHistorySearch] = useState("");
 
   // ─── PIN verification for destructive actions only (not on page entry) ───
   // Login already triggers PinGate globally — no need to re-prompt on page mount.
@@ -659,49 +661,109 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
           <span className="text-xs text-gray-500">{showHistory ? t("history_hide") : t("history_show")}</span>
         </button>
         {showHistory && (() => {
-          // Sort expenses
-          const sortedExpenses = [...(expenses ?? [])].sort((a: any, b: any) => {
+          const allExpenses = expenses ?? [];
+          // Build type counts + totals for filter pills
+          const typeStats: Record<string, { count: number; total: number }> = {
+            all: { count: allExpenses.length, total: allExpenses.reduce((s: number, e: any) => s + Number(e.amount), 0) },
+            TEAM_PAYMENT: { count: 0, total: 0 },
+            BILL: { count: 0, total: 0 },
+            OTHER: { count: 0, total: 0 },
+          };
+          for (const e of allExpenses) {
+            const t = e.type as string;
+            if (typeStats[t]) {
+              typeStats[t].count++;
+              typeStats[t].total += Number(e.amount);
+            }
+          }
+
+          // Apply filter + search + sort
+          const searchLower = historySearch.trim().toLowerCase();
+          const filteredExpenses = allExpenses
+            .filter((e: any) => historyTypeFilter === "all" || e.type === historyTypeFilter)
+            .filter((e: any) => {
+              if (!searchLower) return true;
+              return (
+                (e.referenceId ?? "").toLowerCase().includes(searchLower) ||
+                (e.note ?? "").toLowerCase().includes(searchLower)
+              );
+            });
+          const sortedExpenses = [...filteredExpenses].sort((a: any, b: any) => {
             const dir = historySortDir === "asc" ? 1 : -1;
             let av: any, bv: any;
-            switch (historySortKey) {
-              case "date": av = a.date; bv = b.date; break;
-              case "amount": av = Number(a.amount); bv = Number(b.amount); break;
-              case "type": av = a.type; bv = b.type; break;
-              case "ref": av = a.referenceId ?? ""; bv = b.referenceId ?? ""; break;
-            }
-            if (av == null) return 1;
-            if (bv == null) return -1;
+            if (historySortKey === "date") { av = a.date; bv = b.date; }
+            else { av = Number(a.amount); bv = Number(b.amount); }
             if (av < bv) return -1 * dir;
             if (av > bv) return 1 * dir;
             return 0;
           });
 
-          const sortBtn = (key: typeof historySortKey, label: string) => {
-            const active = historySortKey === key;
+          const typeFilterBtn = (key: "all" | ExpenseType, label: string, color: string) => {
+            const stat = typeStats[key];
+            const active = historyTypeFilter === key;
             return (
               <button
                 key={key}
                 type="button"
-                onClick={() => {
-                  if (active) setHistorySortDir((d) => (d === "asc" ? "desc" : "asc"));
-                  else { setHistorySortKey(key); setHistorySortDir("desc"); }
-                }}
-                className={`text-[11px] px-2 py-1 rounded ${active ? "bg-blue-100 text-blue-700 font-semibold" : "text-gray-500 hover:bg-gray-100"}`}
+                onClick={() => setHistoryTypeFilter(key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
+                  active ? `${color} ring-2 ring-offset-1` : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+                }`}
               >
-                {label} {active ? (historySortDir === "asc" ? "▲" : "▼") : ""}
+                <span>{label}</span>
+                <span className="text-[10px] opacity-70">({stat.count})</span>
+                <span className="text-[11px] font-mono">{formatCurrency(stat.total)}</span>
               </button>
             );
           };
 
           return (
           <>
-            {/* Sort bar */}
-            <div className="flex items-center gap-1 px-4 py-2 border-b bg-gray-50">
-              <span className="text-[11px] text-gray-400 mr-2">Sort:</span>
-              {sortBtn("date", "Date")}
-              {sortBtn("amount", "Amount")}
-              {sortBtn("type", "Type")}
-              {sortBtn("ref", "Ref")}
+            {/* Type filter pills (with count + total per type) */}
+            <div className="px-4 py-3 border-b bg-gray-50 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {typeFilterBtn("all", "📋 All", "bg-blue-100 text-blue-700 border-blue-300")}
+                {typeFilterBtn("TEAM_PAYMENT", "→ Team", EXPENSE_STYLES.TEAM_PAYMENT.color)}
+                {typeFilterBtn("BILL", "🧾 Bills", EXPENSE_STYLES.BILL.color)}
+                {typeFilterBtn("OTHER", "◇ Other", EXPENSE_STYLES.OTHER.color)}
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Search */}
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(ev) => setHistorySearch(ev.target.value)}
+                  placeholder="🔍 Search by reference ID or note..."
+                  className="flex-1 h-8 px-3 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {/* Sort toggle buttons — only 2 meaningful sorts */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (historySortKey === "date") setHistorySortDir((d) => (d === "asc" ? "desc" : "asc"));
+                    else { setHistorySortKey("date"); setHistorySortDir("desc"); }
+                  }}
+                  className={`text-[11px] px-2.5 py-1.5 rounded border font-semibold whitespace-nowrap ${
+                    historySortKey === "date" ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-white text-gray-500 border-gray-200"
+                  }`}
+                  title="Sort by date"
+                >
+                  Date {historySortKey === "date" ? (historySortDir === "asc" ? "↑" : "↓") : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (historySortKey === "amount") setHistorySortDir((d) => (d === "asc" ? "desc" : "asc"));
+                    else { setHistorySortKey("amount"); setHistorySortDir("desc"); }
+                  }}
+                  className={`text-[11px] px-2.5 py-1.5 rounded border font-semibold whitespace-nowrap ${
+                    historySortKey === "amount" ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-white text-gray-500 border-gray-200"
+                  }`}
+                  title="Sort by amount"
+                >
+                  Amount {historySortKey === "amount" ? (historySortDir === "asc" ? "↑" : "↓") : ""}
+                </button>
+              </div>
             </div>
             <div className="divide-y">
               {sortedExpenses.length === 0 ? (
