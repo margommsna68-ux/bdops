@@ -355,38 +355,34 @@ export default function DashboardPage() {
       {showAgentPP && agentStats && (agentStats.transactionCount > 0 || agentStats.emails.length > 0 || agentStats.balance > 0) && (
         <>
           {/* Agent Hero Balance */}
-          <div className="bg-gradient-to-r from-orange-500 to-amber-500 rounded-2xl shadow-lg overflow-hidden">
+          <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-2xl shadow-lg overflow-hidden">
             <div className="px-6 py-5 flex flex-col md:flex-row md:items-center gap-6">
               <div className="flex-1 text-center md:text-left">
-                <p className="text-orange-100 text-sm font-medium">{t("agd_balance")}</p>
+                <p className="text-blue-200 text-sm font-semibold uppercase tracking-wide">💰 {t("agd_balance")}</p>
                 <p className="text-4xl font-extrabold text-white mt-1">
                   {formatCurrency(agentStats.balance)}
                 </p>
-                <div className="flex items-center gap-4 mt-2 justify-center md:justify-start">
-                  <span className="text-orange-100 text-xs">
-                    {agentStats.emails.length} email{agentStats.emails.length !== 1 ? "s" : ""}
-                  </span>
-                  <span className="text-orange-200">|</span>
-                  <span className="text-orange-100 text-xs">
-                    {agentStats.transactionCount} {t("agd_transactions")}
-                  </span>
+                <div className="flex items-center gap-4 mt-2 justify-center md:justify-start text-blue-100 text-xs">
+                  <span>{agentStats.emails.length} email{agentStats.emails.length !== 1 ? "s" : ""}</span>
+                  <span className="text-blue-300">|</span>
+                  <span>{agentStats.transactionCount} {t("agd_transactions")}</span>
                 </div>
               </div>
-              <div className="flex gap-4 md:gap-6">
-                <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
-                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_received")}</p>
-                  <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency(agentStats.totalReceived)}</p>
-                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.transactionCount} {t("stats_txns")}</p>
+              <div className="flex gap-3 md:gap-4 flex-wrap">
+                <div className="bg-white rounded-xl px-5 py-3 text-center min-w-[130px] shadow-md">
+                  <p className="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">{t("agd_total_received")}</p>
+                  <p className="text-2xl font-bold text-green-700 mt-0.5">{formatCurrency(agentStats.totalReceived)}</p>
+                  <p className="text-gray-500 text-[10px] mt-0.5">{agentStats.transactionCount} {t("stats_txns")}</p>
                 </div>
-                <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
-                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_commission")}</p>
-                  <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency((agentStats as any).totalCommission ?? 0)}</p>
-                  <p className="text-orange-200 text-[10px] mt-0.5">{t("agd_commission_sub")}</p>
+                <div className="bg-white rounded-xl px-5 py-3 text-center min-w-[130px] shadow-md">
+                  <p className="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">{t("agd_commission")}</p>
+                  <p className="text-2xl font-bold text-purple-700 mt-0.5">{formatCurrency((agentStats as any).totalCommission ?? 0)}</p>
+                  <p className="text-gray-500 text-[10px] mt-0.5">{t("agd_commission_sub")}</p>
                 </div>
-                <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
-                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_expenses")}</p>
-                  <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency(agentStats.totalSold)}</p>
-                  <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.saleCount}</p>
+                <div className="bg-white rounded-xl px-5 py-3 text-center min-w-[130px] shadow-md">
+                  <p className="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">{t("agd_total_expenses")}</p>
+                  <p className="text-2xl font-bold text-red-600 mt-0.5">{formatCurrency(agentStats.totalSold)}</p>
+                  <p className="text-gray-500 text-[10px] mt-0.5">{agentStats.saleCount} {t("agd_expense_entries")}</p>
                 </div>
               </div>
             </div>
