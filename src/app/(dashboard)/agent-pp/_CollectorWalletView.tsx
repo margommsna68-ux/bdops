@@ -61,7 +61,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   const [period, setPeriod] = useState<Period>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "unconfirmed" | "unpaid" | "paid">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unconfirmed" | "confirmed">("all");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -173,8 +173,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
       }
       const confirmed = t.matchedPaypalFee != null;
       if (statusFilter === "unconfirmed" && confirmed) return false;
-      if (statusFilter === "unpaid" && (t.paidToTeam || !confirmed)) return false;
-      if (statusFilter === "paid" && !t.paidToTeam) return false;
+      if (statusFilter === "confirmed" && !confirmed) return false;
       return true;
     });
   }, [items, period, customFrom, customTo, statusFilter]);
@@ -233,12 +232,16 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
       acc.received += t.confirmed ? t.net : t.gross;
       acc.commissionEarned += t.confirmed ? t.commission : 0;
       acc.txCount += 1;
-      if (!t.confirmed) { acc.unconfirmedCount++; acc.unconfirmedAmount += t.gross; }
-      else if (t.paidToTeam) acc.paidCount++;
-      else { acc.owedToTeam += t.totalAfterFee; acc.unpaidCount++; }
+      if (!t.confirmed) {
+        acc.unconfirmedCount++;
+        acc.unconfirmedAmount += t.gross;
+      } else {
+        acc.confirmedCount++;
+        acc.owedToTeam += t.totalAfterFee;
+      }
       return acc;
     },
-    { received: 0, commissionEarned: 0, owedToTeam: 0, txCount: 0, paidCount: 0, unpaidCount: 0, unconfirmedCount: 0, unconfirmedAmount: 0 }
+    { received: 0, commissionEarned: 0, owedToTeam: 0, txCount: 0, confirmedCount: 0, unconfirmedCount: 0, unconfirmedAmount: 0 }
   );
 
   // Single-collector header hoist
@@ -254,8 +257,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
-  const selectAllUnpaid = () => {
-    const ids = enriched.filter((t: any) => !t.paidToTeam && t.confirmed).map((t: any) => t.id);
+  // Select all confirmed rows (any with fee entered)
+  const selectAllConfirmed = () => {
+    const ids = enriched.filter((t: any) => t.confirmed).map((t: any) => t.id);
     setSelectedIds(new Set(ids));
   };
   const clearSelection = () => setSelectedIds(new Set());
@@ -320,7 +324,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       {/* ─── WALLET (all-time) ─── */}
-      <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-xl shadow-lg text-white p-5">
+      <div className={`bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-xl shadow-lg text-white p-5 ${
+        totals.unconfirmedCount > 0 ? "ring-4 ring-orange-400/60 animate-pulse" : ""
+      }`}>
         <div className="flex items-start justify-between">
           <div>
             <div className="text-[11px] font-semibold text-blue-200 uppercase tracking-wider">💰 {t("wallet_title")}</div>
@@ -328,6 +334,11 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
             <div className="text-xs text-blue-200 mt-1">
               = {t("wallet_team_share")} {formatCurrency(totalAfterFee)} − {t("wallet_total_spent")} {formatCurrency(totalExpenses)}
             </div>
+            {totals.unconfirmedCount > 0 && (
+              <div className="mt-2 inline-block px-2 py-0.5 bg-orange-500/80 text-white text-[10px] font-semibold rounded">
+                ⚠ {totals.unconfirmedCount} {t("wallet_needs_fee")}
+              </div>
+            )}
           </div>
           <Button
             size="sm"
@@ -391,13 +402,13 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
         <div className="text-[10px] font-semibold text-gray-400 uppercase mb-2">
           {t("stats_title")} — {period === "all" ? t("period_all") : period === "today" ? t("period_today") : period === "week" ? t("period_week") : period === "month" ? t("period_month") : t("period_custom")}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="text-center py-3 bg-green-50 rounded-lg">
             <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">{t("stats_received")}</div>
             <div className="text-xl font-bold text-green-700">{formatCurrency(totals.received)}</div>
             <div className="text-[10px] text-green-600 mt-0.5">{totals.txCount} {t("stats_txns")}</div>
           </div>
-          <div className={`text-center py-3 rounded-lg ${totals.unconfirmedCount > 0 ? "bg-orange-50 ring-2 ring-orange-300" : "bg-gray-50"}`}>
+          <div className={`text-center py-3 rounded-lg ${totals.unconfirmedCount > 0 ? "bg-orange-50 ring-2 ring-orange-300 animate-pulse" : "bg-gray-50"}`}>
             <div className={`text-[10px] font-semibold uppercase mb-1 ${totals.unconfirmedCount > 0 ? "text-orange-700" : "text-gray-500"}`}>
               {t("stats_unconfirmed")}
             </div>
@@ -413,15 +424,10 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
             <div className="text-xl font-bold text-purple-700">{formatCurrency(totals.commissionEarned)}</div>
             <div className="text-[10px] text-purple-600 mt-0.5">{t("stats_commission_earned_sub")}</div>
           </div>
-          <div className="text-center py-3 bg-amber-50 rounded-lg">
-            <div className="text-[10px] font-semibold text-amber-600 uppercase mb-1">{t("stats_pending")}</div>
-            <div className="text-xl font-bold text-amber-700">{formatCurrency(totals.owedToTeam)}</div>
-            <div className="text-[10px] text-amber-600 mt-0.5">{totals.unpaidCount} {t("stats_txns")}</div>
-          </div>
           <div className="text-center py-3 bg-emerald-50 rounded-lg">
-            <div className="text-[10px] font-semibold text-emerald-600 uppercase mb-1">{t("stats_processed")}</div>
-            <div className="text-xl font-bold text-emerald-700">{totals.paidCount}</div>
-            <div className="text-[10px] text-emerald-600 mt-0.5">{t("stats_txns")}</div>
+            <div className="text-[10px] font-semibold text-emerald-600 uppercase mb-1">{t("filter_confirmed")}</div>
+            <div className="text-xl font-bold text-emerald-700">{formatCurrency(totals.owedToTeam)}</div>
+            <div className="text-[10px] text-emerald-600 mt-0.5">{totals.confirmedCount} {t("stats_txns")}</div>
           </div>
         </div>
       </div>
@@ -433,8 +439,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
             {[
               { key: "all", label: `${t("filter_all")} (${enriched.length})` },
               { key: "unconfirmed", label: `${t("filter_unconfirmed")} (${totals.unconfirmedCount})` },
-              { key: "unpaid", label: `${t("filter_pending")} (${totals.unpaidCount})` },
-              { key: "paid", label: `${t("filter_processed")} (${totals.paidCount})` },
+              { key: "confirmed", label: `${t("filter_confirmed")} (${totals.confirmedCount})` },
             ].map((s: any) => (
               <button
                 key={s.key}
@@ -447,9 +452,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
               </button>
             ))}
           </div>
-          {totals.unpaidCount > 0 && statusFilter !== "paid" && statusFilter !== "unconfirmed" && (
-            <button onClick={selectAllUnpaid} className="text-xs text-blue-600 hover:underline">
-              {t("filter_select_all_pending")}
+          {totals.confirmedCount > 0 && statusFilter !== "unconfirmed" && (
+            <button onClick={selectAllConfirmed} className="text-xs text-blue-600 hover:underline">
+              {t("filter_select_all_confirmed")}
             </button>
           )}
         </div>
@@ -479,8 +484,8 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 <th className="px-3 py-2 w-8 text-center">
                   <input
                     type="checkbox"
-                    checked={enriched.length > 0 && selectedIds.size === enriched.filter((t: any) => !t.paidToTeam && t.confirmed).length && enriched.some((t: any) => !t.paidToTeam && t.confirmed)}
-                    onChange={(e) => { if (e.target.checked) selectAllUnpaid(); else clearSelection(); }}
+                    checked={enriched.length > 0 && selectedIds.size === enriched.filter((t: any) => t.confirmed).length && enriched.some((t: any) => t.confirmed)}
+                    onChange={(e) => { if (e.target.checked) selectAllConfirmed(); else clearSelection(); }}
                   />
                 </th>
                 <SortTh label={t("th_date")} k="date" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-gray-600" align="left" />
@@ -510,14 +515,12 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 <tr><td colSpan={13} className="text-center py-8 text-gray-400">{t("cell_no_transactions")}</td></tr>
               ) : (
                 enriched.map((tx: any) => (
-                  <tr key={tx.id} className={`hover:bg-gray-50 ${!tx.confirmed ? "bg-orange-50/40" : tx.paidToTeam ? "bg-emerald-50/30" : ""}`}>
+                  <tr key={tx.id} className={`hover:bg-gray-50 ${!tx.confirmed ? "bg-orange-50/40" : ""}`}>
                     <td className="px-3 py-2 text-center">
                       {!tx.confirmed ? (
                         <span className="text-orange-400">⏳</span>
-                      ) : !tx.paidToTeam ? (
-                        <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} />
                       ) : (
-                        <span className="text-emerald-500">✓</span>
+                        <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} />
                       )}
                     </td>
                     <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
@@ -566,8 +569,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                           </button>
                         ) : (
                           <button
-                            disabled={tx.paidToTeam}
-                            onClick={() => { if (tx.paidToTeam) return; setEditingFeeId(tx.id); setEditingFeeValue(String(tx.fee)); }}
+                            onClick={() => { setEditingFeeId(tx.id); setEditingFeeValue(String(tx.fee)); }}
                             className="text-red-600 hover:bg-blue-50 rounded px-1"
                           >
                             -{formatCurrency(tx.fee)}
@@ -589,11 +591,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                     <td className="px-2 py-2 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">{tx.confirmed ? formatCurrency(tx.totalAfterFee) : <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-center">
                       {!tx.confirmed ? (
-                        <Badge variant="outline" className="border-orange-500 text-orange-700 text-[10px]">{t("badge_unconfirmed")}</Badge>
-                      ) : tx.paidToTeam ? (
-                        <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">{t("badge_processed")}</Badge>
+                        <Badge variant="outline" className="border-orange-500 text-orange-700 text-[10px] animate-pulse">{t("badge_unconfirmed")}</Badge>
                       ) : (
-                        <Badge variant="outline" className="border-amber-500 text-amber-700 text-[10px]">{t("badge_pending")}</Badge>
+                        <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">{t("badge_confirmed")}</Badge>
                       )}
                     </td>
                     <td className="px-2 py-2 text-xs">

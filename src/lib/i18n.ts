@@ -234,9 +234,13 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   // ─── Status filter tabs ───
   "filter_all": { en: "All", vi: "Tất cả" },
   "filter_unconfirmed": { en: "⏳ Unconfirmed", vi: "⏳ Chưa confirm" },
+  "filter_confirmed": { en: "Confirmed", vi: "Đã confirm" },
   "filter_pending": { en: "Pending", vi: "Chưa xử lý" },
   "filter_processed": { en: "Processed", vi: "Đã xử lý" },
   "filter_select_all_pending": { en: "Select all pending", vi: "Chọn tất cả chưa xử lý" },
+  "filter_select_all_confirmed": { en: "Select all confirmed", vi: "Chọn tất cả đã confirm" },
+  "badge_confirmed": { en: "✓ Confirmed", vi: "✓ Đã confirm" },
+  "wallet_needs_fee": { en: "need fee entry", vi: "cần nhập fee" },
 
   // ─── Bulk action bar ───
   "bulk_selected": { en: "Selected", vi: "Đã chọn" },
