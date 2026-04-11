@@ -379,6 +379,11 @@ export default function DashboardPage() {
                   <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.transactionCount} {t("stats_txns")}</p>
                 </div>
                 <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
+                  <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_commission")}</p>
+                  <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency((agentStats as any).totalCommission ?? 0)}</p>
+                  <p className="text-orange-200 text-[10px] mt-0.5">{t("agd_commission_sub")}</p>
+                </div>
+                <div className="bg-white/15 backdrop-blur rounded-xl px-5 py-3 text-center min-w-[120px]">
                   <p className="text-orange-100 text-[11px] font-medium uppercase tracking-wide">{t("agd_total_expenses")}</p>
                   <p className="text-2xl font-bold text-white mt-0.5">{formatCurrency(agentStats.totalSold)}</p>
                   <p className="text-orange-200 text-[10px] mt-0.5">{agentStats.saleCount}</p>

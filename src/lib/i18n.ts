@@ -865,6 +865,8 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "agd_total_sold": { en: "Total Sold", vi: "Tổng đã bán" },
   "agd_total_expenses": { en: "Total Expenses", vi: "Tổng đã chi" },
   "agd_recent_expenses": { en: "Recent expenses", vi: "Chi gần đây" },
+  "agd_commission": { en: "Commission", vi: "Commission" },
+  "agd_commission_sub": { en: "your share", vi: "phần của bạn" },
   "agd_today_received": { en: "Received Today", vi: "Nhận hôm nay" },
   "agd_today_sold": { en: "Sold Today", vi: "Bán hôm nay" },
   "agd_pending": { en: "Pending", vi: "Chờ xác nhận" },

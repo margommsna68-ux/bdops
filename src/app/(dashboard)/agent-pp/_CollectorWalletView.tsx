@@ -5,12 +5,13 @@
 // Wallet-centric: received → wallet balance → flexible expenses (team/bill/other)
 // ═══════════════════════════════════════════════════════════════════════
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { formatCurrency } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { PinVerifyDialog } from "@/components/PinVerify";
 import toast from "react-hot-toast";
 
 type ExpenseType = "TEAM_PAYMENT" | "BILL" | "OTHER";
@@ -80,6 +81,34 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
 
   const [showHistory, setShowHistory] = useState(true);
   const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
+  const [historySortKey, setHistorySortKey] = useState<"date" | "amount" | "type" | "ref">("date");
+  const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
+
+  // ─── PIN verification (page-level, once per session) ───
+  const [pinVerified, setPinVerified] = useState(() => {
+    if (typeof window !== "undefined") return sessionStorage.getItem("collector_pin_ok") === "1";
+    return false;
+  });
+  const [showPinDialog, setShowPinDialog] = useState(false);
+  const [pendingPinAction, setPendingPinAction] = useState<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (projectId && !pinVerified) setShowPinDialog(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const handlePinSuccess = () => {
+    setPinVerified(true);
+    sessionStorage.setItem("collector_pin_ok", "1");
+    setShowPinDialog(false);
+    if (pendingPinAction) { pendingPinAction(); setPendingPinAction(null); }
+  };
+
+  const requirePinOnce = (action: () => void) => {
+    if (pinVerified) { action(); return; }
+    setPendingPinAction(() => action);
+    setShowPinDialog(true);
+  };
 
   // ─── Queries ────────────────────────────────────────────────────
   const { data: txData, isLoading } = trpc.agentPP.myTransactions.useQuery(
@@ -638,62 +667,124 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
           <h3 className="text-sm font-semibold text-gray-800">{t("history_title")} ({expenses?.length ?? 0})</h3>
           <span className="text-xs text-gray-500">{showHistory ? t("history_hide") : t("history_show")}</span>
         </button>
-        {showHistory && (
-          <div className="divide-y">
-            {(expenses ?? []).length === 0 ? (
-              <p className="p-6 text-center text-sm text-gray-400">{t("history_empty")}</p>
-            ) : (
-              (expenses ?? []).map((exp: any) => {
-                const isExpanded = expandedExpenseId === exp.id;
-                const style = EXPENSE_STYLES[exp.type as ExpenseType] ?? EXPENSE_STYLES.OTHER;
-                return (
-                  <div key={exp.id} className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => setExpandedExpenseId(isExpanded ? null : exp.id)}
-                        className="flex-1 flex items-center justify-between hover:bg-gray-50 rounded px-2 py-1 -mx-2 text-left"
-                      >
-                        <div className="flex items-center gap-3 text-sm flex-wrap">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${style.color}`}>
-                            {style.icon} {t(style.key as any)}
-                          </span>
-                          <span className="text-gray-600 text-xs">{new Date(exp.date).toLocaleDateString("en-US")}</span>
-                          <span className="font-mono text-blue-700 text-xs">{exp.referenceId}</span>
-                          {exp.withdrawals?.length > 0 && <span className="text-gray-500 text-xs">({exp.withdrawals.length} {t("history_linked_count")})</span>}
-                          {exp.note && <span className="text-gray-400 italic text-xs">{exp.note}</span>}
-                        </div>
-                        <div className="flex items-center gap-3 text-sm">
-                          <span className="text-red-600 font-bold">-{formatCurrency(Number(exp.amount))}</span>
-                          <span className="text-gray-400 text-xs">{isExpanded ? "▲" : "▼"}</span>
-                        </div>
-                      </button>
-                      <button
-                        onClick={() => { if (confirm(t("history_delete_confirm"))) deleteExpenseMut.mutate({ projectId, id: exp.id }); }}
-                        className="text-gray-300 hover:text-red-500 px-1"
-                        title={t("history_delete_title")}
-                      >×</button>
-                    </div>
-                    {isExpanded && exp.withdrawals?.length > 0 && (
-                      <div className="mt-2 ml-4 bg-gray-50 rounded p-2">
-                        <div className="text-[11px] font-semibold text-gray-600 mb-1">{t("history_linked_label")}</div>
-                        <div className="space-y-1">
-                          {exp.withdrawals.map((w: any) => (
-                            <div key={w.id} className="flex items-center justify-between text-xs">
-                              <span className="font-mono text-gray-500">{w.transactionId || "—"}</span>
-                              <span className="text-gray-600">{w.sourcePaypal?.code}</span>
-                              <span className="font-semibold text-green-700">{formatCurrency(Number(w.amount))}</span>
-                            </div>
-                          ))}
-                        </div>
+        {showHistory && (() => {
+          // Sort expenses
+          const sortedExpenses = [...(expenses ?? [])].sort((a: any, b: any) => {
+            const dir = historySortDir === "asc" ? 1 : -1;
+            let av: any, bv: any;
+            switch (historySortKey) {
+              case "date": av = a.date; bv = b.date; break;
+              case "amount": av = Number(a.amount); bv = Number(b.amount); break;
+              case "type": av = a.type; bv = b.type; break;
+              case "ref": av = a.referenceId ?? ""; bv = b.referenceId ?? ""; break;
+            }
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            if (av < bv) return -1 * dir;
+            if (av > bv) return 1 * dir;
+            return 0;
+          });
+
+          const sortBtn = (key: typeof historySortKey, label: string) => {
+            const active = historySortKey === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  if (active) setHistorySortDir((d) => (d === "asc" ? "desc" : "asc"));
+                  else { setHistorySortKey(key); setHistorySortDir("desc"); }
+                }}
+                className={`text-[11px] px-2 py-1 rounded ${active ? "bg-blue-100 text-blue-700 font-semibold" : "text-gray-500 hover:bg-gray-100"}`}
+              >
+                {label} {active ? (historySortDir === "asc" ? "▲" : "▼") : ""}
+              </button>
+            );
+          };
+
+          return (
+          <>
+            {/* Sort bar */}
+            <div className="flex items-center gap-1 px-4 py-2 border-b bg-gray-50">
+              <span className="text-[11px] text-gray-400 mr-2">Sort:</span>
+              {sortBtn("date", "Date")}
+              {sortBtn("amount", "Amount")}
+              {sortBtn("type", "Type")}
+              {sortBtn("ref", "Ref")}
+            </div>
+            <div className="divide-y">
+              {sortedExpenses.length === 0 ? (
+                <p className="p-6 text-center text-sm text-gray-400">{t("history_empty")}</p>
+              ) : (
+                sortedExpenses.map((exp: any) => {
+                  const isExpanded = expandedExpenseId === exp.id;
+                  const style = EXPENSE_STYLES[exp.type as ExpenseType] ?? EXPENSE_STYLES.OTHER;
+                  return (
+                    <div key={exp.id} className="px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => setExpandedExpenseId(isExpanded ? null : exp.id)}
+                          className="flex-1 flex items-center justify-between hover:bg-gray-50 rounded px-2 py-1 -mx-2 text-left"
+                        >
+                          <div className="flex items-center gap-3 text-sm flex-wrap">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${style.color}`}>
+                              {style.icon} {t(style.key as any)}
+                            </span>
+                            <span className="text-gray-600 text-xs">{new Date(exp.date).toLocaleDateString("en-US")}</span>
+                            <span className="font-mono text-blue-700 text-xs">{exp.referenceId}</span>
+                            {exp.withdrawals?.length > 0 && <span className="text-gray-500 text-xs">({exp.withdrawals.length} {t("history_linked_count")})</span>}
+                            {exp.note && <span className="text-gray-400 italic text-xs">{exp.note}</span>}
+                          </div>
+                          <span className="text-red-600 font-bold text-sm">-{formatCurrency(Number(exp.amount))}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            requirePinOnce(() => {
+                              if (confirm(t("history_delete_confirm"))) {
+                                deleteExpenseMut.mutate({ projectId, id: exp.id });
+                              }
+                            });
+                          }}
+                          className="text-gray-300 hover:text-red-500 px-1"
+                          title={t("history_delete_title")}
+                        >×</button>
                       </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+                      {isExpanded && exp.withdrawals?.length > 0 && (
+                        <div className="mt-2 ml-4 bg-gray-50 rounded p-2">
+                          <div className="text-[11px] font-semibold text-gray-600 mb-1">{t("history_linked_label")}</div>
+                          <div className="space-y-1">
+                            {exp.withdrawals.map((w: any) => (
+                              <div key={w.id} className="flex items-center justify-between text-xs">
+                                <span className="font-mono text-gray-500">{w.transactionId || "—"}</span>
+                                <span className="text-gray-600">{w.sourcePaypal?.code}</span>
+                                <span className="font-semibold text-green-700">{formatCurrency(Number(w.amount))}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+          );
+        })()}
       </div>
+
+      {/* ─── PIN verification dialog (page-level) ─── */}
+      <PinVerifyDialog
+        open={showPinDialog}
+        onClose={() => {
+          setShowPinDialog(false);
+          setPendingPinAction(null);
+        }}
+        onVerified={handlePinSuccess}
+        title="PIN Required"
+        description="Enter your PIN to continue"
+        required={!pinVerified}
+      />
 
       {/* ─── Expense Dialog ─── */}
       {dialogOpen && (
