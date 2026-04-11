@@ -1,12 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import toast from "react-hot-toast";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell,
@@ -16,9 +20,30 @@ const PIE_COLORS = ["#22c55e", "#eab308", "#ef4444", "#6b7280", "#3b82f6", "#8b5
 
 export default function DashboardPage() {
   const t = useT();
+  const utils = trpc.useUtils();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const currentRole = useProjectStore((s) => s.currentRole);
   const currentModules = useProjectStore((s) => s.currentModules);
+
+  // Inline email management for collector on dashboard
+  const [newAgentEmail, setNewAgentEmail] = useState("");
+  const [newAgentLabel, setNewAgentLabel] = useState("");
+  const addAgentEmail = trpc.agentPP.addEmail.useMutation({
+    onSuccess: () => {
+      utils.agentPP.dashboardStats.invalidate();
+      setNewAgentEmail("");
+      setNewAgentLabel("");
+      toast.success(t("agd_email_added"));
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const removeAgentEmail = trpc.agentPP.removeEmail.useMutation({
+    onSuccess: () => {
+      utils.agentPP.dashboardStats.invalidate();
+      toast.success(t("agd_email_removed"));
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const isAdminOrMod = currentRole === "ADMIN" || currentRole === "MODERATOR";
   const hasModule = (mod: string) => isAdminOrMod || currentModules.includes(mod);
@@ -419,32 +444,82 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Your PayPal Emails */}
-            {agentStats.emails.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-base font-medium text-gray-900">{t("agd_your_emails")}</h2>
-                  <Link href="/agent-pp" className="text-xs text-orange-600 hover:text-orange-700 font-medium">
-                    {t("edit")} &rarr;
-                  </Link>
-                </div>
-                <div className="space-y-2">
-                  {agentStats.emails.map((em: any) => (
-                    <div key={em.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
-                        <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                        </svg>
+            {/* Your PayPal emails & links — inline editable */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-medium text-gray-900">{t("agd_your_emails")}</h2>
+                <span className="text-xs text-gray-400">{agentStats.emails.length}</span>
+              </div>
+              <div className="space-y-2">
+                {agentStats.emails.map((em: any) => {
+                  const isLink = em.email.startsWith("http://") || em.email.startsWith("https://");
+                  return (
+                    <div key={em.id} className="group flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100 hover:bg-gray-100">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isLink ? "bg-blue-100" : "bg-orange-100"}`}>
+                        {isLink ? (
+                          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{em.email}</p>
+                        {isLink ? (
+                          <a href={em.email} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline truncate block">{em.email}</a>
+                        ) : (
+                          <p className="text-sm font-medium text-gray-900 truncate">{em.email}</p>
+                        )}
                         {em.label && <p className="text-[11px] text-gray-500">{em.label}</p>}
                       </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(t("agd_email_remove_confirm").replace("{email}", em.email))) {
+                            removeAgentEmail.mutate({ projectId: projectId!, id: em.id });
+                          }
+                        }}
+                        className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        title="Remove"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            )}
+              {/* Add new */}
+              <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-gray-100">
+                <Input
+                  value={newAgentEmail}
+                  onChange={(e) => setNewAgentEmail(e.target.value)}
+                  placeholder={t("agd_add_email_placeholder")}
+                  className="h-8 text-xs flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newAgentEmail.trim()) {
+                      addAgentEmail.mutate({ projectId: projectId!, email: newAgentEmail.trim(), label: newAgentLabel.trim() || undefined });
+                    }
+                  }}
+                />
+                <Input
+                  value={newAgentLabel}
+                  onChange={(e) => setNewAgentLabel(e.target.value)}
+                  placeholder="label"
+                  className="h-8 text-xs w-20"
+                />
+                <Button
+                  size="sm"
+                  className="h-8 text-xs px-3"
+                  disabled={!newAgentEmail.trim() || addAgentEmail.isLoading}
+                  onClick={() => addAgentEmail.mutate({ projectId: projectId!, email: newAgentEmail.trim(), label: newAgentLabel.trim() || undefined })}
+                >
+                  {addAgentEmail.isLoading ? "..." : t("agd_add_email_btn")}
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Recent Transactions + Recent Sales */}

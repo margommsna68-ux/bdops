@@ -16,7 +16,7 @@ export const agentPPRouter = router({
   addEmail: agentPPProcedure
     .input(z.object({
       projectId: z.string(),
-      email: z.string().email(),
+      email: z.string().min(1), // email OR link (paypal.me, bank URL)
       label: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {

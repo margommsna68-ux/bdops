@@ -873,7 +873,12 @@ const translations: Record<string, Record<AppLanguage, string>> = {
   "agd_go_agent_pp": { en: "Go to Agent PP", vi: "Đi tới Đại lý PP" },
   "agd_tx_health": { en: "Transaction Status", vi: "Trạng thái giao dịch" },
   "agd_transactions": { en: "transactions", vi: "giao dịch" },
-  "agd_your_emails": { en: "Your PayPal Emails", vi: "Email PayPal của bạn" },
+  "agd_your_emails": { en: "Your PayPal emails & links", vi: "Email & link PayPal của bạn" },
+  "agd_add_email_placeholder": { en: "email or https://paypal.me/...", vi: "email hoặc https://paypal.me/..." },
+  "agd_add_email_btn": { en: "Add", vi: "Thêm" },
+  "agd_email_added": { en: "Added", vi: "Đã thêm" },
+  "agd_email_removed": { en: "Removed", vi: "Đã xóa" },
+  "agd_email_remove_confirm": { en: "Remove {email}?", vi: "Xóa {email}?" },
   "agd_no_emails": { en: "No PayPal emails registered", vi: "Chưa đăng ký email PayPal" },
 
   // ─── Dashboard v2 ───
