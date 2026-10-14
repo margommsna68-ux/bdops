@@ -40,6 +40,17 @@ const navItems: NavItem[] = [
   { href: "/audit-log", labelKey: "nav_audit_log", icon: "A", adminOnly: true },
   { href: "/settings", labelKey: "nav_settings", icon: "*" },
 ];
+const personalItems:NavItem[]=[
+  {href:'/dashboard',labelKey:'Tổng quan',icon:'D',module:'INFRASTRUCTURE'},
+  {href:'/infrastructure/proxies',labelKey:'Quản lý proxy',icon:'P',module:'INFRASTRUCTURE'},
+  {href:'/infrastructure/servers',labelKey:'Server / VM',icon:'S',module:'INFRASTRUCTURE'},
+  {href:'/vm-tasks',labelKey:'Việc cài proxy',icon:'V',module:'INFRASTRUCTURE'},
+  {href:'/history',labelKey:'Lịch sử thao tác',icon:'H',module:'INFRASTRUCTURE'},
+  {type:'separator',labelKey:'Quản trị'},
+  {href:'/admin/users',labelKey:'Nhân viên',icon:'U',adminOnly:true},
+  {href:'/admin/projects',labelKey:'Dự án',icon:'P',adminOnly:true},
+  {href:'/settings',labelKey:'Thiết lập',icon:'*'},
+];
 
 interface SidebarProps {
   onNavigate?: () => void;
@@ -75,9 +86,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   // When no project selected (all deleted), show dashboard + admin + settings
   const noProject = !currentRole;
 
-  const filteredItems = navItems.filter((item) => {
+  const filteredItems = (proxyMode?personalItems:navItems).filter((item) => {
     if ("type" in item) return true;
-    if(proxyMode&&!['/dashboard','/infrastructure/proxies','/infrastructure/servers','/admin/users','/admin/projects','/audit-log','/settings'].includes(item.href)) return false;
     if (noProject) {
       // Only show dashboard, admin links, settings when no project
       return item.href === "/dashboard" || item.href === "/settings" || item.adminOnly;
@@ -170,7 +180,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
             return (
               <div key={i} className="pt-4 pb-1 px-3">
                 <span className={`text-[10px] font-semibold uppercase tracking-wider ${isGolden ? "text-amber-400/70" : "text-gray-400"}`}>
-                  {t(item.labelKey)}
+                  {proxyMode?item.labelKey:t(item.labelKey)}
                 </span>
               </div>
             );
@@ -183,7 +193,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               key={item.href}
               href={item.href}
               onClick={onNavigate}
-              title={collapsed ? t(item.labelKey) : undefined}
+              title={collapsed ? proxyMode?item.labelKey:t(item.labelKey) : undefined}
               className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${
                 isActive
                   ? `${accentBg} text-white font-medium shadow-md shadow-blue-500/20`
@@ -197,7 +207,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               }`}>
                 {item.icon}
               </span>
-              {!collapsed && <span>{t(item.labelKey)}</span>}
+              {!collapsed && <span>{proxyMode?item.labelKey:t(item.labelKey)}</span>}
             </Link>
           );
         })}

@@ -1,6 +1,6 @@
 # Rà cấu trúc site và thứ tự hợp nhất
 
-14/10/2026, sau nền kho proxy. Đây là inventory source/route toàn site và kiểm thử trình duyệt phần proxy; chưa phải chứng nhận toàn bộ luồng business hay VM đã hoàn tất.
+14/10/2026. Bảng dưới ghi nhận cấu trúc trước khi hợp nhất. Mốc proxy và Server/VM hiện đã hoàn thiện trên bản local thử; chưa phải chứng nhận toàn bộ business hoặc vận hành dữ liệu thật.
 
 | Phần đang có | Vấn đề thực tế | Cách hợp nhất |
 |---|---|---|
@@ -13,6 +13,8 @@
 | Sheet/final/Genjy | Snapshot cũ không phải nguồn live migration | Quét nguồn mới, preview đối chiếu owner/gói/VM, xem chênh lệch trước cutover |
 | Railway/runtime | Chưa đăng nhập đúng target; Next/Auth/SheetJS baseline còn advisories | Nâng dependency có kiểm thử, backup storage riêng/restore test, cấu hình host và TLS/auth trước dữ liệu thật |
 
-Thứ tự tiếp theo: (1) Server/VM, giữ NEW của anh và reservation chống trùng; (2) cài thật rồi xác nhận phiên bản; (3) dashboard/nav/thông báo/lịch sử thống nhất; (4) chuyển dữ liệu Sheet mới và nghiệm thu; (5) host Railway + backup độc lập; (6) business nối tài khoản, chi phí/thu nhập/lợi nhuận. Không xoá các module tài chính cũ để làm giao diện cá nhân.
+Đã thực hiện ba phần đầu: Server/VM giữ occupancy và desired/installed riêng; việc cài xác nhận đúng phiên bản; dashboard/nav/thông báo/lịch sử dùng chung dữ liệu. Các page legacy được giữ nguyên và chỉ mount khi dự án không ở chế độ PROXY_VM. Copy/import/replace và các đường ghi cũ được kiểm tra ở backend. Suite 135 tests/31 files, types/build qua; lint còn bốn cảnh báo hook cũ. Hướng dẫn thao tác ở personal-vm.md.
+
+Thứ tự còn lại: (4) chuyển dữ liệu Sheet mới và nghiệm thu; (5) host Railway + backup độc lập; (6) business nối tài khoản, chi phí/thu nhập/lợi nhuận. Trang tạo dự án/quản trị và các module business cũ vẫn cần lượt hợp nhất sau; bản thử dùng workspace PROXY_TRIAL đã cấu hình rõ. Không xoá các module tài chính cũ để làm giao diện cá nhân.
 
 Nâng cấp sau vận hành: backup tự động/retention và cảnh báo lỗi; đối chiếu cấu hình máy thực với desired; tìm kiếm toàn hệ thống; xuất báo cáo chi phí proxy/server; tổng hợp lợi nhuận theo dự án. Chỉ thêm khi giúp thao tác thật, tránh màn hình thừa.

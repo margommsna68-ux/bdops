@@ -87,6 +87,12 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
   }
   const businessMode=(membership.project.settings as {businessMode?:string}|null)?.businessMode;
+  if(path==='server.getCredentials'&&membership.role==='VIEWER')throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được xem/copy thông tin đăng nhập'});
+  if(/^(server|vmTask)\./.test(path)){
+    const managedProject=businessMode==='PROXY_VM'||await ctx.prisma.server.findFirst({where:{projectId,managed:true},select:{id:true}});
+    if(managedProject&&(path.startsWith('server.')||type==='mutation'))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dữ liệu Server/VM có cấu hình và lịch sử. Dùng luồng quản lý mới.'});
+  }
+  if(type==='mutation'&&businessMode==='PROXY_VM'&&/^(server|vmTask)\./.test(path))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng Server/VM mới để giữ cấu hình và lịch sử cài'});
   if(/^(proxy|vm)\./.test(path)||(type==='mutation'&&/^server\.(delete|bulkDelete)$/.test(path))) {
     const featureLinked=businessMode==='PROXY_VM'||await ctx.prisma.proxyIP.findFirst({where:{projectId,identityId:{not:null}},select:{id:true}});
     if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});

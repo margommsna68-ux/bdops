@@ -77,6 +77,8 @@ model Project {
   earnWithdrawals  EarnWithdrawal[]
   editHistory      EditHistory[]
   operationJournal OperationJournal[]
+  vmConfigurations VMConfiguration[]
+  vmAllocations VMProxyAllocation[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -127,6 +129,9 @@ model Server {
   credentials   Json?
   inventoryId   String?
   notes         String?
+  managed       Boolean @default(false)
+  archivedAt    DateTime?
+  revision      Int @default(0)
   gmailGroup    Int          @default(1)
   monthlyCost   Decimal?     @db.Decimal(12, 2)
   billingCycle  Int?         @default(1) // months
@@ -161,6 +166,19 @@ model VirtualMachine {
   earn24h       Decimal?    @db.Decimal(12, 4)
   uptime        String?
   notes         String?
+  managed       Boolean @default(false)
+  proxySlotState VMProxySlotState @default(UNRESOLVED)
+  slotSourceRef String?
+  originalSlotCipher String?
+  revision Int @default(0)
+  configurationSequence Int @default(0)
+  archivedAt DateTime?
+  desiredConfigurationId String? @unique
+  desiredConfiguration VMConfiguration? @relation("DesiredVMConfiguration",fields:[desiredConfigurationId],references:[id],onDelete:Restrict)
+  installedConfigurationId String? @unique
+  installedConfiguration VMConfiguration? @relation("InstalledVMConfiguration",fields:[installedConfigurationId],references:[id],onDelete:Restrict)
+  configurations VMConfiguration[] @relation("VMVersions")
+  allocations VMProxyAllocation[]
   server        Server      @relation(fields: [serverId], references: [id], onDelete: Cascade)
   serverId      String
   proxy         ProxyIP?    @relation(fields: [proxyId], references: [id], onDelete: SetNull)
@@ -243,6 +261,8 @@ model ProxyIP {
   notesCipher   String?
   hasManualMetadata Boolean @default(false)
   sourceRefs    ProxySourceReference[]
+  vmConfigurations VMConfiguration[]
+  allocations VMProxyAllocation[]
   statusEvents  ProxyStatusEvent[]
   replacedFrom  ProxyReplacement[] @relation("ReplacementOld")
   replacedTo    ProxyReplacement[] @relation("ReplacementNew")
@@ -389,6 +409,7 @@ model OperationJournal {
   kind String
   summary Json
   snapshotCipher String
+  reversible Boolean @default(true)
   batchId String? @unique
   undoOfId String? @unique
   createdAt DateTime @default(now())
@@ -732,6 +753,8 @@ model VMTask {
   id            String       @id @default(cuid())
   vm            VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
   vmId          String
+  configurationId String? @unique
+  configuration VMConfiguration? @relation(fields:[configurationId],references:[id],onDelete:Restrict)
   type          String
   title         String
   description   String?
@@ -742,6 +765,72 @@ model VMTask {
   assignedToId  String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+}
+
+enum VMProxySlotState {
+  BLANK
+  FORMULA
+  PLACEHOLDER
+  UNRESOLVED
+  FULL
+}
+enum VMConfigurationStatus {
+  PLANNED
+  IN_PROGRESS
+  FAILED
+  CONFIRMED
+  CANCELLED
+}
+enum VMAllocationRole {
+  DESIRED
+  INSTALLED
+  UNCERTAIN
+}
+model VMConfiguration {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  vmId String
+  vm VirtualMachine @relation("VMVersions",fields:[vmId],references:[id],onDelete:Restrict)
+  desiredBy VirtualMachine? @relation("DesiredVMConfiguration")
+  installedBy VirtualMachine? @relation("InstalledVMConfiguration")
+  version Int
+  endpointId String?
+  endpoint ProxyIP? @relation(fields:[endpointId],references:[id],onDelete:Restrict)
+  snapshotCipher String
+  configurationHash String
+  status VMConfigurationStatus @default(PLANNED)
+  createdById String
+  createdAt DateTime @default(now())
+  startedAt DateTime?
+  confirmedAt DateTime?
+  confirmedById String?
+  failureNote String?
+  revision Int @default(1)
+  task VMTask?
+  allocations VMProxyAllocation[]
+  @@unique([vmId,version])
+  @@index([projectId,status])
+}
+model VMProxyAllocation {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  vmId String
+  vm VirtualMachine @relation(fields:[vmId],references:[id],onDelete:Restrict)
+  endpointId String
+  endpoint ProxyIP @relation(fields:[endpointId],references:[id],onDelete:Restrict)
+  configurationId String
+  configuration VMConfiguration @relation(fields:[configurationId],references:[id],onDelete:Restrict)
+  allocationKey String
+  role VMAllocationRole @default(DESIRED)
+  createdById String
+  createdAt DateTime @default(now())
+  releasedAt DateTime?
+  releaseReason String?
+  revision Int @default(1)
+  @@index([projectId,vmId])
+  @@index([endpointId])
 }
 
 enum VMTaskStatus {

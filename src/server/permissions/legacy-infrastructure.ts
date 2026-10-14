@@ -15,14 +15,18 @@ export async function assertDeleteTarget(db:PrismaClient,projectId:string,entity
   const model=models[entity];if(!model) denied();
   const scope=entity==='VirtualMachine'?{server:{projectId}}:entity==='VMTask'?{vm:{server:{projectId}}}:{projectId};
   if(!await model.findFirst({where:{id:entityId,...scope},select:{id:true}})) denied();
+  if(entity==='Server'||entity==='VirtualMachine'){const item=await model.findFirst({where:{id:entityId,...scope},select:{managed:true}});if(item?.managed)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Máy có cấu hình và lịch sử; dùng luồng ẩn máy mới thay vì xoá'});}
+  if(entity==='VMTask'){const task=await db.vMTask.findFirst({where:{id:entityId,...scope},select:{configurationId:true,vm:{select:{managed:true}}}});if(task?.configurationId||task?.vm.managed)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Việc cài có cấu hình và lịch sử; dùng luồng VM mới thay vì xoá'});}
 }
 export async function assertProjectCanBeDestroyed(db:PrismaClient,projectId:string){
-  const [project,proxy,batch,source,account]=await Promise.all([
+  const [project,proxy,batch,source,account,managed,journal]=await Promise.all([
     db.project.findUnique({where:{id:projectId},select:{settings:true}}),
     db.proxyIP.findFirst({where:{projectId,identityId:{not:null}},select:{id:true}}),
     db.proxyBatch.findFirst({where:{projectId},select:{id:true}}),
     db.proxySourceSnapshot.findFirst({where:{projectId},select:{id:true}}),
     db.proxyProviderAccount.findFirst({where:{projectId},select:{id:true}}),
+    db.server.findFirst({where:{projectId,managed:true},select:{id:true}}),
+    db.operationJournal.findFirst({where:{projectId},select:{id:true}}),
   ]);
-  if((project?.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM'||proxy||batch||source||account) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dự án có lịch sử kho proxy. Cần quy trình lưu trữ; không xoá bằng luồng cũ.'});
+  if((project?.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM'||proxy||batch||source||account||managed||journal) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dự án có kho proxy, VM hoặc lịch sử. Cần quy trình lưu trữ; không xoá bằng luồng cũ.'});
 }

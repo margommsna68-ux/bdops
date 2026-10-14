@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { router, memberProcedure } from "../trpc";
+import {readVMWorkspace} from '../vm-management/repository';
+import {summarizeVMs} from '../vm-management/state';
 
 export const notificationRouter = router({
   // Compute real-time alerts — filtered by user's role & modules
@@ -24,6 +26,17 @@ export const notificationRouter = router({
         link?: string;
         createdAt: Date;
       }[] = [];
+      if((ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM'){
+        if(!hasModule('INFRASTRUCTURE'))return alerts;
+        const workspace=await readVMWorkspace({projectId,userId:ctx.user.id,role:ctx.role,capabilities:ctx.membership.capabilities},ctx.prisma);
+        const active=new Set(workspace.servers.filter(s=>!s.archivedAt).map(s=>s.id)),counts=summarizeVMs(workspace.vms.filter(v=>active.has(v.serverId)));
+        const blocked=await ctx.prisma.proxyIP.count({where:{projectId,inventoryState:'BLOCKED',retiredAt:null}});
+        if(blocked)alerts.push({id:'proxy-blocked',type:'PROXY_BLOCKED',severity:'error',title:`${blocked} proxy BLOCKED`,message:'Báo nhà cung cấp hoặc nhận replace',link:'/infrastructure/proxies',createdAt:now});
+        if(counts.missing)alerts.push({id:'vm-missing',type:'VM_MISSING',severity:'warning',title:`${counts.missing} VM thiếu proxy`,message:'Điền NEW chưa dùng của anh',link:'/infrastructure/servers',createdAt:now});
+        if(counts.pending)alerts.push({id:'vm-install',type:'VM_INSTALL',severity:'info',title:`${counts.pending} VM chờ cài`,message:'Cài cấu hình được giao rồi xác nhận',link:'/vm-tasks',createdAt:now});
+        if(counts.review)alerts.push({id:'vm-review',type:'VM_REVIEW',severity:'warning',title:`${counts.review} VM cần kiểm tra`,message:'Kiểm tra proxy lỗi, sở hữu và dữ liệu cũ',link:'/infrastructure/servers',createdAt:now});
+        return alerts;
+      }
 
       // 1. Servers with payment due within 5 days — INFRASTRUCTURE module
       if (hasModule("INFRASTRUCTURE")) {

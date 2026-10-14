@@ -11,10 +11,10 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
   await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
   const [endpoints,reserved]=await Promise.all([
-    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},vm:{include:{server:true}}}}),
+    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
     db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
   ]);
-  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),vmRefs:e.vm?[e.vm.server.code+'/'+e.vm.code]:[],statusAt:e.statusAt?.toISOString()||null}]:[]);
+  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),vmRefs:e.allocations.length?e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code+' · '+(a.role==='DESIRED'?'Chờ cài':a.role==='INSTALLED'?'Đã cài':'Giữ để kiểm tra')):e.vm?[e.vm.server.code+'/'+e.vm.code]:[],statusAt:e.statusAt?.toISOString()||null}]:[]);
   const linked=new Set(endpoints.map(e=>e.identityId));
   for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),vmRefs:[],statusAt:null});
   const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
@@ -37,11 +37,13 @@ export async function getProxyTimeline(scope:ActorScope,identityId:string,db:Pri
   const replacements=await db.proxyReplacement.findMany({where:{projectId:scope.projectId},include:{oldEndpoint:{include:{identity:true}},newEndpoint:{include:{identity:true}}},orderBy:{recordedAt:'asc'}});
   const connected=new Set([identityId]);let changed=true;
   while(changed){changed=false;for(const r of replacements){const a=r.oldEndpoint.identityId,b=r.newEndpoint.identityId;if(a&&b&&(connected.has(a)||connected.has(b))){if(!connected.has(a)||!connected.has(b)) changed=true;connected.add(a);connected.add(b);}}}
-  const ids=Array.from(connected),[events,vms]=await Promise.all([
+  const ids=Array.from(connected),[events,vms,holds]=await Promise.all([
     db.proxyStatusEvent.findMany({where:{projectId:scope.projectId,identityId:{in:ids}},orderBy:{recordedAt:'asc'}}),
     db.virtualMachine.findMany({where:{server:{projectId:scope.projectId},proxy:{identityId:{in:ids}}},include:{server:{select:{code:true}}}}),
+    db.vMProxyAllocation.findMany({where:{projectId:scope.projectId,releasedAt:null,endpoint:{identityId:{in:ids}}},include:{vm:{include:{server:{select:{code:true}}}}}}),
   ]);
-  return {identity:{id:identity.id,ip:identity.ip,owner:identity.owner,subgroup:identity.subgroup,revision:identity.revision,allocationMode:identity.allocationMode},events:events.map(e=>({kind:e.kind,occurredAt:e.occurredAt?.toISOString()||null,recordedAt:e.recordedAt.toISOString(),reversedAt:e.reversedAt?.toISOString()||null,actor:e.actorId,sourceRef:e.sourceRef})),replacements:replacements.filter(r=>r.oldEndpoint.identityId&&connected.has(r.oldEndpoint.identityId)).map(r=>({oldIp:r.oldEndpoint.identity!.ip,newIp:r.newEndpoint.identity!.ip,receivedDate:r.receivedDate?.toISOString().slice(0,10)||null,recordedAt:r.recordedAt.toISOString(),status:r.status as 'APPLIED'|'VOID'})),vmRefs:vms.map(v=>v.server.code+'/'+v.code)};
+  const occupied=new Set(holds.map(h=>h.vmId));
+  return {identity:{id:identity.id,ip:identity.ip,owner:identity.owner,subgroup:identity.subgroup,revision:identity.revision,allocationMode:identity.allocationMode},events:events.map(e=>({kind:e.kind,occurredAt:e.occurredAt?.toISOString()||null,recordedAt:e.recordedAt.toISOString(),reversedAt:e.reversedAt?.toISOString()||null,actor:e.actorId,sourceRef:e.sourceRef})),replacements:replacements.filter(r=>r.oldEndpoint.identityId&&connected.has(r.oldEndpoint.identityId)).map(r=>({oldIp:r.oldEndpoint.identity!.ip,newIp:r.newEndpoint.identity!.ip,receivedDate:r.receivedDate?.toISOString().slice(0,10)||null,recordedAt:r.recordedAt.toISOString(),status:r.status as 'APPLIED'|'VOID'})),vmRefs:[...holds.map(h=>h.vm.server.code+'/'+h.vm.code+' · '+(h.role==='DESIRED'?'Chờ cài':h.role==='INSTALLED'?'Đã cài':'Giữ để kiểm tra')),...vms.filter(v=>!occupied.has(v.id)).map(v=>v.server.code+'/'+v.code)]};
 }
 export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
   await authorize(scope,true,db);
@@ -52,6 +54,7 @@ export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
 }
 export async function copyProxyEndpoint(scope:ActorScope,endpointId:string,db:PrismaClient=prisma){
   await authorize(scope,true,db);
+  if(await db.vMProxyAllocation.findFirst({where:{projectId:scope.projectId,endpointId,releasedAt:null},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Proxy đang giữ cho VM. Copy cấu hình tại Việc cài hoặc Server/VM để giữ đúng phiên bản và lịch sử.');
   const endpoint=await db.proxyIP.findFirst({where:{id:endpointId,projectId:scope.projectId,identityId:{not:null}}});
   if(!endpoint) throw new ProxyDomainError('NOT_FOUND');
   const p=decodeEndpoint(endpoint);if(!p||p.format!=='FULL') throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ thông tin');

@@ -4,25 +4,25 @@ import {encrypt,decrypt} from '@/lib/encryption';
 import {assertInfrastructureAction,loadInfrastructureScope} from '../permissions/infrastructure';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {assertImagesUnchanged,describeImage,type OperationSnapshot} from './snapshot';
-export async function recordOperation(tx:Prisma.TransactionClient,input:{scope:ActorScope;kind:string;summary:Record<string,string|number>;snapshot:OperationSnapshot;batchId?:string;undoOfId?:string}){
-  return tx.operationJournal.create({data:{projectId:input.scope.projectId,actorId:input.scope.userId,kind:input.kind,summary:input.summary,snapshotCipher:encrypt(JSON.stringify(input.snapshot)),batchId:input.batchId,undoOfId:input.undoOfId}});
+export async function recordOperation(tx:Prisma.TransactionClient,input:{scope:ActorScope;kind:string;summary:Record<string,string|number>;snapshot:OperationSnapshot;batchId?:string;undoOfId?:string;reversible?:boolean}){
+  return tx.operationJournal.create({data:{projectId:input.scope.projectId,actorId:input.scope.userId,kind:input.kind,summary:input.summary,snapshotCipher:encrypt(JSON.stringify(input.snapshot)),batchId:input.batchId,undoOfId:input.undoOfId,reversible:input.reversible??true}});
 }
 export function openSnapshot(cipher:string):OperationSnapshot{
   const value=JSON.parse(decrypt(cipher)) as OperationSnapshot;
-  if(value.version!==1||!Array.isArray(value.resources)||!Array.isArray(value.eventIds)||!Array.isArray(value.replacementIds))throw new ProxyDomainError('INVALID_INPUT','Không có bản trước để hoàn tác');
+  if(![1,2].includes(value.version)||!Array.isArray(value.resources)||!Array.isArray(value.eventIds)||!Array.isArray(value.replacementIds))throw new ProxyDomainError('INVALID_INPUT','Không có bản trước để hoàn tác');
   return value;
 }
 export async function listOperations(scope:ActorScope,db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,'READ');
-  const rows=await db.operationJournal.findMany({where:{projectId:scope.projectId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100,select:{id:true,kind:true,summary:true,batchId:true,undoOfId:true,actorId:true,createdAt:true}});
+  const rows=await db.operationJournal.findMany({where:{projectId:scope.projectId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100,select:{id:true,kind:true,summary:true,batchId:true,undoOfId:true,actorId:true,createdAt:true,reversible:true}});
   const [undos,users]=await Promise.all([db.operationJournal.findMany({where:{projectId:scope.projectId,undoOfId:{in:rows.map(r=>r.id)}},select:{id:true,undoOfId:true}}),db.user.findMany({where:{id:{in:Array.from(new Set(rows.map(r=>r.actorId)))}},select:{id:true,name:true,username:true}})]);
-  return rows.map(r=>({...r,actor:users.find(u=>u.id===r.actorId)?.name||users.find(u=>u.id===r.actorId)?.username||'Tài khoản cũ',createdAt:r.createdAt.toISOString(),undoneById:undos.find(u=>u.undoOfId===r.id)?.id||null,canUndo:current.role==='ADMIN'&&r.kind!=='UNDO'&&!undos.some(u=>u.undoOfId===r.id)}));
+  return rows.map(r=>({...r,actor:users.find(u=>u.id===r.actorId)?.name||users.find(u=>u.id===r.actorId)?.username||'Tài khoản cũ',createdAt:r.createdAt.toISOString(),undoneById:undos.find(u=>u.undoOfId===r.id)?.id||null,canUndo:current.role==='ADMIN'&&r.reversible&&r.kind!=='UNDO'&&!undos.some(u=>u.undoOfId===r.id)}));
 }
 export async function inspectOperation(scope:ActorScope,id:string,db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,'READ');
   const operation=await db.operationJournal.findFirst({where:{id,projectId:scope.projectId}});if(!operation)throw new ProxyDomainError('NOT_FOUND');
   const undo=await db.operationJournal.findUnique({where:{undoOfId:id}}),snapshot=openSnapshot(operation.snapshotCipher);
-  let blockedReason:string|null=null;
+  let blockedReason:string|null=operation.reversible?null:'Đã bắt đầu xử lý thực tế. Giao một cấu hình mới và xác nhận mới nếu cần đổi lại.';
   try{await assertImagesUnchanged(db,scope.projectId,snapshot);}catch(error){if(error instanceof ProxyDomainError)blockedReason=error.message;else throw error;}
-  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&current.businessMode==='PROXY_VM'&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows:snapshot.resources.map(describeImage)};
+  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&current.businessMode==='PROXY_VM'&&operation.reversible&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows:snapshot.resources.map(describeImage)};
 }

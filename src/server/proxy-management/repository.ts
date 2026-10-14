@@ -24,7 +24,7 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
   const endpointWhere:Prisma.ProxyIPWhereInput=ips?{OR:[{identity:{ip:{in:ips}}},...ips.map(ip=>({AND:[{identityId:null},{OR:[{address:ip},{address:{startsWith:ip+':'}}]}]}))]}:{};
   const [identities,rows,references,events,replacements,source]=await Promise.all([
     db.proxyIdentity.findMany({where:identityWhere}),
-    db.proxyIP.findMany({where:endpointWhere,include:{vm:{include:{server:true}}}}),
+    db.proxyIP.findMany({where:endpointWhere,include:{vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
     db.proxySourceReference.findMany({where:{identity:identityWhere,snapshot:{scanSucceeded:true}},include:{identity:true,snapshot:true}}),
     db.proxyStatusEvent.findMany({where:ips?{ip:{in:ips}}:{}}),
     db.proxyReplacement.findMany({where:ips?{OR:[{oldEndpoint:{identity:identityWhere}},{newEndpoint:{identity:identityWhere}}]}:{},include:{oldEndpoint:{include:{identity:true}},newEndpoint:{include:{identity:true}}}}),
@@ -34,7 +34,7 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
     const parsed=decodeEndpoint(row);if(!parsed) return [];
     // Conflicts outside the caller's project retain only identity, never location/credentials.
     const proxy=row.projectId===scope.projectId?parsed:{ip:parsed.ip,port:parsed.port,username:null,password:null,format:'BARE' as const};
-    return [{id:row.id,projectId:row.projectId,identityId:row.identityId||'legacy:'+row.id,proxy,inventoryState:row.inventoryState,retiredAt:row.retiredAt?.toISOString()||null,revision:row.revision,vmKeys:row.projectId===scope.projectId&&row.vm?[row.vm.server.code+'/'+row.vm.code]:[]}];
+    return [{id:row.id,projectId:row.projectId,identityId:row.identityId||'legacy:'+row.id,proxy,inventoryState:row.inventoryState,retiredAt:row.retiredAt?.toISOString()||null,revision:row.revision,vmKeys:row.projectId===scope.projectId?Array.from(new Set([...(row.vm?[row.vm.server.code+'/'+row.vm.code]:[]),...row.allocations.map(a=>a.vm.server.code+'/'+a.vm.code)])):[]}];
   });
   const kinds=new Set(['RECEIVED','BLOCKED','DIE','REPLACED','VOID']);
   const history:HistoryFact[]=events.filter(e=>kinds.has(e.kind)).map(e=>({ip:e.ip,kind:e.kind as HistoryFact['kind'],occurredAt:e.occurredAt?.toISOString()||null,recordedAt:e.recordedAt.toISOString()}));
@@ -46,9 +46,10 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
   };
 }
 export async function getEligibleInventory(projectId:string,db:Reader=prisma):Promise<EligibleProxy[]>{
+  const held=new Set((await db.vMProxyAllocation.findMany({where:{releasedAt:null},select:{allocationKey:true}})).map(a=>a.allocationKey));
   const rows=await db.proxyIP.findMany({where:{projectId,inventoryState:'NEW',retiredAt:null,credentialCipher:{not:null},packageCode:{not:null},vm:null,identity:{owner:'SELF'}},include:{identity:{include:{events:true,endpoints:true,sourceRefs:true}}}});
   return rows.flatMap(r=>{
-    const i=r.identity;if(!i||!r.port||!r.inventoryKey||i.sourceRefs.some(s=>s.owner==='GENJY')||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID'].includes(e.kind))) return [];
+    const i=r.identity;if(!i||!r.port||!r.inventoryKey||held.has(r.inventoryKey)||i.sourceRefs.some(s=>s.owner==='GENJY')||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID','INSTALL_STARTED','INSTALLED'].includes(e.kind))) return [];
     if(i.allocationMode==='SINGLE_IP'&&i.endpoints.filter(e=>!e.retiredAt).length!==1) return [];
     if(i.allocationMode==='APPROVED_PORT_STREAM'&&!i.policyEvidenceCipher) return [];
     return [{identityId:i.id,endpointId:r.id,ip:i.ip,port:r.port,revision:r.revision,allocationKey:r.inventoryKey}];

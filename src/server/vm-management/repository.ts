@@ -1,0 +1,14 @@
+import type {Prisma,PrismaClient} from '@prisma/client';
+import {loadInfrastructureScope,assertInfrastructureAction,type InfrastructureAction} from '../permissions/infrastructure';
+import {ProxyDomainError,type ActorScope,type SourceSnapshotRef} from '../proxy-management/types';
+import {refreshGenjy} from '../proxy-management/sources';
+export type VMReader=PrismaClient|Prisma.TransactionClient;
+export async function authorizeVM(scope:ActorScope,action:InfrastructureAction,db:VMReader){const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,action);if(current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');return current;}
+export async function requireGenjy(scope:ActorScope,db:PrismaClient,refresh:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>=refreshGenjy){const source=await refresh(scope.projectId,db);if(!source.scanSucceeded)throw new ProxyDomainError('SOURCE_UNAVAILABLE');return source;}
+export const vmInclude={server:true,desiredConfiguration:{include:{endpoint:{select:{host:true,port:true}}}},installedConfiguration:{include:{endpoint:{select:{host:true,port:true}}}},allocations:{where:{releasedAt:null},include:{endpoint:{select:{host:true,port:true,inventoryState:true,identity:{select:{owner:true}}}}}}} as const;
+export async function readManagedVMs(projectId:string,db:VMReader){return db.virtualMachine.findMany({where:{managed:true,server:{projectId,managed:true}},include:vmInclude,orderBy:[{server:{code:'asc'}},{code:'asc'}]});}
+export async function readVMWorkspace(scope:ActorScope,db:PrismaClient){
+  await authorizeVM(scope,'READ',db);const [servers,vms]=await Promise.all([db.server.findMany({where:{projectId:scope.projectId,managed:true},select:{id:true,code:true,ipAddress:true,notes:true,archivedAt:true,revision:true},orderBy:{code:'asc'}}),readManagedVMs(scope.projectId,db)]);
+  const config=(c:typeof vms[number]['desiredConfiguration'])=>c?{id:c.id,endpointId:c.endpointId,version:c.version,status:c.status,hash:c.configurationHash,startedAt:c.startedAt?.toISOString()||null,confirmedAt:c.confirmedAt?.toISOString()||null,confirmedBy:c.confirmedById,failureNote:c.failureNote,ip:c.endpoint?.host||null,port:c.endpoint?.port||null}:null;
+  return {servers:servers.map(s=>({...s,archivedAt:s.archivedAt?.toISOString()||null})),vms:vms.map(v=>({id:v.id,code:v.code,serverId:v.serverId,server:v.server.code,revision:v.revision,slotState:v.proxySlotState,archivedAt:v.archivedAt?.toISOString()||null,health:v.status,desired:config(v.desiredConfiguration),installed:config(v.installedConfiguration),holds:v.allocations.map(a=>({id:a.id,endpointId:a.endpointId,ip:a.endpoint.host,port:a.endpoint.port,role:a.role,state:a.endpoint.inventoryState,owner:a.endpoint.identity?.owner||'UNKNOWN'}))}))};
+}

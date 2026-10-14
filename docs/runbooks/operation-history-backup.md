@@ -13,3 +13,7 @@ Giữ riêng ENCRYPTION_KEY của ứng dụng và BACKUP_ENCRYPTION_KEY; mất 
 Không restore một bản cũ lên hệ thống thật chỉ để sửa một thao tác: việc đó có thể mất thay đổi sau của nhân viên và lịch sử Genjy/nhận IP mới. Khi khôi phục sự cố toàn hệ thống cần lưu snapshot hiện tại nếu còn đọc được, đối chiếu/ghép những bằng chứng ownership/received mới hơn backup trước cutover.
 
 Kiểm chứng 14/10/2026: 118 tests qua, production build qua; vòng real pg_dump/pg_restore có 35 bảng, credential mẫu giải mã được, app DB không đổi. Backup thử `22f5a201-77a6-4fe8-b057-9466c6b69fc2`, checksum `6d8e4bc8a3aa57f007880b883c5b7b2f0851bc7982ed3173e760a23381ab818e`. Browser nhập/undo mẫu 192.0.2.151 và tạo backup từ web đã thành công. Không nhập proxy thật.
+
+## VM schema roundtrip — 14/10/2026
+
+Encrypted backup 6703fb3b-b716-4a53-9cd6-b788b52d3f74 (205480 bytes, SHA256 c3354021241261c964aed6c51b7a833ee4e617f4d325042d9c653fdf0227fd9d) restored to separate empty local proxy_restore_1791983833257. Verified 37 table counts (AuditLog growth excluded) and encrypted proxy credential decryption. Original proxy_app_trial unchanged. Includes new VMConfiguration/VMProxyAllocation, journal/config pointers and all synthetic UI allocation/install history. Keys remain private local config; this does not validate production disaster recovery.

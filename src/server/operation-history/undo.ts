@@ -6,6 +6,7 @@ import {withProxyTransaction} from '../proxy-management/transaction';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {openSnapshot,recordOperation} from './journal';
 import {assertImagesUnchanged,readImage,type OperationSnapshot,type ResourceImage} from './snapshot';
+import {restoreVMImage} from '../vm-management/operation-images';
 export async function undoOperation(scope:ActorScope,id:string,reason:string,db:PrismaClient=prisma,deps:{afterWrite?:()=>void|Promise<void>}={}){
   if(!reason.trim()||reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Ghi lý do hoàn tác (tối đa 300 ký tự)');
   return withProxyTransaction(async tx=>{
@@ -13,12 +14,13 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
     if(current.role!=='ADMIN'||current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');
     const original=await tx.operationJournal.findFirst({where:{id,projectId:scope.projectId}});if(!original)throw new ProxyDomainError('NOT_FOUND');
     const prior=await tx.operationJournal.findUnique({where:{undoOfId:id}});if(prior)return {id:prior.id,replay:true};
-    if(original.kind==='UNDO')throw new ProxyDomainError('INVALID_INPUT','Bản hoàn tác chỉ để xem');
+    if(original.kind==='UNDO'||!original.reversible)throw new ProxyDomainError('INVALID_INPUT','Thao tác này chỉ để xem; cần cấu hình và xác nhận mới');
     const snapshot=openSnapshot(original.snapshotCipher),now=new Date();
     // Validate ALL resources before changing any of them. No client before-image accepted.
     await assertImagesUnchanged(tx,scope.projectId,snapshot);
-    const reversed:OperationSnapshot={version:1,resources:[],eventIds:[],replacementIds:[]};
-    for(const image of snapshot.resources){
+    const reversed:OperationSnapshot={version:2,resources:[],eventIds:[],replacementIds:[]};
+    const resources=[...snapshot.resources].sort((a,b)=>Number(b.resource==='VM_ALLOCATION'&&!b.before)-Number(a.resource==='VM_ALLOCATION'&&!a.before));
+    for(const image of resources){
       if(image.resource==='ENDPOINT'){
         const before=image.before;
         if(before){const {revision:_revision,owner:_owner,subgroup:_subgroup,identityId:_identityId,vmId:_vmId,updatedAt:_updatedAt,...data}=before;await tx.proxyIP.update({where:{id:image.id},data:{...data,statusAt:data.statusAt?new Date(data.statusAt):null,retiredAt:data.retiredAt?new Date(data.retiredAt):null,revision:{increment:1}}});}
@@ -27,10 +29,10 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
       }else if(image.resource==='ACCOUNT'){
         if(image.before){const {revision:_revision,...data}=image.before;await tx.proxyProviderAccount.update({where:{id:image.id},data});}
         else await tx.proxyProviderAccount.update({where:{id:image.id},data:{disabled:true}});
-      }else{
+      }else if(image.resource==='MEMBER'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {accessRevision:_accessRevision,...data}=image.before;await tx.projectMember.update({where:{id:image.id},data});
-      }
+      }else await restoreVMImage(tx,image,reason.trim());
       reversed.resources.push({...image,before:image.after,after:await readImage(tx,scope.projectId,image.resource,image.id)} as ResourceImage);
       await deps.afterWrite?.();
     }

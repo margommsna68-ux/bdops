@@ -100,6 +100,8 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     return dto(batch);
   }
   async function commit(scope:ActorScope,token:string,idempotencyKey:string):Promise<CommitResult>{
+    const vmBatch=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:'VM_ALLOCATION'},select:{id:true}});
+    if(vmBatch)throw new ProxyDomainError('INVALID_INPUT','Đợt gán VM phải lưu qua luồng Server/VM');
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId}});if(!original) throw new ProxyDomainError('NOT_FOUND');
     await scoped(scope,action(original.kind));
     if(original.idempotencyKey!==idempotencyKey) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
