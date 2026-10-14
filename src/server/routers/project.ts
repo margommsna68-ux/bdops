@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {assertProjectCanBeDestroyed} from '../permissions/legacy-infrastructure';
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "../trpc";
 import { APP_MODULES } from "../trpc";
@@ -201,6 +202,8 @@ export const projectRouter = router({
       });
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project không tồn tại" });
 
+      await assertProjectCanBeDestroyed(ctx.prisma,input.projectId);
+
       // Delete in correct FK order (children first)
       await ctx.prisma.vMTask.deleteMany({ where: { vm: { server: { projectId: input.projectId } } } });
       await ctx.prisma.proxyAssignmentHistory.deleteMany({ where: { proxy: { projectId: input.projectId } } });
@@ -242,6 +245,8 @@ export const projectRouter = router({
       }
 
       const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { code: true } });
+
+      await assertProjectCanBeDestroyed(ctx.prisma,input.projectId);
 
       // Delete order: children first, then parents (respect FK constraints)
       // 1. VM tasks (depends on VM)
@@ -413,9 +418,9 @@ export const projectRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const callerId = (ctx.user as any).id;
-      // Caller must be ADMIN in at least one project
+      // Caller must be ADMIN in the target project.
       const callerAdmin = await ctx.prisma.projectMember.findFirst({
-        where: { userId: callerId, role: "ADMIN" },
+        where: { userId: callerId, projectId:input.projectId,role: "ADMIN" },
       });
       if (!callerAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Chỉ ADMIN mới thêm member" });
@@ -459,6 +464,9 @@ export const projectRouter = router({
     .mutation(async ({ ctx, input }) => {
       const callerRole = ctx.role;
       const callerId = (ctx.user as any).id;
+
+      const scopedTarget=await ctx.prisma.projectMember.findFirst({where:{id:input.memberId,projectId:input.projectId},select:{id:true}});
+      if(!scopedTarget) throw new TRPCError({code:'FORBIDDEN',message:'Thành viên không thuộc dự án này'});
 
       // Moderator restrictions
       if (callerRole === "MODERATOR") {
@@ -514,6 +522,9 @@ export const projectRouter = router({
     .mutation(async ({ ctx, input }) => {
       const callerRole = ctx.role;
       const callerId = (ctx.user as any).id;
+
+      const scopedTarget=await ctx.prisma.projectMember.findFirst({where:{id:input.memberId,projectId:input.projectId},select:{id:true}});
+      if(!scopedTarget) throw new TRPCError({code:'FORBIDDEN',message:'Thành viên không thuộc dự án này'});
 
       if (callerRole === "MODERATOR") {
         if (!ctx.membership.canManageUsers) {

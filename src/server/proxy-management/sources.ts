@@ -15,16 +15,21 @@ export function scanWorkbook(book:Workbook,sourceKey:string):SourceSnapshot{
   for(const tab of normalized){
     const subgroup=/^pc$|pc\s*[/_-]?\s*chung/i.test(tab.name)?'PC_CHUNG' as const:null;
     for(const cell of tab.cells){
-      const metadata=!!cell.note||tab.cells.some(c=>c.row===cell.row&&[8,9,10].includes(c.column)&&!!(c.value||c.note||c.formula));
+      const tokenPattern=/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+:[^:\s]+:\S+)?/g;
+      const hasAnnotation=(value:string)=>!!value.replace(tokenPattern,'').replace(/[\s|,;\\]+/g,'');
+      const metadata=!!cell.note||!!cell.formula||hasAnnotation(cell.value)||tab.cells.some(c=>c.row===cell.row&&c.a1!==cell.a1&&(!!c.note||!!c.formula||hasAnnotation(c.value)||([8,9,10].includes(c.column)&&!!c.value)));
       const found=new Map<string,ParsedProxy>();
       for(const text of [cell.value,cell.note,cell.formula]){
-        const tokens=text.match(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+:[^:\s]+:\S+)?/g)||[];
-        for(const token of tokens){try{const p=parseProxy(token);if(!found.has(p.ip)||p.format==='FULL') found.set(p.ip,p);}catch{}}
+        const tokens=text.match(tokenPattern)||[];
+        for(const token of tokens){try{const p=parseProxy(token);if(!found.has(p.ip)||p.format==='FULL') found.set(p.ip,p);}catch{
+          // Invalid endpoint suffix still proves a valid IP belongs to Genjy.
+          try{const p=parseProxy(token.split(':')[0]);if(!found.has(p.ip)) found.set(p.ip,p);}catch{}
+        }}
       }
-      found.forEach(p=>evidence.push({sourceRef:`${book.spreadsheetId}/${tab.id}/${cell.a1}`,ip:p.ip,owner:'GENJY',subgroup,format:p.format,hasFullCredentials:p.format==='FULL',hasManualMetadata:metadata,proxy:p}));
+      found.forEach(p=>evidence.push({sourceRef:`${book.spreadsheetId}/${tab.id}/${cell.a1}`,ip:p.ip,owner:'GENJY',subgroup,format:p.format,hasFullCredentials:p.format==='FULL',hasManualMetadata:metadata||[cell.value,cell.note,cell.formula].some(value=>(value.match(tokenPattern)||[]).some(token=>token.startsWith(p.ip+':')&&p.format==='BARE')),proxy:p}));
     }
   }
-  return {id:randomUUID(),sourceKey,hash:createHash('sha256').update(JSON.stringify({spreadsheetId:book.spreadsheetId,tabs:normalized})).digest('hex'),fetchedAt:new Date().toISOString(),scanSucceeded:true,evidence,tabs:normalized.map(t=>({id:t.id,name:t.name,hidden:t.hidden}))};
+  return {id:randomUUID(),sourceKey,hash:createHash('sha256').update(JSON.stringify({scannerVersion:2,spreadsheetId:book.spreadsheetId,tabs:normalized,evidence})).digest('hex'),fetchedAt:new Date().toISOString(),scanSucceeded:true,evidence,tabs:normalized.map(t=>({id:t.id,name:t.name,hidden:t.hidden}))};
 }
 const tokenCache=new Map<string,{token:string;expires:number}>();
 async function accessToken(ref:string,fetcher:typeof fetch):Promise<string>{

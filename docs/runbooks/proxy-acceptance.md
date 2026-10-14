@@ -34,3 +34,5 @@ Railway triển khai sau khi bản local ổn và biết đúng tài khoản/pro
 Không dùng db push/reset lên database vận hành. Dùng migrate deploy, backup trước chuyển dữ liệu. Không nhập các ví dụ nhà cung cấp trong chat. Không xoá dự án Bright Data cũ hoặc ánh xạ sang VM cá nhân theo tên.
 
 Trên Windows, dừng đúng server local trước prisma generate để tránh DLL bị khoá. Vì ổ C gần đầy, bản kiểm tra production dùng BDOPS_BUILD_DIRECTORY=.next-build (junction sang D:/CodexRuntime/bdops-proxy-trial/build). Railway không đặt biến này, dùng .next mặc định. Cấu hình Railway mới dùng service Settings/IaC; railway.toml chỉ giữ tương thích dịch vụ cũ.
+
+ADMIN dùng Quyền nhân viên ngay trên trang proxy: chọn thành viên, bật truy cập hạ tầng và ba quyền riêng Nhập mới / Nhận replace / Copy thông tin. VIEWER chỉ xem; không lấy mật khẩu qua route server cũ. Backend xác minh lại quyền theo dự án mỗi lần, có nhật ký cấp/thu hồi.

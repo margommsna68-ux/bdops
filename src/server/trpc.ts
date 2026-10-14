@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { authOptions } from "./auth";
 import { prisma } from "@/lib/prisma";
 import { type ProjectRole } from "@prisma/client";
+import {assertLegacyInfrastructureTargets} from './permissions/legacy-infrastructure';
 
 export const APP_MODULES = [
   "FUNDS",
@@ -90,6 +91,7 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     const featureLinked=businessMode==='PROXY_VM'||await ctx.prisma.proxyIP.findFirst({where:{projectId,identityId:{not:null}},select:{id:true}});
     if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});
   }
+  if(/^(proxy|vm|server)\./.test(path)) await assertLegacyInfrastructureTargets(ctx.prisma,projectId,path,input);
   return next({
     ctx: {
       ...ctx,

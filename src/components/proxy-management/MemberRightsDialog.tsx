@@ -1,0 +1,17 @@
+"use client";
+import {useEffect,useState} from 'react';
+import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
+import {trpc} from '@/lib/trpc';
+import toast from 'react-hot-toast';
+type Capability='COPY_CREDENTIALS'|'PROXY_IMPORT'|'PROXY_REPLACE';
+const choices:{value:Capability;label:string}[]=[{value:'COPY_CREDENTIALS',label:'Xem / copy thông tin đăng nhập'},{value:'PROXY_IMPORT',label:'Nhập proxy mới'},{value:'PROXY_REPLACE',label:'Nhận proxy replace'}];
+export function MemberRightsDialog({projectId,onClose}:{projectId:string;onClose:()=>void}){
+  const utils=trpc.useUtils(),members=trpc.proxyManagement.members.useQuery({projectId},{refetchOnWindowFocus:false});
+  const [id,setId]=useState(''),[capabilities,setCapabilities]=useState<Capability[]>([]),[allowInfrastructure,setAllowInfrastructure]=useState(false);
+  const selected=members.data?.find(m=>m.id===id);
+  useEffect(()=>{if(!id&&members.data?.length)setId((members.data.find(m=>m.role!=='ADMIN')||members.data[0]).id);},[id,members.data]);
+  useEffect(()=>{if(selected){setCapabilities(choices.filter(c=>selected.capabilities.includes(c.value)).map(c=>c.value));setAllowInfrastructure(selected.role==='ADMIN'||selected.allowedModules.includes('INFRASTRUCTURE'));}},[selected]);
+  const save=trpc.proxyManagement.setCapabilities.useMutation({onSuccess:()=>{toast.success('Đã cập nhật quyền trong dự án');void members.refetch();void utils.proxyManagement.access.invalidate();},onError:e=>toast.error(e.message)});
+  const fixed=selected?.role==='ADMIN',viewer=selected?.role==='VIEWER';
+  return <Dialog open onOpenChange={open=>{if(!open&&!save.isLoading)onClose();}}><DialogContent className="pm-dialog max-w-lg"><DialogHeader><DialogTitle>Quyền nhân viên</DialogTitle><DialogDescription>Cấp quyền trong dự án đang chọn. Nhân viên thao tác trên toàn bộ VM của dự án.</DialogDescription></DialogHeader>{members.error&&<p className="pm-error" role="alert">{members.error.message}</p>}<label className="pm-label">Thành viên<select className="pm-input" disabled={members.isLoading||save.isLoading} value={id} onChange={e=>setId(e.target.value)}>{members.data?.map(m=><option key={m.id} value={m.id}>{m.user.name||m.user.username||m.user.email} · {m.role}</option>)}</select></label><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={allowInfrastructure} disabled={fixed||!selected||save.isLoading} onChange={e=>{setAllowInfrastructure(e.target.checked);if(!e.target.checked)setCapabilities([]);}}/>Được truy cập Proxy / Server / VM</label><div className="space-y-4 border-t pt-4">{choices.map(c=><label key={c.value} className="flex items-center gap-3 text-sm"><input type="checkbox" checked={fixed||capabilities.includes(c.value)} disabled={fixed||viewer||!allowInfrastructure||save.isLoading} onChange={e=>setCapabilities(e.target.checked?[...capabilities,c.value]:capabilities.filter(v=>v!==c.value))}/>{c.label}</label>)}</div><p className="pm-muted text-xs">{fixed?'ADMIN có toàn bộ quyền trong dự án.':viewer?'Chỉ xem: không thay đổi dữ liệu và không copy mật khẩu.':'Báo BLOCKED và thao tác VM đi theo quyền vận hành; ba quyền trên cấp riêng.'}</p><div className="flex justify-end gap-2"><button className="pm-button" disabled={save.isLoading} onClick={onClose}>Đóng</button><button className="pm-button pm-button-primary" disabled={!selected||fixed||save.isLoading} onClick={()=>save.mutate({projectId,memberId:id,capabilities,allowInfrastructure})}>Lưu quyền</button></div></DialogContent></Dialog>;
+}

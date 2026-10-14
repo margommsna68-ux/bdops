@@ -1,5 +1,5 @@
 import {afterAll,expect,it} from 'vitest';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {scanWorkbook,persistSourceSnapshot} from '@/server/proxy-management/sources';
 import {testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
@@ -21,5 +21,21 @@ it('same source content does not invalidate identities; failure preserves reserv
   }finally{
     await db.proxySourceReference.deleteMany({where:{snapshot:{projectId}}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});
     if(identityId) await db.proxyIdentity.deleteMany({where:{id:identityId}});await db.project.deleteMany({where:{id:projectId}});
+  }
+});
+it('annotation-aware scans replace unsafe evidence cached by the earlier scanner hash',async()=>{
+  const projectId=randomUUID();let identityId:string|undefined;
+  const book={spreadsheetId:'fixture',tabs:[{id:'1',name:'PC',hidden:false,cells:[{a1:'A1',row:1,column:1,value:'198.51.100.205 BLOCKED 2026-10-01',note:'',formula:''}]}]};
+  try{
+    await db.project.create({data:{id:projectId,code:projectId,name:'Scanner upgrade fixture'}});
+    const source=scanWorkbook(book,'GENJY');
+    const oldHash=createHash('sha256').update(JSON.stringify(book)).digest('hex');
+    const old=await persistSourceSnapshot(projectId,{...source,hash:oldHash,evidence:source.evidence.map(e=>({...e,hasManualMetadata:false}))},db);
+    identityId=(await db.proxyIdentity.findUniqueOrThrow({where:{ip:'198.51.100.205'}})).id;
+    const current=await persistSourceSnapshot(projectId,{...source,id:randomUUID()},db);
+    expect(current.id).not.toBe(old.id);
+    expect(await db.proxySourceReference.findFirstOrThrow({where:{snapshotId:current.id}})).toMatchObject({hasManualMetadata:true});
+  }finally{
+    await db.proxySourceReference.deleteMany({where:{snapshot:{projectId}}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});if(identityId)await db.proxyIdentity.delete({where:{id:identityId}});await db.project.deleteMany({where:{id:projectId}});
   }
 });

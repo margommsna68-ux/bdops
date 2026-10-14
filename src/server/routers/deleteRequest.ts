@@ -2,6 +2,7 @@ import { z } from "zod";
 import {TRPCError} from '@trpc/server';
 import { router, memberProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
+import {assertDeleteTarget} from '../permissions/legacy-infrastructure';
 
 export const deleteRequestRouter = router({
   list: moderatorProcedure
@@ -46,6 +47,7 @@ export const deleteRequestRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       // Check if there's already a pending request for this entity
+      await assertDeleteTarget(ctx.prisma,input.projectId,input.entity,input.entityId);
       const existing = await ctx.prisma.deleteRequest.findFirst({
         where: {
           entity: input.entity,
@@ -76,6 +78,7 @@ export const deleteRequestRouter = router({
       const request = await ctx.prisma.deleteRequest.findFirstOrThrow({
         where: { id: input.id, projectId: input.projectId, status: "PENDING" },
       });
+      await assertDeleteTarget(ctx.prisma,input.projectId,request.entity,request.entityId);
       if(['ProxyIP','VirtualMachine','Server'].includes(request.entity)) {
         const mode=(ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode;
         const linked=mode==='PROXY_VM'||await ctx.prisma.proxyIP.findFirst({where:{projectId:input.projectId,identityId:{not:null}},select:{id:true}});

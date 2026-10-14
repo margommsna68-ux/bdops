@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
+import {TRPCError} from '@trpc/server';
 import { encrypt, decrypt } from "@/lib/encryption";
 import { createAuditLog } from "@/lib/audit";
 
@@ -142,6 +143,8 @@ export const serverRouter = router({
   getCredentials: infrastructureProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .query(async ({ ctx, input }) => {
+      const mode=(ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode;
+      if(ctx.role==='VIEWER'||(mode==='PROXY_VM'&&ctx.role!=='ADMIN'&&!ctx.membership.capabilities.includes('COPY_CREDENTIALS'))) throw new TRPCError({code:'FORBIDDEN',message:'Không có quyền xem/copy thông tin đăng nhập'});
       const server = await ctx.prisma.server.findFirstOrThrow({
         where: { id: input.id, projectId: input.projectId },
         select: { credentials: true },
