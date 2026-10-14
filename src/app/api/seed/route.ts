@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encrypt } from "@/lib/encryption";
 import bcrypt from "bcryptjs";
+import {allowLegacySeed} from '@/server/permissions/seed';
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   // Block seed endpoint in production
-  if (process.env.NODE_ENV === "production") {
+  if (!allowLegacySeed(process.env.NODE_ENV,process.env.ENABLE_LEGACY_SEED)) {
     return NextResponse.json({ error: "Seed endpoint is disabled in production" }, { status: 403 });
   }
   try {

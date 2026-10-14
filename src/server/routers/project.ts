@@ -33,16 +33,18 @@ export const projectRouter = router({
       const [membership, project] = await Promise.all([
         ctx.prisma.projectMember.findFirst({
           where: { userId, projectId: input.projectId },
-          select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true },
+          select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true,capabilities:true },
         }),
         ctx.prisma.project.findUnique({
           where: { id: input.projectId },
-          select: { type: true },
+          select: { type: true,settings:true },
         }),
       ]);
+      if(!membership) throw new TRPCError({code:'FORBIDDEN',message:'Không có quyền truy cập dự án'});
       return {
         ...(membership ?? { id: "", role: "USER" as const, allowedModules: [] as string[], canManageUsers: false, managerId: null }),
         projectType: project?.type ?? "FULL",
+        businessMode:(project?.settings as {businessMode?:string}|null)?.businessMode||null,
       };
     }),
 

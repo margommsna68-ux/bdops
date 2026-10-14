@@ -3,7 +3,7 @@ import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
 import {parseProxy,parseProxyList,parseReplacementLists} from './parse';
 import {withProxyTransaction} from './transaction';
-import type {ActorScope,BatchInput,CatalogAccount,EligibleProxy,EndpointFact,HistoryFact,ParsedProxy,ProxyContext} from './types';
+import type {ActorScope,BatchInput,CatalogAccount,EligibleProxy,EndpointFact,HistoryFact,ParsedProxy,ProxyContext,SheetSnapshot} from './types';
 type Reader=PrismaClient|Prisma.TransactionClient;
 export function decodeEndpoint(row:Pick<ProxyIP,'address'|'host'|'port'|'credentialCipher'>):ParsedProxy|null{
   if(row.credentialCipher&&row.host&&row.port){const c=JSON.parse(decrypt(row.credentialCipher)) as {username:string;password:string};return {ip:row.host,port:row.port,...c,format:'FULL'};}
@@ -13,13 +13,13 @@ export async function loadCatalog(projectId:string,db:Reader=prisma):Promise<Cat
   const accounts=await db.proxyProviderAccount.findMany({where:{projectId,disabled:false}});
   return accounts.map(a=>({id:a.id,code:a.code,...JSON.parse(decrypt(a.credentialCipher))}));
 }
-function requestedIps(input:BatchInput):string[]|null{
-  if(input.kind==='SHEET') return null;
+function requestedIps(input:BatchInput,sheet?:SheetSnapshot):string[]|null{
+  if(input.kind==='SHEET') return sheet?Array.from(new Set(sheet.rows.flatMap(r=>r.proxy?[r.proxy.ip]:[]))):null;
   const parsed=input.kind==='REPLACE'?parseReplacementLists(input.removedText||input.text||'',input.addedText||'').flatMap(p=>[p.old,p.next]):parseProxyList(input.text||'');
   return Array.from(new Set(parsed.map(p=>p.ip)));
 }
-export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Reader=prisma):Promise<ProxyContext>{
-  const ips=requestedIps(input);
+export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Reader=prisma,sheet?:SheetSnapshot):Promise<ProxyContext>{
+  const ips=requestedIps(input,sheet);
   const identityWhere=ips?{ip:{in:ips}}:{};
   const endpointWhere:Prisma.ProxyIPWhereInput=ips?{OR:[{identity:{ip:{in:ips}}},...ips.map(ip=>({AND:[{identityId:null},{OR:[{address:ip},{address:{startsWith:ip+':'}}]}]}))]}:{};
   const [identities,rows,references,events,replacements,source]=await Promise.all([
@@ -41,7 +41,7 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
   return {
     identities:identities.map(i=>({id:i.id,ip:i.ip,owner:i.owner,subgroup:i.subgroup,revision:i.revision,allocationMode:i.allocationMode})),endpoints,history,
     evidence:references.map(r=>({sourceRef:r.snapshot.projectId===scope.projectId?r.sourceRef:'Nguồn khác đã giữ IP',ip:r.identity.ip,owner:r.owner,subgroup:r.subgroup,format:r.format as 'BARE'|'FULL',hasFullCredentials:r.hasFullCredentials,hasManualMetadata:r.hasManualMetadata})),
-    receipts:replacements.flatMap(r=>r.oldEndpoint.identity&&r.newEndpoint.identity?[{oldIp:r.oldEndpoint.identity.ip,newIp:r.newEndpoint.identity.ip,status:r.status as 'APPLIED'|'VOID'}]:[]),
+    receipts:replacements.flatMap(r=>r.oldEndpoint.identity&&r.newEndpoint.identity?[{oldIp:r.oldEndpoint.identity.ip,newIp:r.newEndpoint.identity.ip,status:r.status as 'APPLIED'|'VOID',oldEndpointId:r.oldEndpointId,newEndpointId:r.newEndpointId}]:[]),
     source:source?{id:source.id,sourceKey:source.sourceKey,hash:source.hash,fetchedAt:source.fetchedAt.toISOString(),scanSucceeded:source.scanSucceeded}:{id:'',sourceKey:'GENJY',hash:'UNAVAILABLE',fetchedAt:new Date(0).toISOString(),scanSucceeded:false},
   };
 }

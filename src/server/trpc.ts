@@ -69,7 +69,7 @@ const ROLE_HIERARCHY: Record<ProjectRole, number> = {
 };
 
 // Base middleware: verify project membership and extract role
-const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawInput, type }) => {
+const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawInput, type, path }) => {
   const input = rawInput as any;
   const projectId = input?.projectId;
   if (!projectId) {
@@ -84,6 +84,11 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
   }
   if (type === 'mutation' && membership.role === 'VIEWER') {
     throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
+  }
+  const businessMode=(membership.project.settings as {businessMode?:string}|null)?.businessMode;
+  if(/^(proxy|vm)\./.test(path)||(type==='mutation'&&/^server\.(delete|bulkDelete)$/.test(path))) {
+    const featureLinked=businessMode==='PROXY_VM'||await ctx.prisma.proxyIP.findFirst({where:{projectId,identityId:{not:null}},select:{id:true}});
+    if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});
   }
   return next({
     ctx: {

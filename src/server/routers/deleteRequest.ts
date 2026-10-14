@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {TRPCError} from '@trpc/server';
 import { router, memberProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
@@ -75,6 +76,11 @@ export const deleteRequestRouter = router({
       const request = await ctx.prisma.deleteRequest.findFirstOrThrow({
         where: { id: input.id, projectId: input.projectId, status: "PENDING" },
       });
+      if(['ProxyIP','VirtualMachine','Server'].includes(request.entity)) {
+        const mode=(ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode;
+        const linked=mode==='PROXY_VM'||await ctx.prisma.proxyIP.findFirst({where:{projectId:input.projectId,identityId:{not:null}},select:{id:true}});
+        if(linked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Hạ tầng đã quản lý lịch sử; dùng luồng nghỉ dùng thay vì xoá'});
+      }
 
       // Perform the actual delete based on entity type
       const entityModelMap: Record<string, any> = {

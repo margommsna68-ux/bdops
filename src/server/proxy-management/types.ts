@@ -8,7 +8,7 @@ export class ProxyDomainError extends Error {
   constructor(public readonly code:IssueCode, message?:string){super(message?`${code}: ${message}`:code);this.name='ProxyDomainError';}
 }
 export interface ParsedProxy {ip:string;port:number|null;username:string|null;password:string|null;format:'BARE'|'FULL'}
-export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[]}
+export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[];businessMode?:string}
 export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;receivedDate?:string|null;snapshotIds?:string[];idempotencyKey:string}
 export interface Decision {outcome:Outcome;code?:IssueCode;message:string}
 export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;packageCode?:string|null;sourceRefs:string[]}
@@ -22,9 +22,9 @@ export interface HistoryFact {ip:string;kind:'RECEIVED'|'BLOCKED'|'DIE'|'REPLACE
 export interface SourceSnapshotRef {id:string;sourceKey:string;hash:string;fetchedAt:string;scanSucceeded:boolean}
 export interface SourceSnapshot extends SourceSnapshotRef {evidence:SourceEvidence[];tabs?:{id:string;name:string;hidden:boolean}[]}
 export interface SheetSource {key:string;spreadsheetId:string;credentialRef:string;mode:'GOOGLE_AUTH'|'LOCAL_SNAPSHOT';localSnapshotPath?:string}
-export interface ProxyContext {identities:IdentityFact[];endpoints:EndpointFact[];evidence:SourceEvidence[];history:HistoryFact[];receipts:{oldIp:string;newIp:string;status:'APPLIED'|'VOID'}[];source:SourceSnapshotRef}
+export interface ProxyContext {identities:IdentityFact[];endpoints:EndpointFact[];evidence:SourceEvidence[];history:HistoryFact[];receipts:{oldIp:string;newIp:string;status:'APPLIED'|'VOID';oldEndpointId?:string;newEndpointId?:string}[];source:SourceSnapshotRef}
 export interface ReplacementContext {old:EndpointFact|null;oldIdentity:IdentityFact|null;oldCandidates:number;next:ParsedProxy;nextEvidence:SourceEvidence[];nextIdentities:IdentityFact[];nextInInventory:boolean;nextInVmOrReservation:boolean;nextHistory:HistoryFact[];exactReceiptReplay:boolean;sourceScanSucceeded:boolean}
-export interface SheetSnapshot {snapshots:SourceSnapshot[];rows:{sourceRef:string;rawValue:string;proxy:ParsedProxy|null;kind:'CURRENT_INVENTORY'|'LOOKUP_HISTORY'|'VM'|'GENJY_REFERENCE'|'OWNER_DECISION';owner:Owner;subgroup:Subgroup;vmKey:string|null;valueState:'BLANK'|'FORMULA'|'PLACEHOLDER'|'UNRESOLVED'|'FULL'}[]}
+export interface SheetSnapshot {snapshots:SourceSnapshot[];rows:{sourceRef:string;rawValue:string;proxy:ParsedProxy|null;kind:'CURRENT_INVENTORY'|'LOOKUP_HISTORY'|'VM'|'GENJY_REFERENCE'|'OWNER_DECISION';owner:Owner;subgroup:Subgroup;vmKey:string|null;valueState:'BLANK'|'FORMULA'|'PLACEHOLDER'|'UNRESOLVED'|'FULL';snapshotId?:string}[]}
 export interface ReconciliationPlan {rows:PreviewRow[];snapshots:SourceSnapshotRef[];ownership:{ip:string;owner:Owner;subgroup:Subgroup;sourceRefs:string[]}[];vmRefs:{vmKey:string;sourceRef:string;valueState:'BLANK'|'FORMULA'|'PLACEHOLDER'|'UNRESOLVED'|'FULL';endpointId:string|null}[]}
 export interface EligibleProxy {identityId:string;endpointId:string;ip:string;port:number;revision:number;allocationKey:string}
 export interface RegistryFilter {owner?:Owner;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number}

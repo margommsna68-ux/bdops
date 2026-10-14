@@ -25,6 +25,6 @@ export async function createAuditLog(params: {
     });
   } catch {
     // Audit logging should never fail the main operation
-    console.error("Failed to create audit log", params);
+    console.error("Failed to create audit log", {action:params.action,entity:params.entity,entityId:params.entityId});
   }
 }

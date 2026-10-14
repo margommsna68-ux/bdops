@@ -15,7 +15,7 @@ export function assertInfrastructureAction(scope:ActorScope,action:Infrastructur
   if(action==='REPLACE'&&!scope.capabilities.includes('PROXY_REPLACE')) denied();
 }
 export async function loadInfrastructureScope(db:PrismaClient|Prisma.TransactionClient,userId:string,projectId:string):Promise<ActorScope>{
-  const member=await db.projectMember.findUnique({where:{userId_projectId:{userId,projectId}}});
+  const member=await db.projectMember.findUnique({where:{userId_projectId:{userId,projectId}},include:{project:{select:{settings:true}}}});
   if(!member) throw new ProxyDomainError('FORBIDDEN','Không có quyền truy cập dự án');
-  return {userId,projectId,role:member.role,allowedModules:member.allowedModules,capabilities:member.capabilities};
+  return {userId,projectId,role:member.role,allowedModules:member.allowedModules,capabilities:member.capabilities,businessMode:(member.project.settings as {businessMode?:string}|null)?.businessMode};
 }

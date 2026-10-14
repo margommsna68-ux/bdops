@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {TRPCError} from '@trpc/server';
 import { router, infrastructureProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 
@@ -343,6 +344,8 @@ export const proxyRouter = router({
   bulkDelete: moderatorProcedure
     .input(z.object({ projectId: z.string(), ids: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
+      const owned=await ctx.prisma.proxyIP.findMany({where:{id:{in:input.ids},projectId:input.projectId},select:{id:true}});
+      if(owned.length!==new Set(input.ids).size) throw new TRPCError({code:'BAD_REQUEST',message:'Danh sách có proxy không thuộc dự án; tải lại trước khi xoá'});
       await createAuditLog({
         action: "BULK_DELETE",
         entity: "ProxyIP",
@@ -352,9 +355,9 @@ export const proxyRouter = router({
         changes: { count: input.ids.length, ids: input.ids },
       });
       // Unassign VMs first
-      await ctx.prisma.virtualMachine.updateMany({ where: { proxyId: { in: input.ids } }, data: { proxyId: null } });
-      const result = await ctx.prisma.proxyIP.deleteMany({
-        where: { id: { in: input.ids }, projectId: input.projectId },
+      const result=await ctx.prisma.$transaction(async tx=>{
+        await tx.virtualMachine.updateMany({where:{proxyId:{in:owned.map(p=>p.id)},server:{projectId:input.projectId}},data:{proxyId:null}});
+        return tx.proxyIP.deleteMany({where:{id:{in:owned.map(p=>p.id)},projectId:input.projectId}});
       });
       return { deleted: result.count };
     }),

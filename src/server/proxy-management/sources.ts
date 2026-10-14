@@ -5,7 +5,7 @@ import {prisma} from '@/lib/prisma';
 import {encrypt} from '@/lib/encryption';
 import {parseProxy} from './parse';
 import {withProxyTransaction} from './transaction';
-import {ProxyDomainError,type ParsedProxy,type SheetSource,type SourceEvidence,type SourceSnapshot,type SourceSnapshotRef} from './types';
+import {ProxyDomainError,type ParsedProxy,type SheetSource,type SheetSnapshot,type SourceEvidence,type SourceSnapshot,type SourceSnapshotRef} from './types';
 export interface WorkbookCell {a1:string;row:number;column:number;value:string;note?:string;formula?:string}
 export interface Workbook {spreadsheetId:string;tabs:{id:string;name:string;hidden:boolean;cells:WorkbookCell[]}[]}
 export function scanWorkbook(book:Workbook,sourceKey:string):SourceSnapshot{
@@ -99,4 +99,23 @@ export async function refreshGenjy(projectId:string,db:PrismaClient=prisma):Prom
   try{if(process.env.GENJY_SOURCE_JSON) source=JSON.parse(process.env.GENJY_SOURCE_JSON);}catch{}
   const snapshot=source?await fetchGenjySnapshot(source):{id:randomUUID(),sourceKey:'GENJY',hash:'UNAVAILABLE',fetchedAt:new Date().toISOString(),scanSucceeded:false,evidence:[]};
   return persistSourceSnapshot(projectId,snapshot,db);
+}
+// Only the server's reviewed Sheet adapter calls this seam. It does not reserve identities
+// or infer ownership from old notes; preview/commit resolves classified current rows.
+export async function persistSheetSnapshot(projectId:string,sheet:SheetSnapshot,db:PrismaClient=prisma):Promise<SourceSnapshotRef>{
+  if(!Array.isArray(sheet.rows)||!sheet.rows.length||sheet.rows.length>10000||!Array.isArray(sheet.snapshots)) throw new ProxyDomainError('INVALID_INPUT');
+  if(sheet.snapshots.some(s=>!s.scanSucceeded)) throw new ProxyDomainError('SOURCE_UNAVAILABLE');
+  for(const row of sheet.rows){
+    if(!row.sourceRef||!['CURRENT_INVENTORY','LOOKUP_HISTORY','VM','GENJY_REFERENCE','OWNER_DECISION'].includes(row.kind)||!['SELF','GENJY','UNKNOWN'].includes(row.owner)||!['BLANK','FORMULA','PLACEHOLDER','UNRESOLVED','FULL'].includes(row.valueState)||!['PC_CHUNG',null].includes(row.subgroup)) throw new ProxyDomainError('INVALID_INPUT');
+    if(row.proxy){
+      const p=row.proxy;parseProxy(p.format==='BARE'?p.ip:`${p.ip}:${p.port}:${p.username}:${p.password}`);
+    }
+  }
+  const normalized={snapshots:sheet.snapshots,rows:sheet.rows.map(({snapshotId,...row})=>row)};
+  const hash=createHash('sha256').update(JSON.stringify({rows:normalized.rows,sources:sheet.snapshots.map(s=>({sourceKey:s.sourceKey,hash:s.hash}))})).digest('hex');
+  return withProxyTransaction(async tx=>{
+    const existing=await tx.proxySourceSnapshot.findFirst({where:{projectId,sourceKey:'PERSONAL_SHEET',hash,scanSucceeded:true}});
+    const record=existing||await tx.proxySourceSnapshot.create({data:{projectId,sourceKey:'PERSONAL_SHEET',hash,scanSucceeded:true,metadata:{rowCount:sheet.rows.length},encryptedPayload:encrypt(JSON.stringify(normalized))}});
+    return {id:record.id,sourceKey:record.sourceKey,hash:record.hash,fetchedAt:record.fetchedAt.toISOString(),scanSucceeded:record.scanSucceeded};
+  },db);
 }

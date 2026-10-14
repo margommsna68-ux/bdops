@@ -1,4 +1,5 @@
 import type {Owner,ProxyContext,ReconciliationPlan,SheetSnapshot,Subgroup} from './types';
+import {fullProxy} from './parse';
 export function buildReconciliation(input:SheetSnapshot,existing:ProxyContext):ReconciliationPlan{
   const ownership=new Map<string,{ip:string;owner:Owner;subgroup:Subgroup;sourceRefs:string[]}>();
   for(const row of input.rows){
@@ -24,9 +25,18 @@ export function buildReconciliation(input:SheetSnapshot,existing:ProxyContext):R
     if(seen.has(p.ip)) return {...base,outcome:'SKIP' as const,newIp:p.ip,message:'Cùng IP đã có dòng đối chiếu'};
     seen.add(p.ip);
     if(p.format==='BARE'||owner.owner==='UNKNOWN') return {...base,outcome:'ERROR' as const,code:'OWNER_CONFLICT' as const,newIp:p.ip,message:'Cần đủ thông tin và xác định chủ sở hữu'};
-    if(existing.endpoints.some(e=>e.proxy.ip===p.ip)) return {...base,outcome:'SKIP' as const,newIp:p.ip,message:'Đã có trong kho; kiểm tra thông tin hiện hành'};
+    const endpoints=existing.endpoints.filter(e=>e.proxy.ip===p.ip);
+    if(endpoints.length){
+      if(endpoints.some(e=>['REPLACED','DIE'].includes(e.inventoryState))) return {...base,outcome:'ERROR' as const,code:'HISTORICAL_IP' as const,newIp:p.ip,message:'IP có lịch sử đã loại; không nhận lại thành hàng hiện hành'};
+      if(endpoints.length!==1||endpoints[0].proxy.format!=='FULL'||fullProxy(endpoints[0].proxy)!==fullProxy(p)) return {...base,outcome:'ERROR' as const,code:'CURRENT_IP' as const,newIp:p.ip,message:'IP đã có với thông tin khác; cần đối chiếu trước'};
+      return {...base,outcome:'SKIP' as const,newIp:p.ip,message:'Đã có đúng proxy trong kho; giữ dữ liệu web hiện tại'};
+    }
+    if(existing.history.some(e=>e.ip===p.ip)||existing.receipts.some(e=>e.oldIp===p.ip||e.newIp===p.ip)) return {...base,outcome:'ERROR' as const,code:'HISTORICAL_IP' as const,newIp:p.ip,message:'IP đã có lịch sử; không tự phục hồi từ Sheet'};
     if(!existing.source.scanSucceeded) return {...base,outcome:'ERROR' as const,code:'SOURCE_UNAVAILABLE' as const,newIp:p.ip,message:'Chưa quét được nguồn Genjy; chưa nhận proxy vào kho'};
     return {...base,outcome:'READY' as const,newIp:p.ip,owner:owner.owner,subgroup:owner.subgroup,message:'Sẵn sàng đối chiếu kho; chưa tự gán VM'};
   });
-  return {rows,snapshots:input.snapshots.map(({evidence,...snapshot})=>snapshot),ownership:Array.from(ownership.values()),vmRefs:input.rows.filter(r=>r.kind==='VM'&&r.vmKey).map(r=>({vmKey:r.vmKey!,sourceRef:r.sourceRef,valueState:r.valueState,endpointId:existing.endpoints.find(e=>r.proxy&&e.proxy.ip===r.proxy.ip)?.id||null}))};
+  return {rows,snapshots:input.snapshots.map(({evidence,...snapshot})=>snapshot),ownership:Array.from(ownership.values()),vmRefs:input.rows.filter(r=>r.kind==='VM'&&r.vmKey).map(r=>{
+    const exact=existing.endpoints.filter(e=>r.valueState==='FULL'&&r.proxy?.format==='FULL'&&e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(r.proxy));
+    return {vmKey:r.vmKey!,sourceRef:r.sourceRef,valueState:r.valueState,endpointId:exact.length===1?exact[0].id:null};
+  })};
 }

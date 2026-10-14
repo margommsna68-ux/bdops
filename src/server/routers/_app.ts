@@ -20,6 +20,7 @@ import { notificationRouter } from "./notification";
 import { partnerRouter } from "./partner";
 import { earnWithdrawalRouter } from "./earnWithdrawal";
 import { editHistoryRouter } from "./editHistory";
+import { proxyManagementRouter } from './proxyManagement';
 
 export const appRouter = router({
   project: projectRouter,
@@ -32,6 +33,7 @@ export const appRouter = router({
   server: serverRouter,
   vm: vmRouter,
   proxy: proxyRouter,
+  proxyManagement: proxyManagementRouter,
   gmail: gmailRouter,
   vmTask: vmTaskRouter,
   auditLog: auditLogRouter,
