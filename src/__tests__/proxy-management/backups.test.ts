@@ -8,6 +8,7 @@ import {sealArchive,verifyArchive,openArchive} from '@/server/system-backups/arc
 import {assertSystemOwner,assertRestoreTarget,pgEnvironment,createSystemBackup} from '@/server/system-backups/service';
 import {testClient} from './db-fixture';
 import {randomUUID} from 'node:crypto';
+import {spawn} from 'node:child_process';
 it('only configured system owner can operate system backups, not a project admin',()=>{
   expect(()=>assertSystemOwner('admin','')).toThrow('FORBIDDEN');expect(()=>assertSystemOwner('admin','owner')).toThrow('FORBIDDEN');expect(()=>assertSystemOwner('owner','owner')).not.toThrow();
 });
@@ -20,6 +21,10 @@ it('dump failure publishes no backup and releases the lock for another attempt',
     await expect(createSystemBackup(userId,db)).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});
     const {readdir}=await import('node:fs/promises');expect(await readdir(dir)).toEqual([]);
     await expect(createSystemBackup(userId,db)).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});expect(await readdir(dir)).toEqual([]);
+    await expect(createSystemBackup(userId,db,{spawnDump:()=>{throw new Error('Sync spawn failure');}})).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});expect(await readdir(dir)).toEqual([]);
+    await expect(createSystemBackup(userId,db,{spawnDump:()=>spawn(join(dir,'missing-binary.exe'),[],{stdio:['ignore','pipe','pipe'],windowsHide:true})})).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});expect(await readdir(dir)).toEqual([]);
+    const executable=join(dir,'invalid-binary.exe');await writeFile(executable,'not executable');process.env.PG_DUMP_PATH=executable;
+    await expect(createSystemBackup(userId,db)).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});expect(await readdir(dir)).toEqual(['invalid-binary.exe']);
   }finally{for(const k of fields){if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k];}await db.auditLog.deleteMany({where:{userId}});await db.user.delete({where:{id:userId}});await db.$disconnect();if(resolve(dir).startsWith(resolve(tmpdir())+'\\')||resolve(dir).startsWith(resolve(tmpdir())+'/'))await rm(dir,{recursive:true,force:true});}
 });
 it('stream failure removes an incomplete archive and preserves an existing archive',async()=>{

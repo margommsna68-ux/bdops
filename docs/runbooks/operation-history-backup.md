@@ -12,4 +12,4 @@ Giữ riêng ENCRYPTION_KEY của ứng dụng và BACKUP_ENCRYPTION_KEY; mất 
 
 Không restore một bản cũ lên hệ thống thật chỉ để sửa một thao tác: việc đó có thể mất thay đổi sau của nhân viên và lịch sử Genjy/nhận IP mới. Khi khôi phục sự cố toàn hệ thống cần lưu snapshot hiện tại nếu còn đọc được, đối chiếu/ghép những bằng chứng ownership/received mới hơn backup trước cutover.
 
-Kiểm chứng 14/10/2026: 117 tests qua, production build qua; vòng real pg_dump/pg_restore có 35 bảng, credential mẫu giải mã được, app DB không đổi. Backup thử `22f5a201-77a6-4fe8-b057-9466c6b69fc2`, checksum `6d8e4bc8a3aa57f007880b883c5b7b2f0851bc7982ed3173e760a23381ab818e`. Browser nhập/undo mẫu 192.0.2.151 và tạo backup từ web đã thành công. Không nhập proxy thật.
+Kiểm chứng 14/10/2026: 118 tests qua, production build qua; vòng real pg_dump/pg_restore có 35 bảng, credential mẫu giải mã được, app DB không đổi. Backup thử `22f5a201-77a6-4fe8-b057-9466c6b69fc2`, checksum `6d8e4bc8a3aa57f007880b883c5b7b2f0851bc7982ed3173e760a23381ab818e`. Browser nhập/undo mẫu 192.0.2.151 và tạo backup từ web đã thành công. Không nhập proxy thật.

@@ -7,7 +7,7 @@ export function captureEndpoint(row:EndpointRow){
 }
 export function captureAccount(row:ProxyProviderAccount){return {code:row.code,label:row.label,credentialCipher:row.credentialCipher,disabled:row.disabled,revision:row.revision};}
 export function captureMember(row:ProjectMember){return {role:row.role,capabilities:row.capabilities,allowedModules:row.allowedModules,accessRevision:row.accessRevision};}
-type Image<T>={id:string;before:T|null;after:T;endpointGuard?:{id:string;revision:number}[]};
+type Image<T>={id:string;before:T|null;after:T;endpointGuard?:{id:string;revision:number}[];accountGuard?:{id:string;revision:number}[]};
 export type ResourceImage=(Image<ReturnType<typeof captureEndpoint>>&{resource:'ENDPOINT'})|(Image<ReturnType<typeof captureAccount>>&{resource:'ACCOUNT'})|(Image<ReturnType<typeof captureMember>>&{resource:'MEMBER'});
 export interface OperationSnapshot {version:1;resources:ResourceImage[];eventIds:string[];replacementIds:string[]}
 export async function readImage(tx:Prisma.TransactionClient|PrismaClient,projectId:string,resource:ResourceImage['resource'],id:string){
@@ -20,6 +20,7 @@ export async function assertImagesUnchanged(tx:Prisma.TransactionClient|PrismaCl
     const actual=await readImage(tx,projectId,image.resource,image.id);
     if(!actual||JSON.stringify(actual)!==JSON.stringify(image.after))throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã được sửa tiếp hoặc gán VM. Không thể hoàn tác đè lên thay đổi mới.');
     if(image.endpointGuard){const endpoints=await tx.proxyIP.findMany({where:{projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});if(JSON.stringify(endpoints)!==JSON.stringify(image.endpointGuard))throw new ProxyDomainError('STALE_PREVIEW','Kho đã thay đổi sau khi sửa gói. Không thể hoàn tác gói cũ.');}
+    if(image.accountGuard){const accounts=await tx.proxyProviderAccount.findMany({where:{projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});if(JSON.stringify(accounts)!==JSON.stringify(image.accountGuard))throw new ProxyDomainError('STALE_PREVIEW','Các gói đã thay đổi; không thể hoàn tác làm trùng thông tin đăng nhập.');}
   }
 }
 export function describeImage(image:ResourceImage){

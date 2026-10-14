@@ -32,3 +32,5 @@ Reviewer không đưa Minor. Lint còn 4 cảnh báo hook có sẵn ở agent-pp
 ## Kiểm tra và phần tiếp theo
 
 Lượt rà độc lập 3 Critical + 3 Important đã sửa bằng test RED→GREEN; bộ cuối 103/103, TypeScript/build qua. Không có dữ liệu thật hoặc deploy. Branch giữ để nối VM/reservation/install và business theo từng mốc.
+
+Mốc lịch sử 14/10: user chọn hoàn tác từng thao tác + backup toàn hệ thống. 118 tests đã qua, bản sao mã hoá restore riêng 35 bảng + giải mã credentials. Một lượt rà độc lập có 2 Important/1 Minor; sửa RED→GREEN cả ba. Catalog undo chặn nếu catalog khác đổi để tránh trùng credentials. Backup startup sync/async lỗi đều dọn lock/file. Timeline giữ event và ghi rõ đã hoàn tác. VM/physical install/real migration vẫn là mốc tiếp theo. Không có public deploy.

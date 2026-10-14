@@ -4,6 +4,7 @@ import {encrypt} from '@/lib/encryption';
 import {createProxyBatchService} from '@/server/proxy-management/batches';
 import {persistSourceSnapshot} from '@/server/proxy-management/sources';
 import {getEligibleInventory} from '@/server/proxy-management/repository';
+import {getProxyTimeline} from '@/server/proxy-management/history';
 import {listOperations,inspectOperation} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 import {saveProviderAccount} from '@/server/proxy-management/catalog-management';
@@ -41,6 +42,7 @@ it('undo blocked restores dates and eligibility, retains encrypted immutable his
     expect((await db.proxyIP.findUniqueOrThrow({where:{id:before.id}})).inventoryState).toBe('NEW');
     expect(await db.operationJournal.count({where:{undoOfId:operation.id}})).toBe(1);
     expect((await db.proxyStatusEvent.findFirstOrThrow({where:{batchId:blocked.result.batchId}})).reversedAt).not.toBeNull();
+    const history=await getProxyTimeline(f.scope,before.identityId!,db);expect(history.events.find(e=>e.kind==='BLOCKED')?.reversedAt).toEqual(expect.any(String));
   }finally{await f.cleanup();}
 });
 it('cross-project history and VM changes are rejected; concurrent undo has one winner',async()=>{
@@ -103,5 +105,15 @@ it('catalog and member changes have guarded before-images and reversible access'
     await setProxyCapabilities(f.scope,member.id,['COPY_CREDENTIALS'],db,true);
     const accessOp=(await listOperations(f.scope,db)).find(o=>o.kind==='ACCESS')!;await undoOperation(f.scope,accessOp.id,'Thử quyền',db);
     expect((await db.projectMember.findUniqueOrThrow({where:{id:member.id}})).capabilities).toEqual([]);
+  }finally{await f.cleanup();}
+});
+it('catalog undo cannot reclaim credentials now used by a newly added package',async()=>{
+  const f=await fixture();try{
+    await saveProviderAccount(f.scope,{code:'fixture',label:'Changed',username:'changed',password:'changed-secret'},db);
+    const original=(await listOperations(f.scope,db)).find(o=>o.kind==='CATALOG')!;
+    await saveProviderAccount(f.scope,{code:'other',label:'Other',username:'u',password:'test-secret'},db);
+    await expect(undoOperation(f.scope,original.id,'Restore old credentials',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+    expect(await db.proxyProviderAccount.count({where:{projectId:f.scope.projectId,disabled:false}})).toBe(2);
+    expect(await db.operationJournal.count({where:{undoOfId:original.id}})).toBe(0);
   }finally{await f.cleanup();}
 });

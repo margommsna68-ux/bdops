@@ -10,7 +10,7 @@ Mỗi lần commit proxy, thay gói hoặc quyền nhân viên lưu một Operat
 
 Quản lý ADMIN của đúng dự án được hoàn tác. Trước khi ghi, đọc lại quyền, so toàn bộ trường đã ghi và revision/updatedAt với ảnh sau; kiểm tra VM đang liên kết. Một thay đổi tiếp theo ở bất kỳ dòng nào làm toàn bộ hoàn tác thất bại. Hai yêu cầu cùng lúc chỉ tạo một bản hoàn tác; gửi lại trả cùng kết quả. Không lấy dữ liệu ảnh trước từ client.
 
-BLOCKED khôi phục trạng thái/ngày trước và đánh dấu event đó đã hoàn tác. NEW/SHEET không xoá định danh IP hay credentials lịch sử: endpoint mới được thu hồi, retire và QUARANTINED; lịch sử tiếp tục phát hiện IP nhà cung cấp gửi lại. REPLACE khôi phục endpoint cũ, thu hồi endpoint mới và ghi receipt VOID; cạnh replace, RECEIVED và owner Genjy luôn còn. Không tự thay cấu hình VM. Event blocked đã hoàn tác không cản cấp, nhưng RECEIVED và IP đã thấy vẫn cản nhập lại. Gói/quyền hoàn tác ảnh trước nếu tài nguyên liên quan chưa đổi; gói mới tạo được disable, không xoá. Không đảo owner/subgroup, revision chỉ tăng.
+BLOCKED khôi phục trạng thái/ngày trước và đánh dấu event đó đã hoàn tác. NEW/SHEET không xoá định danh IP hay credentials lịch sử: endpoint mới được thu hồi, retire và VOID (Đã thu hồi); lịch sử tiếp tục phát hiện IP nhà cung cấp gửi lại. REPLACE khôi phục endpoint cũ, thu hồi endpoint mới và ghi receipt VOID; cạnh replace, RECEIVED và owner Genjy luôn còn. Không tự thay cấu hình VM. Event blocked đã hoàn tác không cản cấp, nhưng RECEIVED và IP đã thấy vẫn cản nhập lại. Gói/quyền hoàn tác ảnh trước nếu tài nguyên liên quan chưa đổi; gói mới tạo được disable, không xoá. Không đảo owner/subgroup, revision chỉ tăng.
 
 ## Sao lưu toàn hệ thống
 

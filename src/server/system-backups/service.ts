@@ -30,22 +30,25 @@ export async function listSystemBackups(actorId:string){
   const rows:BackupManifest[]=[];for(const name of files)if(/^[a-f0-9-]{36}\.json$/.test(name)){try{const item=JSON.parse(await readFile(join(directory,name),'utf8')) as BackupManifest;if(item.version===1&&item.id+'.json'===name)rows.push(item);}catch{}}
   return rows.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50);
 }
-export async function createSystemBackup(actorId:string,db:PrismaClient=prisma){
+const spawnDump=(binary:string,environment:NodeJS.ProcessEnv)=>spawn(binary,['--format=custom','--no-owner','--no-acl','--no-password'],{env:environment,windowsHide:true,stdio:['ignore','pipe','pipe'],timeout:120000});
+export async function createSystemBackup(actorId:string,db:PrismaClient=prisma,deps:{spawnDump?:typeof spawnDump}={}){
   assertSystemOwner(actorId);if(!await db.user.findUnique({where:{id:actorId}}))throw new ProxyDomainError('FORBIDDEN');
   const {directory,key,binary,appKey}=backupConfiguration(),pg=pgEnvironment(process.env.DATABASE_URL||'');await access(binary);await mkdir(directory,{recursive:true,mode:0o700});
   const lockPath=join(directory,'.creating-backup'),id=randomUUID(),temporary=join(directory,id+'.partial'),archive=join(directory,id+'.backup');
   let lock;try{lock=await open(lockPath,'wx',0o600);}catch{throw new ProxyDomainError('STALE_PREVIEW','Đang tạo một bản sao khác. Chờ hoàn tất.');}
-  const child=spawn(binary,['--format=custom','--no-owner','--no-acl','--no-password'],{env:{...process.env,...pg},windowsHide:true,stdio:['ignore','pipe','pipe'],timeout:120000});
-  const completion=new Promise<boolean>(resolve=>{child.on('error',()=>{child.stdout.destroy(new Error('Backup process failed'));resolve(false);});child.on('close',code=>resolve(code===0));});child.stderr.resume();
+  let child:ReturnType<typeof spawnDump>|undefined,completion:Promise<boolean>|undefined;
   try{
     await db.auditLog.create({data:{userId:actorId,action:'SYSTEM_BACKUP_STARTED',entity:'SystemBackup',entityId:id}});
-    const sealed=await sealArchive(child.stdout,temporary,key);if(!await completion)throw new Error('Backup process failed');
+    const processHandle=(deps.spawnDump||spawnDump)(binary,{...process.env,...pg});child=processHandle;
+    // Attach immediately, and never emit a stream Error before pipeline owns it.
+    completion=new Promise<boolean>(resolve=>{processHandle.on('error',()=>{processHandle.stdout.destroy();resolve(false);});processHandle.on('close',code=>resolve(code===0));});processHandle.stderr.resume();
+    const sealed=await sealArchive(processHandle.stdout,temporary,key);if(!await completion)throw new Error('Backup process failed');
     const migrations=await db.$queryRaw<{migration_name:string}[]>`SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`;
     const manifest:BackupManifest={version:1,id,createdAt:new Date().toISOString(),...sealed,appVersion:'8.9.0',schemaVersion:migrations[0]?.migration_name||'unversioned',appKeyFingerprint:fingerprint(Buffer.from(appKey,'hex')),backupKeyFingerprint:fingerprint(key)};
     await rename(temporary,archive);await writeFile(join(directory,id+'.json.partial'),JSON.stringify(manifest,null,2),{flag:'wx',mode:0o600});await rename(join(directory,id+'.json.partial'),join(directory,id+'.json'));
     await db.auditLog.create({data:{userId:actorId,action:'SYSTEM_BACKUP_COMPLETED',entity:'SystemBackup',entityId:id,changes:{bytes:manifest.bytes,checksum:manifest.checksum}}});return manifest;
   }catch{
-    child.kill();await completion;await Promise.all([temporary,archive,join(directory,id+'.json.partial'),join(directory,id+'.json')].map(path=>unlink(path).catch(()=>{})));
+    child?.kill();if(completion)await completion;await Promise.all([temporary,archive,join(directory,id+'.json.partial'),join(directory,id+'.json')].map(path=>unlink(path).catch(()=>{})));
     await db.auditLog.create({data:{userId:actorId,action:'SYSTEM_BACKUP_FAILED',entity:'SystemBackup',entityId:id}}).catch(()=>{});
     throw new ProxyDomainError('SOURCE_UNAVAILABLE','Chưa tạo được bản sao. Không có bản sao lỗi trong danh sách; dữ liệu đang chạy được giữ nguyên.');
   }finally{await lock.close();await unlink(lockPath).catch(()=>{});}

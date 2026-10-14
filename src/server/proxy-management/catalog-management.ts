@@ -32,6 +32,7 @@ export async function saveProviderAccount(scope:ActorScope,input:{code:string;la
       if(packageCode!==row.packageCode||inventoryState!==row.inventoryState){await tx.proxyIP.update({where:{id:row.id},data:{packageCode,inventoryState,notesCipher:Object.keys(notes).length?encrypt(JSON.stringify(notes)):null,revision:{increment:1}}});resources.push({resource:'ENDPOINT',id:row.id,before:captureEndpoint(row),after:await readImage(tx,scope.projectId,'ENDPOINT',row.id)} as ResourceImage);}
     }
     resources[0].endpointGuard=await tx.proxyIP.findMany({where:{projectId:scope.projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});
+    resources[0].accountGuard=await tx.proxyProviderAccount.findMany({where:{projectId:scope.projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});
     await recordOperation(tx,{scope:current,kind:'CATALOG',summary:{code:input.code,resolved},snapshot:{version:1,resources,eventIds:[],replacementIds:[]}});
     await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_CATALOG',entity:'ProxyProviderAccount',entityId:input.code,changes:{code:input.code,resolved}}});
     return {saved:true,resolved};
