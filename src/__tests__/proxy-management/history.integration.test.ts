@@ -1,7 +1,7 @@
 import {afterAll,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {encrypt} from '@/lib/encryption';
-import {queryRegistry,getProxyTimeline,exportBlocked} from '@/server/proxy-management/history';
+import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint} from '@/server/proxy-management/history';
 import {testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 it('queries mask credentials, timeline hides other projects, copy requires capability',async()=>{
@@ -16,7 +16,10 @@ it('queries mask credentials, timeline hides other projects, copy requires capab
     const timeline=await getProxyTimeline(scope,identityId,db);expect(timeline.events[0].occurredAt).toBeNull();expect(JSON.stringify(timeline)).not.toContain('secret');
     await expect(getProxyTimeline({...scope,projectId:randomUUID()},identityId,db)).rejects.toMatchObject({code:'FORBIDDEN'});
     await expect(exportBlocked(scope,db)).rejects.toMatchObject({code:'FORBIDDEN'});
+    await expect(copyProxyEndpoint(scope,endpoint.id,db)).rejects.toMatchObject({code:'FORBIDDEN'});
     await db.projectMember.update({where:{userId_projectId:{userId,projectId}},data:{capabilities:['COPY_CREDENTIALS']}});
     expect(await exportBlocked(scope,db)).toEqual([{packageCode:'fixture',proxy:'192.0.2.90:80:u:secret',status:'BLOCKED'}]);expect(await db.auditLog.count({where:{projectId,action:'COPY_PROXY_CREDENTIALS'}})).toBe(1);
+    expect(await copyProxyEndpoint(scope,endpoint.id,db)).toEqual({proxy:'192.0.2.90:80:u:secret'});
+    await expect(copyProxyEndpoint(scope,randomUUID(),db)).rejects.toMatchObject({code:'NOT_FOUND'});
   }finally{await db.auditLog.deleteMany({where:{projectId}});await db.proxyStatusEvent.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});if(identityId) await db.proxyIdentity.deleteMany({where:{id:identityId}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});}
 });

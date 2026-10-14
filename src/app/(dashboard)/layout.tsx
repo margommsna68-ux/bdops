@@ -31,7 +31,7 @@ export default function DashboardLayout({
   // Update store when membership data arrives
   useEffect(() => {
     if (membership && projectId && currentProjectCode && currentProjectName) {
-      setCurrentProject(projectId, currentProjectCode, currentProjectName, membership.projectType || "FULL", membership.role, membership.allowedModules, membership.canManageUsers, membership.id);
+      setCurrentProject(projectId, currentProjectCode, currentProjectName, membership.projectType || "FULL", membership.role, membership.allowedModules, membership.canManageUsers, membership.id,membership.businessMode);
     }
   }, [membership, projectId, currentProjectCode, currentProjectName, setCurrentProject]);
 

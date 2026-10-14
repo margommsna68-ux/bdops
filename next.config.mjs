@@ -8,6 +8,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  distDir: process.env.BDOPS_BUILD_DIRECTORY || '.next',
   poweredByHeader: false,
   async headers() {
     return [

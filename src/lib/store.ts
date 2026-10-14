@@ -7,11 +7,12 @@ interface ProjectState {
   currentProjectCode: string | null;
   currentProjectName: string | null;
   currentProjectType: string | null; // "FULL" | "PAYPAL_ONLY"
+  currentBusinessMode: string | null;
   currentRole: string | null;
   currentModules: string[];
   canManageUsers: boolean;
   currentMemberId: string | null;
-  setCurrentProject: (id: string, code: string, name: string, type: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string) => void;
+  setCurrentProject: (id: string, code: string, name: string, type: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string, businessMode?:string|null) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -21,12 +22,13 @@ export const useProjectStore = create<ProjectState>()(
       currentProjectCode: null,
       currentProjectName: null,
       currentProjectType: null,
+      currentBusinessMode: null,
       currentRole: null,
       currentModules: [],
       canManageUsers: false,
       currentMemberId: null,
-      setCurrentProject: (id, code, name, type, role, modules, canManageUsers = false, memberId = undefined) =>
-        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null }),
+      setCurrentProject: (id, code, name, type, role, modules, canManageUsers = false, memberId = undefined, businessMode=null) =>
+        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null, currentBusinessMode:businessMode }),
     }),
     {
       name: "bdops-project",

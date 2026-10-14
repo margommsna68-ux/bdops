@@ -70,12 +70,14 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   };
 
   const isPaypalOnly = currentProjectType === "PAYPAL_ONLY";
+  const proxyMode=useProjectStore(s=>s.currentBusinessMode)==='PROXY_VM';
 
   // When no project selected (all deleted), show dashboard + admin + settings
   const noProject = !currentRole;
 
   const filteredItems = navItems.filter((item) => {
     if ("type" in item) return true;
+    if(proxyMode&&!['/dashboard','/infrastructure/proxies','/infrastructure/servers','/admin/users','/admin/projects','/audit-log','/settings'].includes(item.href)) return false;
     if (noProject) {
       // Only show dashboard, admin links, settings when no project
       return item.href === "/dashboard" || item.href === "/settings" || item.adminOnly;
@@ -99,7 +101,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   }
 
   const rawName = session?.user?.name || "User";
-  const userName = rawName.replace(/\b\w/g, (c: string) => c.toUpperCase());
+  const userName = rawName;
   const userInitial = userName.charAt(0);
 
   return (

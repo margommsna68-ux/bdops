@@ -111,7 +111,7 @@ export async function persistSheetSnapshot(projectId:string,sheet:SheetSnapshot,
       const p=row.proxy;parseProxy(p.format==='BARE'?p.ip:`${p.ip}:${p.port}:${p.username}:${p.password}`);
     }
   }
-  const normalized={snapshots:sheet.snapshots,rows:sheet.rows.map(({snapshotId,...row})=>row)};
+  const normalized={snapshots:sheet.snapshots,rows:sheet.rows.map(({snapshotId:_snapshotId,...row})=>row)};
   const hash=createHash('sha256').update(JSON.stringify({rows:normalized.rows,sources:sheet.snapshots.map(s=>({sourceKey:s.sourceKey,hash:s.hash}))})).digest('hex');
   return withProxyTransaction(async tx=>{
     const existing=await tx.proxySourceSnapshot.findFirst({where:{projectId,sourceKey:'PERSONAL_SHEET',hash,scanSucceeded:true}});

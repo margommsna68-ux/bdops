@@ -31,7 +31,8 @@ export function ProjectSwitcher() {
         membership?.role || "USER",
         membership?.allowedModules || [],
         membership?.canManageUsers || false,
-        membership?.id
+        membership?.id,
+        (project.settings as {businessMode?:string}|null)?.businessMode||null
       );
     }
   };

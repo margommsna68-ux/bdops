@@ -9,6 +9,8 @@ import { exportToCSV } from "@/lib/excel-export";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 import { PageHistory } from "@/components/PageHistory";
+import {RegistryTable} from "@/components/proxy-management/RegistryTable";
+import "@/components/proxy-management/proxy-management.css";
 
 const statusColors: Record<string, string> = {
   AVAILABLE: "bg-green-100 text-green-800",
@@ -68,7 +70,7 @@ function EditableCell({ value, onSave, mono, placeholder }: {
   );
 }
 
-export default function ProxiesPage() {
+function LegacyProxiesPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
   const t = useT();
@@ -412,4 +414,13 @@ export default function ProxiesPage() {
       <PageHistory entity="ProxyIP" show={showHistory} />
     </div>
   );
+}
+
+export default function ProxiesPage(){
+  const projectId=useProjectStore(s=>s.currentProjectId);
+  const access=trpc.proxyManagement.access.useQuery({projectId:projectId||''},{enabled:!!projectId});
+  if(!projectId) return <p className="text-sm text-gray-500">Chọn dự án để quản lý proxy.</p>;
+  if(access.isLoading) return <p className="text-sm text-gray-500">Đang mở kho proxy…</p>;
+  if(access.error) return <p role="alert" className="text-red-500">{access.error.message}</p>;
+  return access.data?.businessMode==='PROXY_VM'?<RegistryTable key={projectId} projectId={projectId}/>:<LegacyProxiesPage/>;
 }

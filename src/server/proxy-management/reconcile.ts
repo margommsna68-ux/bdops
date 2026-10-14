@@ -35,7 +35,7 @@ export function buildReconciliation(input:SheetSnapshot,existing:ProxyContext):R
     if(!existing.source.scanSucceeded) return {...base,outcome:'ERROR' as const,code:'SOURCE_UNAVAILABLE' as const,newIp:p.ip,message:'Chưa quét được nguồn Genjy; chưa nhận proxy vào kho'};
     return {...base,outcome:'READY' as const,newIp:p.ip,owner:owner.owner,subgroup:owner.subgroup,message:'Sẵn sàng đối chiếu kho; chưa tự gán VM'};
   });
-  return {rows,snapshots:input.snapshots.map(({evidence,...snapshot})=>snapshot),ownership:Array.from(ownership.values()),vmRefs:input.rows.filter(r=>r.kind==='VM'&&r.vmKey).map(r=>{
+  return {rows,snapshots:input.snapshots.map(({evidence:_evidence,...snapshot})=>snapshot),ownership:Array.from(ownership.values()),vmRefs:input.rows.filter(r=>r.kind==='VM'&&r.vmKey).map(r=>{
     const exact=existing.endpoints.filter(e=>r.valueState==='FULL'&&r.proxy?.format==='FULL'&&e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(r.proxy));
     return {vmKey:r.vmKey!,sourceRef:r.sourceRef,valueState:r.valueState,endpointId:exact.length===1?exact[0].id:null};
   })};

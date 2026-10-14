@@ -24,7 +24,7 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
     (!filter.owner||r.owner===filter.owner)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
     (!search||[r.ip,r.packageCode||'',...r.vmRefs].some(v=>v.toLowerCase().includes(search))));
   const numericIP=(ip:string)=>ip.split('.').reduce((n,part)=>n*256+Number(part),0);
-  filtered.sort((a,b)=>(a.packageCode||'~').localeCompare(b.packageCode||'~',undefined,{numeric:true})||numericIP(a.ip)-numericIP(b.ip)||(a.port||0)-(b.port||0)||(a.endpointId||a.identityId).localeCompare(b.endpointId||b.identityId));
+  filtered.sort((a,b)=>Number(a.packageCode===null)-Number(b.packageCode===null)||(a.packageCode||'').localeCompare(b.packageCode||'',undefined,{numeric:true})||numericIP(a.ip)-numericIP(b.ip)||(a.port||0)-(b.port||0)||(a.endpointId||a.identityId).localeCompare(b.endpointId||b.identityId));
   let start=0;
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
@@ -49,4 +49,12 @@ export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
   const result=rows.flatMap(r=>{const p=decodeEndpoint(r);return p?.format==='FULL'?[{packageCode:r.packageCode||'Chưa rõ gói',proxy:fullProxy(p),status:'BLOCKED' as const}]:[];});
   await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'blocked-export',changes:{count:result.length}}});
   return result;
+}
+export async function copyProxyEndpoint(scope:ActorScope,endpointId:string,db:PrismaClient=prisma){
+  await authorize(scope,true,db);
+  const endpoint=await db.proxyIP.findFirst({where:{id:endpointId,projectId:scope.projectId,identityId:{not:null}}});
+  if(!endpoint) throw new ProxyDomainError('NOT_FOUND');
+  const p=decodeEndpoint(endpoint);if(!p||p.format!=='FULL') throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ thông tin');
+  await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:endpointId,changes:{count:1}}});
+  return {proxy:fullProxy(p)};
 }
