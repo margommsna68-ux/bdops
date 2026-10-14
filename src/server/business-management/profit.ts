@@ -37,6 +37,12 @@ export async function markProfitPaid(scope:ActorScope,input:{allocationId:string
   await images.remember('SPLIT_PAYMENT',row.id);await tx.splitAllocation.update({where:{id:row.id},data:{paid:true,note:input.reason.trim(),revision:{increment:1}}});return {id:row.id};
  },db);
 }
+export async function correctProfitPaid(scope:ActorScope,input:{allocationId:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){
+ if(!input.reason.trim()||input.reason.length>300)throw new ProxyDomainError('INVALID_INPUT');return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_PAID_CORRECTION',module:'PROFIT',reversible:false},async(tx,images,current)=>{
+  if(current.role!=='ADMIN')throw new ProxyDomainError('FORBIDDEN');const row=await tx.splitAllocation.findFirst({where:{id:input.allocationId,split:{projectId:scope.projectId,businessManaged:true,voidedAt:null}}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||!row.paid)throw new ProxyDomainError('STALE_PREVIEW');
+  await images.remember('SPLIT_PAYMENT',row.id);await tx.splitAllocation.update({where:{id:row.id},data:{paid:false,note:[row.note,'Sửa ghi đã trả: '+input.reason.trim()].filter(Boolean).join('\n'),revision:{increment:1}}});return {id:row.id};
+ },db);
+}
 export async function reopenProfit(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){
  if(!input.reason.trim()||input.reason.length>300)throw new ProxyDomainError('INVALID_INPUT');return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_REOPEN',module:'PROFIT',reversible:false},async(tx,images,current)=>{
   if(current.role!=='ADMIN')throw new ProxyDomainError('FORBIDDEN');const row=await tx.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId,businessManaged:true,voidedAt:null},include:{allocations:true}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||!row.settled)throw new ProxyDomainError('STALE_PREVIEW');if(row.allocations.some(a=>a.paid))throw new ProxyDomainError('INVALID_INPUT','Đã có ghi trả lợi nhuận. Cần điều chỉnh thực tế trước khi mở lại kỳ.');

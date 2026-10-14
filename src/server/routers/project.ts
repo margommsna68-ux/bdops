@@ -88,6 +88,7 @@ export const projectRouter = router({
         name: z.string().min(1),
         code: z.string().min(1).max(10),
         type: z.enum(["FULL", "PAYPAL_ONLY"]).default("FULL"),
+        businessMode:z.literal('PROXY_VM').optional(),
         description: z.string().optional(),
       })
     )
@@ -117,20 +118,7 @@ export const projectRouter = router({
         if (existing.members.length > 0) {
           throw new TRPCError({ code: "CONFLICT", message: `Mã dự án "${input.code.toUpperCase()}" đã tồn tại và bạn đã là thành viên.` });
         }
-        // Project exists but user is NOT a member → add as ADMIN
-        await ctx.prisma.projectMember.create({
-          data: { userId, projectId: existing.id, role: "ADMIN" },
-        });
-        // Update name/description if provided
-        const result = await ctx.prisma.project.update({
-          where: { id: existing.id },
-          data: {
-            ...(input.name ? { name: input.name } : {}),
-            ...(input.description ? { description: input.description } : {}),
-          },
-        });
-        await createAuditLog({ action: "CREATE", entity: "Project", entityId: result.id, userId, projectId: result.id, changes: { code: result.code, action: "joined_existing" } });
-        return result;
+        throw new TRPCError({code:'CONFLICT',message:'Mã dự án đã tồn tại. Cần quản trị dự án đó cấp quyền truy cập.'});
       }
 
       const result = await ctx.prisma.project.create({
@@ -139,6 +127,7 @@ export const projectRouter = router({
           code: input.code.toUpperCase(),
           type: input.type,
           description: input.description,
+          ...(input.businessMode?{settings:{businessMode:input.businessMode}}:{}),
           members: {
             create: { userId, role: "ADMIN" },
           },
@@ -294,6 +283,7 @@ export const projectRouter = router({
   getSettings: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      if(!await ctx.prisma.projectMember.findUnique({where:{userId_projectId:{userId:ctx.user.id,projectId:input.projectId}},select:{id:true}}))throw new TRPCError({code:'FORBIDDEN',message:'Không có quyền truy cập dự án'});
       const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { settings: true } });
       return (project?.settings || {}) as any;
     }),

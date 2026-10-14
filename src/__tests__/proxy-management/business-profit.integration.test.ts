@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {businessDB as db,businessFixture} from './business-fixture';
 import {saveOperatingAccount} from '@/server/business-management/accounts';
 import {saveFinance} from '@/server/business-management/finance';
-import {createProfitPeriod,settleProfit,markProfitPaid,readProfitWorkspace,recalculateProfit,reopenProfit} from '@/server/business-management/profit';
+import {createProfitPeriod,settleProfit,markProfitPaid,readProfitWorkspace,recalculateProfit,reopenProfit,correctProfitPaid} from '@/server/business-management/profit';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 afterAll(()=>db.$disconnect());
@@ -23,6 +23,11 @@ it('profit periods snapshot exact cents, reject stale settlement and lock settle
   await expect(createProfitPeriod(f.scope,{...range,partners,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
   const allocation=await db.splitAllocation.findFirstOrThrow({where:{splitId:split.id},orderBy:{partnerName:'asc'}});await markProfitPaid(f.scope,{allocationId:allocation.id,expectedRevision:allocation.revision,key:randomUUID(),reason:'Manual paid fact'},db);
   await expect(reopenProfit(f.scope,{id:split.id,expectedRevision:(await db.profitSplit.findUniqueOrThrow({where:{id:split.id}})).revision,key:randomUUID(),reason:'Change after paid'},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+  await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{role:'MODERATOR',allowedModules:['PROFIT']}});
+  await expect(correctProfitPaid(f.worker,{allocationId:allocation.id,expectedRevision:allocation.revision+1,key:randomUUID(),reason:'Wrong paid note'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  await correctProfitPaid(f.scope,{allocationId:allocation.id,expectedRevision:allocation.revision+1,key:randomUUID(),reason:'Recorded payment by mistake; no money moved'},db);
+  expect((await db.splitAllocation.findUniqueOrThrow({where:{id:allocation.id}})).paid).toBe(false);
+  expect((await listOperations(f.scope,db)).find(o=>o.kind==='BUSINESS_PROFIT_PAID_CORRECTION')?.reversible).toBe(false);
  }finally{await f.cleanup();}
 });
 it('settlement requires recorded withdrawals confirmed back and denies staff, foreign IDs and negative payouts',async()=>{

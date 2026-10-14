@@ -2,7 +2,7 @@ import type {PrismaClient,GmailStatus,PayPalStatus} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
-import {assertInfrastructureAction} from '../permissions/infrastructure';
+import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {withProxyTransaction} from '../proxy-management/transaction';
 import {runBusinessCommand} from './idempotency';
 import {authorizeBusiness} from './scope';
@@ -13,7 +13,7 @@ const manager=(scope:ActorScope)=>{if(!['ADMIN','MODERATOR'].includes(scope.role
 export async function saveOperatingAccount(scope:ActorScope,input:AccountInput,db:PrismaClient=prisma){
  const email=input.email.trim().toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>320||input.notes&&input.notes.length>1000||[input.password,input.twoFa,input.token].some(s=>s&&s.length>20000))invalid();
  const statuses=input.kind==='GMAIL'?['ACTIVE','SUSPENDED','NEEDS_RECOVERY','NEEDS_2FA_UPDATE','BLOCKED','DISABLED']:['ACTIVE','LIMITED','SUSPENDED','CLOSED','PENDING_VERIFY'];if(input.status&&!statuses.includes(input.status)||input.kind==='PAYPAL'&&(!input.code?.trim()||input.code.length>80))invalid();
- return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT',module:'INFRASTRUCTURE'},async(tx,images,current)=>{
+ return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT',module:input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE'},async(tx,images,current)=>{
   manager(current);
   if(input.kind==='GMAIL'){
    const old=input.id?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}}):null;if(input.id&&!old)throw new ProxyDomainError('NOT_FOUND');if(old&&old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
@@ -40,25 +40,25 @@ export async function bindVMAccount(scope:ActorScope,input:{vmId:string;gmailId:
  },db);
 }
 export async function archiveOperatingAccount(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;expectedRevision:number;key:string},db:PrismaClient=prisma){
- return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT_ARCHIVE',module:'INFRASTRUCTURE'},async(tx,images,current)=>{
+ return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT_ARCHIVE',module:input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE'},async(tx,images,current)=>{
   manager(current);const old=input.kind==='GMAIL'?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId}}):await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!old)throw new ProxyDomainError('NOT_FOUND');if(old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
   const held=input.kind==='GMAIL'?await tx.virtualMachine.count({where:{gmailId:old.id}}):await tx.gmailAccount.count({where:{paypalId:old.id,archivedAt:null}});if(held)throw new ProxyDomainError('INVALID_INPUT','Tài khoản đang được ghi trên VM hoặc liên kết Gmail. Bỏ liên kết trước khi ẩn.');await images.remember(input.kind,old.id);
   if(input.kind==='GMAIL')await tx.gmailAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});else await tx.payPalAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});return {id:old.id};
  },db);
 }
 export async function readOperatingWorkspace(scope:ActorScope,db:PrismaClient=prisma){
- await authorizeBusiness(scope,'INFRASTRUCTURE',false,db);const [gmails,paypals,vms,members]=await Promise.all([
-  db.gmailAccount.findMany({where:{projectId:scope.projectId},include:{vms:{select:{id:true,code:true,server:{select:{code:true}}}}},orderBy:{email:'asc'}}),
-  db.payPalAccount.findMany({where:{projectId:scope.projectId},include:{emails:{where:{isPrimary:true,archivedAt:null},select:{password:true,twoFa:true,hotmailToken:true}}},orderBy:{code:'asc'}}),
-  db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},select:{id:true,code:true,gmailId:true,revision:true,server:{select:{id:true,code:true}}}}),
-  db.projectMember.findMany({where:{projectId:scope.projectId},select:{role:true,allowedModules:true,user:{select:{id:true,name:true,username:true}}}}),
+ const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),infra=current.role==='ADMIN'||!!current.allowedModules?.includes('INFRASTRUCTURE'),pp=current.role==='ADMIN'||!!current.allowedModules?.includes('PAYPALS');if(current.businessMode!=='PROXY_VM'||!infra&&!pp)throw new ProxyDomainError('FORBIDDEN');const [gmails,paypals,vms,members]=await Promise.all([
+  infra?db.gmailAccount.findMany({where:{projectId:scope.projectId},include:{vms:{select:{id:true,code:true,server:{select:{code:true}}}}},orderBy:{email:'asc'}}):Promise.resolve([]),
+  pp?db.payPalAccount.findMany({where:{projectId:scope.projectId},include:{emails:{where:{isPrimary:true,archivedAt:null},select:{password:true,twoFa:true,hotmailToken:true}}},orderBy:{code:'asc'}}):Promise.resolve([]),
+  infra?db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},select:{id:true,code:true,gmailId:true,revision:true,server:{select:{id:true,code:true}}}}):Promise.resolve([]),
+  infra?db.projectMember.findMany({where:{projectId:scope.projectId},select:{role:true,allowedModules:true,user:{select:{id:true,name:true,username:true}}}}):Promise.resolve([]),
  ]);
  return {gmails:gmails.map(g=>({id:g.id,email:g.email,status:g.status,notes:g.notes,paypalId:g.paypalId,recoveryEmail:g.recoveryEmail,revision:g.revision,archivedAt:g.archivedAt?.toISOString()||null,credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),vmRefs:g.vms.map(v=>v.server.code+'/'+v.code)})),paypals:paypals.map(p=>({id:p.id,code:p.code,email:p.primaryEmail,status:p.status,holder:p.holder,notes:p.notes,revision:p.revision,archivedAt:p.archivedAt?.toISOString()||null,credentialsAvailable:!!(p.password||p.emails.some(e=>e.password||e.twoFa||e.hotmailToken))})),vms:vms.map(v=>({...v,serverId:v.server.id,server:v.server.code})),members:members.filter(m=>m.role!=='VIEWER'&&(m.role==='ADMIN'||m.allowedModules.includes('INFRASTRUCTURE'))).map(m=>({id:m.user.id,name:m.user.name||m.user.username||'Nhân viên',role:m.role}))};
 }
 export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;pin:string},db:PrismaClient=prisma){
- const current=await authorizeBusiness(scope,'INFRASTRUCTURE',false,db);assertInfrastructureAction(current,'COPY_CREDENTIALS');await verifyBusinessPin(db,scope.userId,input.pin);
+ const area=input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE',copy=(s:ActorScope)=>{if(s.role==='VIEWER'||s.role!=='ADMIN'&&!s.capabilities.includes('COPY_CREDENTIALS'))throw new ProxyDomainError('FORBIDDEN');};const current=await authorizeBusiness(scope,area,false,db);copy(current);await verifyBusinessPin(db,scope.userId,input.pin);
  return withProxyTransaction(async tx=>{
-  const fresh=await authorizeBusiness(scope,'INFRASTRUCTURE',false,tx);assertInfrastructureAction(fresh,'COPY_CREDENTIALS');
+  const fresh=await authorizeBusiness(scope,area,false,tx);copy(fresh);
   const row=input.kind==='GMAIL'?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}}):await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null},include:{emails:{where:{isPrimary:true,archivedAt:null}}}});if(!row)throw new ProxyDomainError('NOT_FOUND');
   const gmail=row as {email:string;password:string|null;twoFaCurrent:string|null;token:string|null},paypal=row as {primaryEmail:string;password:string|null;twoFa:string|null;hotmailToken:string|null;emails:{password:string|null;twoFa:string|null;hotmailToken:string|null}[]};
   const values=input.kind==='GMAIL'?{email:gmail.email,password:gmail.password,twoFa:gmail.twoFaCurrent,token:gmail.token}:{email:paypal.primaryEmail,password:paypal.emails[0]?.password||paypal.password,twoFa:paypal.emails[0]?.twoFa||paypal.twoFa,token:paypal.emails[0]?.hotmailToken||paypal.hotmailToken};if(!values.password&&!values.twoFa&&!values.token)throw new ProxyDomainError('INVALID_INPUT','Chưa ghi thông tin đăng nhập');

@@ -1,0 +1,6 @@
+export function monthRange(month:string){if(!/^\d{4}-\d{2}$/.test(month))throw new Error('Tháng không hợp lệ');const [y,m]=month.split('-').map(Number);if(y<2000||m<1||m>12)throw new Error('Tháng không hợp lệ');return {start:month+'-01',end:month+'-'+new Date(Date.UTC(y,m,0)).getUTCDate()};}
+export const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+export function commandKeyStore(make:()=>string){let previous='',key='';return (payload:unknown)=>{const next=JSON.stringify(payload);if(next!==previous){previous=next;key=make();}return key;};}
+export function financialStatus(kind:string,row:{confirmed?:boolean;failed?:boolean;type?:string;paidToTeam?:boolean}){if(kind==='FUND')return row.failed?'Không về':row.confirmed?'Đã nhận':'Chờ nhận';if(kind==='WITHDRAWAL')return row.type==='MIXING'?'Chuyển nội bộ':row.paidToTeam?'Đã về':'Chờ về';return 'Đã ghi chi phí';}
+export const moneyDisplay=(amount:string,currency:string)=>new Intl.NumberFormat('vi-VN',{maximumFractionDigits:2,minimumFractionDigits:currency==='USD'?2:0}).format(Number(amount))+' '+currency;
+export const workLabels={PENDING:'Chờ làm',IN_PROGRESS:'Đang làm',COMPLETED:'Hoàn thành',CANCELLED:'Đã hủy'};

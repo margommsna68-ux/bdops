@@ -26,7 +26,7 @@ export default function AdminProjectsPage() {
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
-  const [newType, setNewType] = useState<"FULL" | "PAYPAL_ONLY">("FULL");
+  const [newType, setNewType] = useState<"FULL" | "PAYPAL_ONLY"|'PROXY_VM'>("PROXY_VM");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; code: string; name: string } | null>(null);
   const [deleteInput, setDeleteInput] = useState("");
@@ -65,7 +65,7 @@ export default function AdminProjectsPage() {
       setNewName("");
       setNewDesc("");
       toast.success(`Tạo dự án ${p.code} thành công`);
-      setCurrentProject(p.id, p.code, p.name, p.type || "FULL", "ADMIN", [], false);
+      setCurrentProject(p.id, p.code, p.name, p.type || "FULL", "ADMIN", [], false,undefined,(p.settings as {businessMode?:string}|null)?.businessMode||null);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -323,6 +323,7 @@ export default function AdminProjectsPage() {
               <select value={newType} onChange={(e) => setNewType(e.target.value as any)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="FULL">Full (VMs + PayPal + Infrastructure)</option>
+                <option value="PROXY_VM">Business Proxy / VM (quản lý hợp nhất + lịch sử)</option>
                 <option value="PAYPAL_ONLY">PayPal Only (chỉ quản lý PayPal)</option>
               </select>
             </div>
@@ -335,7 +336,7 @@ export default function AdminProjectsPage() {
               <Button
                 onClick={() => {
                   if (!newCode || !newName) return;
-                  createProject.mutate({ name: newName, code: newCode, type: newType, description: newDesc || undefined });
+                  createProject.mutate({ name: newName, code: newCode, type: newType==='PROXY_VM'?'FULL':newType,businessMode:newType==='PROXY_VM'?'PROXY_VM':undefined, description: newDesc || undefined });
                 }}
                 disabled={!newCode || !newName || createProject.isLoading}
               >

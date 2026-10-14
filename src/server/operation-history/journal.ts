@@ -23,7 +23,8 @@ export async function inspectOperation(scope:ActorScope,id:string,db:PrismaClien
   const operation=await db.operationJournal.findFirst({where:{id,projectId:scope.projectId}});if(!operation)throw new ProxyDomainError('NOT_FOUND');
   if(current.role!=='ADMIN'&&!current.allowedModules?.includes(operation.accessModule))throw new ProxyDomainError('FORBIDDEN');
   const undo=await db.operationJournal.findUnique({where:{undoOfId:id}}),snapshot=openSnapshot(operation.snapshotCipher);
-  let blockedReason:string|null=operation.reversible?null:'Đã bắt đầu xử lý thực tế. Giao một cấu hình mới và xác nhận mới nếu cần đổi lại.';
+  let blockedReason:string|null=operation.reversible?null:operation.kind.startsWith('BUSINESS_')?'Đây là ghi nhận chốt kỳ / trả tiền. Dùng Mở lại kỳ hoặc Sửa ghi trả nhầm với lý do để điều chỉnh.':'Đã bắt đầu xử lý thực tế. Giao một cấu hình mới và xác nhận mới nếu cần đổi lại.';
   try{await assertImagesUnchanged(db,scope.projectId,snapshot);}catch(error){if(error instanceof ProxyDomainError)blockedReason=error.message;else throw error;}
-  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&current.businessMode==='PROXY_VM'&&operation.reversible&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows:snapshot.resources.map(describeImage)};
+  const rows=await Promise.all(snapshot.resources.map(async image=>{const result=describeImage(image);if(image.resource==='VM_BINDING'){const vm=await db.virtualMachine.findFirst({where:{id:image.id,server:{projectId:scope.projectId}},select:{code:true,server:{select:{code:true}}}});if(vm)result.label=vm.server.code+' / '+vm.code;}return result;}));
+  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&current.businessMode==='PROXY_VM'&&operation.reversible&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows};
 }
