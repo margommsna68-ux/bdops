@@ -19,6 +19,7 @@ import { agentPPRouter } from "./agentPP";
 import { notificationRouter } from "./notification";
 import { partnerRouter } from "./partner";
 import { earnWithdrawalRouter } from "./earnWithdrawal";
+import { editHistoryRouter } from "./editHistory";
 
 export const appRouter = router({
   project: projectRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   notification: notificationRouter,
   partner: partnerRouter,
   earnWithdrawal: earnWithdrawalRouter,
+  editHistory: editHistoryRouter,
 });
 
 export type AppRouter = typeof appRouter;

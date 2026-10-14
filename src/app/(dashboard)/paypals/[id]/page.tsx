@@ -11,6 +11,7 @@ import { useProjectStore } from "@/lib/store";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { PinVerifyDialog } from "@/components/PinVerify";
 import { NoDataBadge } from "@/components/NoDataBadge";
+import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
 // ─── Copy Button ─────────
@@ -66,6 +67,7 @@ function PPAccountSecret({ ppId, field, projectId, pinVerified, onNeedPin, canEd
   pinVerified: boolean; onNeedPin: () => void; canEdit?: boolean; onSaved?: () => void;
   required?: boolean; hasData?: boolean;
 }) {
+  const t = useT();
   const [revealed, setRevealed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -100,7 +102,7 @@ function PPAccountSecret({ ppId, field, projectId, pinVerified, onNeedPin, canEd
       const payload: any = { projectId, id: ppId };
       payload[field] = draft || null;
       await trpcVanilla.paypal.update.mutate(payload);
-      toast.success("Đã lưu"); setEditing(false); setRevealed(null); onSaved?.();
+      toast.success(t("toast_saved")); setEditing(false); setRevealed(null); onSaved?.();
     } catch (e: any) { toast.error(e.message || "Lỗi"); } finally { setSaving(false); }
   };
 
@@ -187,6 +189,7 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdi
   pinVerified: boolean; onNeedPin: () => void; canEdit?: boolean; onSaved?: () => void;
   hasData?: boolean;
 }) {
+  const t = useT();
   const [revealed, setRevealed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -229,7 +232,7 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdi
       const payload: any = { projectId, id: emailId };
       payload[field] = draft || null;
       await trpcVanilla.paypalEmail.update.mutate(payload);
-      toast.success("Đã lưu");
+      toast.success(t("toast_saved"));
       setEditing(false);
       setRevealed(null);
       onSaved?.();
@@ -343,6 +346,7 @@ function SecretField({ emailId, field, projectId, pinVerified, onNeedPin, canEdi
 }
 
 export default function PayPalDetailPage() {
+  const t = useT();
   const params = useParams();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const { currentRole } = useProjectStore();
@@ -400,27 +404,27 @@ export default function PayPalDetailPage() {
   const invalidate = () => { utils.paypal.getById.invalidate(); refetchEmails(); };
 
   const updatePaypal = trpc.paypal.update.useMutation({
-    onSuccess: () => { invalidate(); setEditingDetails(false); setEditingOwner(false); toast.success("Đã cập nhật"); },
+    onSuccess: () => { invalidate(); setEditingDetails(false); setEditingOwner(false); toast.success(t("toast_updated")); },
     onError: (e) => toast.error(e.message),
   });
 
   const addCaseNote = trpc.paypal.addCaseNote.useMutation({
-    onSuccess: () => { invalidate(); setShowAddNote(false); setNewNoteText(""); setNewNoteDocsLink(""); setNewNoteType("note"); toast.success("Đã thêm ghi chú"); },
+    onSuccess: () => { invalidate(); setShowAddNote(false); setNewNoteText(""); setNewNoteDocsLink(""); setNewNoteType("note"); toast.success(t("paypal_detail_note_added")); },
     onError: (e) => toast.error(e.message),
   });
 
   const deleteCaseNote = trpc.paypal.deleteCaseNote.useMutation({
-    onSuccess: () => { invalidate(); toast.success("Đã xóa"); },
+    onSuccess: () => { invalidate(); toast.success(t("toast_deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const deleteEmail = trpc.paypalEmail.delete.useMutation({
-    onSuccess: () => { invalidate(); toast.success("Email đã xóa"); },
+    onSuccess: () => { invalidate(); toast.success(t("paypal_detail_email_deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const updateEmail = trpc.paypalEmail.update.useMutation({
-    onSuccess: () => { invalidate(); setEditingEmail(null); toast.success("Đã cập nhật"); },
+    onSuccess: () => { invalidate(); setEditingEmail(null); toast.success(t("toast_updated")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -449,8 +453,8 @@ export default function PayPalDetailPage() {
     onSuccess: (res: any) => {
       invalidate();
       if (res.error) toast.error(res.error);
-      else if (res.newStatus) toast.error(`Phát hiện: ${res.newStatus} — ${res.alertSubject || ""}`);
-      else toast.success("PP OK — Không phát hiện suspend/limit");
+      else if (res.newStatus) toast.error(t("paypal_detail_status_issue", { status: res.newStatus, subject: res.alertSubject || "" }));
+      else toast.success(t("paypal_detail_pp_ok"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -504,7 +508,7 @@ export default function PayPalDetailPage() {
           isPrimary: emails.length === 0 && i === 0,
         })),
       });
-      toast.success(`Đã thêm ${result.created} email`);
+      toast.success(t("paypal_detail_emails_added", { n: result.created }));
       setBulkText("");
       setShowAddEmail(false);
       invalidate();
@@ -540,7 +544,7 @@ export default function PayPalDetailPage() {
         <div>
           {canEdit ? (
             <EditableField value={pp.code} canEdit onSave={(v) => {
-              if (!v.trim()) { toast.error("Mã PP không được trống"); return; }
+              if (!v.trim()) { toast.error(t("validation_pp_code_empty")); return; }
               updatePaypal.mutate({ projectId: projectId!, id: pp.id, code: v.trim() });
             }} mono textClass="text-2xl font-bold text-gray-900" />
           ) : (
@@ -687,7 +691,7 @@ export default function PayPalDetailPage() {
             <label className="block text-[10px] font-medium text-gray-400 uppercase mb-1">Primary Email</label>
             <EditableField value={pp.primaryEmail} canEdit={canEdit} onSave={(v) => {
               if (v && v.includes("@")) updatePaypal.mutate({ projectId: projectId!, id: pp.id, primaryEmail: v });
-              else toast.error("Email không hợp lệ");
+              else toast.error(t("validation_invalid_email"));
             }} mono required />
           </div>
           <div>
@@ -1004,7 +1008,7 @@ export default function PayPalDetailPage() {
                     docsLink: parts[5] || prev.docsLink,
                   }));
                   setQuickFillText("");
-                  toast.success("Đã điền!");
+                  toast.success(t("toast_filled"));
                 }} disabled={!quickFillText.trim()}
                   className="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700 disabled:opacity-50 shrink-0">
                   Điền
@@ -1106,7 +1110,7 @@ export default function PayPalDetailPage() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => {
-                if (!newNoteText.trim()) { toast.error("Nhập nội dung"); return; }
+                if (!newNoteText.trim()) { toast.error(t("validation_enter_content")); return; }
                 addCaseNote.mutate({
                   projectId: projectId!, id: pp.id,
                   type: newNoteType as any,

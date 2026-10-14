@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 // import { trpcVanilla } from "@/lib/trpc-vanilla";
 import { useProjectStore } from "@/lib/store";
+import { useT } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/utils";
 import toast from "react-hot-toast";
 
@@ -16,14 +17,20 @@ const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-red-100 text-red-800", MODERATOR: "bg-blue-100 text-blue-800", USER: "bg-green-100 text-green-800",
 };
 const APP_MODULES = ["FUNDS", "WITHDRAWALS", "PAYPALS", "INFRASTRUCTURE", "COSTS", "PROFIT", "AGENT_PP", "AUTOTYPE"] as const;
-const MODULE_LABELS: Record<string, string> = {
-  FUNDS: "Fund PayPal", WITHDRAWALS: "Rút tiền", PAYPALS: "Tài khoản PayPal",
-  INFRASTRUCTURE: "Hạ tầng", COSTS: "Chi phí", PROFIT: "Lợi nhuận",
-  AGENT_PP: "PayPal gộp", AUTOTYPE: "AutoType",
+const MODULE_LABEL_KEYS: Record<string, string> = {
+  FUNDS: "admin_module_funds",
+  WITHDRAWALS: "admin_module_withdrawals",
+  PAYPALS: "admin_module_paypals",
+  INFRASTRUCTURE: "admin_module_infrastructure",
+  COSTS: "admin_module_costs",
+  PROFIT: "admin_module_profit",
+  AGENT_PP: "admin_module_agent_pp",
+  AUTOTYPE: "admin_module_autotype",
 };
 
 export default function UserDetailPage() {
   const params = useParams();
+  const t = useT();
   const storeProjectId = useProjectStore((s) => s.currentProjectId);
   const currentRole = useProjectStore((s) => s.currentRole);
   const isAdmin = currentRole === "ADMIN";
@@ -51,30 +58,30 @@ export default function UserDetailPage() {
     if (data?.membership) {
       setEditRole(data.membership.role);
       setEditModules(data.membership.allowedModules ?? []);
-      setEditFee(data.membership.agentFeePercent ? String(Number(data.membership.agentFeePercent)) : "3");
+      setEditFee(data.membership.agentFeePercent != null ? String(Number(data.membership.agentFeePercent)) : "3");
       setEditDevices(String(data.membership.maxAutotypeDevices ?? 2));
       setDirty(false);
     }
   }, [data?.membership]);
 
   const updateMember = trpc.project.updateMember.useMutation({
-    onSuccess: () => { refetch(); setDirty(false); toast.success("Đã cập nhật"); },
+    onSuccess: () => { refetch(); setDirty(false); toast.success(t("toast_updated")); },
     onError: (e) => toast.error(e.message),
   });
   const resetPin = trpc.user.resetPin.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã reset PIN"); },
+    onSuccess: () => { refetch(); toast.success(t("admin_pin_reset")); },
     onError: (e) => toast.error(e.message),
   });
   const resetPassword = trpc.user.resetPassword.useMutation({
-    onSuccess: (res: any) => { refetch(); toast.success(`Mật khẩu mới: ${res.newPassword}`); },
+    onSuccess: (res: any) => { refetch(); toast.success(t("admin_password_reset", { pw: res.newPassword })); },
     onError: (e) => toast.error(e.message),
   });
   const addAgentEmail = trpc.agentPP.adminAddEmail.useMutation({
-    onSuccess: () => { refetch(); setNewAgentEmail(""); toast.success("Đã thêm"); },
+    onSuccess: () => { refetch(); setNewAgentEmail(""); toast.success(t("user_email_added")); },
     onError: (e) => toast.error(e.message),
   });
   const removeAgentEmail = trpc.agentPP.adminRemoveEmail.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã xóa"); },
+    onSuccess: () => { refetch(); toast.success(t("toast_deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -85,7 +92,7 @@ export default function UserDetailPage() {
       memberId: data.membership.id,
       role: editRole as any,
       allowedModules: editModules as any,
-      agentFeePercent: parseFloat(editFee) || 3,
+      agentFeePercent: editFee !== "" ? parseFloat(editFee) : 3,
       maxAutotypeDevices: parseInt(editDevices) || 2,
     });
   };
@@ -95,9 +102,9 @@ export default function UserDetailPage() {
     setDirty(true);
   };
 
-  if (!projectId) return <p className="text-gray-500 p-8">Chọn project.</p>;
-  if (isLoading) return <p className="p-8 text-gray-400">Đang tải...</p>;
-  if (!data) return <p className="p-8">Không tìm thấy user.</p>;
+  if (!projectId) return <p className="text-gray-500 p-8">{t("select_project_first")}</p>;
+  if (isLoading) return <p className="p-8 text-gray-400">{t("loading_dots")}</p>;
+  if (!data) return <p className="p-8">{t("user_not_found")}</p>;
 
   const { user, membership, agentEmails, agentSales, agentStats, sessions, editHistory } = data;
   const collectorExpenses = (data as any).collectorExpenses ?? [];
@@ -109,7 +116,7 @@ export default function UserDetailPage() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm text-gray-500">
-        <Link href="/admin/users" className="hover:text-blue-600">Quản lý Users</Link>
+        <Link href="/admin/users" className="hover:text-blue-600">{t("user_manage_users_link")}</Link>
         <span>/</span>
         <span className="font-medium text-gray-900">{user.name || user.username}</span>
       </nav>
@@ -147,18 +154,18 @@ export default function UserDetailPage() {
             </div>
           )}
           {membership && <Badge className={ROLE_COLORS[membership.role]}>{membership.role}</Badge>}
-          <Badge variant="outline">{user.hasPin ? "PIN ✓" : "Chưa PIN"}</Badge>
+          <Badge variant="outline">{user.hasPin ? "PIN ✓" : t("user_no_pin_badge")}</Badge>
         </div>
       </div>
 
       {/* ═══ Config Section ═══ */}
       <div className="bg-white rounded-lg border p-5 space-y-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-800">Cấu hình quyền</h2>
+          <h2 className="text-sm font-semibold text-gray-800">{t("user_permission_config")}</h2>
           {dirty && (
             <Button size="sm" onClick={saveConfig} disabled={updateMember.isLoading}
               className="bg-green-600 hover:bg-green-700 h-7 px-4 text-xs">
-              {updateMember.isLoading ? "Đang lưu..." : "Lưu thay đổi"}
+              {updateMember.isLoading ? t("saving_dots") : t("user_save_changes")}
             </Button>
           )}
         </div>
@@ -186,7 +193,7 @@ export default function UserDetailPage() {
               {APP_MODULES.map((mod) => (
                 <button key={mod} onClick={() => toggleModule(mod)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${editModules.includes(mod) ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"}`}>
-                  {MODULE_LABELS[mod]}
+                  {t(MODULE_LABEL_KEYS[mod] || mod)}
                 </button>
               ))}
             </div>
@@ -298,7 +305,7 @@ export default function UserDetailPage() {
                       <tr key={s.id} className="hover:bg-gray-50">
                         <td className="px-3 py-1.5 text-gray-600">{new Date(s.date).toLocaleDateString("vi-VN")}</td>
                         <td className="px-3 py-1.5 text-right font-semibold text-orange-700">{formatCurrency(Number(s.amount))}</td>
-                        <td className="px-3 py-1.5 text-center text-gray-500">{s.feePercent ? `${Number(s.feePercent)}%` : "—"}</td>
+                        <td className="px-3 py-1.5 text-center text-gray-500">{s.feePercent != null ? `${Number(s.feePercent)}%` : "—"}</td>
                         <td className="px-3 py-1.5 text-right font-semibold text-purple-700">{s.agentEarning ? formatCurrency(Number(s.agentEarning)) : "—"}</td>
                         <td className="px-3 py-1.5 font-mono text-gray-400">{s.transactionId}</td>
                         <td className="px-3 py-1.5 text-center">

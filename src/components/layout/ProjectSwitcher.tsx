@@ -27,6 +27,7 @@ export function ProjectSwitcher() {
         project.id,
         project.code,
         project.name,
+        (project as any).type || "FULL",
         membership?.role || "USER",
         membership?.allowedModules || [],
         membership?.canManageUsers || false,
@@ -56,7 +57,7 @@ export function ProjectSwitcher() {
           <SelectContent>
             {projects?.map((p) => (
               <SelectItem key={p.id} value={p.id}>
-                {p.code} — {p.name}
+                {p.name}
               </SelectItem>
             ))}
           </SelectContent>

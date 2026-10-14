@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { capitalName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,75 @@ import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
 
 const APP_MODULES = ["FUNDS", "WITHDRAWALS", "PAYPALS", "INFRASTRUCTURE", "COSTS", "PROFIT", "AGENT_PP", "AUTOTYPE"] as const;
+
+const MODULE_LABEL_KEYS: Record<string, string> = {
+  FUNDS: "admin_module_funds",
+  WITHDRAWALS: "admin_module_withdrawals",
+  PAYPALS: "admin_module_paypals",
+  INFRASTRUCTURE: "admin_module_infrastructure",
+  COSTS: "admin_module_costs",
+  PROFIT: "admin_module_profit",
+  AGENT_PP: "admin_module_agent_pp",
+  AUTOTYPE: "admin_module_autotype",
+};
+
+function DeviceLimitInput({ current, onSave }: { current: number; onSave: (v: number) => void }) {
+  const t = useT();
+  const [val, setVal] = useState(String(current));
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { setVal(String(current)); setDirty(false); }, [current]);
+  const save = () => {
+    const v = parseInt(val);
+    if (isNaN(v)) return;
+    if (v !== current) { onSave(v); toast.success(v === 0 ? t("admin_limit_unlimited") : t("admin_device_limit_set", { n: v })); }
+    setDirty(false);
+  };
+  return (
+    <div className="flex items-center gap-0.5">
+      <input type="number" min="0" max="999" value={val}
+        onChange={(e) => { setVal(e.target.value); setDirty(true); }}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+        className={`w-11 h-6 px-1 text-center text-[11px] border rounded focus:ring-1 focus:ring-blue-500 focus:outline-none ${dirty ? "border-blue-400 bg-blue-50" : ""}`}
+      />
+      {dirty && (
+        <button onClick={save} className="h-6 w-6 flex items-center justify-center rounded bg-green-500 text-white hover:bg-green-600 transition-colors" title="Lưu">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+        </button>
+      )}
+      <button onClick={() => { setVal("0"); setDirty(true); }}
+        className={`h-6 px-1.5 flex items-center justify-center rounded text-[10px] font-bold transition-colors ${val === "0" ? "bg-blue-500 text-white" : "bg-blue-100 text-blue-700 hover:bg-blue-200"}`} title="Không giới hạn">
+        ∞
+      </button>
+    </div>
+  );
+}
+
+// Fee% input — supports decimals and 0%
+function FeePercentInput({ current, onSave }: { current: number; onSave: (v: number) => void }) {
+  const [val, setVal] = useState(String(current));
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { setVal(String(current)); setDirty(false); }, [current]);
+  const save = () => {
+    const v = parseFloat(val);
+    if (isNaN(v) || v < 0 || v > 100) return;
+    if (v !== current) { onSave(v); toast.success(`Fee: ${v}%`); }
+    setDirty(false);
+  };
+  return (
+    <div className="flex items-center gap-0.5">
+      <input type="number" min="0" max="100" step="0.1" value={val}
+        onChange={(e) => { setVal(e.target.value); setDirty(true); }}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+        className={`w-12 h-6 px-1 text-center text-[11px] border rounded focus:ring-1 focus:ring-purple-500 focus:outline-none ${dirty ? "border-purple-400 bg-purple-50" : ""}`}
+      />
+      {dirty && (
+        <button onClick={save} className="h-6 w-6 flex items-center justify-center rounded bg-green-500 text-white hover:bg-green-600 transition-colors" title="Lưu">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
 
 const roleColors: Record<string, string> = {
   ADMIN: "bg-red-100 text-red-800",
@@ -71,17 +141,17 @@ export default function AdminUsersPage() {
     { enabled: !!projectId }
   );
 
-  const { data: onlineData } = trpc.user.onlineUsers.useQuery(
+  const { data: onlineData, refetch: refetchOnline } = trpc.user.onlineUsers.useQuery(
     { projectId: projectId! },
     { enabled: !!projectId, refetchInterval: 30000 }
   );
 
   const createUser = trpc.project.createUser.useMutation({
-    onSuccess: () => { refetch(); resetForm(); toast.success("Tạo user thành công"); },
+    onSuccess: () => { refetch(); refetchOnline(); resetForm(); toast.success(t("admin_user_created")); },
     onError: (err) => toast.error(err.message),
   });
   const updateMember = trpc.project.updateMember.useMutation({
-    onSuccess: () => { refetch(); setEditingMember(null); toast.success("Đã cập nhật"); },
+    onSuccess: () => { refetch(); refetchOnline(); setEditingMember(null); toast.success(t("toast_updated")); },
     onError: (err) => toast.error(err.message),
   });
   const updateUserInfo = trpc.project.updateUserInfo.useMutation({
@@ -89,17 +159,25 @@ export default function AdminUsersPage() {
     onError: (err) => toast.error(err.message),
   });
   const removeMember = trpc.project.removeMember.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã xóa"); },
+    onSuccess: () => { refetch(); toast.success(t("toast_deleted")); },
     onError: (err) => toast.error(err.message),
   });
   const adminResetPin = trpc.user.adminResetPin.useMutation({
-    onSuccess: () => { setResetPinDialog(null); setNewPin(""); toast.success("Đã reset PIN"); },
+    onSuccess: () => { setResetPinDialog(null); setNewPin(""); toast.success(t("admin_pin_reset")); },
     onError: (err) => toast.error(err.message),
   });
   const adminResetPassword = trpc.user.adminResetPassword.useMutation({
-    onSuccess: () => { setResetPassDialog(null); setNewPassword(""); toast.success("Đã reset mật khẩu"); },
+    onSuccess: () => { setResetPassDialog(null); setNewPassword(""); toast.success(t("admin_password_reset_success")); },
     onError: (err) => toast.error(err.message),
   });
+  const adminUnlockAccount = trpc.user.adminUnlockAccount.useMutation({
+    onSuccess: () => { refetch(); toast.success(t("admin_account_unlocked")); },
+    onError: (err) => toast.error(err.message),
+  });
+  const lockedUsersQuery = trpc.user.lockedUsers.useQuery(
+    { projectId: projectId! },
+    { enabled: !!projectId, refetchInterval: 30000 }
+  );
 
   function resetForm() {
     setShowForm(false);
@@ -143,16 +221,38 @@ export default function AdminUsersPage() {
   }
 
   const kickSession = trpc.user.kickAutotypeSession.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã kick thiết bị"); },
+    onSuccess: () => { refetch(); toast.success(t("admin_device_kicked")); },
     onError: (err: any) => toast.error(err.message),
   });
   const kickAllSessions = trpc.user.kickAllAutotypeSessions.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã kick tất cả thiết bị"); },
+    onSuccess: () => { refetch(); toast.success(t("admin_all_devices_kicked")); },
     onError: (err: any) => toast.error(err.message),
   });
 
   // Autotype device dialog
   const [autotypeDialog, setAutotypeDialog] = useState<{ userId: string; name: string; sessions: any[] } | null>(null);
+
+  // Agent PP email dialog
+  const [agentEmailDialog, setAgentEmailDialog] = useState<{ userId: string; name: string } | null>(null);
+  const [newAgentEmail, setNewAgentEmail] = useState("");
+  const { data: agentEmails, refetch: refetchAgentEmails } = trpc.agentPP.adminListEmails.useQuery(
+    { projectId: projectId!, userId: agentEmailDialog?.userId ?? "" },
+    { enabled: !!projectId && !!agentEmailDialog?.userId }
+  );
+  const addAgentEmail = trpc.agentPP.adminAddEmail.useMutation({
+    onSuccess: () => { refetchAgentEmails(); setNewAgentEmail(""); toast.success(t("admin_email_added")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const removeAgentEmail = trpc.agentPP.adminRemoveEmail.useMutation({
+    onSuccess: () => { refetchAgentEmails(); toast.success(t("toast_deleted")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const updateAgentEmail = trpc.agentPP.adminUpdateEmail.useMutation({
+    onSuccess: () => { refetchAgentEmails(); toast.success(t("toast_updated")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [editingAgentVal, setEditingAgentVal] = useState("");
 
   // Project assignment dialog
   const [projectDialog, setProjectDialog] = useState<{ userId: string; name: string; memberships: any[] } | null>(null);
@@ -160,7 +260,7 @@ export default function AdminUsersPage() {
   const [addProjectModules, setAddProjectModules] = useState<string[]>(["AUTOTYPE"]);
   const { data: allProjects } = trpc.project.list.useQuery(undefined, { enabled: !!projectDialog });
   const addMember = trpc.project.addMember.useMutation({
-    onSuccess: () => { refetch(); toast.success("Đã thêm vào project"); },
+    onSuccess: () => { refetch(); toast.success(t("admin_added_to_project")); },
     onError: (err) => toast.error(err.message),
   });
 
@@ -175,8 +275,18 @@ export default function AdminUsersPage() {
       canManageUsers: u.canManageUsers,
       allowedModules: u.allowedModules,
       maxAutotypeDevices: u.maxAutotypeDevices,
+      agentFeePercent: u.agentFeePercent,
       autotypeActiveDevices: u.autotypeActiveDevices,
       autotypeSessions: u.autotypeSessions,
+    });
+  });
+
+  // Build locked status map
+  const lockedMap = new Map<string, { loginLockedAt: Date | null; pinLockedAt: Date | null }>();
+  lockedUsersQuery.data?.forEach((u) => {
+    lockedMap.set(u.userId, {
+      loginLockedAt: u.loginLockedAt ? new Date(u.loginLockedAt) : null,
+      pinLockedAt: u.pinLockedAt ? new Date(u.pinLockedAt) : null,
     });
   });
 
@@ -221,6 +331,9 @@ export default function AdminUsersPage() {
     const memberActiveDevices: number = userStatus?.autotypeActiveDevices ?? 0;
     const memberSessions: any[] = userStatus?.autotypeSessions ?? [];
     const hasAutotype = m.role === "ADMIN" || memberModules.includes("AUTOTYPE");
+    const lockInfo = lockedMap.get(m.user.id);
+    const isLoginLocked = !!lockInfo?.loginLockedAt;
+    const isPinLocked = !!lockInfo?.pinLockedAt;
 
     // Can this caller edit this member?
     const canEditThis = isAdmin || (isModerator && canManageUsers && memberManagerId === currentMemberId);
@@ -279,7 +392,7 @@ export default function AdminUsersPage() {
                   {availableModules.map((mod) => (
                     <label key={mod} className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={editModules.includes(mod)} onChange={() => toggleModule(mod, editModules, setEditModules)} className="rounded border-gray-300" />
-                      {mod}
+                      {t(MODULE_LABEL_KEYS[mod] || mod)}
                     </label>
                   ))}
                 </div>
@@ -300,7 +413,7 @@ export default function AdminUsersPage() {
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <span className={`inline-block w-2 h-2 rounded-full ${isOnline ? "bg-green-500" : "bg-gray-300"}`} />
-                <p className="font-medium text-sm">{m.user.name || m.user.username || m.user.email}</p>
+                <a href={`/users/${m.user.id}`} className="font-medium text-sm text-blue-700 hover:underline">{capitalName(m.user.name || m.user.username || m.user.email)}</a>
                 {!hasPin && (
                   <Badge variant="outline" className="text-[10px] border-orange-300 text-orange-600">{t("user_no_pin")}</Badge>
                 )}
@@ -340,11 +453,33 @@ export default function AdminUsersPage() {
               {(m.role === "USER" || m.role === "MODERATOR") && memberModules.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1 ml-4">
                   {memberModules.map((mod: string) => (
-                    <Badge key={mod} variant="outline" className="text-xs">{mod}</Badge>
+                    <Badge key={mod} variant="outline" className="text-xs">{t(MODULE_LABEL_KEYS[mod] || mod)}</Badge>
                   ))}
                 </div>
               )}
               {m.role === "ADMIN" && <p className="text-xs text-gray-400 mt-1 ml-4">{t("user_all_modules")}</p>}
+              {/* Agent PP email button */}
+              {(m.role === "ADMIN" || memberModules.includes("AGENT_PP")) && (
+                <div className="mt-1 ml-4">
+                  <button
+                    onClick={() => setAgentEmailDialog({ userId: m.user.id, name: m.user.name || m.user.username || "User" })}
+                    className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-orange-200 text-orange-600 hover:bg-orange-50 transition-colors">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    Email & Link gộp
+                  </button>
+                  {/* Agent Fee % */}
+                  {(canEditThis || isAdmin) && (
+                    <div className="flex items-center gap-1 ml-2">
+                      <span className="text-[10px] text-gray-400">Fee:</span>
+                      <FeePercentInput
+                        current={userStatus?.agentFeePercent ?? 3}
+                        onSave={(v) => updateMember.mutate({ projectId: projectId!, memberId: m.id, agentFeePercent: v })}
+                      />
+                      <span className="text-[10px] text-gray-400">%</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {/* AutoType device info */}
               {hasAutotype && (
                 <div className="flex items-center gap-2 mt-1 ml-4">
@@ -360,29 +495,14 @@ export default function AdminUsersPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                     <span className={memberActiveDevices > 0 ? "text-green-700 font-medium" : "text-gray-500"}>
-                      {memberActiveDevices}/{memberMaxDevices}
+                      {memberActiveDevices}/{memberMaxDevices === 0 ? "∞" : memberMaxDevices}
                     </span>
                   </button>
                   {(canEditThis || isAdmin) && (
-                    <Select
-                      value={String(memberMaxDevices)}
-                      onValueChange={(v) => {
-                        updateMember.mutate({
-                          projectId: projectId!,
-                          memberId: m.id,
-                          maxAutotypeDevices: parseInt(v),
-                        });
-                      }}
-                    >
-                      <SelectTrigger className="w-20 h-6 text-[11px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                          <SelectItem key={n} value={String(n)}>{n} TB</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <DeviceLimitInput
+                      current={memberMaxDevices}
+                      onSave={(v) => updateMember.mutate({ projectId: projectId!, memberId: m.id, maxAutotypeDevices: v })}
+                    />
                   )}
                 </div>
               )}
@@ -400,6 +520,26 @@ export default function AdminUsersPage() {
             </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
               <Badge className={`${roleColors[m.role] ?? ""} text-xs`}>{m.role}</Badge>
+              {isLoginLocked && (
+                <Badge className="bg-red-100 text-red-700 border border-red-300 text-xs">🔒 Khóa login</Badge>
+              )}
+              {isPinLocked && (
+                <Badge className="bg-orange-100 text-orange-700 border border-orange-300 text-xs">🔒 Khóa PIN</Badge>
+              )}
+              {(isLoginLocked || isPinLocked) && (canEditThis || (isAdmin && !isSelf)) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-green-400 text-green-700 hover:bg-green-50"
+                  onClick={() => {
+                    if (!window.confirm(`Mở khóa tài khoản ${m.user.username || m.user.email}?`)) return;
+                    adminUnlockAccount.mutate({ projectId: projectId!, userId: m.user.id, type: "BOTH" });
+                  }}
+                  disabled={adminUnlockAccount.isLoading}
+                >
+                  🔓 Mở khóa
+                </Button>
+              )}
               {/* Admin: toggle canManageUsers for moderators */}
               {isAdmin && m.role === "MODERATOR" && (
                 <Button size="sm" variant="outline"
@@ -506,13 +646,15 @@ export default function AdminUsersPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Tên đăng nhập</label>
               <Input placeholder="nguyenvana" value={formUsername}
-                onChange={(e) => setFormUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, "").toLowerCase())} />
+                onChange={(e) => setFormUsername(e.target.value.replace(/[^a-zA-Z0-9._-]/g, "").toLowerCase())}
+                autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" />
               <p className="text-xs text-gray-400 mt-0.5">Chữ thường, số, dấu chấm, gạch ngang</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
               <div className="relative">
-                <Input type={showPassword ? "text" : "password"} placeholder="Tối thiểu 6 ký tự" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} className="pr-10" />
+                <Input type={showPassword ? "text" : "password"} placeholder="Tối thiểu 6 ký tự" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} className="pr-10"
+                  autoComplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {showPassword ? (
@@ -891,7 +1033,7 @@ export default function AdminUsersPage() {
                             onClick={() => {
                               const user = allMembers.find((m: any) => m.user.id === projectDialog?.userId);
                               const email = user?.user?.email;
-                              if (!email) { toast.error("User không có email"); return; }
+                              if (!email) { toast.error(t("admin_user_no_email")); return; }
                               addMember.mutate({
                                 projectId: p.id,
                                 email,
@@ -936,6 +1078,94 @@ export default function AdminUsersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Agent PP Email Dialog */}
+      {agentEmailDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setAgentEmailDialog(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b">
+              <h3 className="text-sm font-bold text-gray-900">Email & Link gộp — {agentEmailDialog.name}</h3>
+              <p className="text-[10px] text-gray-400">Email hoặc link dùng để nhận tiền từ PayPal gộp</p>
+            </div>
+
+            {/* Existing items */}
+            <div className="divide-y max-h-[300px] overflow-y-auto">
+              {agentEmails && agentEmails.length > 0 ? agentEmails.map((ae: any) => {
+                const isLink = ae.email.startsWith("http://") || ae.email.startsWith("https://");
+                const isEditing = editingAgentId === ae.id;
+                return (
+                  <div key={ae.id} className="px-4 py-2.5 hover:bg-gray-50">
+                    {isEditing ? (
+                      <div className="flex gap-2 items-center">
+                        <input value={editingAgentVal} onChange={(e) => setEditingAgentVal(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { updateAgentEmail.mutate({ projectId: projectId!, id: ae.id, email: editingAgentVal }); setEditingAgentId(null); } if (e.key === "Escape") setEditingAgentId(null); }}
+                          className="flex-1 px-2 py-1 border border-blue-400 rounded text-sm font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none" autoFocus />
+                        <button onClick={() => { updateAgentEmail.mutate({ projectId: projectId!, id: ae.id, email: editingAgentVal }); setEditingAgentId(null); }}
+                          className="text-green-600 hover:text-green-800"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg></button>
+                        <button onClick={() => setEditingAgentId(null)} className="text-gray-400 hover:text-gray-600"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isLink ? (
+                            <svg className="w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                          )}
+                          {isLink ? (
+                            <a href={ae.email} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline truncate">{ae.email}</a>
+                          ) : (
+                            <span className="text-sm font-mono text-gray-800 truncate">{ae.email}</span>
+                          )}
+                          <span className="text-[9px] text-gray-300 shrink-0">{new Date(ae.createdAt).toLocaleDateString("vi-VN")}</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <button onClick={() => { setEditingAgentId(ae.id); setEditingAgentVal(ae.email); }}
+                            className="p-1 text-gray-300 hover:text-blue-600 rounded transition-colors" title="Sửa">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          </button>
+                          <button onClick={() => removeAgentEmail.mutate({ projectId: projectId!, id: ae.id })}
+                            className="p-1 text-gray-300 hover:text-red-500 rounded transition-colors" title="Xóa">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }) : (
+                <p className="px-4 py-6 text-center text-sm text-gray-400">Chưa có email/link nào</p>
+              )}
+            </div>
+
+            {/* Add new */}
+            <div className="px-4 py-3 border-t bg-gray-50">
+              <div className="flex gap-2">
+                <input
+                  value={newAgentEmail}
+                  onChange={(e) => setNewAgentEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newAgentEmail.trim()) {
+                      addAgentEmail.mutate({ projectId: projectId!, userId: agentEmailDialog.userId, email: newAgentEmail.trim() });
+                    }
+                  }}
+                  placeholder="email@paypal.com hoặc https://..."
+                  className="flex-1 px-3 py-2 border rounded text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (!newAgentEmail.trim()) return;
+                    addAgentEmail.mutate({ projectId: projectId!, userId: agentEmailDialog.userId, email: newAgentEmail.trim() });
+                  }}
+                  disabled={!newAgentEmail.trim() || addAgentEmail.isLoading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0">
+                  Thêm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

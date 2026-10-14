@@ -9,6 +9,7 @@ import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
 import { exportToCSV } from "@/lib/excel-export";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
+import { PageHistory } from "@/components/PageHistory";
 
 const statusColors: Record<string, string> = {
   ACTIVE: "bg-green-100 text-green-800",
@@ -141,6 +142,7 @@ export default function GmailsPage() {
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [showUnassigned, setShowUnassigned] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -231,13 +233,15 @@ export default function GmailsPage() {
   const bulkUpdateStatus = (status: string) => {
     const ids = Array.from(selected);
     Promise.all(ids.map((id) => updateGmail.mutateAsync({ projectId: projectId!, id, status: status as any })))
-      .then(() => { invalidate(); setSelected(new Set()); });
+      .then(() => { toast.success(`${ids.length} updated`); invalidate(); setSelected(new Set()); })
+      .catch((err) => { toast.error(err.message || "Update failed"); invalidate(); setSelected(new Set()); });
   };
   const bulkDisable = () => {
     if (!confirm(`${t("gmail_disable_confirm").replace("?", "")} (${selected.size})?`)) return;
     const ids = Array.from(selected);
     Promise.all(ids.map((id) => updateGmail.mutateAsync({ projectId: projectId!, id, status: "DISABLED" as any })))
-      .then(() => { invalidate(); setSelected(new Set()); });
+      .then(() => { toast.success(`${ids.length} disabled`); invalidate(); setSelected(new Set()); })
+      .catch((err) => { toast.error(err.message || "Disable failed"); invalidate(); setSelected(new Set()); });
   };
   const bulkDelete = () => {
     if (!confirm(`${t("gmail_delete_confirm")} (${selected.size})`)) return;
@@ -442,6 +446,15 @@ export default function GmailsPage() {
           <div className="px-3 py-1.5 bg-gray-50 border-t text-[11px] text-gray-500">{items.length} {t("gmail_accounts")}</div>
         </div>
       )}
+      
+      
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? t("hide_history_label_nav") : t("history_label_nav")}
+      </button>
+      <PageHistory entity="GmailAccount" show={showHistory} />
     </div>
   );
 }

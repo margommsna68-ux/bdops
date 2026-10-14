@@ -179,24 +179,24 @@ function CopyBtn({ value }: { value: string }) {
   );
 }
 
-// ─── All columns definition ─────────
-const ALL_COLUMNS: Array<{ key: string; label: string; width: number; sortable?: boolean; rightAlign?: boolean; defaultVisible?: boolean }> = [
-  { key: "checkbox", label: "", width: 28, defaultVisible: true },
-  { key: "idx", label: "#", width: 28, defaultVisible: false },
-  { key: "status", label: "Trạng thái", width: 50, sortable: true, defaultVisible: true },
-  { key: "health", label: "Health", width: 50, defaultVisible: false },
-  { key: "code", label: "Mã PP", width: 68, sortable: true, defaultVisible: true },
-  { key: "holder", label: "User Win", width: 45, sortable: true, defaultVisible: true },
-  { key: "vmppCode", label: "VMPP Code", width: 68, sortable: true, defaultVisible: true },
-  { key: "email", label: "Email", width: 145, sortable: true, defaultVisible: true },
-  { key: "pass", label: "Password", width: 75, defaultVisible: true },
-  { key: "twoFa", label: "2FA", width: 75, defaultVisible: true },
-  { key: "token", label: "Email Token", width: 95, defaultVisible: false },
-  { key: "received", label: "Tổng nhận", width: 70, sortable: true, rightAlign: true, defaultVisible: false },
-  { key: "withdrawn", label: "Đã rút", width: 70, sortable: true, rightAlign: true, defaultVisible: false },
-  { key: "balance", label: "Số dư", width: 70, sortable: true, rightAlign: true, defaultVisible: true },
-  { key: "notes", label: "Ghi chú", width: 120, defaultVisible: true },
-  { key: "createdBy", label: "Người tạo", width: 60, defaultVisible: true },
+// ─── All columns definition (labelKey resolved via t() at render time) ─────────
+const ALL_COLUMNS: Array<{ key: string; labelKey: string; width: number; sortable?: boolean; rightAlign?: boolean; defaultVisible?: boolean }> = [
+  { key: "checkbox", labelKey: "", width: 28, defaultVisible: true },
+  { key: "idx", labelKey: "", width: 28, defaultVisible: false },
+  { key: "status", labelKey: "pp_col_status", width: 50, sortable: true, defaultVisible: true },
+  { key: "health", labelKey: "pp_col_health", width: 50, defaultVisible: false },
+  { key: "code", labelKey: "pp_col_code", width: 68, sortable: true, defaultVisible: true },
+  { key: "holder", labelKey: "pp_col_holder", width: 45, sortable: true, defaultVisible: true },
+  { key: "vmppCode", labelKey: "pp_col_vmpp_code", width: 68, sortable: true, defaultVisible: true },
+  { key: "email", labelKey: "pp_col_email", width: 145, sortable: true, defaultVisible: true },
+  { key: "pass", labelKey: "pp_col_password", width: 75, defaultVisible: true },
+  { key: "twoFa", labelKey: "pp_col_2fa", width: 75, defaultVisible: true },
+  { key: "token", labelKey: "pp_col_token", width: 95, defaultVisible: false },
+  { key: "received", labelKey: "pp_col_received", width: 70, sortable: true, rightAlign: true, defaultVisible: false },
+  { key: "withdrawn", labelKey: "pp_col_withdrawn", width: 70, sortable: true, rightAlign: true, defaultVisible: false },
+  { key: "balance", labelKey: "pp_col_balance", width: 70, sortable: true, rightAlign: true, defaultVisible: true },
+  { key: "notes", labelKey: "pp_col_notes", width: 120, defaultVisible: true },
+  { key: "createdBy", labelKey: "pp_col_created_by", width: 60, defaultVisible: true },
 ];
 
 const DEFAULT_VISIBLE_KEYS = ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key);
@@ -235,7 +235,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = Object.fromEntries(ALL_COLUMN
 export default function PayPalsPage() {
   const router = useRouter();
   const t = useT();
-  const { currentProjectId: projectId, currentRole } = useProjectStore();
+  const { currentProjectId: projectId, currentProjectCode: projectCode, currentRole } = useProjectStore();
   const utils = trpc.useUtils();
 
   // PIN verification — once per session for entire PayPals section
@@ -372,7 +372,7 @@ export default function PayPalsPage() {
     lastEditRef.current = null;
   };
   const updatePaypalSilent = trpc.paypal.update.useMutation({
-    onSuccess: () => { invalidate(); toast.success("Đã hoàn tác"); },
+    onSuccess: () => { invalidate(); toast.success(t("toast_reverted")); },
     onError: (e) => toast.error(e.message),
   });
   const [showUndo, setShowUndo] = useState(false);
@@ -418,9 +418,9 @@ export default function PayPalsPage() {
       setCheckResult(res);
       invalidate();
       if (res.suspended > 0 || res.limited > 0) {
-        toast.error(`Phát hiện: ${res.suspended} SUSPENDED, ${res.limited} LIMITED`);
+        toast.error(t("pp_status_issues", { sus: res.suspended, lim: res.limited }));
       } else if (res.checked > 0) {
-        toast.success(`Đã check ${res.checked} PP — Tất cả OK`);
+        toast.success(t("pp_all_ok", { n: res.checked }));
       } else {
         toast(res.message || "Không có PP nào có token để check");
       }
@@ -439,7 +439,7 @@ export default function PayPalsPage() {
 
   // ─── Workflow Status ───
   const updateWorkflow = trpc.paypal.updateWorkflowStatus.useMutation({
-    onSuccess: () => { invalidate(); toast.success("Đã cập nhật workflow"); },
+    onSuccess: () => { invalidate(); toast.success(t("pp_workflow_updated")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -635,7 +635,7 @@ export default function PayPalsPage() {
   const warningLines = parsedLines.filter((p) => p.warnings.length > 0);
 
   const saveQuickAdd = async () => {
-    if (!validLines.length) { toast.error("Không có email hợp lệ"); return; }
+    if (!validLines.length) { toast.error(t("pp_no_valid_emails")); return; }
     setSavingQuick(true);
     let created = 0;
     let extraEmails = 0;
@@ -927,7 +927,7 @@ export default function PayPalsPage() {
                     <div key={key} className="flex items-center gap-1 hover:bg-gray-50 px-1 py-0.5 rounded group">
                       <label className="flex items-center gap-2 text-xs cursor-pointer flex-1 min-w-0">
                         <input type="checkbox" checked={visible} onChange={() => toggleCol(key)} className="rounded border-gray-300 shrink-0" />
-                        <span className={`truncate ${visible ? "text-gray-800 font-medium" : "text-gray-400"}`}>{c.label || c.key}</span>
+                        <span className={`truncate ${visible ? "text-gray-800 font-medium" : "text-gray-400"}`}>{c.labelKey ? t(c.labelKey) : c.key}</span>
                       </label>
                       <div className="flex items-center shrink-0">
                         <button
@@ -994,7 +994,11 @@ export default function PayPalsPage() {
             <textarea value={quickEmails} onChange={(e) => setQuickEmails(e.target.value)}
               rows={5} autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
               className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none bg-white resize-y"
-              placeholder={"PP01|PP-VN453|user1@hotmail.com|Mi#o*AKxoOzk7G|AZKU IYVS 3RYR 5VBR\nPP02|PP-VN454|user2@hotmail.com|pass2|2FA2\nuser3@outlook.com"} />
+              placeholder={
+                projectCode?.toUpperCase().startsWith("AE")
+                  ? "PP01|AE-001|user1@hotmail.com|password1|2FA-CODE1\nPP02|AE-002|user2@hotmail.com|pass2|2FA2\nuser3@outlook.com"
+                  : "PP01|PP-VN453|user1@hotmail.com|password1|2FA-CODE1\nPP02|PP-VN454|user2@hotmail.com|pass2|2FA2\nuser3@outlook.com"
+              } />
           </div>
           {/* Warnings */}
           {warningLines.length > 0 && (
@@ -1117,7 +1121,7 @@ export default function PayPalsPage() {
               <tr>
                 {orderedColumns.filter((c) => isColVisible(c.key)).map((colDef) => {
                   const col = colDef.key;
-                  const label = colDef.label;
+                  const label = colDef.labelKey ? t(colDef.labelKey) : (col === "idx" ? "#" : "");
                   const sortable = colDef.sortable;
                   const rightAlign = colDef.rightAlign;
                   const sortField = col === "email" ? "primaryEmail" : col === "received" ? "totalReceived" : col === "withdrawn" ? "totalWithdrawn" : col;
@@ -1239,7 +1243,7 @@ export default function PayPalsPage() {
                       {canEdit ? (
                         <div className="flex items-center gap-1">
                           <EditableCell value={pp.code} onSave={(v) => {
-                            if (!v.trim()) { toast.error("Mã PP không được trống"); return; }
+                            if (!v.trim()) { toast.error(t("validation_pp_code_empty")); return; }
                             saveField(pp.id, "code", v.trim(), pp.code);
                           }} mono />
                           <button onClick={() => router.push(`/paypals/${pp.id}`)} className="text-blue-500 hover:text-blue-700 shrink-0" title="Chi tiết">
@@ -1269,7 +1273,9 @@ export default function PayPalsPage() {
                       {canEdit ? (
                         <EditableCell value={pp.vmppCode ?? ""} onSave={(v) => saveField(pp.id, "vmppCode", v, pp.vmppCode ?? "")} mono placeholder="VMPP..." />
                       ) : (
-                        <span className="font-mono text-gray-500">{pp.vmppCode || "—"}</span>
+                        pp.vmppCode
+                          ? <span className="font-mono text-gray-500">{pp.vmppCode}</span>
+                          : <span className="font-mono text-red-400 bg-red-50 px-1 rounded text-[10px]">NODATA</span>
                       )}
                     </td>
                   ),
@@ -1484,7 +1490,7 @@ export default function PayPalsPage() {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-              <p className="text-xs text-gray-400 mt-1">Nhập mã PayPal (cột A) → hệ thống tự lấy dữ liệu từ sheet (userwin, pass, 2FA, emails, tokens)</p>
+              <p className="text-xs text-gray-400 mt-1">Nhập VMPP Code (cột C) để tìm dòng → Mã PP lấy từ cột A, cùng các dữ liệu khác (userwin, pass, 2FA, emails, tokens)</p>
             </div>
 
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
@@ -1534,13 +1540,21 @@ export default function PayPalsPage() {
 
               {/* PP Codes */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Mã PayPal — cột A trong sheet (mỗi dòng 1 mã)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  VMPP Code — cột C trong sheet (mỗi dòng 1 mã)
+                </label>
                 <textarea value={sheetPPCodes} onChange={(e) => setSheetPPCodes(e.target.value)}
                   rows={6}
                   className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-teal-500 focus:outline-none resize-y"
-                  placeholder={"PP-271\nPP-272\nPP-273\nAE-010\nAE-011"} />
+                  placeholder={
+                    projectCode?.toUpperCase().startsWith("AE")
+                      ? "AE-VN001\nAE-VN002\nAE-VN003"
+                      : "PP-VN001\nPP-VN002\nPP-VN003"
+                  } />
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  {sheetPPCodes.split("\n").filter((l) => l.trim()).length} mã PayPal
+                  {sheetPPCodes.split("\n").filter((l) => l.trim()).length} mã
+                  {projectCode?.toUpperCase().startsWith("AE") && <> · Mã PP ở cột A phải bắt đầu <code className="font-mono text-teal-600">AE-</code>, sai prefix sẽ bị từ chối</>}
+                  {(projectCode?.toUpperCase().startsWith("DN") || projectCode?.toUpperCase().startsWith("PP")) && <> · Mã PP ở cột A phải bắt đầu <code className="font-mono text-teal-600">PP-</code>, sai prefix sẽ bị từ chối</>}
                 </p>
               </div>
 
@@ -1548,8 +1562,8 @@ export default function PayPalsPage() {
               <button
                 onClick={() => {
                   const codes = sheetPPCodes.split("\n").map((l) => l.trim()).filter(Boolean);
-                  if (!codes.length) { toast.error("Chưa nhập mã PayPal"); return; }
-                  if (!sheetUrl) { toast.error("Chưa nhập Sheet URL"); return; }
+                  if (!codes.length) { toast.error(t("validation_no_pp_code")); return; }
+                  if (!sheetUrl) { toast.error(t("validation_no_sheet_url")); return; }
                   importFromSheet.mutate({
                     projectId: projectId!,
                     sheetUrl,

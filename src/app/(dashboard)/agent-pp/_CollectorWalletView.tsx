@@ -9,17 +9,117 @@ import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, capitalName } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { PinVerifyDialog } from "@/components/PinVerify";
 import toast from "react-hot-toast";
 
-type ExpenseType = "TEAM_PAYMENT" | "BILL" | "OTHER";
+type ExpenseType = "TEAM_PAYMENT" | "BILL" | "OTHER" | "COMMISSION_WITHDRAW";
+
+// ─── Commission Card with withdraw + history ─────────────────────────────────
+function CommissionCard({ projectId, totalCommission, userName }: { projectId: string; totalCommission: number; userName: string }) {
+  const t = useT();
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [wdAmount, setWdAmount] = useState("");
+  const [wdRef, setWdRef] = useState("");
+  const [wdNote, setWdNote] = useState("");
+
+  const { data: commBalance, refetch } = trpc.agentPP.myCommissionBalance.useQuery(
+    { projectId },
+    { enabled: !!projectId }
+  );
+  const createExpense = trpc.agentPP.createExpense.useMutation({
+    onSuccess: () => {
+      refetch();
+      setShowWithdraw(false);
+      setWdAmount("");
+      setWdRef("");
+      setWdNote("");
+      toast.success(t("commission_wd_success"));
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const earned = commBalance?.totalEarned ?? totalCommission;
+  const withdrawn = commBalance?.totalWithdrawn ?? 0;
+  const available = commBalance?.available ?? totalCommission;
+  const _history = commBalance?.history ?? [];
+
+  return (
+    <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 rounded-xl shadow-lg text-white overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-[11px] font-semibold text-purple-200 uppercase tracking-wider">💜 {userName} Fee</div>
+            <div className="text-4xl font-bold mt-1 font-mono tabular-nums">{formatCurrency(available)}</div>
+            <div className="text-xs text-purple-200 mt-1">{t("commission_available_desc")}</div>
+          </div>
+          <Button
+            size="sm"
+            className="bg-white text-purple-700 hover:bg-purple-50 shadow-md font-semibold"
+            onClick={() => setShowWithdraw(!showWithdraw)}
+          >
+            {showWithdraw ? t("cancel") : t("commission_withdraw_btn")}
+          </Button>
+        </div>
+        <div className="mt-4 pt-3 border-t border-purple-400/30 grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <div className="text-purple-200">{t("commission_total_earned")}</div>
+            <div className="text-base font-bold">{formatCurrency(earned)}</div>
+          </div>
+          <div>
+            <div className="text-purple-200">{t("commission_total_withdrawn")}</div>
+            <div className="text-base font-bold">{formatCurrency(withdrawn)}</div>
+          </div>
+          <div>
+            <div className="text-purple-200">{t("commission_available")}</div>
+            <div className="text-base font-bold">{formatCurrency(available)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Withdraw form */}
+      {showWithdraw && (
+        <div className="px-5 pb-4 pt-2 border-t border-purple-500/30">
+          <div className="bg-white/10 rounded-lg p-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <input type="number" step="0.01" min="0" max={available} value={wdAmount}
+                onChange={(e) => setWdAmount(e.target.value)}
+                placeholder={t("commission_wd_amount")}
+                className="px-2 py-1.5 rounded text-xs text-gray-900 bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none" />
+              <input type="text" value={wdRef} onChange={(e) => setWdRef(e.target.value)}
+                placeholder={t("commission_wd_ref")}
+                className="px-2 py-1.5 rounded text-xs text-gray-900 bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none" />
+            </div>
+            <input type="text" value={wdNote} onChange={(e) => setWdNote(e.target.value)}
+              placeholder={t("commission_wd_note")}
+              className="w-full px-2 py-1.5 rounded text-xs text-gray-900 bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none" />
+            <Button size="sm" className="w-full bg-white text-purple-700 hover:bg-purple-50 font-semibold"
+              disabled={!wdAmount || !wdRef || parseFloat(wdAmount) <= 0 || createExpense.isLoading}
+              onClick={() => {
+                createExpense.mutate({
+                  projectId,
+                  type: "COMMISSION_WITHDRAW",
+                  amount: parseFloat(wdAmount),
+                  referenceId: wdRef,
+                  note: wdNote || undefined,
+                });
+              }}>
+              {createExpense.isLoading ? "..." : t("commission_wd_submit")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
 
 const EXPENSE_STYLES: Record<ExpenseType, { color: string; icon: string; key: string }> = {
-  TEAM_PAYMENT: { color: "bg-emerald-100 text-emerald-700 border-emerald-300", icon: "→", key: "wallet_transfer_team" },
-  BILL:         { color: "bg-blue-100 text-blue-700 border-blue-300", icon: "🧾", key: "wallet_pay_bill" },
-  OTHER:        { color: "bg-gray-100 text-gray-700 border-gray-300", icon: "◇", key: "wallet_other" },
+  TEAM_PAYMENT:        { color: "bg-emerald-100 text-emerald-700 border-emerald-300", icon: "→", key: "wallet_transfer_team" },
+  BILL:                { color: "bg-blue-100 text-blue-700 border-blue-300", icon: "🧾", key: "wallet_pay_bill" },
+  OTHER:               { color: "bg-gray-100 text-gray-700 border-gray-300", icon: "◇", key: "wallet_other" },
+  COMMISSION_WITHDRAW: { color: "bg-purple-100 text-purple-700 border-purple-300", icon: "💜", key: "commission_withdraw_btn" },
 };
 
 type Period = "all" | "today" | "week" | "month" | "custom";
@@ -222,8 +322,8 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
         case "date": av = a.date; bv = b.date; break;
         case "project": av = a.project?.code ?? ""; bv = b.project?.code ?? ""; break;
         case "ppCode": av = a.sourcePaypal?.code ?? ""; bv = b.sourcePaypal?.code ?? ""; break;
-        case "ppAgent": av = a.agentEmail?.email ?? ""; bv = b.agentEmail?.email ?? ""; break;
-        case "transactionId": av = a.transactionId ?? ""; bv = b.transactionId ?? ""; break;
+        case "ppAgent": av = a.agentEmail?.email || a.agentUser?.name || ""; bv = b.agentEmail?.email || b.agentUser?.name || ""; break;
+        case "transactionId": av = a.transactionId || a.withdrawCode || ""; bv = b.transactionId || b.withdrawCode || ""; break;
         case "gross": av = a.gross; bv = b.gross; break;
         case "feePP": av = a.fee; bv = b.fee; break;
         case "net": av = a.net; bv = b.net; break;
@@ -285,7 +385,8 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
     });
   // Select all confirmed rows (any with fee entered)
   const selectAllConfirmed = () => {
-    const ids = enriched.filter((t: any) => t.confirmed).map((t: any) => t.id);
+    // Only select confirmed AND not yet paid to team
+    const ids = enriched.filter((t: any) => t.confirmed && !t.paidToTeam).map((t: any) => t.id);
     setSelectedIds(new Set(ids));
   };
   const clearSelection = () => setSelectedIds(new Set());
@@ -345,6 +446,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
   const walletBalance = wallet?.walletBalance ?? 0;
   const totalAfterFee = (wallet as any)?.totalAfterFee ?? 0;
   const totalExpenses = wallet?.totalExpenses ?? 0;
+  const totalCommission = (wallet as any)?.totalCommission ?? 0;
   const breakdown = wallet?.breakdown ?? { TEAM_PAYMENT: 0, BILL: 0, OTHER: 0 };
 
   return (
@@ -389,6 +491,9 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
           </div>
         </div>
       </div>
+
+      {/* ─── YOUR COMMISSION ─── */}
+      <CommissionCard projectId={projectId!} totalCommission={totalCommission} userName={capitalName(singleCollectorName) || "User"} />
 
       {/* ─── Period filter ─── */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -521,12 +626,12 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 <SortTh label={t("th_tx_id")} k="transactionId" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-gray-600" align="left" />
                 <SortTh label={t("th_gross")} k="gross" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-green-700" align="right" />
                 <SortTh
-                  label={singleCollectorName ? `PP Fee (${singleCollectorName} note)` : "PP Fee (Agent note)"}
+                  label={singleCollectorName ? `PP Fee (${capitalName(singleCollectorName)} note)` : "PP Fee (User note)"}
                   k="feePP" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-red-600" align="right"
                 />
                 <SortTh label={t("th_net")} k="net" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-gray-700" align="right" />
                 <SortTh
-                  label={singleCollectorName ? `${singleCollectorName} ${singleCollectorPct}%` : t("th_collector_fee_multi")}
+                  label={singleCollectorName ? `Fee ${capitalName(singleCollectorName)} ${singleCollectorPct}%` : "Fee User %"}
                   k="commission" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-purple-700" align="right"
                 />
                 <SortTh label={t("th_total_after_fee")} k="totalAfterFee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} color="text-emerald-700" align="right" />
@@ -558,14 +663,14 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                     <td className="px-2 py-2 text-xs font-medium">{tx.sourcePaypal?.code ?? "—"}</td>
                     <td className="px-2 py-2 text-xs">
                       {(() => {
-                        const val = tx.agentEmail?.email ?? "—";
+                        const val = tx.agentEmail?.email || capitalName(tx.agentUser?.name || tx.agentUser?.username) || "—";
                         const isL = val.startsWith("http://") || val.startsWith("https://");
                         return isL
                           ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block max-w-[150px]">{val.replace("https://", "")}</a>
                           : <span className="truncate block max-w-[150px]">{val}</span>;
                       })()}
                     </td>
-                    <td className="px-2 py-2 text-xs font-mono text-gray-500 whitespace-nowrap">{tx.transactionId || "—"}</td>
+                    <td className="px-2 py-2 text-xs font-mono text-gray-500 whitespace-nowrap">{tx.transactionId || tx.withdrawCode || "—"}</td>
                     <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{formatCurrency(tx.gross)}</td>
                     <td className="px-2 py-2 text-right text-xs w-24">
                       <div className="h-6 flex items-center justify-end">
@@ -613,13 +718,8 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                     </td>
                     <td className="px-2 py-2 text-right font-mono text-gray-700 whitespace-nowrap">{tx.confirmed ? formatCurrency(tx.net) : <span className="text-gray-300">—</span>}</td>
                     <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
-                      {!tx.confirmed ? <span className="text-gray-300">—</span> : singleCollectorName ? (
+                      {!tx.confirmed ? <span className="text-gray-300">—</span> : (
                         <div className="text-purple-700 font-mono font-semibold">{formatCurrency(tx.commission)}</div>
-                      ) : (
-                        <div className="leading-tight">
-                          <div className="text-gray-700 font-medium truncate">{tx.collectorName || "—"} <span className="text-purple-700 font-bold">{tx.pct}%</span></div>
-                          <div className="text-purple-700 font-mono font-semibold">{formatCurrency(tx.commission)}</div>
-                        </div>
                       )}
                     </td>
                     <td className="px-2 py-2 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">{tx.confirmed ? formatCurrency(tx.totalAfterFee) : <span className="text-gray-300">—</span>}</td>
@@ -680,6 +780,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
             TEAM_PAYMENT: { count: 0, total: 0 },
             BILL: { count: 0, total: 0 },
             OTHER: { count: 0, total: 0 },
+            COMMISSION_WITHDRAW: { count: 0, total: 0 },
           };
           for (const e of allExpenses) {
             const t = e.type as string;
@@ -738,6 +839,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 {typeFilterBtn("TEAM_PAYMENT", "→ Team", EXPENSE_STYLES.TEAM_PAYMENT.color)}
                 {typeFilterBtn("BILL", "🧾 Bills", EXPENSE_STYLES.BILL.color)}
                 {typeFilterBtn("OTHER", "◇ Other", EXPENSE_STYLES.OTHER.color)}
+                {typeFilterBtn("COMMISSION_WITHDRAW", "💜 Withdraw", EXPENSE_STYLES.COMMISSION_WITHDRAW.color)}
               </div>
               <div className="flex items-center gap-2">
                 {/* Search */}
@@ -829,7 +931,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                           <div className="space-y-1">
                             {exp.withdrawals.map((w: any) => (
                               <div key={w.id} className="flex items-center justify-between text-xs">
-                                <span className="font-mono text-gray-500">{w.transactionId || "—"}</span>
+                                <span className="font-mono text-gray-500">{w.transactionId || w.withdrawCode || "—"}</span>
                                 <span className="text-gray-600">{w.sourcePaypal?.code}</span>
                                 <span className="font-semibold text-green-700">{formatCurrency(Number(w.amount))}</span>
                               </div>

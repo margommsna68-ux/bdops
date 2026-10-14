@@ -103,6 +103,9 @@ export interface PPCheckResult {
   alertDate?: string;
   newStatus?: "SUSPENDED" | "LIMITED";
   error?: string;
+  emailsScanned?: number;      // how many PayPal emails were found
+  tokenType?: string;           // "outlook" | "gmail"
+  debugInfo?: string;           // extra debug context
 }
 
 export interface PPCheckSummary {
@@ -158,28 +161,20 @@ async function refreshAccessToken(refreshToken: string, clientId: string = DEFAU
   throw new Error(`Token refresh failed: ${lastError.slice(0, 200)}`);
 }
 
-async function outlookFetchPayPalEmails(accessToken: string): Promise<MailboxEmail[]> {
-  const filter = encodeURIComponent(
-    "(from/emailAddress/address eq 'service@paypal.com' or " +
-    "from/emailAddress/address eq 'service@intl.paypal.com' or " +
-    "from/emailAddress/address eq 'paypal@mail.paypal.com')"
-  );
-  const select = "id,subject,from,receivedDateTime,bodyPreview,isRead";
-  const url = `${GRAPH_API_URL}/me/messages?$filter=${filter}&$select=${select}&$top=200&$orderby=receivedDateTime desc`;
+// Reuse outlookReadMailbox (line 228) — fetch ALL recent emails, no filter
+// Then scan for PayPal keywords on server side. This is the same approach
+// that works in the Mailbox Reader (detail page).
+
+// Fetch full body for a specific email (used when subject/preview match is inconclusive)
+async function outlookFetchEmailBody(accessToken: string, messageId: string): Promise<string> {
+  const url = `${GRAPH_API_URL}/me/messages/${messageId}?$select=body`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
   });
-  if (!resp.ok) throw new Error(`Graph API (${resp.status})`);
-  const data = await resp.json();
-  return (data.value || []).map((msg: any) => ({
-    id: msg.id,
-    subject: msg.subject || "(No Subject)",
-    sender: msg.from?.emailAddress?.address || "",
-    senderName: msg.from?.emailAddress?.name || "",
-    receivedAt: msg.receivedDateTime,
-    preview: msg.bodyPreview || "",
-    isRead: msg.isRead ?? true,
-  }));
+  if (!resp.ok) return "";
+  const msg = await resp.json();
+  // Strip HTML tags for pattern matching
+  return (msg.body?.content || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
 }
 
 async function outlookReadMailbox(accessToken: string, count: number): Promise<MailboxEmail[]> {
@@ -251,7 +246,11 @@ async function gmailFetchEmails(
 ): Promise<MailboxEmail[]> {
   const maxEmails = options?.maxEmails ?? 30;
   const lookbackDays = options?.lookbackDays ?? 365;
-  const paypalSenders = ["service@paypal.com", "service@intl.paypal.com", "paypal@mail.paypal.com"];
+  const paypalSenders = [
+    "service@paypal.com", "service@intl.paypal.com", "paypal@mail.paypal.com",
+    "member@paypal.com", "no-reply@paypal.com", "customerservice@paypal.com",
+    "paypal@emails.paypal.com", "service@paypal.co.uk", "service@e.paypal.com",
+  ];
 
   const imapConfig: any = {
     host: "imap.gmail.com",
@@ -343,25 +342,70 @@ async function gmailFetchEmails(
 
 const SUSPEND_PATTERNS = [
   /permanently deactivated/i,
+  /permanently limited/i,
   /vô hiệu hóa vĩnh viễn/i,
   /account has been permanently/i,
   /tài khoản.*đã bị.*vô hiệu/i,
+  /your account has been deactivated/i,
+  /closed your account/i,
+  /đóng tài khoản/i,
+  /account.*permanently.*closed/i,
+  /we've permanently/i,
+  /account.*terminated/i,
+  /chấm dứt.*tài khoản/i,
+  /180 days.*withdraw/i,
+  /180 ngày.*rút/i,
 ];
 
 const LIMIT_PATTERNS = [
   /paused some of your account features/i,
+  /paused.*account features/i,
   /tạm dừng một số tính năng/i,
   /tạm dừng các tính năng/i,
+  /tạm dừng tính năng/i,
   /account limitation/i,
   /account.*limited/i,
   /hạn chế tài khoản/i,
   /we've limited your account/i,
   /we need you to resolve/i,
   /action required.*account/i,
+  /your account access is limited/i,
+  /your account has been limited/i,
+  /giới hạn.*tài khoản/i,
+  /complete.*steps.*restore/i,
+  /hoàn tất.*bước.*khôi phục/i,
+  /verify your identity/i,
+  /xác minh danh tính/i,
+  /confirm your identity/i,
+  /provide.*documents/i,
+  /cung cấp.*tài liệu/i,
+  /upload.*document/i,
+  /tải.*giấy tờ/i,
+  /resolve.*issue.*account/i,
+  /giải quyết.*vấn đề.*tài khoản/i,
+  /can't send or receive/i,
+  /không thể gửi hoặc nhận/i,
+  /suspended.*features/i,
+  /features.*suspended/i,
 ];
 
-function detectAlertType(subject: string, bodyPreview: string): PPAlertType {
-  const text = `${subject} ${bodyPreview}`.toLowerCase();
+// Keywords in subject that suggest PP status issues (for secondary full-body check)
+const SUBJECT_HINT_PATTERNS = [
+  /paypal/i,
+  /account/i,
+  /tài khoản/i,
+  /verify/i,
+  /xác minh/i,
+  /important/i,
+  /quan trọng/i,
+  /action.*required/i,
+  /hành động.*cần/i,
+  /update.*information/i,
+  /cập nhật.*thông tin/i,
+];
+
+function detectAlertType(subject: string, bodyText: string): PPAlertType {
+  const text = `${subject} ${bodyText}`;
   for (const pat of SUSPEND_PATTERNS) {
     if (pat.test(text)) return "permanently_deactivated";
   }
@@ -369,6 +413,10 @@ function detectAlertType(subject: string, bodyPreview: string): PPAlertType {
     if (pat.test(text)) return "features_paused";
   }
   return "none";
+}
+
+function subjectMightBeRelevant(subject: string): boolean {
+  return SUBJECT_HINT_PATTERNS.some((p) => p.test(subject));
 }
 
 // ═══════════════════════════════════════
@@ -384,36 +432,93 @@ export async function checkSinglePP(
   try {
     const parsed = parseTokenField(rawToken);
     if (!parsed) {
-      return { paypalId, paypalCode, emailChecked: email, alertType: "none", error: "Token không hợp lệ" };
+      return { paypalId, paypalCode, emailChecked: email, alertType: "none", error: "Token không hợp lệ — kiểm tra lại format token", tokenType: "unknown", emailsScanned: 0 };
     }
 
     let emails: MailboxEmail[];
+    let accessToken: string | null = null;
+    const tokenType = parsed.type;
 
     if (parsed.type === "gmail") {
-      emails = await gmailFetchEmails(parsed.email, parsed.appPassword, parsed.proxy, { paypalOnly: true, maxEmails: 200 });
+      // Gmail BẮT BUỘC qua proxy — không có proxy thì báo lỗi
+      if (!parsed.proxy) {
+        return { paypalId, paypalCode, emailChecked: email, alertType: "none", error: "Gmail thiếu proxy — format: email|appPassword|host:port:user:pass", tokenType, emailsScanned: 0 };
+      }
+      emails = await gmailFetchEmails(parsed.email, parsed.appPassword, parsed.proxy, { paypalOnly: false, maxEmails: 200 });
     } else {
-      const accessToken = await refreshAccessToken(parsed.refreshToken, parsed.clientId);
-      emails = await outlookFetchPayPalEmails(accessToken);
+      accessToken = await refreshAccessToken(parsed.refreshToken, parsed.clientId);
+      // Fetch ALL recent emails — same as Mailbox Reader (works 100%)
+      emails = await outlookReadMailbox(accessToken, 200);
     }
 
-    for (const msg of emails) {
+    const totalFetched = emails.length;
+
+    // Filter for PayPal-related emails on server side
+    const paypalEmails = emails.filter((msg) => {
+      const text = `${msg.sender} ${msg.senderName} ${msg.subject} ${msg.preview}`.toLowerCase();
+      return text.includes("paypal");
+    });
+
+    // Phase 1: Quick check subject + preview on PayPal emails
+    for (const msg of paypalEmails) {
       const alertType = detectAlertType(msg.subject, msg.preview);
       if (alertType !== "none") {
         return {
-          paypalId,
-          paypalCode,
-          emailChecked: email,
-          alertType,
-          alertSubject: msg.subject,
-          alertDate: msg.receivedAt,
+          paypalId, paypalCode, emailChecked: email, alertType,
+          alertSubject: msg.subject, alertDate: msg.receivedAt,
           newStatus: alertType === "permanently_deactivated" ? "SUSPENDED" : "LIMITED",
+          emailsScanned: totalFetched, tokenType,
+          debugInfo: `Found in ${paypalEmails.length} PayPal emails (of ${totalFetched} total)`,
         };
       }
     }
 
-    return { paypalId, paypalCode, emailChecked: email, alertType: "none" };
+    // Phase 2: Fetch full body for PayPal emails with relevant subjects
+    if (accessToken && paypalEmails.length > 0) {
+      const candidates = paypalEmails
+        .filter((msg) => subjectMightBeRelevant(msg.subject))
+        .slice(0, 15);
+
+      for (const msg of candidates) {
+        const fullBody = await outlookFetchEmailBody(accessToken, msg.id);
+        if (fullBody) {
+          const alertType = detectAlertType(msg.subject, fullBody);
+          if (alertType !== "none") {
+            return {
+              paypalId, paypalCode, emailChecked: email, alertType,
+              alertSubject: msg.subject, alertDate: msg.receivedAt,
+              newStatus: alertType === "permanently_deactivated" ? "SUSPENDED" : "LIMITED",
+              emailsScanned: totalFetched, tokenType,
+              debugInfo: `Full body match: ${msg.subject.slice(0, 80)}`,
+            };
+          }
+        }
+      }
+    }
+
+    // No alert found — return OK with debug info
+    const ppSampleSubjects = paypalEmails.slice(0, 5).map((m) => m.subject.slice(0, 50)).join(" | ");
+    return {
+      paypalId, paypalCode, emailChecked: email, alertType: "none",
+      emailsScanned: totalFetched, tokenType,
+      debugInfo: `${paypalEmails.length} PayPal emails / ${totalFetched} total. ${ppSampleSubjects || "No PayPal emails"}`,
+    };
   } catch (err: any) {
-    return { paypalId, paypalCode, emailChecked: email, alertType: "none", error: err.message || "Unknown error" };
+    const errMsg = err.message || "Unknown error";
+    // Provide helpful guidance based on error type
+    let hint = "";
+    if (errMsg.includes("ECONNREFUSED") || errMsg.includes("ECONNRESET") || errMsg.includes("ETIMEDOUT") || errMsg.includes("socket hang up") || errMsg.includes("Socks5")) hint = " — Proxy dead hoặc không kết nối được. Kiểm tra lại proxy";
+    else if (errMsg.includes("ENOTFOUND")) hint = " — Proxy host không tìm thấy. Kiểm tra lại địa chỉ proxy";
+    else if (errMsg.includes("Token refresh failed")) hint = " — Token expired, cần cập nhật token mới";
+    else if (errMsg.includes("invalid_grant")) hint = " — Token đã bị revoke, cần lấy token mới";
+    else if (errMsg.includes("Graph API")) hint = " — Microsoft API lỗi, thử lại sau";
+    else if (errMsg.includes("AUTHENTICATIONFAILED") || errMsg.includes("Invalid credentials")) hint = " — Gmail app password sai hoặc bị vô hiệu";
+    else if (errMsg.includes("IMAP")) hint = " — Lỗi kết nối IMAP Gmail";
+    return {
+      paypalId, paypalCode, emailChecked: email, alertType: "none",
+      error: errMsg.slice(0, 300) + hint,
+      emailsScanned: 0, tokenType: "unknown",
+    };
   }
 }
 
@@ -426,6 +531,7 @@ export async function readMailbox(
     if (!parsed) return { emails: [], error: "Token không hợp lệ" };
 
     if (parsed.type === "gmail") {
+      if (!parsed.proxy) return { emails: [], error: "Gmail thiếu proxy — format: email|appPassword|host:port:user:pass" };
       const emails = await gmailFetchEmails(parsed.email, parsed.appPassword, parsed.proxy, { maxEmails: count, lookbackDays: 30 });
       return { emails };
     } else {

@@ -57,8 +57,17 @@ const DEFAULT_WIDTHS: Record<string, number> = {
   amount: 100, txid: 140, status: 90, company: 110, notes: 130, createdBy: 80, actions: 50,
 };
 
+// Build placeholder based on project code prefix
+function ppPlaceholder(code: string | null) {
+  const upper = (code || "").toUpperCase();
+  if (upper.startsWith("AE")) return "AE-001\nAE-002\nAE-003\nAE-004\nAE-005";
+  if (upper.startsWith("DN") || upper.startsWith("PP")) return "PP-001\nPP-002\nPP-003\nPP-004\nPP-005";
+  return "PP-001\nPP-002\nPP-003";
+}
+
 // ═══ PAYPAL_ONLY Fund Quick Add ═══
-function PPOnlyFundPanel({ projectId }: { projectId: string }) {
+function PPOnlyFundPanel({ projectId, projectCode }: { projectId: string; projectCode: string | null }) {
+  const t = useT();
   const [ppCodes, setPpCodes] = useState("");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -75,7 +84,7 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
   const quickAdd = trpc.fund.quickAddByPPCode.useMutation({
     onSuccess: (res) => {
       setSaving(false);
-      toast.success(`Đã tạo ${res.created} fund records`);
+      toast.success(t("funds_fund_created", { n: res.created }));
       setPpCodes("");
       setAmounts({});
       setNotes({});
@@ -88,12 +97,12 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
     const items = (lookup.data || [])
       .filter((pp: any) => amounts[pp.id] && parseFloat(amounts[pp.id]) > 0)
       .map((pp: any) => ({ paypalId: pp.id, amount: parseFloat(amounts[pp.id]), notes: notes[pp.id] || undefined }));
-    if (!items.length) { toast.error("Chưa nhập amount"); return; }
+    if (!items.length) { toast.error(t("funds_no_amount")); return; }
     setSaving(true);
     quickAdd.mutate({ projectId, items });
   };
 
-  const copyEmail = (email: string) => { navigator.clipboard.writeText(email); toast.success("Copied!"); };
+  const copyEmail = (email: string) => { navigator.clipboard.writeText(email); toast.success(t("toast_copied")); };
 
   const removePP = (ppCode: string) => {
     // Remove matching code/email from textarea
@@ -111,23 +120,23 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       {/* Header + textarea */}
       <div className="px-4 py-3 border-b">
-        <h3 className="text-sm font-semibold text-gray-800 mb-2">Thêm Fund nhanh</h3>
+        <h3 className="text-sm font-semibold text-gray-800 mb-2">{t("funds_quick_add_title")}</h3>
         <textarea value={ppCodes} onChange={(e) => setPpCodes(e.target.value)} rows={5}
           className="w-full px-3 py-2 border border-gray-200 rounded text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
-          placeholder={"Paste mã PP mỗi dòng 1 mã:\nPP-001\nPP-002\nPP-003\nPP-004\nPP-005"} />
+          placeholder={ppPlaceholder(projectCode)} />
         {codes.length > 0 && (
           <div className="flex items-center gap-2 mt-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded text-xs font-semibold text-blue-700">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-              {codes.length} mã nhập
+              {codes.length} {t("funds_codes_entered")}
             </span>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded text-xs font-semibold text-green-700">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              {lookup.data?.length ?? 0} PP tìm thấy
+              {lookup.data?.length ?? 0} {t("funds_pp_found")}
             </span>
             {lookup.data && codes.length > 0 && (lookup.data.length < codes.length) && (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 border border-orange-200 rounded text-xs font-semibold text-orange-600">
-                {codes.length - lookup.data.length} không khớp
+                {codes.length - lookup.data.length} {t("funds_no_match")}
               </span>
             )}
           </div>
@@ -141,13 +150,13 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
             <thead className="bg-gray-50 sticky top-0 z-10 border-b">
               <tr>
                 <th className="px-3 py-2 text-left text-gray-500 w-8">#</th>
-                <th className="px-3 py-2 text-left text-gray-500">Mã PP</th>
+                <th className="px-3 py-2 text-left text-gray-500">{t("funds_col_pp_code")}</th>
                 <th className="px-3 py-2 text-left text-gray-500" style={{maxWidth:160}}>Email</th>
                 <th className="px-3 py-2 text-left text-gray-500">User Win</th>
-                <th className="px-3 py-2 text-left text-gray-500">Mã VMPP</th>
-                <th className="px-3 py-2 text-center text-gray-500 w-16">Trạng thái</th>
-                <th className="px-3 py-2 text-right text-gray-500 w-24">Số tiền</th>
-                <th className="px-3 py-2 text-left text-gray-500" style={{minWidth:180}}>Ghi chú</th>
+                <th className="px-3 py-2 text-left text-gray-500">{t("funds_col_vmpp_code")}</th>
+                <th className="px-3 py-2 text-center text-gray-500 w-16">{t("funds_col_status")}</th>
+                <th className="px-3 py-2 text-right text-gray-500 w-24">{t("funds_col_amount")}</th>
+                <th className="px-3 py-2 text-left text-gray-500" style={{minWidth:180}}>{t("funds_col_notes")}</th>
                 <th className="px-3 py-2 w-8"></th>
               </tr>
             </thead>
@@ -183,10 +192,10 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
                       <input type="text" value={notes[pp.id] || ""}
                         onChange={(e) => setNotes((prev) => ({ ...prev, [pp.id]: e.target.value }))}
                         className="w-full h-7 px-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                        placeholder="ghi chú..." />
+                        placeholder={t("funds_notes_placeholder")} />
                     </td>
                     <td className="px-1 py-1.5 text-center">
-                      <button onClick={() => removePP(pp.code)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors" title="Xóa PP này">
+                      <button onClick={() => removePP(pp.code)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors" title={t("funds_remove_pp_tooltip")}>
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>
                     </td>
@@ -199,16 +208,16 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
       )}
 
       {codes.length > 0 && lookup.data && lookup.data.length === 0 && (
-        <p className="px-4 py-4 text-xs text-orange-600 text-center">Không tìm thấy PP nào khớp</p>
+        <p className="px-4 py-4 text-xs text-orange-600 text-center">{t("funds_no_pp_match")}</p>
       )}
 
       {/* Footer */}
       {lookup.data && lookup.data.length > 0 && (
         <div className="px-4 py-2.5 border-t bg-gray-50 flex items-center justify-between">
-          <span className="text-xs"><span className="font-bold text-blue-600">{filledCount}</span><span className="text-gray-400">/{lookup.data.length} PP đã nhập</span> <span className="text-gray-300 mx-1">|</span> <span className="font-mono font-bold text-green-600">${totalAmount.toFixed(2)}</span></span>
+          <span className="text-xs"><span className="font-bold text-blue-600">{filledCount}</span><span className="text-gray-400">/{lookup.data.length} {t("funds_filled_count")}</span> <span className="text-gray-300 mx-1">|</span> <span className="font-mono font-bold text-green-600">${totalAmount.toFixed(2)}</span></span>
           <button onClick={handleSave} disabled={saving || filledCount === 0}
             className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-            {saving ? "Đang lưu..." : `Lưu ${filledCount} Fund`}
+            {saving ? t("saving_dots") : t("funds_save_fund", { n: filledCount })}
           </button>
         </div>
       )}
@@ -219,6 +228,7 @@ function PPOnlyFundPanel({ projectId }: { projectId: string }) {
 export default function FundsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
   const projectType = useProjectStore((s) => s.currentProjectType);
+  const projectCode = useProjectStore((s) => s.currentProjectCode);
   const [page, setPage] = useState(1);
   const [showHistory, setShowHistory] = useState(false);
   const [search, setSearch] = useState("");
@@ -227,6 +237,17 @@ export default function FundsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filterServerId, setFilterServerId] = useState("");
+
+  // BD Sheet import
+  const [showBDImport, setShowBDImport] = useState(false);
+  const [bdSheetUrl, setBdSheetUrl] = useState("https://docs.google.com/spreadsheets/d/1gf6a3TpD1bldrbwbRLozsY7cn2FhTiekhK4N5Em8ek8/edit?gid=0#gid=0");
+  const [bdPreview, setBdPreview] = useState<any>(null);
+  const [bdCreateFlags, setBdCreateFlags] = useState<Record<number, boolean>>({});
+  const scanBDSheet = trpc.fund.scanBDSheet.useMutation({ onSuccess: (data) => { setBdPreview(data); setBdCreateFlags({}); }, onError: (e) => toast.error(e.message) });
+  const executeBDImport = trpc.fund.executeBDSheetImport.useMutation({
+    onSuccess: (res) => { toast.success(`Imported ${res.imported} fund(s), ${res.emailsUpdated} email(s) updated, ${res.ppCreated} PP created`); setBdPreview(null); setShowBDImport(false); invalidateAll(); },
+    onError: (e) => toast.error(e.message),
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const t = useT();
 
@@ -608,6 +629,9 @@ export default function FundsPage() {
           {projectType !== "PAYPAL_ONLY" && (
             <Button size="sm" onClick={() => setShowQuickAddPopup(true)}>{t("funds_quick_add")}</Button>
           )}
+          <Button size="sm" variant="outline" className="border-teal-500 text-teal-700 hover:bg-teal-50" onClick={() => setShowBDImport(true)}>
+            BD Sheet
+          </Button>
         </div>
       </div>
 
@@ -676,7 +700,7 @@ export default function FundsPage() {
 
       {/* PAYPAL_ONLY Quick Add */}
       {projectType === "PAYPAL_ONLY" && projectId && (
-        <PPOnlyFundPanel projectId={projectId} />
+        <PPOnlyFundPanel projectId={projectId} projectCode={projectCode} />
       )}
 
       {/* Quick Add popup (FULL projects only) */}
@@ -1214,6 +1238,121 @@ export default function FundsPage() {
         {showHistory ? "Ẩn lịch sử" : "Lịch sử"}
       </button>
       <PageHistory entity="FundTransaction" show={showHistory} />
+
+      {/* BD Sheet Import Dialog */}
+      {showBDImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowBDImport(false); setBdPreview(null); }}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Import từ BD Sheet</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Quét sheet → tìm Withdrawal hôm nay → import fund</p>
+              </div>
+              <button onClick={() => { setShowBDImport(false); setBdPreview(null); }} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {/* Sheet URL + Scan */}
+              <div className="flex gap-2">
+                <input value={bdSheetUrl} onChange={(e) => setBdSheetUrl(e.target.value)}
+                  className="flex-1 px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                  placeholder="https://docs.google.com/spreadsheets/d/..." />
+                <button onClick={() => { if (!bdSheetUrl || !projectId) return; scanBDSheet.mutate({ projectId, sheetUrl: bdSheetUrl }); }}
+                  disabled={scanBDSheet.isLoading || !bdSheetUrl}
+                  className="px-4 py-2 bg-teal-600 text-white rounded text-sm font-medium hover:bg-teal-700 disabled:opacity-50 shrink-0">
+                  {scanBDSheet.isLoading ? "Đang quét..." : "Quét Sheet"}
+                </button>
+              </div>
+
+              {/* Preview */}
+              {bdPreview && (
+                <>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="px-2 py-1 bg-teal-50 text-teal-700 rounded font-semibold">{bdPreview.date}</span>
+                    <span className="text-gray-500">Tổng quét: {bdPreview.totalScanned}</span>
+                    <span className="text-green-700 font-semibold">Withdrawal: {bdPreview.withdrawalCount}</span>
+                  </div>
+
+                  {bdPreview.items.length === 0 ? (
+                    <p className="text-center py-8 text-gray-400 text-sm">Không tìm thấy Withdrawal nào hôm nay</p>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[400px] overflow-y-auto border rounded">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-2 py-2 text-left font-semibold text-gray-600">PP Code</th>
+                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Email</th>
+                            <th className="px-2 py-2 text-right font-semibold text-gray-600">Amount</th>
+                            <th className="px-2 py-2 text-left font-semibold text-gray-600">Time</th>
+                            <th className="px-2 py-2 text-center font-semibold text-gray-600">Status</th>
+                            <th className="px-2 py-2 text-center font-semibold text-gray-600">Tạo PP?</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {bdPreview.items.map((item: any, idx: number) => (
+                            <tr key={idx} className="hover:bg-gray-50">
+                              <td className="px-2 py-1.5 font-mono font-semibold text-blue-700">{item.ppCode}</td>
+                              <td className="px-2 py-1.5 font-mono text-gray-600 truncate max-w-[200px]">{item.email}</td>
+                              <td className="px-2 py-1.5 text-right font-semibold text-green-700">${item.amount.toFixed(2)}</td>
+                              <td className="px-2 py-1.5 text-gray-500">{item.time}</td>
+                              <td className="px-2 py-1.5 text-center">
+                                {item.existsInSystem ? (
+                                  <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-semibold">Có</span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-[10px] font-semibold">Chưa có</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1.5 text-center">
+                                {!item.existsInSystem && (
+                                  <input type="checkbox" checked={bdCreateFlags[idx] ?? false}
+                                    onChange={(e) => setBdCreateFlags((f) => ({ ...f, [idx]: e.target.checked }))}
+                                    className="rounded border-gray-300" />
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Import button */}
+                  {bdPreview.items.length > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">
+                        {bdPreview.items.filter((i: any) => i.existsInSystem || bdCreateFlags[bdPreview.items.indexOf(i)]).length} / {bdPreview.items.length} sẽ import
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (!projectId) return;
+                          const items = bdPreview.items
+                            .map((item: any, idx: number) => ({
+                              ppCode: item.ppCode,
+                              email: item.email,
+                              amount: item.amount,
+                              createPP: !item.existsInSystem && (bdCreateFlags[idx] ?? false),
+                            }))
+                            .filter((item: any) => {
+                              const preview = bdPreview.items.find((p: any) => p.ppCode === item.ppCode && p.email === item.email);
+                              return preview?.existsInSystem || item.createPP;
+                            });
+                          if (!items.length) { toast.error("Không có gì để import"); return; }
+                          executeBDImport.mutate({ projectId, items });
+                        }}
+                        disabled={executeBDImport.isLoading}
+                        className="px-4 py-2 bg-teal-600 text-white rounded text-sm font-medium hover:bg-teal-700 disabled:opacity-50">
+                        {executeBDImport.isLoading ? "Đang import..." : "Import Fund"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

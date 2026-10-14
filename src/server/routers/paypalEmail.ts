@@ -167,7 +167,7 @@ export const paypalEmailRouter = router({
         twoFa: z.string().optional(),
         hotmailToken: z.string().optional(),
         isPrimary: z.boolean().default(false),
-      })),
+      })).max(100),
     }))
     .mutation(async ({ ctx, input }) => {
       let created = 0;

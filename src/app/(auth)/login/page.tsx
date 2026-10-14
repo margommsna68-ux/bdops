@@ -3,14 +3,25 @@
 import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { useT } from "@/lib/i18n";
+
+// Only allow same-origin relative paths to prevent open redirect
+function sanitizeCallbackUrl(raw: string | null): string {
+  if (!raw) return "/";
+  // Reject protocol-relative URLs (//evil.com) and absolute URLs
+  if (raw.startsWith("//") || /^[a-z]+:/i.test(raw)) return "/";
+  if (!raw.startsWith("/")) return "/";
+  return raw;
+}
 
 function LoginForm() {
+  const t = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const callbackUrl = sanitizeCallbackUrl(searchParams.get("callbackUrl"));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,10 +36,28 @@ function LoginForm() {
     });
 
     if (res?.error) {
-      setError("Tên đăng nhập hoặc mật khẩu không đúng");
+      // Extract server error message (e.g. ACCOUNT_LOCKED, INVALID_CREDENTIALS)
+      const raw = res.error || "";
+      if (raw.startsWith("ACCOUNT_LOCKED:")) {
+        setError(raw.replace("ACCOUNT_LOCKED: ", ""));
+      } else if (raw.startsWith("INVALID_CREDENTIALS:")) {
+        setError(raw.replace("INVALID_CREDENTIALS: ", ""));
+      } else {
+        setError(t("login_invalid_credentials"));
+      }
       setLoading(false);
     } else if (res?.url) {
-      window.location.href = res.url;
+      // Only follow same-origin URLs
+      try {
+        const u = new URL(res.url, window.location.origin);
+        if (u.origin === window.location.origin) {
+          window.location.href = u.pathname + u.search + u.hash;
+        } else {
+          window.location.href = "/";
+        }
+      } catch {
+        window.location.href = "/";
+      }
     }
   };
 
@@ -36,7 +65,7 @@ function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Tên đăng nhập
+          {t("login_username_label")}
         </label>
         <input
           type="text"
@@ -50,7 +79,7 @@ function LoginForm() {
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Mật khẩu
+          {t("login_password_label")}
         </label>
         <input
           type="password"
@@ -69,33 +98,39 @@ function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        className="w-full py-3 px-4 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 transition-all duration-200"
       >
-        {loading ? "Đang xác thực..." : "Đăng nhập"}
+        {loading ? t("login_authenticating") : t("login_submit")}
       </button>
     </form>
   );
 }
 
-export default function LoginPage() {
+function LoginPageInner() {
+  const t = useT();
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-xl shadow-lg">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
+      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-2xl shadow-2xl border border-gray-100 animate-fade-in">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">BDOps</h1>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xl font-bold mx-auto mb-3 shadow-lg shadow-blue-500/30">B</div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">BDOps</h1>
           <p className="mt-2 text-gray-600">
             Bright Data Operations Management
           </p>
         </div>
 
-        <Suspense fallback={<div className="text-center text-gray-400">Loading...</div>}>
+        <Suspense fallback={<div className="text-center text-gray-400">{t("loading_dots")}</div>}>
           <LoginForm />
         </Suspense>
 
         <p className="text-xs text-center text-gray-500">
-          Liên hệ admin để được cấp tài khoản.
+          {t("login_contact_admin")}
         </p>
       </div>
     </div>
   );
+}
+
+export default function LoginPage() {
+  return <LoginPageInner />;
 }

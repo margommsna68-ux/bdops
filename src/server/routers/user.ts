@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, moderatorProcedure } from "../trpc";
 import bcrypt from "bcryptjs";
 import { createAuditLog } from "@/lib/audit";
+import { LOCK_DURATION_MS } from "../auth";
 
 export const userRouter = router({
   // Check if current user has PIN set
@@ -38,10 +39,10 @@ export const userRouter = router({
         if (!valid) throw new Error("Current PIN is incorrect");
       }
 
-      const hashedPin = await bcrypt.hash(input.pin, 10);
+      const hashedPin = await bcrypt.hash(input.pin, 12);
       await ctx.prisma.user.update({
         where: { id: userId },
-        data: { pin: hashedPin },
+        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
       });
       return { success: true };
     }),
@@ -53,11 +54,50 @@ export const userRouter = router({
       const userId = (ctx.user as any).id;
       const user = await ctx.prisma.user.findUnique({
         where: { id: userId },
-        select: { pin: true },
+        select: { pin: true, pinFailedCount: true, pinLockedAt: true },
       });
       if (!user?.pin) throw new Error("PIN not set");
+
+      // Lock check — 30 min auto-expire, admin can unlock earlier
+      let currentFailedCount = user.pinFailedCount || 0;
+      if (user.pinLockedAt) {
+        const lockExpiry = user.pinLockedAt.getTime() + LOCK_DURATION_MS;
+        const msLeft = lockExpiry - Date.now();
+        if (msLeft > 0) {
+          const minsLeft = Math.ceil(msLeft / 60000);
+          throw new Error(`PIN_LOCKED: PIN bị khóa — còn ${minsLeft} phút. Liên hệ admin để mở khóa sớm.`);
+        }
+        // Lock expired — auto-unlock
+        await ctx.prisma.user.update({
+          where: { id: userId },
+          data: { pinLockedAt: null, pinFailedCount: 0 },
+        });
+        currentFailedCount = 0;
+      }
+
       const valid = await bcrypt.compare(input.pin, user.pin);
-      if (!valid) throw new Error("Incorrect PIN");
+      if (!valid) {
+        const newCount = currentFailedCount + 1;
+        await ctx.prisma.user.update({
+          where: { id: userId },
+          data: {
+            pinFailedCount: newCount,
+            pinLockedAt: newCount >= 3 ? new Date() : null,
+          },
+        });
+        if (newCount >= 3) {
+          throw new Error("PIN_LOCKED: Đã sai 3 lần — PIN bị khóa 30 phút. Liên hệ admin để mở khóa sớm.");
+        }
+        throw new Error(`Sai PIN (còn ${3 - newCount} lần trước khi bị khóa 30 phút)`);
+      }
+
+      // Success — reset counter
+      if (currentFailedCount > 0) {
+        await ctx.prisma.user.update({
+          where: { id: userId },
+          data: { pinFailedCount: 0 },
+        });
+      }
       return { valid: true };
     }),
 
@@ -78,10 +118,10 @@ export const userRouter = router({
       if (!user?.password) throw new Error("No password set");
       const valid = await bcrypt.compare(input.currentPassword, user.password);
       if (!valid) throw new Error("Current password is incorrect");
-      const hashedPassword = await bcrypt.hash(input.newPassword, 10);
+      const hashedPassword = await bcrypt.hash(input.newPassword, 12);
       await ctx.prisma.user.update({
         where: { id: userId },
-        data: { password: hashedPassword },
+        data: { password: hashedPassword, loginFailedCount: 0, loginLockedAt: null },
       });
       return { success: true };
     }),
@@ -117,7 +157,7 @@ export const userRouter = router({
           throw new Error("Bạn chỉ reset PIN cho user trong nhóm của mình");
         }
       }
-      const hashedPin = await bcrypt.hash(input.newPin, 10);
+      const hashedPin = await bcrypt.hash(input.newPin, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
         data: { pin: hashedPin },
@@ -145,10 +185,10 @@ export const userRouter = router({
           throw new Error("Bạn chỉ reset password cho user trong nhóm của mình");
         }
       }
-      const hashedPassword = await bcrypt.hash(input.newPassword, 10);
+      const hashedPassword = await bcrypt.hash(input.newPassword, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { password: hashedPassword },
+        data: { password: hashedPassword, loginFailedCount: 0, loginLockedAt: null },
       });
       await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: callerId, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
@@ -234,7 +274,7 @@ export const userRouter = router({
           canManageUsers: m.canManageUsers,
           managerId: m.managerId,
           maxAutotypeDevices: m.maxAutotypeDevices,
-          agentFeePercent: m.agentFeePercent ? Number(m.agentFeePercent) : null,
+          agentFeePercent: m.agentFeePercent != null ? Number(m.agentFeePercent) : null,
           hasPin: !!m.user.pin,
           isOnline: m.user.lastActiveAt ? m.user.lastActiveAt > fiveMinAgo : false,
           lastActiveAt: m.user.lastActiveAt,
@@ -255,12 +295,19 @@ export const userRouter = router({
       const user = await ctx.prisma.user.findUniqueOrThrow({
         where: { id: input.userId },
         select: {
-          id: true, email: true, username: true, name: true, pin: true, lastActiveAt: true, createdAt: true,
+          id: true, email: true, username: true, name: true, lastActiveAt: true, createdAt: true,
+          loginFailedCount: true, loginLockedAt: true, pinFailedCount: true, pinLockedAt: true,
           memberships: {
             include: { project: { select: { id: true, code: true, name: true } } },
           },
         },
       });
+      // Separately check if PIN exists (never load the hash into main user object)
+      const pinCheck = await ctx.prisma.user.findUnique({
+        where: { id: input.userId },
+        select: { pin: true },
+      });
+      const hasPin = !!pinCheck?.pin;
 
       // Current project membership
       const membership = user.memberships.find((m) => m.projectId === input.projectId);
@@ -340,7 +387,7 @@ export const userRouter = router({
       }) : [];
 
       return {
-        user: { ...user, hasPin: !!user.pin, pin: undefined },
+        user: { ...user, hasPin },
         membership,
         agentEmails,
         agentSales,
@@ -367,9 +414,100 @@ export const userRouter = router({
     .input(z.object({ projectId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const newPassword = Math.random().toString(36).slice(2, 10);
-      const hashed = await bcrypt.hash(newPassword, 10);
-      await ctx.prisma.user.update({ where: { id: input.userId }, data: { password: hashed } });
+      const hashed = await bcrypt.hash(newPassword, 12);
+      await ctx.prisma.user.update({
+        where: { id: input.userId },
+        data: { password: hashed, loginFailedCount: 0, loginLockedAt: null },
+      });
       await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
       return { newPassword };
+    }),
+
+  // Admin/Moderator: unlock a locked account (login and/or PIN)
+  adminUnlockAccount: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      userId: z.string(),
+      type: z.enum(["LOGIN", "PIN", "BOTH"]).default("BOTH"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const callerRole = ctx.role;
+      const callerId = (ctx.user as any).id;
+      // Moderator can only unlock their team
+      if (callerRole === "MODERATOR") {
+        const callerMember = await ctx.prisma.projectMember.findFirst({
+          where: { userId: callerId, projectId: input.projectId },
+          select: { id: true },
+        });
+        const target = await ctx.prisma.projectMember.findFirst({
+          where: { userId: input.userId, projectId: input.projectId },
+        });
+        if (!target || !callerMember || target.managerId !== callerMember.id) {
+          throw new Error("Bạn chỉ mở khóa cho user trong nhóm của mình");
+        }
+      }
+      const data: any = {};
+      if (input.type === "LOGIN" || input.type === "BOTH") {
+        data.loginFailedCount = 0;
+        data.loginLockedAt = null;
+      }
+      if (input.type === "PIN" || input.type === "BOTH") {
+        data.pinFailedCount = 0;
+        data.pinLockedAt = null;
+      }
+      await ctx.prisma.user.update({ where: { id: input.userId }, data });
+      await createAuditLog({
+        action: "UNLOCK_ACCOUNT",
+        entity: "User",
+        entityId: input.userId,
+        userId: callerId,
+        projectId: input.projectId,
+        changes: { type: input.type, targetUserId: input.userId },
+      });
+      return { success: true };
+    }),
+
+  // Admin/Moderator: list locked users in project (only those with ACTIVE lock)
+  lockedUsers: moderatorProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const members = await ctx.prisma.projectMember.findMany({
+        where: { projectId: input.projectId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+              name: true,
+              loginFailedCount: true,
+              loginLockedAt: true,
+              pinFailedCount: true,
+              pinLockedAt: true,
+            },
+          },
+        },
+      });
+      const now = Date.now();
+      return members
+        .map((m) => {
+          // Filter out expired locks (lock > 30 min ago)
+          const loginActive = m.user.loginLockedAt
+            ? (m.user.loginLockedAt.getTime() + LOCK_DURATION_MS) > now
+            : false;
+          const pinActive = m.user.pinLockedAt
+            ? (m.user.pinLockedAt.getTime() + LOCK_DURATION_MS) > now
+            : false;
+          return {
+            userId: m.user.id,
+            email: m.user.email,
+            username: m.user.username,
+            name: m.user.name,
+            loginLockedAt: loginActive ? m.user.loginLockedAt : null,
+            pinLockedAt: pinActive ? m.user.pinLockedAt : null,
+            active: loginActive || pinActive,
+          };
+        })
+        .filter((u) => u.active);
     }),
 });

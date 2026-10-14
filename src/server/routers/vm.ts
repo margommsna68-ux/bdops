@@ -227,7 +227,7 @@ export const vmRouter = router({
         status: z.enum(["NEW", "OK", "ERROR", "SUSPENDED", "NOT_CONNECTED", "NOT_AVC", "BLOCKED"]).default("NEW"),
         sdkId: z.string().optional(),
         notes: z.string().optional(),
-      })),
+      })).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       let imported = 0;

@@ -470,7 +470,7 @@ export const withdrawalRouter = router({
         sourcePaypalCode: z.string(),
         destPaypalCode: z.string().optional(),
         notes: z.string().optional(),
-      })),
+      })).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       let imported = 0;

@@ -46,3 +46,9 @@ export function formatDateTime(date: Date | string): string {
     timeZone: getTimezone(),
   }).format(d);
 }
+
+/** Capitalize first letter of each word: "marua" → "Marua" */
+export function capitalName(name: string | null | undefined): string {
+  if (!name) return "";
+  return name.replace(/\b\w/g, (c) => c.toUpperCase());
+}

@@ -98,8 +98,9 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
     }
   }
 
-  const userName = session?.user?.name || "User";
-  const userInitial = userName.charAt(0).toUpperCase();
+  const rawName = session?.user?.name || "User";
+  const userName = rawName.replace(/\b\w/g, (c: string) => c.toUpperCase());
+  const userInitial = userName.charAt(0);
 
   return (
     <aside className={`${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-300 border-r border-gray-800/40`}>

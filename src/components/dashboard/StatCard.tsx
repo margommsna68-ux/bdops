@@ -28,9 +28,12 @@ export function StatCard({ title, value, subtitle, trend, className = "" }: Stat
 
   return (
     <div
-      className={`bg-white rounded-xl border border-gray-200 shadow-md p-5 flex flex-col gap-3 ${className}`}
+      className={`bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 p-5 flex flex-col gap-3 relative overflow-hidden ${className}`}
       style={{ minHeight: 120 }}
     >
+      {/* Accent top bar */}
+      <div className={`absolute top-0 left-0 right-0 h-0.5 ${indicatorColor}`} />
+
       {/* Header: indicator + label */}
       <div className="flex items-center gap-2">
         <span className={`w-2 h-2 rounded-full ${indicatorColor} shrink-0`} />
@@ -38,7 +41,7 @@ export function StatCard({ title, value, subtitle, trend, className = "" }: Stat
       </div>
 
       {/* Value */}
-      <p className="text-2xl font-semibold text-gray-900 tracking-tight leading-none">{value}</p>
+      <p className="text-2xl font-bold text-gray-900 tracking-tight leading-none tabular-nums">{value}</p>
 
       {/* Subtitle */}
       {subtitle && (

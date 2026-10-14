@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { router, agentPPProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
+import { loadAgentFees, getFeePercent } from "@/lib/agent-fee";
+
+// Capitalize first letter of each word: "marua" → "Marua", "john doe" → "John Doe"
+function capitalName(name: string | null | undefined): string {
+  if (!name) return "Unknown";
+  return name.replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export const agentPPRouter = router({
   // ═══ Agent's PayPal Emails ═══
@@ -181,7 +188,7 @@ export const agentPPRouter = router({
       // fall back to ANY project where this user has a % set.
       const userIds = new Set<string>();
       for (const w of items) {
-        const uid = (w as any).agentEmail?.user?.id;
+        const uid = (w as any).agentEmail?.user?.id || (w as any).agentUserId;
         if (uid) userIds.add(uid);
       }
       const memberRows =
@@ -209,7 +216,7 @@ export const agentPPRouter = router({
         const sale = w.transactionId && w.agentEmailId
           ? saleMap.get(`${w.transactionId}:${w.agentEmailId}`)
           : undefined;
-        const uid = (w as any).agentEmail?.user?.id;
+        const uid = (w as any).agentEmail?.user?.id || (w as any).agentUserId;
         // Lookup %: exact project match → user's fallback (any project) → sale → 0
         let memberFeePercent: any = null;
         if (uid) {
@@ -219,10 +226,13 @@ export const agentPPRouter = router({
               userEntry.byProject.get(w.projectId) ?? userEntry.fallback ?? null;
           }
         }
-        const collectorName =
+        const collectorName = capitalName(
           (w as any).agentEmail?.user?.name ||
           (w as any).agentEmail?.user?.username ||
-          null;
+          (w as any).agentUser?.name ||
+          (w as any).agentUser?.username ||
+          null
+        );
         // Detect if agent destination is a PayPal link (vs bank link / plain email)
         const emailVal = (w as any).agentEmail?.email ?? "";
         const isPaypalLink =
@@ -481,10 +491,10 @@ export const agentPPRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
-      const where: any = {
-        projectId: input.projectId,
-        ...(isAdmin ? {} : { agentUserId: ctx.user.id }),
-      };
+      // Admin sees ALL sales cross-project; user sees only own sales in this project
+      const where: any = isAdmin
+        ? {}
+        : { projectId: input.projectId, agentUserId: ctx.user.id };
       const [items, total] = await Promise.all([
         ctx.prisma.agentSale.findMany({
           where,
@@ -494,6 +504,7 @@ export const agentPPRouter = router({
           include: {
             agentEmail: { select: { email: true, label: true } },
             agentUser: { select: { name: true, username: true } },
+            project: { select: { code: true } },
           },
         }),
         ctx.prisma.agentSale.count({ where }),
@@ -789,7 +800,7 @@ export const agentPPRouter = router({
         if (!userMap[e.userId]) {
           userMap[e.userId] = {
             userId: e.userId,
-            userName: e.user.name || e.user.username || "Unknown",
+            userName: capitalName(e.user.name || e.user.username),
             emails: [],
           };
         }
@@ -972,18 +983,20 @@ export const agentPPRouter = router({
       }
       const netReceived = grossConfirmed - totalFees;
 
-      // All my expenses (cross-project)
+      // All my expenses (cross-project) — EXCLUDE COMMISSION_WITHDRAW from wallet calc
       const expenses = await ctx.prisma.collectorExpense.findMany({
         where: { collectorId: userId },
         select: { amount: true, type: true },
       });
-      const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
+      // Only team-related expenses affect wallet (not commission withdrawals)
+      const teamExpenses = expenses.filter((e) => e.type !== "COMMISSION_WITHDRAW");
+      const totalExpenses = teamExpenses.reduce((s, e) => s + Number(e.amount), 0);
       const breakdown = { TEAM_PAYMENT: 0, BILL: 0, OTHER: 0 } as Record<string, number>;
-      for (const e of expenses) {
+      for (const e of teamExpenses) {
         breakdown[e.type] = (breakdown[e.type] ?? 0) + Number(e.amount);
       }
 
-      // Wallet = team's share (totalAfterFee) − all expenses
+      // Wallet = team's share (totalAfterFee) − team expenses (NOT commission withdrawals)
       const walletBalance = totalAfterFee - totalExpenses;
 
       return {
@@ -1002,23 +1015,63 @@ export const agentPPRouter = router({
   listExpenses: agentPPProcedure
     .input(z.object({ projectId: z.string(), limit: z.number().min(1).max(500).default(100) }))
     .query(async ({ ctx, input }) => {
+      const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
+      // Admin sees ALL expenses cross-project; user sees only own
+      const where: any = isAdmin ? {} : { collectorId: ctx.user.id };
       const items = await ctx.prisma.collectorExpense.findMany({
-        where: { collectorId: ctx.user.id },
+        where,
         orderBy: { date: "desc" },
         take: input.limit,
         include: {
           project: { select: { id: true, code: true, name: true } },
+          collector: { select: { id: true, name: true, username: true } },
           withdrawals: { select: { id: true, transactionId: true, amount: true, sourcePaypal: { select: { code: true } } } },
         },
       });
       return items;
     }),
 
+  // Commission balance: earned - withdrawn
+  myCommissionBalance: agentPPProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx }) => {
+      const userId = ctx.user.id;
+      // Total commission earned (from walletBalance logic)
+      const wallet = await ctx.prisma.agentPaypalEmail.findMany({ where: { userId }, select: { id: true } });
+      const emailIds = wallet.map((e) => e.id);
+      const withdrawals = await ctx.prisma.withdrawal.findMany({
+        where: { type: "EXCHANGE", OR: [...(emailIds.length > 0 ? [{ agentEmailId: { in: emailIds } }] : []), { agentUserId: userId }] },
+        select: { amount: true, paypalFee: true, projectId: true },
+      });
+      const fees = await loadAgentFees(ctx.prisma, [userId]);
+      const userFee = fees.get(userId);
+      let totalEarned = 0;
+      for (const w of withdrawals) {
+        if (w.paypalFee == null) continue;
+        const net = Number(w.amount) - Number(w.paypalFee);
+        const pct = userFee ? getFeePercent(userFee, w.projectId) : 0;
+        totalEarned += net * pct / 100;
+      }
+      // Total withdrawn (COMMISSION_WITHDRAW expenses)
+      const cwExpenses = await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: userId, type: "COMMISSION_WITHDRAW" },
+        select: { id: true, amount: true, date: true, referenceId: true, note: true },
+        orderBy: { date: "desc" },
+      });
+      const totalWithdrawn = cwExpenses.reduce((s, e) => s + Number(e.amount), 0);
+      return {
+        totalEarned,
+        totalWithdrawn,
+        available: totalEarned - totalWithdrawn,
+        history: cwExpenses,
+      };
+    }),
+
   // Create a new expense (optionally links withdrawals)
   createExpense: agentPPProcedure
     .input(z.object({
       projectId: z.string(),
-      type: z.enum(["TEAM_PAYMENT", "BILL", "OTHER"]),
+      type: z.enum(["TEAM_PAYMENT", "BILL", "OTHER", "COMMISSION_WITHDRAW"]),
       amount: z.number().positive(),
       referenceId: z.string().min(1),
       note: z.string().optional(),
@@ -1111,5 +1164,347 @@ export const agentPPRouter = router({
         changes: {},
       });
       return { deleted: true };
+    }),
+
+  // ═══════════════════════════════════════════════════════════════
+  // ADMIN DASHBOARD + AGENT PERFORMANCE
+  // ═══════════════════════════════════════════════════════════════
+
+
+  adminDashboard: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      period: z.enum(["today", "week", "month", "quarter", "all"]),
+    }))
+    .query(async ({ ctx, input }) => {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      // Period date ranges
+      let currentStart: Date | null = null;
+      let previousStart: Date | null = null;
+      let previousEnd: Date | null = null;
+      switch (input.period) {
+        case "today": { currentStart = startOfToday; previousStart = new Date(startOfToday); previousStart.setDate(previousStart.getDate() - 1); previousEnd = startOfToday; break; }
+        case "week": { currentStart = new Date(startOfToday); currentStart.setDate(currentStart.getDate() - 7); previousStart = new Date(currentStart); previousStart.setDate(previousStart.getDate() - 7); previousEnd = new Date(currentStart); break; }
+        case "month": { currentStart = new Date(startOfToday); currentStart.setDate(currentStart.getDate() - 30); previousStart = new Date(currentStart); previousStart.setDate(previousStart.getDate() - 30); previousEnd = new Date(currentStart); break; }
+        case "quarter": { currentStart = new Date(startOfToday); currentStart.setDate(currentStart.getDate() - 90); previousStart = new Date(currentStart); previousStart.setDate(previousStart.getDate() - 90); previousEnd = new Date(currentStart); break; }
+        case "all": { break; }
+      }
+      const currentDateFilter: any = currentStart ? { gte: currentStart, lte: now } : undefined;
+      const previousDateFilter: any = previousStart && previousEnd ? { gte: previousStart, lt: previousEnd } : undefined;
+
+      // Find all EXCHANGE withdrawals (cross-project, same as agentPerformance)
+      const allW = await ctx.prisma.withdrawal.findMany({
+        where: {
+          type: "EXCHANGE",
+          OR: [{ agentEmailId: { not: null } }, { agentUserId: { not: null } }],
+          ...(currentDateFilter ? { date: currentDateFilter } : {}),
+        },
+        select: { amount: true, paypalFee: true, projectId: true, agentConfirmed: true,
+          agentDisputed: true, disputeResolved: true, agentEmailId: true, agentUserId: true },
+      });
+
+      // Collect user IDs
+      const emailIds = new Set<string>();
+      const userIdSet = new Set<string>();
+      for (const w of allW) { if (w.agentEmailId) emailIds.add(w.agentEmailId); if (w.agentUserId) userIdSet.add(w.agentUserId); }
+      const agentEmails = emailIds.size > 0
+        ? await ctx.prisma.agentPaypalEmail.findMany({ where: { id: { in: Array.from(emailIds) } }, select: { id: true, userId: true } })
+        : [];
+      const emailToUser = new Map<string, string>();
+      for (const ae of agentEmails) { emailToUser.set(ae.id, ae.userId); userIdSet.add(ae.userId); }
+      const userIds = Array.from(userIdSet);
+
+      // Fee lookup via shared utility
+      const agentFees = await loadAgentFees(ctx.prisma, userIds);
+
+      // Current period stats
+      let grossReceived = 0, totalFees = 0, totalCommission = 0;
+      const transactionCount = allW.length;
+      let confirmedCount = 0, unconfirmedCount = 0, disputeCount = 0, pendingFeeCount = 0;
+
+      for (const w of allW) {
+        if (w.agentConfirmed) confirmedCount++;
+        else if (w.agentDisputed && !w.disputeResolved) disputeCount++;
+        else unconfirmedCount++;
+        if (w.paypalFee == null) { pendingFeeCount++; continue; }
+        const gross = Number(w.amount);
+        grossReceived += gross;
+        const fee = Number(w.paypalFee);
+        totalFees += fee;
+        const net = gross - fee;
+        const uid = (w.agentEmailId ? emailToUser.get(w.agentEmailId) : null) || w.agentUserId;
+        const userFee = uid ? agentFees.get(uid) : undefined;
+        const pct = userFee ? getFeePercent(userFee, w.projectId) : 0;
+        totalCommission += net * pct / 100;
+      }
+      const netReceived = grossReceived - totalFees;
+      const teamRevenue = netReceived - totalCommission;
+
+      // Expenses — cross-project, EXCLUDE COMMISSION_WITHDRAW
+      const expenses = userIds.length > 0
+        ? await ctx.prisma.collectorExpense.findMany({ where: { collectorId: { in: userIds }, type: { not: "COMMISSION_WITHDRAW" } }, select: { amount: true } })
+        : [];
+      const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
+      const walletBalance = teamRevenue - totalExpenses;
+
+      // Previous period
+      let previous = { grossReceived: 0, netReceived: 0, teamRevenue: 0, transactionCount: 0 };
+      if (previousDateFilter) {
+        const prevW = await ctx.prisma.withdrawal.findMany({
+          where: { type: "EXCHANGE", date: previousDateFilter,
+            OR: [{ agentEmailId: { not: null } }, { agentUserId: { not: null } }] },
+          select: { amount: true, paypalFee: true, projectId: true, agentEmailId: true, agentUserId: true },
+        });
+        let pg = 0, pf = 0, pc = 0;
+        for (const w of prevW) {
+          if (w.paypalFee == null) continue;
+          const g = Number(w.amount), f = Number(w.paypalFee), n = g - f;
+          const uid = (w.agentEmailId ? emailToUser.get(w.agentEmailId) : null) || w.agentUserId;
+          const uf = uid ? agentFees.get(uid) : undefined;
+          const p = uf ? getFeePercent(uf, w.projectId) : 0;
+          pg += g; pf += f; pc += n * p / 100;
+        }
+        previous = { grossReceived: pg, netReceived: pg - pf, teamRevenue: (pg - pf) - pc, transactionCount: prevW.length };
+      }
+
+      const calcChange = (cur: number, prev: number): number | null => {
+        if (input.period === "all") return null;
+        if (prev === 0) return cur > 0 ? 100 : null;
+        return ((cur - prev) / prev) * 100;
+      };
+
+      return {
+        current: { grossReceived, totalFees, netReceived, totalCommission, teamRevenue,
+          transactionCount, confirmedCount, unconfirmedCount, disputeCount, pendingFeeCount, totalExpenses, walletBalance },
+        previous,
+        changes: { grossChange: calcChange(grossReceived, previous.grossReceived),
+          revenueChange: calcChange(teamRevenue, previous.teamRevenue),
+          txCountChange: calcChange(transactionCount, previous.transactionCount) },
+      };
+    }),
+
+  agentPerformance: moderatorProcedure
+    .input(z.object({
+      projectId: z.string(),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Date filter (optional)
+      const dateFilter: any = {};
+      if (input.dateFrom) dateFilter.gte = new Date(input.dateFrom);
+      if (input.dateTo) { const d = new Date(input.dateTo); d.setDate(d.getDate() + 1); dateFilter.lt = d; }
+      const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+      // ═══ STEP 1: Find ALL agents who have EXCHANGE withdrawals in this project ═══
+      const projectWithdrawals = await ctx.prisma.withdrawal.findMany({
+        where: {
+          projectId: input.projectId,
+          type: "EXCHANGE",
+          OR: [
+            { agentEmailId: { not: null } },
+            { agentUserId: { not: null } },
+          ],
+          ...(hasDateFilter ? { date: dateFilter } : {}),
+        },
+        select: {
+          amount: true,
+          paypalFee: true,
+          paidToTeam: true,
+          date: true,
+          agentEmailId: true,
+          agentUserId: true,
+          agentDisputed: true,
+          disputeResolved: true,
+        },
+      });
+      if (projectWithdrawals.length === 0) return [];
+
+      // Collect unique agent user IDs
+      const emailIdSet = new Set<string>();
+      const userIdSet = new Set<string>();
+      for (const w of projectWithdrawals) {
+        if (w.agentEmailId) emailIdSet.add(w.agentEmailId);
+        if (w.agentUserId) userIdSet.add(w.agentUserId);
+      }
+
+      // ═══ STEP 2: Fetch agent email details + auto-heal missing agentUserId ═══
+      const allEmailIds = Array.from(emailIdSet);
+      const agentEmails = allEmailIds.length > 0
+        ? await ctx.prisma.agentPaypalEmail.findMany({
+            where: { id: { in: allEmailIds } },
+            select: { id: true, email: true, userId: true,
+              user: { select: { id: true, name: true, username: true, email: true, lastActiveAt: true } } },
+          })
+        : [];
+
+      // Auto-heal: backfill agentUserId (mirrors walletBalance logic)
+      for (const ae of agentEmails) {
+        userIdSet.add(ae.userId);
+        await ctx.prisma.withdrawal.updateMany({
+          where: { agentEmailId: ae.id, agentUserId: null, type: "EXCHANGE" },
+          data: { agentUserId: ae.userId },
+        });
+      }
+
+      // Build lookups
+      const emailToUser = new Map<string, string>();
+      const userEmailMap = new Map<string, typeof agentEmails>();
+      for (const ae of agentEmails) {
+        emailToUser.set(ae.id, ae.userId);
+        const arr = userEmailMap.get(ae.userId) || [];
+        arr.push(ae);
+        userEmailMap.set(ae.userId, arr);
+      }
+
+      // For users found via agentUserId but without emails, fetch user info
+      const missingUserIds = Array.from(userIdSet).filter((uid) => !userEmailMap.has(uid));
+      if (missingUserIds.length > 0) {
+        const users = await ctx.prisma.user.findMany({
+          where: { id: { in: missingUserIds } },
+          select: { id: true, name: true, username: true, email: true, lastActiveAt: true },
+        });
+        for (const u of users) {
+          userEmailMap.set(u.id, [{ id: "", email: u.email, userId: u.id, user: u } as any]);
+        }
+      }
+
+      const userIds = Array.from(userEmailMap.keys());
+      if (userIds.length === 0) return [];
+
+      // ═══ STEP 3+4: BATCHED cross-project aggregation using shared utility (no N+1) ═══
+      // One query: ALL emails for ALL agents
+      const allUserEmails = await ctx.prisma.agentPaypalEmail.findMany({
+        where: { userId: { in: userIds } },
+        select: { id: true, userId: true },
+      });
+      const allUserEmailIds = allUserEmails.map((e) => e.id);
+      const emailUserLookup = new Map<string, string>();
+      for (const e of allUserEmails) emailUserLookup.set(e.id, e.userId);
+
+      // One query: ALL withdrawals for ALL agents (cross-project, with optional date filter)
+      const allCrossW = await ctx.prisma.withdrawal.findMany({
+        where: {
+          type: "EXCHANGE",
+          OR: [
+            ...(allUserEmailIds.length > 0 ? [{ agentEmailId: { in: allUserEmailIds } }] : []),
+            { agentUserId: { in: userIds } },
+          ],
+          ...(hasDateFilter ? { date: dateFilter } : {}),
+        },
+        select: { amount: true, paypalFee: true, paidToTeam: true, date: true, projectId: true,
+          agentEmailId: true, agentUserId: true, agentDisputed: true, disputeResolved: true },
+      });
+
+      // Load fees using shared utility
+      const agentFees = await loadAgentFees(ctx.prisma, userIds);
+
+      // Build 14-day sparkline labels
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const fourteenDaysAgo = new Date(startOfToday);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 13);
+      const dayLabels: string[] = [];
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(fourteenDaysAgo);
+        d.setDate(d.getDate() + i);
+        dayLabels.push(d.toISOString().split("T")[0]);
+      }
+
+      // Group withdrawals by userId and aggregate in memory
+      const userStats = new Map<string, {
+        grossConfirmed: number; totalFees: number; totalCommission: number;
+        totalAfterFee: number; unpaidTeamShare: number;
+        hasDisputes: boolean; dailyMap: Map<string, number>;
+      }>();
+      for (const uid of userIds) {
+        userStats.set(uid, {
+          grossConfirmed: 0, totalFees: 0, totalCommission: 0,
+          totalAfterFee: 0, unpaidTeamShare: 0,
+          hasDisputes: false, dailyMap: new Map(dayLabels.map((d) => [d, 0])),
+        });
+      }
+
+      for (const w of allCrossW) {
+        const uid = (w.agentEmailId ? emailUserLookup.get(w.agentEmailId) : null) || w.agentUserId;
+        if (!uid || !userStats.has(uid)) continue;
+        const stats = userStats.get(uid)!;
+        const gross = Number(w.amount);
+        const fees = agentFees.get(uid);
+
+        if (w.paypalFee != null && fees) {
+          const fee = Number(w.paypalFee);
+          const net = gross - fee;
+          const pct = getFeePercent(fees, w.projectId);
+          const comm = net * pct / 100;
+          const taf = net - comm;
+          stats.grossConfirmed += gross;
+          stats.totalFees += fee;
+          stats.totalCommission += comm;
+          stats.totalAfterFee += taf;
+          if (!w.paidToTeam) stats.unpaidTeamShare += taf;
+        }
+        if (w.agentDisputed && !w.disputeResolved) stats.hasDisputes = true;
+        const dayKey = new Date(w.date).toISOString().split("T")[0];
+        if (stats.dailyMap.has(dayKey)) stats.dailyMap.set(dayKey, stats.dailyMap.get(dayKey)! + gross);
+      }
+
+      // ═══ STEP 5: Expenses — cross-project, EXCLUDE COMMISSION_WITHDRAW ═══
+      const allExpenses = await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: { in: userIds } },
+        select: { collectorId: true, amount: true, type: true },
+      });
+      const expenseByUser = new Map<string, number>();
+      const teamPaymentByUser = new Map<string, number>();
+      for (const e of allExpenses) {
+        if (e.type === "COMMISSION_WITHDRAW") continue; // skip — doesn't affect team wallet
+        expenseByUser.set(e.collectorId, (expenseByUser.get(e.collectorId) ?? 0) + Number(e.amount));
+        if (e.type === "TEAM_PAYMENT") {
+          teamPaymentByUser.set(e.collectorId, (teamPaymentByUser.get(e.collectorId) ?? 0) + Number(e.amount));
+        }
+      }
+
+      // ═══ STEP 6: Build result (stats already cross-project from STEP 4) ═══
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const result = userIds.map((uid) => {
+        const emails = userEmailMap.get(uid)!;
+        const user = emails[0].user;
+        const stats = userStats.get(uid)!;
+        const userFee = agentFees.get(uid);
+        const pct = userFee ? getFeePercent(userFee, input.projectId) : 0;
+        const dailyVolume = dayLabels.map((date) => ({ date, amount: stats.dailyMap.get(date) ?? 0 }));
+        const totalExpenses = expenseByUser.get(uid) ?? 0;
+        const totalTeamPayments = teamPaymentByUser.get(uid) ?? 0;
+        // owedToTeam = totalAfterFee - expenses (all cross-project, matches walletBalance)
+        const walletBalance = stats.totalAfterFee - totalExpenses;
+
+        return {
+          userId: uid,
+          userName: capitalName(user.name || user.username),
+          email: emails[0].email,
+          // Per-project metrics (this project only)
+          totalReceived: stats.grossConfirmed,
+          totalPPFees: stats.totalFees,
+          netReceived: stats.grossConfirmed - stats.totalFees,
+          totalCommission: stats.totalCommission,
+          feePercent: pct,
+          teamShare: stats.totalAfterFee,
+          // Cross-project financial position
+          totalExpenses,
+          totalTeamPayments,
+          owedToTeam: walletBalance, // THE key number — matches walletBalance endpoint
+          isOnline: user.lastActiveAt ? new Date(user.lastActiveAt) > fiveMinAgo : false,
+          hasDisputes: stats.hasDisputes,
+          unpaidCommission: stats.unpaidTeamShare,
+          dailyVolume,
+        };
+      });
+
+      // Sort by totalReceived descending
+      result.sort((a, b) => b.totalReceived - a.totalReceived);
+
+      return result;
     }),
 });

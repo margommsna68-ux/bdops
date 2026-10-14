@@ -190,7 +190,8 @@ export async function POST(request: Request) {
 
       const otherSessions = activeSessions.filter((s) => s.deviceId !== effectiveDeviceId);
 
-      if (otherSessions.length >= maxDevices) {
+      // maxDevices = 0 means unlimited
+      if (maxDevices > 0 && otherSessions.length >= maxDevices) {
         return NextResponse.json(
           {
             error: `Da dat gioi han ${maxDevices} thiet bi. Lien he admin de tang gioi han hoac cho session het han.`,
@@ -326,16 +327,8 @@ export async function POST(request: Request) {
       }
 
       if (!paypalAccount) {
-        // Debug: count total PPs across all allowed projects
-        const total = await prisma.payPalAccount.count({ where: { projectId: { in: allowedProjectIds } } });
-        const samples = await prisma.payPalAccount.findMany({
-          where: { projectId: { in: allowedProjectIds } },
-          select: { holder: true, vmppCode: true, code: true },
-          take: 5,
-        });
-        const sampleStr = samples.map((s) => `${s.code}:holder=${s.holder},vmpp=${s.vmppCode}`).join("; ");
         return NextResponse.json(
-          { error: `Khong tim thay PP voi holder="${holder}" vmpp="${vmppCode}". Tong ${total} PP. VD: ${sampleStr}` },
+          { error: "Khong tim thay PP" },
           { status: 404 }
         );
       }

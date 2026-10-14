@@ -140,7 +140,7 @@ export const gmailRouter = router({
             twoFaCurrent: z.string().optional(),
             token: z.string().optional(),
           })
-        ),
+        ).max(500),
       })
     )
     .mutation(async ({ ctx, input }) => {

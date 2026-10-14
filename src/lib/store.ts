@@ -6,11 +6,12 @@ interface ProjectState {
   currentProjectId: string | null;
   currentProjectCode: string | null;
   currentProjectName: string | null;
+  currentProjectType: string | null; // "FULL" | "PAYPAL_ONLY"
   currentRole: string | null;
   currentModules: string[];
   canManageUsers: boolean;
   currentMemberId: string | null;
-  setCurrentProject: (id: string, code: string, name: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string) => void;
+  setCurrentProject: (id: string, code: string, name: string, type: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -19,12 +20,13 @@ export const useProjectStore = create<ProjectState>()(
       currentProjectId: null,
       currentProjectCode: null,
       currentProjectName: null,
+      currentProjectType: null,
       currentRole: null,
       currentModules: [],
       canManageUsers: false,
       currentMemberId: null,
-      setCurrentProject: (id, code, name, role, modules, canManageUsers = false, memberId = undefined) =>
-        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null }),
+      setCurrentProject: (id, code, name, type, role, modules, canManageUsers = false, memberId = undefined) =>
+        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null }),
     }),
     {
       name: "bdops-project",
@@ -39,11 +41,10 @@ export function useHydration() {
 
   useEffect(() => {
     useProjectStore.persist.rehydrate();
-    // Also rehydrate settings store
     import("./settings-store").then(({ useSettingsStore }) => {
       useSettingsStore.persist.rehydrate();
+      setHydrated(true);
     });
-    setHydrated(true);
   }, []);
 
   return hydrated;

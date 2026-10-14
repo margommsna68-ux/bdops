@@ -8,6 +8,7 @@ import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
 import { exportToCSV } from "@/lib/excel-export";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
+import { PageHistory } from "@/components/PageHistory";
 
 const statusColors: Record<string, string> = {
   AVAILABLE: "bg-green-100 text-green-800",
@@ -74,6 +75,7 @@ export default function ProxiesPage() {
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [showImport, setShowImport] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [pasteText, setPasteText] = useState("");
@@ -157,7 +159,8 @@ export default function ProxiesPage() {
   const bulkUpdateStatus = (status: string) => {
     const ids = Array.from(selected);
     Promise.all(ids.map((id) => updateProxy.mutateAsync({ projectId: projectId!, id, status: status as any })))
-      .then(() => { invalidate(); setSelected(new Set()); });
+      .then(() => { toast.success(`${ids.length} updated`); invalidate(); setSelected(new Set()); })
+      .catch((err) => { toast.error(err.message || "Update failed"); invalidate(); setSelected(new Set()); });
   };
 
   const bulkBlock = () => {
@@ -262,7 +265,7 @@ export default function ProxiesPage() {
       {showImport && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-indigo-900">Nhập Proxy hàng loạt</h3>
+            <h3 className="text-sm font-semibold text-indigo-900">{t("proxies_bulk_import_title")}</h3>
             <div className="flex items-center gap-3">
               {pasteSubnets.length > 0 && (
                 <div className="flex items-center gap-1.5">
@@ -275,7 +278,7 @@ export default function ProxiesPage() {
                 </div>
               )}
               <div className="bg-white border rounded-lg px-3 py-1.5 text-sm">
-                <span className="text-gray-500">Hợp lệ: </span>
+                <span className="text-gray-500">{t("proxies_valid_label")} </span>
                 <span className="font-bold text-indigo-700">{validPaste.length}</span>
                 <span className="text-gray-400 text-xs ml-1">/ {parsedPaste.length} dòng</span>
               </div>
@@ -283,9 +286,9 @@ export default function ProxiesPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              Paste dữ liệu (mỗi dòng 1 proxy)
+              {t("proxies_paste_label")}
             </label>
-            <p className="text-[10px] text-gray-400 mb-1">Format: IP:PORT:USER:PASS — Subnet tự detect từ IP + port prefix</p>
+            <p className="text-[10px] text-gray-400 mb-1">{t("proxies_format_hint")}</p>
             <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
               rows={6} autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
               className="w-full px-3 py-2 border rounded text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none bg-white resize-y"
@@ -328,7 +331,7 @@ export default function ProxiesPage() {
               disabled={validPaste.length === 0 || bulkImport.isLoading}
               className="px-4 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
             >
-              {bulkImport.isLoading ? "Đang nhập..." : `Nhập ${validPaste.length} proxy`}
+              {bulkImport.isLoading ? t("importing_dots") : t("proxies_import_count", { n: validPaste.length })}
             </button>
             <button onClick={() => { setShowImport(false); setPasteText(""); }} className="px-3 py-1.5 bg-gray-100 rounded text-xs hover:bg-gray-200">{t("cancel")}</button>
           </div>
@@ -398,6 +401,15 @@ export default function ProxiesPage() {
           <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{items.length} {t("proxy_proxies")}</div>
         </div>
       )}
+      
+      
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? t("hide_history_label_nav") : t("history_label_nav")}
+      </button>
+      <PageHistory entity="ProxyIP" show={showHistory} />
     </div>
   );
 }

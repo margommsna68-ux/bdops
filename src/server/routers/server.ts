@@ -26,7 +26,8 @@ export const serverRouter = router({
             include: {
               proxy: true,
               gmail: {
-                select: { id: true, email: true, password: true, twoFaCurrent: true, recoveryEmail: true, status: true, paypal: { select: { id: true, code: true, status: true, primaryEmail: true } } },
+                // Never return encrypted password/twoFa in list responses — fetch via gmail.getCredentials with PIN
+                select: { id: true, email: true, recoveryEmail: true, status: true, paypal: { select: { id: true, code: true, status: true, primaryEmail: true } } },
               },
             },
             orderBy: { code: "asc" },
@@ -236,7 +237,7 @@ export const serverRouter = router({
         status: z.enum(["BUILDING", "ACTIVE", "SUSPENDED", "EXPIRED", "MAINTENANCE"]).default("BUILDING"),
         inventoryId: z.string().optional(),
         notes: z.string().optional(),
-      })),
+      })).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       let imported = 0;

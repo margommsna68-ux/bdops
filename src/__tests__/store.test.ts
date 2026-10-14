@@ -3,11 +3,11 @@ import { useProjectStore } from "@/lib/store";
 
 describe("useProjectStore", () => {
   beforeEach(() => {
-    // Reset store state
     useProjectStore.setState({
       currentProjectId: null,
       currentProjectCode: null,
       currentProjectName: null,
+      currentProjectType: null,
     });
   });
 
@@ -18,20 +18,21 @@ describe("useProjectStore", () => {
   });
 
   it("sets current project", () => {
-    useProjectStore.getState().setCurrentProject("proj-1", "AE", "Bright Data AE", "ADMIN", []);
+    useProjectStore.getState().setCurrentProject("proj-1", "AE", "Bright Data AE", "FULL", "ADMIN", []);
     const state = useProjectStore.getState();
     expect(state.currentProjectId).toBe("proj-1");
     expect(state.currentProjectCode).toBe("AE");
     expect(state.currentProjectName).toBe("Bright Data AE");
+    expect(state.currentProjectType).toBe("FULL");
   });
 
   it("switches between projects", () => {
     const store = useProjectStore.getState();
-    store.setCurrentProject("proj-1", "AE", "Bright Data AE", "ADMIN", []);
-    store.setCurrentProject("proj-2", "DN", "Da Nang Team", "USER", []);
+    store.setCurrentProject("proj-1", "AE", "Bright Data AE", "FULL", "ADMIN", []);
+    store.setCurrentProject("proj-2", "DN", "Da Nang Team", "PAYPAL_ONLY", "USER", []);
     const state = useProjectStore.getState();
     expect(state.currentProjectId).toBe("proj-2");
     expect(state.currentProjectCode).toBe("DN");
-    expect(state.currentProjectName).toBe("Da Nang Team");
+    expect(state.currentProjectType).toBe("PAYPAL_ONLY");
   });
 });

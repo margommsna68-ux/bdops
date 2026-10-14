@@ -561,7 +561,7 @@ export const paypalRouter = router({
         limitNote: z.string().optional(),
         company: z.string().default("Bright Data Ltd."),
         serverAssignment: z.string().optional(),
-      })),
+      })).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       let imported = 0;
@@ -977,9 +977,21 @@ export const paypalRouter = router({
       projectId: z.string(),
       sheetUrl: z.string().url(),
       gid: z.string().optional(), // specific sheet tab gid
-      ppCodes: z.array(z.string().min(1)), // "ma paypal" values
+      ppCodes: z.array(z.string().min(1)), // vmpp code values (column C)
     }))
     .mutation(async ({ ctx, input }) => {
+      // Fetch current project to enforce prefix rule
+      const project = await ctx.prisma.project.findUniqueOrThrow({
+        where: { id: input.projectId },
+        select: { code: true },
+      });
+      // Prefix rule: AE* project → "AE-", DN*/PP* project → "PP-", others → no restriction
+      const projectCode = (project.code || "").toUpperCase();
+      const expectedPrefix =
+        projectCode.startsWith("AE") ? "AE-" :
+        (projectCode.startsWith("DN") || projectCode.startsWith("PP")) ? "PP-" :
+        null;
+
       // Build URL with specific gid if provided
       let url = input.sheetUrl;
       if (input.gid) {
@@ -991,10 +1003,10 @@ export const paypalRouter = router({
       }
       const allRows = await fetchSheetData(url);
 
-      // Build lookup by maPaypal (column A) — primary key for import
+      // Build lookup by ppcode (column C — VMPP Code) — primary key for import
       const rowMap = new Map<string, typeof allRows[0]>();
       for (const r of allRows) {
-        if (r.maPaypal) rowMap.set(r.maPaypal.toUpperCase(), r);
+        if (r.ppcode) rowMap.set(r.ppcode.toUpperCase(), r);
       }
 
       let imported = 0;
@@ -1010,23 +1022,36 @@ export const paypalRouter = router({
         const trimmed = code.trim();
         if (!trimmed) continue;
 
+        // Lookup row by col C (VMPP Code) — the key user enters
         const row = rowMap.get(trimmed.toUpperCase());
         if (!row) {
-          errors.push(`${trimmed}: không tìm thấy trong sheet`);
-          results.push({ ppcode: trimmed, status: "error", message: "Không tìm thấy trong sheet" });
+          errors.push(`${trimmed}: không tìm thấy trong sheet (cột C)`);
+          results.push({ ppcode: trimmed, status: "error", message: "Không tìm thấy trong sheet (cột C)" });
           continue;
         }
 
-        // Use maPaypal as the PP code in BDOps
-        const ppCode = row.maPaypal || row.ppcode || trimmed;
+        // Mã PP = col A from the sheet (what actually gets stored as PP.code)
+        // VMPP Code = col C (stored as vmppCode)
+        // If col A is empty, use "NODATA-{vmppCode}" as placeholder
+        const rawPPCode = (row.maPaypal || "").trim();
+        const ppCode = rawPPCode || `NODATA-${row.ppcode || trimmed}`;
 
-        // Check if PP exists — prefer CURRENT project first, then global
+        // Prefix validation on col A (Mã PP) — block wrong project import (skip if col A was empty)
+        if (rawPPCode && expectedPrefix && !ppCode.toUpperCase().startsWith(expectedPrefix)) {
+          const msg = `Mã PP "${ppCode}" không thuộc project ${projectCode} (chỉ nhận prefix "${expectedPrefix}")`;
+          errors.push(`${trimmed}: ${msg}`);
+          results.push({ ppcode: trimmed, status: "error", message: msg });
+          continue;
+        }
+
+        // Check if PP exists — match by code (col A) OR vmppCode (col C)
+        // Prefer CURRENT project first, then global
         let existing = await ctx.prisma.payPalAccount.findFirst({
           where: {
             projectId: input.projectId,
             OR: [
               { code: ppCode },
-              ...(row.ppcode ? [{ code: row.ppcode }] : []),
+              ...(row.ppcode ? [{ vmppCode: row.ppcode }] : []),
             ],
           },
         });
@@ -1036,7 +1061,7 @@ export const paypalRouter = router({
             where: {
               OR: [
                 { code: ppCode },
-                ...(row.ppcode ? [{ code: row.ppcode }] : []),
+                ...(row.ppcode ? [{ vmppCode: row.ppcode }] : []),
               ],
             },
           });
@@ -1048,7 +1073,15 @@ export const paypalRouter = router({
             const accountChangedFields: string[] = [];
 
             if (row.userwin) updateData.holder = row.userwin.toUpperCase();
-            if (row.ppcode) updateData.vmppCode = row.ppcode;
+            if (row.ppcode && existing.vmppCode !== row.ppcode) {
+              updateData.vmppCode = row.ppcode;
+              accountChangedFields.push("vmppCode");
+            }
+            // Mã PP follows sheet (col A) — if existing code differs, sync it
+            if (existing.code !== ppCode) {
+              updateData.code = ppCode;
+              accountChangedFields.push("code");
+            }
 
             // Compare-first for PP-level password + 2FA
             const currentPPPass = existing.password ? decrypt(existing.password) : null;
@@ -1447,8 +1480,8 @@ export const paypalRouter = router({
       projectId: z.string(),
       items: z.array(z.object({
         emailId: z.string(),
-        extractedEmails: z.array(z.string().min(1)),
-      })).min(1),
+        extractedEmails: z.array(z.string().min(1)).max(50),
+      })).min(1).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {

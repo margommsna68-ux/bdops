@@ -11,6 +11,7 @@ import { exportToCSV } from "@/lib/excel-export";
 import { useTableSort, SortIcon } from "@/components/tables/useTableSort";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
+import { PageHistory } from "@/components/PageHistory";
 
 const CATEGORIES = ["SERVER", "IP_PROXY", "GMAIL", "PAYPAL", "OTHER"] as const;
 const categoryColors: Record<string, string> = {
@@ -68,6 +69,7 @@ export default function CostsPage() {
   const { currentProjectId: projectId, currentRole } = useProjectStore();
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [showHistory, setShowHistory] = useState(false);
   const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -450,6 +452,15 @@ export default function CostsPage() {
           bulkImport.mutate({ projectId: projectId!, items });
         }}
       />
+      
+      
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? t("hide_history_label_nav") : t("history_label_nav")}
+      </button>
+      <PageHistory entity="CostRecord" show={showHistory} />
     </div>
   );
 }

@@ -75,7 +75,8 @@ export default function SettingsPage() {
       setEditingName(false);
       refetch();
       if (projectId && currentProjectCode) {
-        setCurrentProject(projectId, currentProjectCode, updated.name, currentRole || "USER", currentModules);
+        const currentType = useProjectStore.getState().currentProjectType || "FULL";
+        setCurrentProject(projectId, currentProjectCode, updated.name, currentType, currentRole || "USER", currentModules);
       }
     },
     onError: (err) => toast.error(err.message),

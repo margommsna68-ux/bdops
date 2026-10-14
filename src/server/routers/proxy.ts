@@ -293,7 +293,7 @@ export const proxyRouter = router({
             address: z.string(),
             subnet: z.string().optional(),
           })
-        ),
+        ).max(1000),
       })
     )
     .mutation(async ({ ctx, input }) => {

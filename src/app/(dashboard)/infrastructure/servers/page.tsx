@@ -16,6 +16,7 @@ import { useProjectStore } from "@/lib/store";
 import { exportToCSV, parseCSV } from "@/lib/excel-export";
 import { usePinAction } from "@/components/PinVerify";
 import toast from "react-hot-toast";
+import { PageHistory } from "@/components/PageHistory";
 import { useT } from "@/lib/i18n";
 
 const serverStatusColors: Record<string, string> = {
@@ -364,6 +365,7 @@ export default function ServersPage() {
 
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [vmStatusFilter, setVmStatusFilter] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [vmSearch, setVmSearch] = useState("");
 
@@ -1264,6 +1266,15 @@ export default function ServersPage() {
           </div>
         </DialogContent>
       </Dialog>
+      
+      
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? t("hide_history_label_nav") : t("history_label_nav")}
+      </button>
+      <PageHistory entity="Server" show={showHistory} />
     </div>
   );
 }

@@ -8,16 +8,19 @@ import { useProjectStore } from "@/lib/store";
 import { formatDateTime } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
-function timeAgo(date: Date | string): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "vừa xong";
-  if (mins < 60) return `${mins} phút trước`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  const days = Math.floor(hours / 24);
-  return `${days} ngày trước`;
+function useTimeAgo() {
+  const t = useT();
+  return (date: Date | string): string => {
+    const d = typeof date === "string" ? new Date(date) : date;
+    const diff = Date.now() - d.getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return t("time_just_now");
+    if (mins < 60) return `${mins} ${t("time_mins_ago")}`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} ${t("time_hours_ago")}`;
+    const days = Math.floor(hours / 24);
+    return `${days} ${t("time_days_ago")}`;
+  };
 }
 
 const ACTION_COLORS: Record<string, string> = {
@@ -39,41 +42,39 @@ const ACTION_COLORS: Record<string, string> = {
   DELETE_APPROVED: "bg-red-100 text-red-800",
 };
 
-const ACTION_VI: Record<string, string> = {
-  CREATE: "Tạo mới",
-  UPDATE: "Cập nhật",
-  DELETE: "Xóa",
-  BULK_UPDATE: "Cập nhật hàng loạt",
-  BULK_DELETE: "Xóa hàng loạt",
-  IMPORT: "Nhập dữ liệu",
-  ASSIGN: "Gán",
-  UNASSIGN: "Gỡ gán",
-  ADD_NOTE: "Thêm ghi chú",
-  DELETE_NOTE: "Xóa ghi chú",
-  SETTLE: "Quyết toán",
-  RECALCULATE: "Tính lại",
-  RESET_PIN: "Reset PIN",
-  RESET_PASSWORD: "Reset mật khẩu",
-  STATUS_CHANGE: "Đổi trạng thái",
-  DELETE_APPROVED: "Duyệt xóa",
+const ACTION_KEYS: Record<string, string> = {
+  CREATE: "audit_action_create",
+  UPDATE: "audit_action_update",
+  DELETE: "audit_action_delete",
+  BULK_UPDATE: "audit_action_bulk_update",
+  BULK_DELETE: "audit_action_bulk_delete",
+  IMPORT: "audit_action_import",
+  ASSIGN: "audit_action_assign",
+  UNASSIGN: "audit_action_unassign",
+  ADD_NOTE: "audit_action_add_note",
+  DELETE_NOTE: "audit_action_delete_note",
+  SETTLE: "audit_action_settle",
+  RECALCULATE: "audit_action_recalculate",
+  RESET_PIN: "audit_action_reset_pin",
+  RESET_PASSWORD: "audit_action_reset_password",
+  STATUS_CHANGE: "audit_action_status_change",
+  DELETE_APPROVED: "audit_action_delete_approved",
+  UNLOCK_ACCOUNT: "audit_action_unlock_account",
 };
 
-const ENTITY_VI: Record<string, string> = {
-  FundTransaction: "Giao dịch quỹ",
-  Withdrawal: "Rút tiền",
-  CostRecord: "Chi phí",
-  ProfitSplit: "Chia lợi nhuận",
-  SplitAllocation: "Phân bổ",
-  PayPalAccount: "PayPal",
-  PayPalEmail: "Email PayPal",
-  Server: "Máy chủ",
-  VirtualMachine: "Máy ảo",
-  ProxyIP: "IP Proxy",
-  GmailAccount: "Gmail",
-  VMTask: "Tác vụ VM",
-  User: "Người dùng",
-  ProjectMember: "Thành viên",
-  Project: "Dự án",
+const ENTITY_KEYS: Record<string, string> = {
+  FundTransaction: "audit_entity_fund",
+  Withdrawal: "audit_entity_withdrawal",
+  CostRecord: "audit_entity_cost",
+  ProfitSplit: "audit_entity_profit",
+  SplitAllocation: "audit_entity_allocation",
+  PayPalAccount: "audit_entity_paypal",
+  PayPalEmail: "audit_entity_paypal_email",
+  Server: "audit_entity_server",
+  VirtualMachine: "audit_entity_vm",
+  ProxyIP: "audit_entity_proxy",
+  GmailAccount: "audit_entity_gmail",
+  User: "audit_entity_user",
 };
 
 const ENTITY_ICONS: Record<string, string> = {
@@ -114,6 +115,7 @@ const ENTITY_ICON_COLORS: Record<string, string> = {
 
 export default function AuditLogPage() {
   const t = useT();
+  const timeAgo = useTimeAgo();
   const projectId = useProjectStore((s) => s.currentProjectId);
   const [page, setPage] = useState(1);
   const [filterEntity, setFilterEntity] = useState<string>("");
@@ -130,7 +132,7 @@ export default function AuditLogPage() {
       action: filterAction || undefined,
       userId: filterUser || undefined,
     },
-    { enabled: !!projectId, refetchInterval: 15000 }
+    { enabled: !!projectId, staleTime: 30000 }
   );
 
   const { data: stats } = trpc.auditLog.stats.useQuery(
@@ -250,7 +252,7 @@ export default function AuditLogPage() {
         >
           <option value="">Tất cả đối tượng</option>
           {allEntities.map((e) => (
-            <option key={e} value={e}>{ENTITY_VI[e] || e}</option>
+            <option key={e} value={e}>{t(ENTITY_KEYS[e] || e)}</option>
           ))}
         </select>
         <select
@@ -260,7 +262,7 @@ export default function AuditLogPage() {
         >
           <option value="">Tất cả hành động</option>
           {allActions.map((a) => (
-            <option key={a} value={a}>{ACTION_VI[a] || a}</option>
+            <option key={a} value={a}>{t(ACTION_KEYS[a] || a)}</option>
           ))}
         </select>
       </div>
@@ -297,10 +299,10 @@ export default function AuditLogPage() {
                         {item.user?.name || item.user?.username || item.user?.email || "—"}
                       </span>
                       <Badge className={`text-[10px] ${ACTION_COLORS[item.action] || "bg-gray-100 text-gray-800"}`}>
-                        {ACTION_VI[item.action] || item.action}
+                        {t(ACTION_KEYS[item.action] || item.action)}
                       </Badge>
                       <span className="text-sm text-gray-600">
-                        {ENTITY_VI[item.entity] || item.entity}
+                        {t(ENTITY_KEYS[item.entity] || item.entity)}
                       </span>
                     </div>
                     {changesStr && (

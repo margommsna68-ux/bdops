@@ -344,8 +344,8 @@ export const projectRouter = router({
         }
       }
 
-      const hashedPassword = await bcrypt.hash(input.password, 10);
-      const hashedPin = input.pin ? await bcrypt.hash(input.pin, 10) : undefined;
+      const hashedPassword = await bcrypt.hash(input.password, 12);
+      const hashedPin = input.pin ? await bcrypt.hash(input.pin, 12) : undefined;
 
       // Check if username already exists
       const existing = await ctx.prisma.user.findFirst({
@@ -625,10 +625,10 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const hashedPin = await bcrypt.hash(input.pin, 10);
+      const hashedPin = await bcrypt.hash(input.pin, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { pin: hashedPin },
+        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
       });
       return { success: true };
     }),

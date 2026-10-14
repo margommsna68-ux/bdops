@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, capitalName } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/settings-store";
 import { isCollectorOnly } from "@/lib/collector-utils";
 import { usePinAction } from "@/components/PinVerify";
 import { CollectorWalletView } from "./_CollectorWalletView";
+import { AgentAdminDashboard } from "./_AdminDashboard";
 import toast from "react-hot-toast";
 
 export default function AgentPPPage() {
@@ -25,7 +26,7 @@ export default function AgentPPPage() {
   const collectorOnly = isCollectorOnly(currentRole, currentModules);
 
   const [page, setPage] = useState(1);
-  const [salesPage, setSalesPage] = useState(1);
+  const [salesPage, _setSalesPage] = useState(1);
   const [newEmail, setNewEmail] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -33,6 +34,15 @@ export default function AgentPPPage() {
   const [disputeTargetProjectId, setDisputeTargetProjectId] = useState<string | null>(null);
   const [disputeNote, setDisputeNote] = useState("");
   const [activeTab, setActiveTab] = useState<"received" | "sold">("received");
+  const [agentFilter, setAgentFilter] = useState<string>(""); // filter by agent userId
+
+  // Sort state for received transactions table
+  const [txSortKey, setTxSortKey] = useState<string>("date");
+  const [txSortDir, setTxSortDir] = useState<"asc" | "desc">("desc");
+  const toggleTxSort = (key: string) => {
+    if (txSortKey === key) setTxSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setTxSortKey(key); setTxSortDir("desc"); }
+  };
 
   // Sell form state
   const [showSellForm, setShowSellForm] = useState(false);
@@ -65,8 +75,9 @@ export default function AgentPPPage() {
     { projectId: projectId!, page: salesPage },
     { enabled: !!projectId }
   );
-  const { data: allAgents } = trpc.agentPP.allAgents.useQuery(
-    { projectId: projectId! },
+  // Admin: fetch all collector expenses (cross-project)
+  const { data: allExpenses, isLoading: expensesLoading } = trpc.agentPP.listExpenses.useQuery(
+    { projectId: projectId!, limit: 200 },
     { enabled: !!projectId && isAdminOrMod }
   );
   const { data: todayActivity } = trpc.agentPP.todayActivity.useQuery(
@@ -152,8 +163,51 @@ export default function AgentPPPage() {
   });
   const { requirePin, PinDialog } = usePinAction();
 
-  const items = txData?.items ?? [];
+  const rawItems = txData?.items ?? [];
   const total = txData?.total ?? 0;
+
+  // Build unique agent list from transactions (for filter dropdown)
+  const agentOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of rawItems) {
+      const uid = (w as any).agentEmail?.user?.id || (w as any).agentUserId;
+      const name = capitalName((w as any).agentEmail?.user?.name || (w as any).agentEmail?.user?.username || (w as any).agentUser?.name || (w as any).agentUser?.username);
+      if (uid && name && !map.has(uid)) map.set(uid, name);
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [rawItems]);
+
+  // Filter + sort transactions client-side
+  const items = useMemo(() => {
+    let arr = [...rawItems];
+    // Agent filter
+    if (agentFilter) {
+      arr = arr.filter((w: any) => {
+        const uid = (w as any).agentEmail?.user?.id || (w as any).agentUserId;
+        return uid === agentFilter;
+      });
+    }
+    arr.sort((a: any, b: any) => {
+      let va: any, vb: any;
+      switch (txSortKey) {
+        case "date": va = new Date(a.date).getTime(); vb = new Date(b.date).getTime(); break;
+        case "amount": va = Number(a.amount ?? 0); vb = Number(b.amount ?? 0); break;
+        case "fee": va = Number(a.matchedPaypalFee ?? 0); vb = Number(b.matchedPaypalFee ?? 0); break;
+        case "net": va = Number(a.amount ?? 0) - Number(a.matchedPaypalFee ?? 0); vb = Number(b.amount ?? 0) - Number(b.matchedPaypalFee ?? 0); break;
+        case "agent": va = (a.agentEmail?.email || a.agentUser?.name || "").toLowerCase(); vb = (b.agentEmail?.email || b.agentUser?.name || "").toLowerCase(); break;
+        case "pp": va = (a.sourcePaypal?.code || "").toLowerCase(); vb = (b.sourcePaypal?.code || "").toLowerCase(); break;
+        case "status": {
+          const s = (w: any) => w.agentDisputed ? 0 : (w.agentConfirmed || w.matchedPaypalFee != null) ? 2 : 1;
+          va = s(a); vb = s(b); break;
+        }
+        default: va = 0; vb = 0;
+      }
+      if (va < vb) return txSortDir === "asc" ? -1 : 1;
+      if (va > vb) return txSortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [rawItems, txSortKey, txSortDir, agentFilter]);
   const totalPages = Math.ceil(total / 50);
   // If all visible rows are for a single collector, we can hoist the name + %
   // into the "Fee" header so cells only show the $ amount.
@@ -161,8 +215,8 @@ export default function AgentPPPage() {
     items.map((w: any) => w.collectorName).filter(Boolean)
   );
   const singleCollector = uniqueCollectors.size === 1 ? items.find((w: any) => w.collectorName) : null;
-  const singleCollectorName = (singleCollector as any)?.collectorName ?? null;
-  const singleCollectorPct = singleCollector ? Number((singleCollector as any).collectorFeePercent ?? 0) : null;
+  const _singleCollectorName = (singleCollector as any)?.collectorName ?? null;
+  const _singleCollectorPct = singleCollector ? Number((singleCollector as any).collectorFeePercent ?? 0) : null;
 
   // Compute hero totals from the transaction items (single source of truth with the table).
   // Collector-only users want these numbers to match the rows exactly.
@@ -191,7 +245,14 @@ export default function AgentPPPage() {
   const heroFundRemaining = heroReceived - heroPaidToTeam;
   const salesItems = salesData?.items ?? [];
   const salesTotal = salesData?.total ?? 0;
-  const salesTotalPages = Math.ceil(salesTotal / 50);
+  const _salesTotalPages = Math.ceil(salesTotal / 50);
+
+  // Filter expenses by selected agent
+  const filteredExpenses = useMemo(() => {
+    if (!allExpenses) return [];
+    if (!agentFilter) return allExpenses;
+    return allExpenses.filter((e: any) => e.collectorId === agentFilter || e.collector?.id === agentFilter);
+  }, [allExpenses, agentFilter]);
 
   if (!projectId) return <p className="text-gray-500 p-8">{t("select_project")}</p>;
 
@@ -220,7 +281,7 @@ export default function AgentPPPage() {
   const ppFee = parseFloat(sellPaypalFee) || 0;
   const netPreview = grossAmt - ppFee - (grossAmt * feePct / 100);
 
-  const bal = displayBalance?.balance ?? 0;
+  const _bal = displayBalance?.balance ?? 0;
 
   return (
     <div className="space-y-4">
@@ -237,8 +298,13 @@ export default function AgentPPPage() {
         )}
       </div>
 
-      {/* ══ Hero Balance ══ */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      {/* ══ Admin Command Center ══ */}
+      {isAdminOrMod && !collectorOnly && projectId && (
+        <AgentAdminDashboard projectId={projectId} />
+      )}
+
+      {/* ══ Hero Balance (Collector Only) ══ */}
+      <div className={`bg-white rounded-xl border border-gray-200 shadow-sm ${isAdminOrMod && !collectorOnly ? "hidden" : ""}`}>
         <div className="p-5">
           {collectorOnly ? (
             /* Collector-only: 5 metric cards — totals computed from visible transactions */
@@ -270,29 +336,7 @@ export default function AgentPPPage() {
                 )}
               </div>
             </div>
-          ) : (
-            /* Admin/Moderator/Multi-module user: legacy 3-col layout */
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center py-3 bg-green-50 rounded-lg">
-                <div className="text-[10px] font-semibold text-green-600 uppercase mb-1">{t("collector_total_received")}</div>
-                <div className="text-xl font-bold text-green-700">{formatCurrency(displayBalance?.totalReceived ?? 0)}</div>
-              </div>
-              <div className="text-center py-3 bg-orange-50 rounded-lg">
-                <div className="text-[10px] font-semibold text-orange-600 uppercase mb-1">{t("collector_total_sold")}</div>
-                <div className="text-xl font-bold text-orange-700">{formatCurrency(displayBalance?.totalSold ?? 0)}</div>
-              </div>
-              <div className="text-center py-3 bg-blue-50 rounded-lg relative">
-                <div className="text-[10px] font-semibold text-blue-600 uppercase mb-1">{t("collector_balance_remaining")}</div>
-                <div className={`text-2xl font-extrabold ${bal >= 0 ? "text-blue-700" : "text-red-600"}`}>{formatCurrency(bal)}</div>
-                {isCollector && (
-                  <button onClick={() => { setShowSellForm(!showSellForm); if (!showSellForm) setActiveTab("sold"); }}
-                    className={`mt-2 px-4 py-1 rounded text-xs font-semibold transition-colors ${showSellForm ? "bg-gray-200 text-gray-600" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
-                    {showSellForm ? t("collector_close") : t("collector_sell_fund")}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+          ) : null}
 
           {/* Email & Link section */}
           {isCollector && (
@@ -459,6 +503,25 @@ export default function AgentPPPage() {
 
       {/* ══ Tabs: Giao dịch nhận | Lịch sử bán ══ */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {/* Agent filter — above tabs, applies to both */}
+        {agentOptions.length > 1 && (
+          <div className="px-4 py-2 border-b bg-gray-50 flex items-center gap-3">
+            <span className="text-xs font-medium text-gray-500">Agent:</span>
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 focus:outline-none bg-white"
+            >
+              <option value="">{t("all")} ({rawItems.length})</option>
+              {agentOptions.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            {agentFilter && (
+              <span className="text-[10px] text-gray-400">{items.length} {t("rows")}</span>
+            )}
+          </div>
+        )}
         {/* Tab header */}
         <div className="flex border-b border-gray-200">
           <button
@@ -482,7 +545,10 @@ export default function AgentPPPage() {
             }`}
           >
             {t("agpp_sales_history")}
-            {salesTotal > 0 && <Badge className="ml-2 bg-orange-100 text-orange-700 text-[10px] px-1.5">{salesTotal}</Badge>}
+            {isAdminOrMod
+              ? (filteredExpenses.length > 0 && <Badge className="ml-2 bg-orange-100 text-orange-700 text-[10px] px-1.5">{filteredExpenses.length}</Badge>)
+              : (salesTotal > 0 && <Badge className="ml-2 bg-orange-100 text-orange-700 text-[10px] px-1.5">{salesTotal}</Badge>)
+            }
             {activeTab === "sold" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-600" />}
           </button>
         </div>
@@ -494,25 +560,21 @@ export default function AgentPPPage() {
               <table className="min-w-full text-sm table-auto">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_date")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap cursor-pointer hover:text-gray-900 select-none" onClick={() => toggleTxSort("date")}>{t("col_date")} {txSortKey === "date" && (txSortDir === "asc" ? "▲" : "▼")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_project_col")}</th>
-                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_pp_code")}</th>
-                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_pp_agent")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap cursor-pointer hover:text-gray-900 select-none" onClick={() => toggleTxSort("pp")}>{t("collector_pp_code")} {txSortKey === "pp" && (txSortDir === "asc" ? "▲" : "▼")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap cursor-pointer hover:text-gray-900 select-none" onClick={() => toggleTxSort("agent")}>{t("collector_pp_agent")} {txSortKey === "agent" && (txSortDir === "asc" ? "▲" : "▼")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("collector_transaction_id")}</th>
-                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-green-700 whitespace-nowrap">{t("collector_gross_amount")}</th>
-                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24">
-                      {singleCollectorName
-                        ? `Fee PP (${singleCollectorName} note)`
-                        : `Fee PP (${t("collector_agent_label")} note)`}
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-green-700 whitespace-nowrap cursor-pointer hover:text-green-900 select-none" onClick={() => toggleTxSort("amount")}>{t("collector_gross_amount")} {txSortKey === "amount" && (txSortDir === "asc" ? "▲" : "▼")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-red-600 whitespace-nowrap w-24 cursor-pointer hover:text-red-800 select-none" onClick={() => toggleTxSort("fee")}>
+                      {t("agpp_col_fee_pp")} {txSortKey === "fee" && (txSortDir === "asc" ? "▲" : "▼")}
                     </th>
-                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap">{t("collector_net_amount")}</th>
+                    <th className="px-2 py-2 text-right text-[11px] font-semibold text-gray-700 whitespace-nowrap cursor-pointer hover:text-gray-900 select-none" onClick={() => toggleTxSort("net")}>{t("collector_net_amount")} {txSortKey === "net" && (txSortDir === "asc" ? "▲" : "▼")}</th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-purple-700 whitespace-nowrap">
-                      {singleCollectorName
-                        ? `Fee ${singleCollectorName} ${singleCollectorPct}%`
-                        : t("collector_fee_percent_col")}
+                      {t("collector_col_commission")}
                     </th>
                     <th className="px-2 py-2 text-right text-[11px] font-semibold text-emerald-700 whitespace-nowrap">{t("collector_total_after_fee")}</th>
-                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap">{t("col_status")}</th>
+                    <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap cursor-pointer hover:text-gray-900 select-none" onClick={() => toggleTxSort("status")}>{t("col_status")} {txSortKey === "status" && (txSortDir === "asc" ? "▲" : "▼")}</th>
                     <th className="px-2 py-2 text-left text-[11px] font-semibold text-gray-600 whitespace-nowrap w-32">{t("collector_note")}</th>
                     <th className="px-2 py-2 text-center text-[11px] font-semibold text-gray-600 w-24"></th>
                   </tr>
@@ -541,7 +603,7 @@ export default function AgentPPPage() {
                         <td className="px-2 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
                         <td className="px-2 py-2 text-xs">
                           {(() => {
-                            const val = w.agentEmail?.email ?? "—";
+                            const val = w.agentEmail?.email || capitalName(w.agentUser?.name || w.agentUser?.username) || "—";
                             const isL = val.startsWith("http://") || val.startsWith("https://");
                             return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block max-w-[180px]">{val}</a> : <span className="truncate block max-w-[180px]">{val}</span>;
                           })()}
@@ -550,72 +612,57 @@ export default function AgentPPPage() {
                         <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{formatCurrency(gross)}</td>
                         <td className="px-2 py-2 text-right text-xs text-gray-600 w-24">
                           <div className="h-6 flex items-center justify-end">
-                            {w.isPaypalLink ? (
-                              editingFeeId === w.id ? (
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  autoFocus
-                                  value={editingFeeValue}
-                                  onChange={(e) => setEditingFeeValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-                                    if (e.key === "Escape") { setEditingFeeId(null); setEditingFeeValue(""); }
-                                  }}
-                                  onBlur={() => {
-                                    const raw = editingFeeValue.trim();
-                                    const val = raw === "" ? null : parseFloat(raw);
-                                    const current = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : null;
-                                    if (val !== current) {
-                                      updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
-                                    }
-                                    setEditingFeeId(null);
-                                  }}
-                                  className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                />
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setEditingFeeId(w.id);
-                                    setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
-                                  }}
-                                  className="w-full h-6 font-mono hover:bg-blue-50 rounded cursor-pointer text-right px-1 truncate text-red-600"
-                                  title="Click to note fee"
-                                >
-                                  {w.matchedPaypalFee != null
-                                    ? `-${formatCurrency(Number(w.matchedPaypalFee))}`
-                                    : <span className="text-gray-300">+</span>}
-                                </button>
-                              )
+                            {editingFeeId === w.id ? (
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                autoFocus
+                                value={editingFeeValue}
+                                onChange={(e) => setEditingFeeValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                                  if (e.key === "Escape") { setEditingFeeId(null); setEditingFeeValue(""); }
+                                }}
+                                onBlur={() => {
+                                  const raw = editingFeeValue.trim();
+                                  const val = raw === "" ? null : parseFloat(raw);
+                                  const current = w.matchedPaypalFee != null ? Number(w.matchedPaypalFee) : null;
+                                  if (val !== current) {
+                                    updatePaypalFee.mutate({ projectId: w.projectId ?? projectId!, id: w.id, paypalFee: val });
+                                  }
+                                  setEditingFeeId(null);
+                                }}
+                                className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded font-mono text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
                             ) : (
-                              <span className="text-gray-200">N/A</span>
+                              <button
+                                onClick={() => {
+                                  setEditingFeeId(w.id);
+                                  setEditingFeeValue(w.matchedPaypalFee != null ? String(Number(w.matchedPaypalFee)) : "");
+                                }}
+                                className="w-full h-6 font-mono hover:bg-blue-50 rounded cursor-pointer text-right px-1 truncate text-red-600"
+                                title="Click to edit fee"
+                              >
+                                {w.matchedPaypalFee != null
+                                  ? `-${formatCurrency(Number(w.matchedPaypalFee))}`
+                                  : <span className="text-gray-300">—</span>}
+                              </button>
                             )}
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono text-gray-700 whitespace-nowrap">{formatCurrency(netAmount)}</td>
                         <td className="px-2 py-2 text-right text-xs whitespace-nowrap">
-                          {singleCollectorName ? (
-                            /* Header already shows collector name + %, cell only shows amount */
-                            <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
-                          ) : (
-                            /* Mixed collectors → show name + % per row */
-                            <div className="leading-tight">
-                              <div className="text-gray-700 font-medium truncate" title={w.collectorName || ""}>
-                                {w.collectorName || "—"} <span className="text-purple-700 font-bold">{feePct}%</span>
-                              </div>
-                              <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
-                            </div>
-                          )}
+                          <div className="text-purple-700 font-mono font-semibold">{formatCurrency(commissionAmount)}</div>
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-mono font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(totalAfterFee)}</td>
                         <td className="px-2 py-2">
                           {w.disputeResolved && w.disputeAction === "OVERRIDE" ? (
                             <Badge className="bg-blue-100 text-blue-800 text-xs" title={w.adminResolveNote || ""}>{t("collector_admin_confirmed")}</Badge>
-                          ) : w.agentConfirmed ? (
-                            <Badge className="bg-green-100 text-green-800 text-xs">{t("agpp_confirmed")}</Badge>
-                          ) : w.agentDisputed ? (
+                          ) : w.agentDisputed && !w.disputeResolved ? (
                             <Badge className="bg-red-100 text-red-800 text-xs" title={w.disputeNote}>{t("collector_disputing")}</Badge>
+                          ) : w.agentConfirmed || w.matchedPaypalFee != null ? (
+                            <Badge className="bg-green-100 text-green-800 text-xs">{t("agpp_confirmed")}</Badge>
                           ) : (
                             <Badge variant="outline" className="border-yellow-500 text-yellow-700 text-xs">{t("agpp_pending")}</Badge>
                           )}
@@ -641,7 +688,7 @@ export default function AgentPPPage() {
                                 setEditingNoteId(null);
                               }}
                               className="w-full h-6 text-xs px-1 box-border border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              placeholder="note..."
+                              placeholder={t("agpp_note_placeholder")}
                             />
                           ) : (
                             <button
@@ -722,119 +769,120 @@ export default function AgentPPPage() {
           </>
         )}
 
-        {/* Tab: Lịch sử bán */}
+        {/* Tab: Lịch sử chi / Expense History */}
         {activeTab === "sold" && (
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
-                    {isAdminOrMod && <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_role_label")}</th>}
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_pp")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_exchange")}</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Fee%</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("collector_col_commission")}</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">TX ID</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">{t("collector_paid_team")}</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {salesLoading ? (
-                    <tr><td colSpan={isAdminOrMod ? 11 : 10} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
-                  ) : salesItems.length === 0 ? (
-                    <tr><td colSpan={isAdminOrMod ? 11 : 10} className="text-center py-8 text-gray-400">{t("agpp_no_sales")}</td></tr>
-                  ) : (
-                    salesItems.map((s: any) => (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(s.date)}</td>
-                        {isAdminOrMod && <td className="px-3 py-2 text-xs font-medium text-gray-800">{s.agentUser?.name || s.agentUser?.username || "—"}</td>}
-                        <td className="px-3 py-2 text-xs">
-                          {(() => {
-                            const val = s.agentEmail?.email ?? "—";
-                            const isL = val.startsWith("http://") || val.startsWith("https://");
-                            return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
-                          })()}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-600">{s.exchangeEmail || "—"}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-500">{s.feePercent ? `${Number(s.feePercent)}%` : "—"}</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold text-purple-700">{s.agentEarning ? formatCurrency(Number(s.agentEarning)) : "—"}</td>
-                        <td className="px-3 py-2 text-xs font-mono text-gray-500">{s.transactionId}</td>
-                        <td className="px-3 py-2 text-center">
-                          <button onClick={() => markWithdrawn.mutate({ projectId: projectId!, id: s.id, withdrawn: !s.withdrawn })}
-                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-pointer ${s.withdrawn ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500 hover:bg-amber-100 hover:text-amber-700"}`}>
-                            {s.withdrawn ? t("collector_mark_paid") : t("collector_mark_pending")}
-                          </button>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <button onClick={() => requirePin(
-                            () => deleteSale.mutate({ projectId: projectId!, id: s.id }),
-                            t("collector_delete_sale"),
-                            t("collector_delete_sale_confirm").replace("{amount}", formatCurrency(s.amount))
-                          )} className="text-red-400 hover:text-red-600 text-xs">&times;</button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {salesTotal > 50 && (
-              <div className="flex items-center justify-between px-4 py-2 border-t text-sm">
-                <span className="text-gray-500">{(salesPage - 1) * 50 + 1}-{Math.min(salesPage * 50, salesTotal)} / {salesTotal}</span>
-                <div className="flex gap-1">
-                  <Button variant="outline" size="sm" disabled={salesPage <= 1} onClick={() => setSalesPage(salesPage - 1)} className="h-7 text-xs">{t("prev")}</Button>
-                  <Button variant="outline" size="sm" disabled={salesPage >= salesTotalPages} onClick={() => setSalesPage(salesPage + 1)} className="h-7 text-xs">{t("next")}</Button>
-                </div>
+            {isAdminOrMod ? (
+              /* ── Admin: show CollectorExpense records (what collectors paid) ── */
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_col_agent")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_project_col")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("status_label")}</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_col_ref_id")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("notes_label")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("agpp_col_tx")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {expensesLoading ? (
+                      <tr><td colSpan={8} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                    ) : filteredExpenses.length === 0 ? (
+                      <tr><td colSpan={8} className="text-center py-8 text-gray-400">{t("agpp_no_sales")}</td></tr>
+                    ) : (
+                      filteredExpenses.map((e: any) => (
+                        <tr key={e.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(e.date)}</td>
+                          <td className="px-3 py-2 text-xs font-medium text-gray-800">{capitalName(e.collector?.name || e.collector?.username)}</td>
+                          <td className="px-3 py-2 text-xs">
+                            {e.project?.code ? <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{e.project.code}</span> : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-xs">
+                            <Badge className={
+                              e.type === "TEAM_PAYMENT" ? "bg-green-100 text-green-700 text-[10px]" :
+                              e.type === "BILL" ? "bg-orange-100 text-orange-700 text-[10px]" :
+                              "bg-gray-100 text-gray-600 text-[10px]"
+                            }>{e.type}</Badge>
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-orange-700 whitespace-nowrap">{formatCurrency(Number(e.amount))}</td>
+                          <td className="px-3 py-2 text-xs font-mono text-gray-500">{e.referenceId || "—"}</td>
+                          <td className="px-3 py-2 text-xs text-gray-600 max-w-[200px] truncate">{e.note || "—"}</td>
+                          <td className="px-3 py-2 text-xs text-gray-400">
+                            {e.withdrawals?.length > 0
+                              ? e.withdrawals.map((w: any) => w.sourcePaypal?.code || w.transactionId).filter(Boolean).join(", ")
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* ── Collector: show AgentSale records (original behavior) ── */
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("col_date")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_pp")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">{t("collector_email_exchange")}</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("col_amount")}</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Fee%</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">{t("collector_col_commission")}</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">TX ID</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">{t("collector_paid_team")}</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {salesLoading ? (
+                      <tr><td colSpan={9} className="text-center py-8 text-gray-400">{t("loading")}</td></tr>
+                    ) : salesItems.length === 0 ? (
+                      <tr><td colSpan={9} className="text-center py-8 text-gray-400">{t("agpp_no_sales")}</td></tr>
+                    ) : (
+                      salesItems.map((s: any) => (
+                        <tr key={s.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(s.date)}</td>
+                          <td className="px-3 py-2 text-xs">
+                            {(() => {
+                              const val = s.agentEmail?.email ?? "—";
+                              const isL = val.startsWith("http://") || val.startsWith("https://");
+                              return isL ? <a href={val} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{val}</a> : <span>{val}</span>;
+                            })()}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-600">{s.exchangeEmail || "—"}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-500">{s.feePercent != null ? `${Number(s.feePercent)}%` : "—"}</td>
+                          <td className="px-3 py-2 text-right text-xs font-semibold text-purple-700">{s.agentEarning ? formatCurrency(Number(s.agentEarning)) : "—"}</td>
+                          <td className="px-3 py-2 text-xs font-mono text-gray-500">{s.transactionId}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button onClick={() => markWithdrawn.mutate({ projectId: projectId!, id: s.id, withdrawn: !s.withdrawn })}
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-pointer ${s.withdrawn ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500 hover:bg-amber-100 hover:text-amber-700"}`}>
+                              {s.withdrawn ? t("collector_mark_paid") : t("collector_mark_pending")}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button onClick={() => requirePin(
+                              () => deleteSale.mutate({ projectId: projectId!, id: s.id }),
+                              t("collector_delete_sale"),
+                              t("collector_delete_sale_confirm").replace("{amount}", formatCurrency(s.amount))
+                            )} className="text-red-400 hover:text-red-600 text-xs">&times;</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
         )}
       </div>
-
-      {/* ══ Admin: All Agents Overview ══ */}
-      {isAdminOrMod && allAgents && allAgents.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900">{t("agpp_all_agents")}</h3>
-          </div>
-          <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {allAgents.map((ag: any) => (
-              <div key={ag.userId} className="border rounded-lg p-4 bg-gray-50">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-bold text-gray-800">{ag.userName}</span>
-                  <span className="text-lg font-bold text-green-700">{formatCurrency(ag.totalReceived)}</span>
-                </div>
-                <div className="space-y-1">
-                  {ag.emails.map((em: any) => {
-                    const isLink = em.email.startsWith("http://") || em.email.startsWith("https://");
-                    return (
-                      <div key={em.id} className="flex items-center justify-between text-xs gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {isLink ? (
-                            <svg className="w-3 h-3 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                          ) : (
-                            <svg className="w-3 h-3 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                          )}
-                          {isLink ? (
-                            <a href={em.email} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">{em.email}</a>
-                          ) : (
-                            <span className="text-gray-600 truncate">{em.email}</span>
-                          )}
-                        </div>
-                        <span className="text-green-600 font-medium shrink-0">{formatCurrency(em.totalReceived)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ══ Admin: Today Activity ══ */}
       {isAdminOrMod && todayActivity && (todayActivity.countWithdrawals > 0 || todayActivity.countSales > 0) && (
@@ -863,7 +911,7 @@ export default function AgentPPPage() {
                   <tr key={`w-${w.id}`} className="hover:bg-gray-50">
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(w.date).toLocaleTimeString(language === "vi" ? "vi-VN" : "en-US", { hour: "2-digit", minute: "2-digit" })}</td>
                     <td className="px-3 py-2"><span className="bg-green-100 text-green-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{t("collector_type_received")}</span></td>
-                    <td className="px-3 py-2 font-medium text-gray-800">{w.agentEmail?.user?.name || w.agentEmail?.user?.username || "—"}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{capitalName(w.agentEmail?.user?.name || w.agentEmail?.user?.username)}</td>
                     <td className="px-3 py-2 text-gray-600">{w.agentEmail?.email || "—"}</td>
                     <td className="px-3 py-2 text-right font-semibold text-green-700">{formatCurrency(w.amount)}</td>
                     <td className="px-3 py-2 font-mono text-gray-400">{w.transactionId || w.withdrawCode || "—"}</td>
@@ -873,7 +921,7 @@ export default function AgentPPPage() {
                   <tr key={`s-${s.id}`} className="hover:bg-gray-50">
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(s.date).toLocaleTimeString(language === "vi" ? "vi-VN" : "en-US", { hour: "2-digit", minute: "2-digit" })}</td>
                     <td className="px-3 py-2"><span className="bg-orange-100 text-orange-700 text-[10px] font-semibold px-1.5 py-0.5 rounded">{t("collector_type_sold")}</span></td>
-                    <td className="px-3 py-2 font-medium text-gray-800">{s.agentUser?.name || s.agentUser?.username || "—"}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{capitalName(s.agentUser?.name || s.agentUser?.username)}</td>
                     <td className="px-3 py-2 text-gray-600">{s.agentEmail?.email || "—"}</td>
                     <td className="px-3 py-2 text-right font-semibold text-orange-700">{formatCurrency(s.amount)}</td>
                     <td className="px-3 py-2 font-mono text-gray-400">{s.transactionId}</td>

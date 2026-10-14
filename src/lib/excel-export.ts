@@ -26,6 +26,15 @@ export function exportToExcel(
   XLSX.writeFile(wb, `${filename}.xlsx`);
 }
 
+// CSV injection prevention: cells starting with = + - @ are formulas in Excel.
+// Prefix with ' to force text interpretation.
+function sanitizeCsvCell(val: string): string {
+  if (val.length > 0 && /^[=+\-@\t\r]/.test(val)) {
+    return `'${val}`;
+  }
+  return val;
+}
+
 export function exportToCSV(
   data: Record<string, unknown>[],
   filename: string
@@ -36,11 +45,11 @@ export function exportToCSV(
     headers.join(","),
     ...data.map((row) =>
       headers.map((h) => {
-        const val = String(row[h] ?? "");
+        const sanitized = sanitizeCsvCell(String(row[h] ?? ""));
         // Escape if contains comma, quote, or newline
-        return val.includes(",") || val.includes('"') || val.includes("\n")
-          ? `"${val.replace(/"/g, '""')}"`
-          : val;
+        return sanitized.includes(",") || sanitized.includes('"') || sanitized.includes("\n")
+          ? `"${sanitized.replace(/"/g, '""')}"`
+          : sanitized;
       }).join(",")
     ),
   ];

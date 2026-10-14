@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PinGate } from "@/components/PinGate";
+import { ProjectPickerGate } from "@/components/ProjectPickerGate";
 import { useHydration, useProjectStore } from "@/lib/store";
 import { trpc } from "@/lib/trpc";
 
@@ -30,7 +31,7 @@ export default function DashboardLayout({
   // Update store when membership data arrives
   useEffect(() => {
     if (membership && projectId && currentProjectCode && currentProjectName) {
-      setCurrentProject(projectId, currentProjectCode, currentProjectName, membership.role, membership.allowedModules, membership.canManageUsers, membership.id);
+      setCurrentProject(projectId, currentProjectCode, currentProjectName, membership.projectType || "FULL", membership.role, membership.allowedModules, membership.canManageUsers, membership.id);
     }
   }, [membership, projectId, currentProjectCode, currentProjectName, setCurrentProject]);
 
@@ -60,6 +61,7 @@ export default function DashboardLayout({
 
   return (
     <PinGate>
+    <ProjectPickerGate>
       <div className="flex min-h-screen bg-gray-50">
         {/* Mobile overlay */}
         {sidebarOpen && (
@@ -84,11 +86,12 @@ export default function DashboardLayout({
 
         <div className="flex-1 flex flex-col min-w-0">
           <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-          <main className="flex-1 p-3 sm:p-4 md:p-6 overflow-auto">
+          <main className="flex-1 p-4 sm:p-5 md:p-6 lg:p-8 overflow-auto">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>
         </div>
       </div>
+    </ProjectPickerGate>
     </PinGate>
   );
 }

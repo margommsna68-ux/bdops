@@ -12,6 +12,7 @@ import { exportToCSV } from "@/lib/excel-export";
 import { ImportCSVDialog } from "@/components/forms/ImportCSVDialog";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
+import { PageHistory } from "@/components/PageHistory";
 
 // Helper: get the holder of currently selected PPs
 function getCurrentHolder(selected: Set<string>, pps: any[]): string | null {
@@ -27,6 +28,7 @@ export default function WithdrawalsPage() {
   const currentRole = useProjectStore((s) => s.currentRole);
   const isAdminOrMod = currentRole === "ADMIN" || currentRole === "MODERATOR";
   const [page, setPage] = useState(1);
+  const [showHistory, setShowHistory] = useState(false);
   const [typeFilter, setTypeFilter] = useState<"MIXING" | "EXCHANGE" | "">("");
   const [holderFilter, setHolderFilter] = useState("");
   const [showExchangeForm, setShowExchangeForm] = useState(false);
@@ -98,16 +100,7 @@ export default function WithdrawalsPage() {
   const unmixed = [...(mixingStatus?.unmixed ?? [])].sort((a: any, b: any) => b.balance - a.balance);
   const accumulated = [...(mixingStatus?.accumulated ?? [])].sort((a: any, b: any) => b.balance - a.balance);
 
-  // Build vmppCode lookup by holder from ALL PPs (unmixed + accumulated)
-  const vmppByHolder: Record<string, string[]> = {};
-  for (const pp of [...unmixed, ...accumulated]) {
-    const holder = pp.holder || "—";
-    const vmpp = pp.vmppCode;
-    if (vmpp) {
-      if (!vmppByHolder[holder]) vmppByHolder[holder] = [];
-      if (!vmppByHolder[holder].includes(vmpp)) vmppByHolder[holder].push(vmpp);
-    }
-  }
+  // vmppByHolder now computed locally inside each PPPanel from its own pps prop
 
   // Table selection
   const allSelected = items.length > 0 && items.every((i: any) => selected.has(i.id));
@@ -235,7 +228,7 @@ export default function WithdrawalsPage() {
         .map(([ppId, amountStr]) => ({ sourcePaypalId: ppId, amount: parseFloat(amountStr || "0") }))
         .filter((s) => s.amount > 0);
       if (sources.length === 0) {
-        toast.error("Không có PP nào có số tiền > 0");
+        toast.error(t("wd_no_pp_with_balance"));
         setIsSubmitting(false);
         return;
       }
@@ -244,7 +237,7 @@ export default function WithdrawalsPage() {
         withdrawCode: actionTxId.trim(),
         sources,
       });
-      toast.success(`Gộp ${result.created} PP thành công`);
+      toast.success(t("wd_mixed_success", { n: result.created }));
       if (actionMode === "merge-acc") setAccSelected(new Set());
       else setPendingSelected(new Set());
       closeAction();
@@ -263,22 +256,28 @@ export default function WithdrawalsPage() {
         .map(([ppId, amountStr]) => ({ ppId, amount: parseFloat(amountStr || "0") }))
         .filter((e) => e.amount > 0);
       if (entries.length === 0) {
-        toast.error("Không có PP nào có số tiền > 0");
+        toast.error(t("wd_no_pp_with_balance"));
         setIsSubmitting(false);
         return;
       }
+      let created = 0;
       for (const entry of entries) {
-        await createWithdrawal.mutateAsync({
-          projectId, date: today, amount: entry.amount,
-          type: "EXCHANGE", sourcePaypalId: entry.ppId,
-          agent: agentEmail?.user?.name || agentEmail?.user?.username || "Unknown",
-          agentUserId: agentEmail?.userId,
-          agentEmailId: agentEmail?.id,
-          withdrawCode: actionTxId.trim(),
-          mailConfirmed: false,
-        });
+        try {
+          await createWithdrawal.mutateAsync({
+            projectId, date: today, amount: entry.amount,
+            type: "EXCHANGE", sourcePaypalId: entry.ppId,
+            agent: agentEmail?.user?.name || agentEmail?.user?.username || "Unknown",
+            agentUserId: agentEmail?.userId,
+            agentEmailId: agentEmail?.id,
+            withdrawCode: actionTxId.trim(),
+            mailConfirmed: false,
+          });
+          created++;
+        } catch (err: any) {
+          toast.error(`PP ${entry.ppId}: ${err.message}`);
+        }
       }
-      toast.success(`Tạo ${entries.length} lệnh exchange`);
+      if (created > 0) toast.success(t("wd_exchange_created_count", { n: created, total: entries.length }));
       if (actionMode === "sell-acc") setAccSelected(new Set());
       else setPendingSelected(new Set());
       closeAction();
@@ -295,7 +294,8 @@ export default function WithdrawalsPage() {
     for (const id of deletable) {
       try { await deleteWithdrawal.mutateAsync({ projectId, id }); count++; } catch {}
     }
-    toast.success(`${count} ${t("deleted")}`);
+    if (count > 0) toast.success(`${count} ${t("deleted")}`);
+    if (count < deletable.length) toast.error(`${deletable.length - count} failed`);
     setSelected(new Set());
   };
 
@@ -348,7 +348,7 @@ export default function WithdrawalsPage() {
           disputes={disputes.filter((d: any) => !d.disputeResolved)}
           onResolve={(id, action, note) => {
             resolveDispute.mutate({ projectId: projectId!, id, action, adminNote: note || undefined }, {
-              onSuccess: () => toast.success(action === "OVERRIDE" ? "Đã xác nhận giao dịch" : "Đã hủy giao dịch"),
+              onSuccess: () => toast.success(action === "OVERRIDE" ? t("wd_dispute_confirmed") : t("wd_dispute_cancelled")),
               onError: (err) => toast.error(err.message),
             });
           }}
@@ -363,7 +363,7 @@ export default function WithdrawalsPage() {
         // Group by server
         const serverGroups: Record<string, { serverCode: string; pps: typeof funds; total: number }> = {};
         for (const g of funds) {
-          const srv = (g.transactions?.[0] as any)?.server?.code || "Khác";
+          const srv = (g.transactions?.[0] as any)?.server?.code || t("wd_other_server");
           if (!serverGroups[srv]) serverGroups[srv] = { serverCode: srv, pps: [], total: 0 };
           serverGroups[srv].pps.push(g);
           serverGroups[srv].total += g.totalAmount;
@@ -376,7 +376,7 @@ export default function WithdrawalsPage() {
               <span className="text-lg font-bold text-green-700">{formatCurrency(todayTotal)}</span>
             </div>
             {funds.length === 0 ? (
-              <p className="text-xs text-green-600 mt-2">Chưa có giao dịch xác nhận hôm nay</p>
+              <p className="text-xs text-green-600 mt-2">{t("wd_no_tx_today")}</p>
             ) : (
               <>
                 {/* Server summary row */}
@@ -392,7 +392,7 @@ export default function WithdrawalsPage() {
                 {/* PP detail — collapsible */}
                 <details className="group">
                   <summary className="text-[10px] text-green-700 font-medium cursor-pointer hover:text-green-900 select-none">
-                    Chi tiết {funds.length} PP
+                    {t("wd_details_count", { n: funds.length })}
                   </summary>
                   <div className="mt-2 space-y-1.5">
                     {sortedServers.map((sg) => (
@@ -423,11 +423,11 @@ export default function WithdrawalsPage() {
           </span>
           <div className="flex-1" />
           <Button size="sm" onClick={() => openAction("merge")} className="bg-blue-600 hover:bg-blue-700">
-            Gộp vào PP...
+            {t("wd_merge_to_pp")}
           </Button>
           <Button size="sm" variant="outline" onClick={() => openAction("sell-pending")}
             className="border-green-500 text-green-700 hover:bg-green-50">
-            Bán trực tiếp...
+            {t("wd_sell_direct")}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setPendingSelected(new Set())}>{t("cancel")}</Button>
         </div>
@@ -441,7 +441,6 @@ export default function WithdrawalsPage() {
         onToggleItem={togglePendingItem}
         dotColor="bg-amber-500"
         emptyText={t("wd_no_pending")}
-        vmppByHolder={vmppByHolder}
         t={t}
         disabled={!!actionMode}
         mergeTargets={mergeTargets}
@@ -461,16 +460,16 @@ export default function WithdrawalsPage() {
               </span>
               <div className="flex-1" />
               <Button size="sm" onClick={() => openAction("merge-acc")} className="bg-blue-600 hover:bg-blue-700">
-                Gộp vào PP...
+                {t("wd_merge_to_pp")}
               </Button>
               <Button size="sm" onClick={() => openAction("sell-acc")} className="bg-green-600 hover:bg-green-700">
-                Bán trực tiếp...
+                {t("wd_sell_direct")}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setAccSelected(new Set())}>{t("cancel")}</Button>
             </div>
           )}
           <PPPanel
-            title="PP đã gộp — Chờ bán trực tiếp"
+            title={t("wd_mixed_pending_sale")}
             pps={accumulated}
             totalBalance={accumulated.reduce((s: number, pp: any) => s + pp.balance, 0)}
             selected={accSelected}
@@ -479,8 +478,7 @@ export default function WithdrawalsPage() {
             dotColor="bg-blue-500"
             emptyText=""
             showIncoming
-            vmppByHolder={vmppByHolder}
-            t={t}
+                t={t}
             disabled={!!actionMode}
             showCopyVmpp={false}
           />
@@ -680,7 +678,7 @@ export default function WithdrawalsPage() {
                             return (
                               <div className="flex items-center gap-0.5 mt-0.5">
                                 <span className="text-[10px] text-gray-500 truncate max-w-[130px]" title={emails.map((e: any) => e.email).join("\n") || email}>{email}</span>
-                                <button onClick={() => { navigator.clipboard.writeText(email); toast.success("Copied!"); }}
+                                <button onClick={() => { navigator.clipboard.writeText(email); toast.success(t("toast_copied")); }}
                                   className="opacity-0 group-hover/src:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity shrink-0 p-0.5">
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                                 </button>
@@ -700,7 +698,7 @@ export default function WithdrawalsPage() {
                               return (
                                 <div className="flex items-center gap-0.5 mt-0.5">
                                   <span className="text-[10px] text-gray-500 truncate max-w-[130px]" title={emails.map((e: any) => e.email).join("\n") || email}>{email}</span>
-                                  <button onClick={() => { navigator.clipboard.writeText(email); toast.success("Copied!"); }}
+                                  <button onClick={() => { navigator.clipboard.writeText(email); toast.success(t("toast_copied")); }}
                                     className="opacity-0 group-hover/dest:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity shrink-0 p-0.5">
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                                   </button>
@@ -816,16 +814,22 @@ export default function WithdrawalsPage() {
           toast.success(`Imported ${result.imported}, skipped ${result.skipped}`);
           setShowImport(false);
         }} />
+      {/* History */}
+      <button onClick={() => setShowHistory(!showHistory)}
+        className={"flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors " + (showHistory ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {showHistory ? "Ẩn lịch sử" : "Lịch sử"}
+      </button>
+      <PageHistory entity="Withdrawal" show={showHistory} />
     </div>
   );
 }
 
 // ═══ Reusable PP Card Panel — grouped by holder ═══
-function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onToggleItem, dotColor, emptyText, showIncoming, vmppByHolder, t, disabled, showCopyVmpp = true, mergeTargets, onSetMergeTarget }: {
+function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onToggleItem, dotColor, emptyText, showIncoming, t, disabled, showCopyVmpp = true, mergeTargets, onSetMergeTarget }: {
   title: string; pps: any[]; totalBalance: number; selected: Set<string>;
   onToggleAllHolder: (holder: string) => void; onToggleItem: (id: string) => void;
   dotColor: string; emptyText: string; showIncoming?: boolean;
-  vmppByHolder: Record<string, string[]>;
   t: (k: string) => string;
   disabled?: boolean;
   showCopyVmpp?: boolean;
@@ -845,8 +849,19 @@ function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onTogg
     return a.localeCompare(b);
   });
 
+  // Build VMPP lookup from THIS panel's PPs only (not global)
+  const localVmpp: Record<string, string[]> = {};
+  for (const pp of pps) {
+    const holder = pp.holder || "—";
+    const vmpp = pp.vmppCode;
+    if (vmpp) {
+      if (!localVmpp[holder]) localVmpp[holder] = [];
+      if (!localVmpp[holder].includes(vmpp)) localVmpp[holder].push(vmpp);
+    }
+  }
+
   const copyVmppForHolder = (holder: string) => {
-    const codes = vmppByHolder[holder];
+    const codes = localVmpp[holder];
     if (!codes || codes.length === 0) {
       toast.error(`Không có VMPP code cho ${holder}`);
       return;
@@ -880,7 +895,7 @@ function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onTogg
             const holderPPs = grouped[holder];
             const holderTotal = holderPPs.reduce((s: number, pp: any) => s + pp.balance, 0);
             const holderAllSelected = holderPPs.length > 0 && holderPPs.every((pp: any) => selected.has(pp.id));
-            const hasVmpp = vmppByHolder[holder] && vmppByHolder[holder].length > 0;
+            const hasVmpp = localVmpp[holder] && localVmpp[holder].length > 0;
             const currentMerge = mergeTargets?.[holder.toLowerCase().trim()];
             return (
               <div key={holder}>
@@ -910,9 +925,9 @@ function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onTogg
                     <button
                       onClick={() => copyVmppForHolder(holder)}
                       className="text-[10px] font-medium text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-full border border-purple-200 transition-colors"
-                      title={`Copy ${vmppByHolder[holder].length} VMPP code`}
+                      title={`Copy ${localVmpp[holder]?.length ?? 0} VMPP code`}
                     >
-                      Copy VMPP ({vmppByHolder[holder].length})
+                      Copy VMPP ({localVmpp[holder]?.length ?? 0})
                     </button>
                   )}
                 </div>
@@ -976,6 +991,7 @@ function PPPanel({ title, pps, totalBalance, selected, onToggleAllHolder, onTogg
           })}
         </div>
       )}
+
     </div>
   );
 }

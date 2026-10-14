@@ -6,9 +6,13 @@ import bcrypt from "bcryptjs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // Block seed endpoint in production
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Seed endpoint is disabled in production" }, { status: 403 });
+  }
   try {
     // ═══ 1. Create Admin User ═══
-    const hashedPw = await bcrypt.hash("admin123", 10);
+    const hashedPw = await bcrypt.hash("admin123", 12);
     const admin = await prisma.user.upsert({
       where: { email: "admin@bdops.com" },
       update: { username: "admin" },

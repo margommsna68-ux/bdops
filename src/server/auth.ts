@@ -3,6 +3,9 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
+// Lock duration — 30 minutes. Admin can still unlock earlier via adminUnlockAccount.
+export const LOCK_DURATION_MS = 30 * 60 * 1000;
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -25,8 +28,47 @@ export const authOptions: NextAuthOptions = {
         });
         if (!user || !user.password) return null;
 
+        // Lock check — 30 min auto-expire, admin can unlock earlier
+        let currentFailedCount = user.loginFailedCount || 0;
+        if (user.loginLockedAt) {
+          const lockExpiry = user.loginLockedAt.getTime() + LOCK_DURATION_MS;
+          const msLeft = lockExpiry - Date.now();
+          if (msLeft > 0) {
+            const minsLeft = Math.ceil(msLeft / 60000);
+            throw new Error(`ACCOUNT_LOCKED: Tài khoản bị khóa — còn ${minsLeft} phút. Liên hệ admin để mở khóa sớm.`);
+          }
+          // Lock expired — auto-unlock (treat as fresh attempt)
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { loginLockedAt: null, loginFailedCount: 0 },
+          });
+          currentFailedCount = 0;
+        }
+
         const valid = await bcrypt.compare(credentials.password, user.password);
-        if (!valid) return null;
+        if (!valid) {
+          // Increment failed counter; lock if >= 3
+          const newCount = currentFailedCount + 1;
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              loginFailedCount: newCount,
+              loginLockedAt: newCount >= 3 ? new Date() : null,
+            },
+          });
+          if (newCount >= 3) {
+            throw new Error("ACCOUNT_LOCKED: Đã sai 3 lần — tài khoản bị khóa 30 phút. Liên hệ admin để mở khóa sớm.");
+          }
+          throw new Error(`INVALID_CREDENTIALS: Sai mật khẩu (còn ${3 - newCount} lần trước khi bị khóa 30 phút)`);
+        }
+
+        // Success — reset counter
+        if (currentFailedCount > 0) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { loginFailedCount: 0 },
+          });
+        }
 
         return { id: user.id, email: user.email, name: user.name };
       },

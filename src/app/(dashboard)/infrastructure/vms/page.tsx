@@ -9,6 +9,7 @@ import { useProjectStore } from "@/lib/store";
 import { formatDate } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import toast from "react-hot-toast";
+// import { PageHistory } from "@/components/PageHistory";
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: "bg-gray-100 text-gray-500",
@@ -157,7 +158,7 @@ export default function EarnAppPage() {
               setPpPickerFor(null);
               refetch();
             } catch (e: any) {
-              toast.error(e.message || "Lỗi cập nhật PP");
+              toast.error(e.message || t("vms_update_pp_error"));
             }
           }}
           onClose={() => setPpPickerFor(null)} />
@@ -195,6 +196,7 @@ function ServerPanel({ server, onNewRound, onUpdate, onPickPP, onViewHistory, pp
 
   // Column resize
   const [colWidths, setColWidths] = useState({ vm: 65, pp: 230, date: 95, time: 58, status: 90, amount: 70, actions: 40 });
+  const [_showHistory, _setShowHistory] = useState(false);
   const resizingCol = useRef<string | null>(null);
   const startX = useRef(0);
   const startW = useRef(0);
@@ -268,6 +270,7 @@ function EarnRow({ row, ppMap, onNewRound, onUpdate, onPickPP, onViewHistory }: 
   onPickPP: (withdrawalId: string, currentPpId: string | null) => void;
   onViewHistory: (gmailId: string, email: string) => void;
 }) {
+  const t = useT();
   const w = row.latest;
   const noGmail = !row.gmailId;
   const [localVmCodes, setLocalVmCodes] = useState(cleanVmCode(row.vmCodes));
@@ -308,7 +311,7 @@ function EarnRow({ row, ppMap, onNewRound, onUpdate, onPickPP, onViewHistory }: 
           <div className="flex items-center gap-1">
             <button onClick={() => onPickPP(w.id, row.paypalId)}
               className="text-[11px] text-indigo-700 font-bold hover:bg-indigo-50 rounded px-1 py-0.5 shrink-0 border border-transparent hover:border-indigo-200 transition-colors"
-              title="Đổi PayPal">
+              title={t("vms_change_pp_tooltip")}>
               {ppInfo?.code ?? "PP..."}
             </button>
             {ppInfo?.email && (
@@ -362,12 +365,12 @@ function EarnRow({ row, ppMap, onNewRound, onUpdate, onPickPP, onViewHistory }: 
           <div className="flex gap-0.5 justify-center">
             {w && (w.date || w.amount || w.status !== "PENDING") && (
               <button onClick={handleClear}
-                className="text-[9px] text-red-400 hover:bg-red-100 w-4 h-4 rounded flex items-center justify-center" title="Xóa">×</button>
+                className="text-[9px] text-red-400 hover:bg-red-100 w-4 h-4 rounded flex items-center justify-center" title={t("vms_clear_tooltip")}>×</button>
             )}
             <button onClick={() => onNewRound(row.gmailId, localVmCodes, row.paypalId)}
-              className="text-[9px] text-blue-600 hover:bg-blue-100 w-4 h-4 rounded flex items-center justify-center" title="Đợt mới">+</button>
+              className="text-[9px] text-blue-600 hover:bg-blue-100 w-4 h-4 rounded flex items-center justify-center" title={t("vms_new_round_tooltip")}>+</button>
             <button onClick={() => onViewHistory(row.gmailId, row.gmailEmail)}
-              className="text-[9px] text-gray-400 hover:bg-gray-200 w-4 h-4 rounded flex items-center justify-center" title="Lịch sử">H</button>
+              className="text-[9px] text-gray-400 hover:bg-gray-200 w-4 h-4 rounded flex items-center justify-center" title={t("vms_history_tooltip")}>H</button>
           </div>
         )}
       </td>
@@ -380,6 +383,7 @@ function PPPickerDialog({ open, items, selectedId, onSelect, onClose }: {
   open: boolean; items: any[]; selectedId: string;
   onSelect: (ppId: string, email: string) => void; onClose: () => void;
 }) {
+  const t = useT();
   const [search, setSearch] = useState("");
 
   const filtered = items.filter((pp: any) => {
@@ -403,19 +407,19 @@ function PPPickerDialog({ open, items, selectedId, onSelect, onClose }: {
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
       <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Chọn PayPal — <span className="text-purple-600">click email để chọn</span></DialogTitle>
+          <DialogTitle>{t("vms_select_pp_title")} — <span className="text-purple-600">{t("vms_click_email_hint")}</span></DialogTitle>
         </DialogHeader>
         <div className="flex gap-2 items-center">
           <div className="relative flex-1">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <Input placeholder="Tìm PP code, email, holder..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" autoFocus />
+            <Input placeholder={t("vms_search_placeholder")} value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" autoFocus />
           </div>
           <span className="text-xs text-gray-400">{sorted.length} PP</span>
         </div>
         <div className="flex-1 overflow-y-auto -mx-2 space-y-1">
-          {sorted.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Không tìm thấy</div>}
+          {sorted.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">{t("vms_no_pp_found")}</div>}
           {sorted.map((pp: any) => {
             const isSelected = pp.id === selectedId;
             const allEmails = pp.emails?.length > 0 ? pp.emails : (pp.primaryEmail ? [{ id: "primary", email: pp.primaryEmail, isPrimary: true }] : []);
@@ -438,7 +442,7 @@ function PPPickerDialog({ open, items, selectedId, onSelect, onClose }: {
                       <span key={em.id || em.email}
                         onClick={() => handleSelect(pp.id, em.email)}
                         className="inline-flex items-center gap-1.5 text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-2.5 py-1 cursor-pointer hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all group"
-                        title={`Chọn ${pp.code} với email này`}>
+                        title={t("vms_select_pp_email_tooltip", { code: pp.code })}>
                         <svg className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                         </svg>
@@ -480,7 +484,7 @@ function HistoryDialog({ projectId, gmailId, serverId, email, onClose, t }: {
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto">
           {(!history || history.length === 0) ? (
-            <p className="text-sm text-gray-400 text-center py-4">Chưa có lịch sử</p>
+            <p className="text-sm text-gray-400 text-center py-4">{t("vms_no_history")}</p>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b sticky top-0">

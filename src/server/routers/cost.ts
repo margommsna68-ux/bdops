@@ -212,7 +212,7 @@ export const costRouter = router({
         amount: z.number().min(0),
         note: z.string().optional(),
         isPrepaid: z.boolean().default(false),
-      })),
+      })).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
       let imported = 0;

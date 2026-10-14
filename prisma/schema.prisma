@@ -20,6 +20,11 @@ model User {
   pin           String?
   lastActiveAt  DateTime?
   image         String?
+  // Brute-force protection — lock requires admin unlock
+  loginFailedCount Int          @default(0)
+  loginLockedAt    DateTime?
+  pinFailedCount   Int          @default(0)
+  pinLockedAt      DateTime?
   memberships   ProjectMember[]
   auditLogs     AuditLog[]
   proxyAssignments ProxyAssignmentHistory[] @relation("AssignedByUser")
