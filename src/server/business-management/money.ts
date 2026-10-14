@@ -3,6 +3,7 @@ import {ProxyDomainError} from '../proxy-management/types';
 const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Số tiền, ngày hoặc phần trăm chưa hợp lệ');};
 export function money(text:string){if(!/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/.test(text))invalid();return new Prisma.Decimal(text);}
 export function dayDate(text:string){if(!/^\d{4}-\d{2}-\d{2}$/.test(text))invalid();const date=new Date(text+'T00:00:00+07:00');if(!Number.isFinite(date.getTime())||new Date(date.getTime()+7*3600000).toISOString().slice(0,10)!==text)invalid();return date;}
+export function dayText(date:Date){return new Date(date.getTime()+7*3600000).toISOString().slice(0,10);}
 export function period(start:string,end:string){const a=dayDate(start),b=dayDate(end);if(a>b||b.getTime()-a.getTime()>3660*86400000)invalid();return {start:a,end:new Date(b.getTime()+86400000)};}
 export function allocateCents(net:string,partners:{name:string;percentage:string}[]){
   if(!partners.length||partners.length>100||new Set(partners.map(p=>p.name.trim())).size!==partners.length)invalid();

@@ -87,6 +87,10 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
   }
   const businessMode=(membership.project.settings as {businessMode?:string}|null)?.businessMode;
+  if(/^(gmail|paypal|paypalEmail|fund|withdrawal|cost|profitSplit|partner|earnWithdrawal|dashboard)\./.test(path)){
+    const managedBusiness=businessMode==='PROXY_VM'||await ctx.prisma.operationJournal.findFirst({where:{projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}});
+    if(managedBusiness)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng business hợp nhất để giữ dữ liệu, quyền và lịch sử'});
+  }
   if(path==='server.getCredentials'&&membership.role==='VIEWER')throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được xem/copy thông tin đăng nhập'});
   if(/^(server|vmTask)\./.test(path)){
     const managedProject=businessMode==='PROXY_VM'||await ctx.prisma.server.findFirst({where:{projectId,managed:true},select:{id:true}});

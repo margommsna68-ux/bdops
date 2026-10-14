@@ -16,6 +16,7 @@ export async function assertDeleteTarget(db:PrismaClient,projectId:string,entity
   const scope=entity==='VirtualMachine'?{server:{projectId}}:entity==='VMTask'?{vm:{server:{projectId}}}:{projectId};
   if(!await model.findFirst({where:{id:entityId,...scope},select:{id:true}})) denied();
   if(entity==='Server'||entity==='VirtualMachine'){const item=await model.findFirst({where:{id:entityId,...scope},select:{managed:true}});if(item?.managed)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Máy có cấu hình và lịch sử; dùng luồng ẩn máy mới thay vì xoá'});}
+  if(['GmailAccount','PayPalAccount','CostRecord','FundTransaction','Withdrawal','ProfitSplit'].includes(entity)){const item=await model.findFirst({where:{id:entityId,...scope},select:{businessManaged:true}});if(item?.businessManaged||await db.operationJournal.findFirst({where:{projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dữ liệu business có lịch sử; dùng luồng ẩn/thu hồi thay vì xoá'});}
   if(entity==='VMTask'){const task=await db.vMTask.findFirst({where:{id:entityId,...scope},select:{configurationId:true,vm:{select:{managed:true}}}});if(task?.configurationId||task?.vm.managed)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Việc cài có cấu hình và lịch sử; dùng luồng VM mới thay vì xoá'});}
 }
 export async function assertProjectCanBeDestroyed(db:PrismaClient,projectId:string){
