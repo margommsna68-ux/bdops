@@ -1,0 +1,11 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {buildReconciliation} from '../../src/server/proxy-management/reconcile';
+import type {SheetSnapshot,ProxyContext} from '../../src/server/proxy-management/types';
+const file=process.argv[2],output=process.argv[3];
+if(!file||!output) throw new Error('Usage: tsx scripts/proxy-import/inspect-snapshot.ts input.json report.json');
+const input=JSON.parse(readFileSync(file,'utf8')) as SheetSnapshot;
+if(!Array.isArray(input.rows)||!Array.isArray(input.snapshots)) throw new Error('Invalid snapshot shape');
+const source=input.snapshots.find(s=>s.sourceKey==='GENJY')||{id:'',sourceKey:'GENJY',hash:'UNAVAILABLE',fetchedAt:new Date(0).toISOString(),scanSucceeded:false};
+const context:ProxyContext={identities:[],endpoints:[],evidence:[],history:[],receipts:[],source};
+writeFileSync(output,JSON.stringify(buildReconciliation(input,context),null,2));
+console.log('Read-only redacted reconciliation report written. No database access.');

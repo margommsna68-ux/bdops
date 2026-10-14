@@ -10,4 +10,4 @@ Chạy trên nhánh `feat/proxy-inventory` trong `bdops-proxy-app/`. Source gố
 
 Baseline `0_init` chỉ áp dụng trực tiếp lên database trống. Database đã có dữ liệu cần backup, diff schema và xác nhận khớp trước `migrate resolve --applied 0_init`. Không seed, reset hoặc push schema tự động.
 
-Railway dùng pre-deploy `npx prisma migrate deploy`, startup `npm start`. Giữ encryption key ổn định và riêng mỗi môi trường. Không đưa credentials vào screenshot/log/Git.
+Railway dùng pre-deploy `npx prisma migrate deploy`, startup `npm start`. Service mới cấu hình trực tiếp tại Settings hoặc Railway IaC; TOML trong source chỉ phục vụ service legacy còn hỗ trợ. Giữ encryption key ổn định và riêng mỗi môi trường. Không đưa credentials vào screenshot/log/Git.

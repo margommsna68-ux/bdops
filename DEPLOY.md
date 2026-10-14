@@ -28,7 +28,9 @@ ENCRYPTION_KEY=<generate: openssl rand -hex 32>
 **Note**: `DATABASE_URL` is auto-set by Railway PostgreSQL addon.
 
 ## Step 4: Deploy
-Railway auto-deploys on push. The `railway.toml` handles:
+Configure the trial service with Dockerfile build and pre-deploy `npx prisma migrate deploy` in Settings or Railway IaC. New services do not read deprecated Config as Code files. `railway.toml` is retained for legacy services only; see [Railway IaC](https://docs.railway.com/infrastructure-as-code#iac-vs-config-as-code).
+
+Deployment must:
 - Install dependencies
 - Generate Prisma client
 - Apply reviewed migrations with `npx prisma migrate deploy` in the pre-deploy command

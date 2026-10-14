@@ -17,6 +17,8 @@ it('quarantines duplicate legacy IP variants and keeps them out of available inv
     const context=await loadProxyContext(scope,{kind:'NEW',text:'192.0.2.44:80:new:credentials',idempotencyKey:'fixture'},db);
     expect(context.endpoints).toHaveLength(2);
     expect(context.history.every(h=>h.occurredAt===null)).toBe(true);
+    const events=await db.proxyStatusEvent.findMany({where:{projectId:id}});
+    expect(events).toHaveLength(2);expect(events.every(e=>e.occurredAt===null&&e.recordedAt instanceof Date)).toBe(true);
     expect(JSON.stringify(result)).not.toContain('credentials');
   }finally{
     await db.proxyStatusEvent.deleteMany({where:{projectId:id}});await db.proxyIP.deleteMany({where:{projectId:id}});
