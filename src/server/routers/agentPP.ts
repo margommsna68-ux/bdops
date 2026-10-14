@@ -272,7 +272,7 @@ export const agentPPRouter = router({
 
       const [received, sold, salesBreakdown] = await Promise.all([
         ctx.prisma.withdrawal.aggregate({
-          where: { businessManaged: false, 
+          where: { businessManaged: false,
             projectId: input.projectId,
             type: "EXCHANGE",
             agentEmailId: { in: myEmailIds },
@@ -334,7 +334,7 @@ export const agentPPRouter = router({
 
       const [received, sold] = await Promise.all([
         ctx.prisma.withdrawal.aggregate({
-          where: { businessManaged: false, 
+          where: { businessManaged: false,
             projectId: input.projectId,
             type: "EXCHANGE",
             agentEmailId: { in: allEmailIds },
@@ -812,7 +812,7 @@ export const agentPPRouter = router({
       const emailIds = emails.map((e) => e.id);
       const wdAggs = await ctx.prisma.withdrawal.groupBy({
         by: ["agentEmailId"],
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           projectId: input.projectId,
           type: "EXCHANGE",
           agentEmailId: { in: emailIds },
@@ -862,7 +862,7 @@ export const agentPPRouter = router({
 
       // Today's withdrawals (sales to agents)
       const todayWithdrawals = await ctx.prisma.withdrawal.findMany({
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           projectId: input.projectId,
           type: "EXCHANGE",
           date: { gte: vnTodayStart },
@@ -920,7 +920,7 @@ export const agentPPRouter = router({
       // Auto-heal: backfill agentUserId on withdrawals that have our agent email but null user id
       if (myEmailIds.length > 0) {
         await ctx.prisma.withdrawal.updateMany({
-          where: { businessManaged: false, 
+          where: { businessManaged: false,
             type: "EXCHANGE",
             agentEmailId: { in: myEmailIds },
             agentUserId: null,
@@ -931,7 +931,7 @@ export const agentPPRouter = router({
 
       // All incoming withdrawals (cross-project) — match by email OR directly by user id
       const withdrawals = await ctx.prisma.withdrawal.findMany({
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           type: "EXCHANGE",
           OR: [
             { agentEmailId: { in: myEmailIds } },
@@ -1200,7 +1200,7 @@ export const agentPPRouter = router({
 
       // Find all EXCHANGE withdrawals (cross-project, same as agentPerformance)
       const allW = await ctx.prisma.withdrawal.findMany({
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           type: "EXCHANGE",
           OR: [{ agentEmailId: { not: null } }, { agentUserId: { not: null } }],
           ...(currentDateFilter ? { date: currentDateFilter } : {}),
@@ -1304,7 +1304,7 @@ export const agentPPRouter = router({
 
       // ═══ STEP 1: Find ALL agents who have EXCHANGE withdrawals in this project ═══
       const projectWithdrawals = await ctx.prisma.withdrawal.findMany({
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           projectId: input.projectId,
           type: "EXCHANGE",
           OR: [
@@ -1390,7 +1390,7 @@ export const agentPPRouter = router({
 
       // One query: ALL withdrawals for ALL agents (cross-project, with optional date filter)
       const allCrossW = await ctx.prisma.withdrawal.findMany({
-        where: { businessManaged: false, 
+        where: { businessManaged: false,
           type: "EXCHANGE",
           OR: [
             ...(allUserEmailIds.length > 0 ? [{ agentEmailId: { in: allUserEmailIds } }] : []),

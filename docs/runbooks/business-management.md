@@ -38,3 +38,7 @@ Backup mã hóa chứa cả proxy/VM/tài khoản/công việc/thu-chi/kỳ và 
 Gmail `vm-demo@example.invalid` ghi trên demo-server/VM_001, proxy192.0.2.101:5432 không đổi. PP-DEMO nhận100USD, rút80USD xác nhận về, chi phíserver30USD → lợi nhuận50USD. Tỷ lệ mẫu100% chỉ phục vụ QA, không phải thỏa thuận thật. Kỳ mẫu đã chốt, thử sửa bị chặn, rồi mở lại có lý do để tiếp tục dùng thử. Công việc mẫu đã thử hoàn tác; dấu vết còn trong Lịch sử. Các tài khoản operator/viewer mẫu chỉ có INFRASTRUCTURE, không cấp quyền cho người thật.
 
 155 tests/38 files, types/lint/production build đã qua trước lượt rà cuối; bốn cảnh báo hook agent-pp có sẵn. Encrypted backup3deacbf2-63d3-43f5-97b6-7a5e22eba51d khôi phục38 bảng, decrypt được proxy và business history v3, database đang chạy không đổi. Kết quả rà cuối/build cuối được bổ sung khi hoàn tất.
+
+Lượt rà cuối đã xử lý5 lỗi quan trọng và bổ sung nguồn IDs/revisions cho kỳ lợi nhuận. Kiểm chứng cuối:162 tests/39 files, types/lint và production build thành công; chỉ còn4 cảnh báo hook cũ. Tài khoản chỉ xem không thấy menu tiền, truy cập trực tiếp /profit bị chặn. Preview cuối chạy trên127.0.0.1:3010. Không nhập dữ liệu thật, không push/merge/Railway.
+
+Bản sao cuối sau kiểm thử vai trò và tính lại kỳ:92fdf4d7-16dc-41c6-aacb-8e99149e3f53,237167bytes, SHA256565da21207625fdacd5ad0b232bd9637be93532077b445d9288d5d1ee8e84853. Restore riêngproxy_restore_1791991278902:38bảng, giải mã proxy/lịch sử business, DB đang dùng không đổi. Bản tính nguồn đã lưu IDs/revisions để tra sau; giao diện quản lý đã mở lại.

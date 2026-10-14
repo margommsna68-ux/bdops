@@ -18,3 +18,9 @@
 Thứ tự còn lại: (4) chuyển dữ liệu Sheet mới và nghiệm thu; (5) host Railway + backup độc lập; (6) business nối tài khoản, chi phí/thu nhập/lợi nhuận. Trang tạo dự án/quản trị và các module business cũ vẫn cần lượt hợp nhất sau; bản thử dùng workspace PROXY_TRIAL đã cấu hình rõ. Không xoá các module tài chính cũ để làm giao diện cá nhân.
 
 Nâng cấp sau vận hành: backup tự động/retention và cảnh báo lỗi; đối chiếu cấu hình máy thực với desired; tìm kiếm toàn hệ thống; xuất báo cáo chi phí proxy/server; tổng hợp lợi nhuận theo dự án. Chỉ thêm khi giúp thao tác thật, tránh màn hình thừa.
+
+## Mốc business local đã nối — 14/10/2026
+
+Tổng quan, Gmail/PayPal, công việc, tiền nhận/rút/chi phí và kỳ lợi nhuận đã nối cùng dự án/VM/nhật ký. Lợi nhuận = tiền đã rút − chi phí; USD/VND riêng. 162 tests/39 files, types/lint/build đã qua. Một lượt rà độc lập và sửa lỗi đã đóng đường cũ vượt quyền/sửa tiền đã chốt, giữ liên kết email PayPal. Trang tạo dự án có Business Proxy/VM; các trang cũ được giữ nguyên. Hướng dẫn: business-management.md. Backup đã khôi phục 38 bảng và giải mã được lịch sử business.
+
+Chưa nhập Sheet hiện hành, chưa lên Railway hoặc dùng dữ liệu thật. Trước triển khai: đối chiếu nguồn mới/ngoại lệ, chốt quản trị tài khoản và cách ghi chi phí thực tế, nâng thư viện cũ, backup storage độc lập/TLS và thử khôi phục trên host. Giữ worktree local để anh thử và chốt quy trình.

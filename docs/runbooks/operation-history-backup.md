@@ -17,3 +17,9 @@ Kiểm chứng 14/10/2026: 118 tests qua, production build qua; vòng real pg_du
 ## VM schema roundtrip — 14/10/2026
 
 Encrypted backup 6703fb3b-b716-4a53-9cd6-b788b52d3f74 (205480 bytes, SHA256 c3354021241261c964aed6c51b7a833ee4e617f4d325042d9c653fdf0227fd9d) restored to separate empty local proxy_restore_1791983833257. Verified 37 table counts (AuditLog growth excluded) and encrypted proxy credential decryption. Original proxy_app_trial unchanged. Includes new VMConfiguration/VMProxyAllocation, journal/config pointers and all synthetic UI allocation/install history. Keys remain private local config; this does not validate production disaster recovery.
+
+## Business schema roundtrip — 14/10/2026
+
+Encrypted backup3deacbf2-63d3-43f5-97b6-7a5e22eba51d (231021bytes, SHA2564c23c47496192723c55efc5094c6ddf5c0dd0d352db44866a066e1c9e38e3196) restored to separate empty proxy_restore_1791989620293. Verified38table counts, proxy credential cipher and business history v3 decryption; active application database unchanged. Whole canonical accounts/work/finance/profit are included. Later sample work undo and viewer role QA do not imply real business operations.
+
+Final reviewed-source roundtrip:backup92fdf4d7-16dc-41c6-aacb-8e99149e3f53,237167bytes,SHA256565da21207625fdacd5ad0b232bd9637be93532077b445d9288d5d1ee8e84853 → isolatedproxy_restore_1791991278902.38tables and proxy/business history decryption verified; active DB unchanged. Includes final sample source facts, operator/viewer trial identities and work undo history.
