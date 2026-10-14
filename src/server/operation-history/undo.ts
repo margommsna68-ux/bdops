@@ -7,6 +7,8 @@ import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {openSnapshot,recordOperation} from './journal';
 import {assertImagesUnchanged,readImage,type OperationSnapshot,type ResourceImage} from './snapshot';
 import {restoreVMImage} from '../vm-management/operation-images';
+import {isBusinessResource,restoreBusinessImage} from '../business-management/operation-images';
+import type {BusinessImage} from '../business-management/types';
 export async function undoOperation(scope:ActorScope,id:string,reason:string,db:PrismaClient=prisma,deps:{afterWrite?:()=>void|Promise<void>}={}){
   if(!reason.trim()||reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Ghi lý do hoàn tác (tối đa 300 ký tự)');
   return withProxyTransaction(async tx=>{
@@ -32,14 +34,15 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
       }else if(image.resource==='MEMBER'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {accessRevision:_accessRevision,...data}=image.before;await tx.projectMember.update({where:{id:image.id},data});
-      }else await restoreVMImage(tx,image,reason.trim());
+      }else if(isBusinessResource(image.resource))await restoreBusinessImage(tx,scope.projectId,image as BusinessImage);
+      else await restoreVMImage(tx,image as Parameters<typeof restoreVMImage>[1],reason.trim());
       reversed.resources.push({...image,before:image.after,after:await readImage(tx,scope.projectId,image.resource,image.id)} as ResourceImage);
       await deps.afterWrite?.();
     }
     // Keep RECEIVED and ownership facts intact, even after cancelling the operation.
     await tx.proxyStatusEvent.updateMany({where:{id:{in:snapshot.eventIds},projectId:scope.projectId,kind:{in:['BLOCKED','REPLACED','SHEET_IMPORT']}},data:{reversedAt:now}});
     await tx.proxyReplacement.updateMany({where:{id:{in:snapshot.replacementIds},projectId:scope.projectId},data:{status:'VOID'}});
-    const operation=await recordOperation(tx,{scope:current,kind:'UNDO',summary:{originalKind:original.kind,reason:reason.trim(),count:snapshot.resources.length},snapshot:reversed,undoOfId:id});
+    const operation=await recordOperation(tx,{scope:current,kind:'UNDO',accessModule:original.accessModule,summary:{originalKind:original.kind,reason:reason.trim(),count:snapshot.resources.length},snapshot:reversed,undoOfId:id});
     await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'UNDO_OPERATION',entity:'OperationJournal',entityId:operation.id,changes:{undoOfId:id,reason:reason.trim()}}});
     return {id:operation.id,replay:false};
   },db);
