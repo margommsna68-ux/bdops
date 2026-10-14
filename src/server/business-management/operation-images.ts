@@ -33,7 +33,7 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
 export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId:string,image:BusinessImage){
  if(['COST','FUND','WITHDRAWAL'].includes(image.resource))for(const state of [image.after,image.before])if(state?.date)await assertPeriodOpen(tx,projectId,new Date(String(state.date)),String(state.currency));
  if(image.resource==='PROFIT'&&image.after.settled)throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt; không hoàn tác thông thường');
- if(image.resource==='SPLIT_PAYMENT')throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
+ if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
  if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt'].includes(key)?new Date(String(value)):value;}}
  else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK'].includes(image.resource))data.archivedAt=new Date();
@@ -50,5 +50,6 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='FUND')await tx.fundTransaction.update({where:{id:image.id},data:data as Prisma.FundTransactionUncheckedUpdateInput});
  if(image.resource==='WITHDRAWAL')await tx.withdrawal.update({where:{id:image.id},data:data as Prisma.WithdrawalUncheckedUpdateInput});
  if(image.resource==='PROFIT')await tx.profitSplit.update({where:{id:image.id},data:data as Prisma.ProfitSplitUncheckedUpdateInput});
+ if(image.resource==='SPLIT_PAYMENT')await tx.splitAllocation.update({where:{id:image.id},data:data as Prisma.SplitAllocationUncheckedUpdateInput});
 }
 export function describeBusinessImage(image:BusinessImage){const s=image.after,b=image.before,label=String(s.email||s.code||s.title||s.transactionId||s.partnerName||image.id),format=(row:BusinessRow|null)=>!row?'Chưa có':row.voidedAt||row.archivedAt?'Đã thu hồi / ẩn':row.amount?`${row.amount} ${row.currency||''}`:row.status?String(row.status):row.gmailId?'Đã ghi tài khoản trên VM':row.netProfit?`Lợi nhuận ${row.netProfit} ${row.currency}`:'Đã lưu';return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận'}[image.resource],label,before:format(b),after:format(s),onUndo:b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};}

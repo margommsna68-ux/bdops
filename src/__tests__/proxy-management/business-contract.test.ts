@@ -12,6 +12,7 @@ it('allocates all cents exactly including negative profit and rejects invalid pe
   const partners=[{name:'A',percentage:'33.33'},{name:'B',percentage:'66.67'}];
   expect(allocateCents('10.00',partners).map(p=>p.amount)).toEqual(['3.33','6.67']);
   expect(allocateCents('-0.01',partners).map(p=>p.amount)).toEqual(['0.00','-0.01']);
+  expect(allocateCents('10000000000.00',[{name:'A',percentage:'100'}])[0].amount).toBe('10000000000.00');
   expect(()=>allocateCents('10.00',[{name:'A',percentage:'50'}])).toThrow();
   expect(()=>allocateCents('10.00',[{name:'A',percentage:'50'},{name:'A',percentage:'50'}])).toThrow();
 });

@@ -8,7 +8,7 @@ export function period(start:string,end:string){const a=dayDate(start),b=dayDate
 export function allocateCents(net:string,partners:{name:string;percentage:string}[]){
   if(!partners.length||partners.length>100||new Set(partners.map(p=>p.name.trim())).size!==partners.length)invalid();
   const bps=partners.map(p=>{if(!p.name.trim())invalid();const pct=money(p.percentage);if(pct.gt(100))invalid();return BigInt(pct.mul(100).toFixed(0));});if(bps.reduce((a,b)=>a+b,BigInt(0))!==BigInt(10000))invalid();
-  const negative=net.startsWith('-'),cents=BigInt(money(negative?net.slice(1):net).mul(100).toFixed(0)),shares=bps.map((bp,index)=>({index,value:cents*bp/BigInt(10000),remainder:cents*bp%BigInt(10000)}));
+  const negative=net.startsWith('-'),total=negative?net.slice(1):net;if(!/^(0|[1-9]\d{0,11})(\.\d{1,2})?$/.test(total))invalid();const cents=BigInt(new Prisma.Decimal(total).mul(100).toFixed(0)),shares=bps.map((bp,index)=>({index,value:cents*bp/BigInt(10000),remainder:cents*bp%BigInt(10000)}));
   const remainder=cents-shares.reduce((a,b)=>a+b.value,BigInt(0)),ordered=[...shares].sort((a,b)=>Number(b.remainder-a.remainder)||a.index-b.index);for(let i=0;i<Number(remainder);i++)ordered[i].value++;
   return partners.map((p,index)=>({name:p.name.trim(),percentage:new Prisma.Decimal(p.percentage).toFixed(2),amount:new Prisma.Decimal(shares[index].value.toString()).div(100).mul(negative?-1:1).toFixed(2)}));
 }
