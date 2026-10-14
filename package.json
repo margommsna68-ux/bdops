@@ -17,6 +17,8 @@
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest"
+    ,"db:test": "tsx scripts/test-db.ts"
+    ,"db:migrate": "prisma migrate deploy"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

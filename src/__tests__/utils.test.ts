@@ -31,7 +31,7 @@ describe("formatDate", () => {
   it("formats Date object", () => {
     const d = new Date("2024-06-15T12:00:00Z");
     const result = formatDate(d);
-    expect(result).toContain("Jun");
+    expect(result).toContain("thg 6");
     expect(result).toContain("15");
     expect(result).toContain("2024");
   });
@@ -39,7 +39,7 @@ describe("formatDate", () => {
   it("formats date string", () => {
     // Use explicit time to avoid timezone issues
     const result = formatDate("2024-01-15T12:00:00");
-    expect(result).toContain("Jan");
+    expect(result).toContain("thg 1");
     expect(result).toContain("15");
     expect(result).toContain("2024");
   });

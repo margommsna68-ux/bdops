@@ -31,18 +31,13 @@ ENCRYPTION_KEY=<generate: openssl rand -hex 32>
 Railway auto-deploys on push. The `railway.toml` handles:
 - Install dependencies
 - Generate Prisma client
-- Push schema to DB
+- Apply reviewed migrations with `npx prisma migrate deploy` in the pre-deploy command
 - Build Next.js
 
-## Step 5: Seed Data (first time)
-In Railway project > your service > Settings > Run Command (one-time):
-```bash
-npx tsx prisma/seed.ts
-```
-Or use Railway CLI:
-```bash
-railway run npx tsx prisma/seed.ts
-```
+## Step 5: Existing databases and trial data
+An empty trial database can apply all migrations. For an existing database, back up and compare its schema before baselining `0_init` with `prisma migrate resolve --applied 0_init`. Never run the create-tables baseline blindly on existing tables.
+
+Startup is `npm start`; schema changes are a separate pre-deploy step. Production deployment does not seed, reset, or run `db push --accept-data-loss`. Trial acceptance uses synthetic data only; see `docs/runbooks/proxy-staging.md`.
 
 ## Step 6: Google OAuth
 Update Google Cloud Console OAuth:
