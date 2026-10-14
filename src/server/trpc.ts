@@ -65,20 +65,25 @@ const ROLE_HIERARCHY: Record<ProjectRole, number> = {
   ADMIN: 3,
   MODERATOR: 2,
   USER: 1,
+  VIEWER: 0,
 };
 
 // Base middleware: verify project membership and extract role
-const enforceProjectMember = enforceAuth.unstable_pipe(({ ctx, next, rawInput }) => {
+const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawInput, type }) => {
   const input = rawInput as any;
   const projectId = input?.projectId;
   if (!projectId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "projectId required" });
   }
-  const membership = (ctx.user.memberships as any[])?.find(
-    (m: any) => m.projectId === projectId
-  );
+  const membership = await ctx.prisma.projectMember.findUnique({
+    where: { userId_projectId: {userId:ctx.user.id,projectId} },
+    include: { project:true },
+  });
   if (!membership) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this project" });
+  }
+  if (type === 'mutation' && membership.role === 'VIEWER') {
+    throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
   }
   return next({
     ctx: {

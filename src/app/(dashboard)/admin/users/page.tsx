@@ -120,12 +120,12 @@ export default function AdminUsersPage() {
   const [formUsername, setFormUsername] = useState("");
   const [formPassword, setFormPassword] = useState("");
   const [formPin, setFormPin] = useState("");
-  const [formRole, setFormRole] = useState<"ADMIN" | "MODERATOR" | "USER">("USER");
+  const [formRole, setFormRole] = useState<"ADMIN" | "MODERATOR" | "USER" | "VIEWER">("USER");
   const [formModules, setFormModules] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
 
   // Edit form state
-  const [editRole, setEditRole] = useState<"ADMIN" | "MODERATOR" | "USER">("USER");
+  const [editRole, setEditRole] = useState<"ADMIN" | "MODERATOR" | "USER" | "VIEWER">("USER");
   const [editModules, setEditModules] = useState<string[]>([]);
   const [editName, setEditName] = useState("");
   const [editUsername, setEditUsername] = useState("");
@@ -256,7 +256,7 @@ export default function AdminUsersPage() {
 
   // Project assignment dialog
   const [projectDialog, setProjectDialog] = useState<{ userId: string; name: string; memberships: any[] } | null>(null);
-  const [addProjectRole, setAddProjectRole] = useState<"ADMIN" | "MODERATOR" | "USER">("USER");
+  const [addProjectRole, setAddProjectRole] = useState<"ADMIN" | "MODERATOR" | "USER" | "VIEWER">("USER");
   const [addProjectModules, setAddProjectModules] = useState<string[]>(["AUTOTYPE"]);
   const { data: allProjects } = trpc.project.list.useQuery(undefined, { enabled: !!projectDialog });
   const addMember = trpc.project.addMember.useMutation({
@@ -317,7 +317,7 @@ export default function AdminUsersPage() {
 
   // Determine available roles for create form
   const availableRoles = isAdmin
-    ? (["ADMIN", "MODERATOR", "USER"] as const)
+    ? (["ADMIN", "MODERATOR", "USER", "VIEWER"] as const)
     : (["USER"] as const);
 
   function renderMember(m: any) {

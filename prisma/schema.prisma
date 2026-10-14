@@ -54,6 +54,11 @@ model Project {
   description      String?
   settings         Json?
   members          ProjectMember[]
+  proxyCatalog     ProxyProviderAccount[]
+  proxySnapshots   ProxySourceSnapshot[]
+  proxyEvents      ProxyStatusEvent[]
+  proxyBatches     ProxyBatch[]
+  proxyReplacements ProxyReplacement[]
   servers          Server[]
   paypalAccounts   PayPalAccount[]
   paypalEmails     PayPalEmail[]
@@ -83,6 +88,7 @@ model ProjectMember {
   projectId       String
   role            ProjectRole @default(USER)
   allowedModules  String[]    @default([])
+  capabilities    String[]    @default([])
   canManageUsers  Boolean     @default(false)
   managerId       String?
   maxAutotypeDevices Int      @default(2)
@@ -98,6 +104,7 @@ enum ProjectRole {
   ADMIN
   MODERATOR
   USER
+  VIEWER
 }
 
 // ═══════════════════════════════════════
@@ -222,6 +229,21 @@ model ProxyIP {
   status        ProxyStatus @default(AVAILABLE)
   outboundIP    String?
   blockReason   String?
+  identityId    String?
+  identity      ProxyIdentity? @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  credentialCipher String?
+  packageCode   String?
+  inventoryState ProxyInventoryState @default(QUARANTINED)
+  inventoryKey  String?
+  revision      Int @default(0)
+  statusAt      DateTime?
+  retiredAt     DateTime?
+  notesCipher   String?
+  hasManualMetadata Boolean @default(false)
+  sourceRefs    ProxySourceReference[]
+  statusEvents  ProxyStatusEvent[]
+  replacedFrom  ProxyReplacement[] @relation("ReplacementOld")
+  replacedTo    ProxyReplacement[] @relation("ReplacementNew")
   project       Project     @relation(fields: [projectId], references: [id])
   projectId     String
   vm            VirtualMachine?
@@ -231,6 +253,145 @@ model ProxyIP {
 
   @@unique([address, projectId])
   @@index([projectId, status])
+  @@index([identityId])
+  @@index([projectId, inventoryState])
+}
+
+enum ProxyOwner {
+  SELF
+  GENJY
+  UNKNOWN
+}
+enum ProxySubgroup {
+  PC_CHUNG
+}
+enum ProxyAllocationMode {
+  SINGLE_IP
+  APPROVED_PORT_STREAM
+}
+enum ProxyInventoryState {
+  NEW
+  LIVE
+  BLOCKED
+  REPLACED
+  DIE
+  QUARANTINED
+}
+model ProxyIdentity {
+  id String @id @default(cuid())
+  ip String @unique @db.Inet
+  owner ProxyOwner @default(UNKNOWN)
+  subgroup ProxySubgroup?
+  allocationMode ProxyAllocationMode @default(SINGLE_IP)
+  policyEvidenceCipher String?
+  revision Int @default(1)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  endpoints ProxyIP[]
+  sourceRefs ProxySourceReference[]
+  events ProxyStatusEvent[]
+}
+model ProxyProviderAccount {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  code String
+  label String
+  credentialCipher String
+  disabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@unique([projectId,code])
+}
+model ProxySourceSnapshot {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  sourceKey String
+  hash String
+  fetchedAt DateTime @default(now())
+  scanSucceeded Boolean
+  metadata Json?
+  encryptedPayload String?
+  references ProxySourceReference[]
+  @@index([projectId,sourceKey,fetchedAt])
+}
+model ProxySourceReference {
+  id String @id @default(cuid())
+  snapshotId String
+  snapshot ProxySourceSnapshot @relation(fields:[snapshotId], references:[id], onDelete:Restrict)
+  identityId String
+  identity ProxyIdentity @relation(fields:[identityId], references:[id], onDelete:Restrict)
+  endpointId String?
+  endpoint ProxyIP? @relation(fields:[endpointId], references:[id], onDelete:Restrict)
+  sourceRef String
+  format String
+  owner ProxyOwner
+  subgroup ProxySubgroup?
+  hasFullCredentials Boolean @default(false)
+  hasManualMetadata Boolean @default(false)
+  dataCipher String?
+  @@index([identityId,snapshotId])
+  @@unique([snapshotId,sourceRef,identityId])
+}
+model ProxyBatch {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  actorId String
+  kind String
+  idempotencyKey String
+  payloadHash String
+  token String @unique
+  encryptedPlan String
+  sourceHash String
+  revisionFacts Json
+  previewRows Json
+  result Json?
+  status String @default("PREVIEW")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  appliedAt DateTime?
+  events ProxyStatusEvent[]
+  replacements ProxyReplacement[]
+  @@unique([projectId,idempotencyKey])
+  @@index([projectId,createdAt])
+}
+model ProxyStatusEvent {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  identityId String
+  identity ProxyIdentity @relation(fields:[identityId], references:[id], onDelete:Restrict)
+  endpointId String?
+  endpoint ProxyIP? @relation(fields:[endpointId], references:[id], onDelete:Restrict)
+  batchId String?
+  batch ProxyBatch? @relation(fields:[batchId], references:[id], onDelete:Restrict)
+  ip String @db.Inet
+  kind String
+  occurredAt DateTime?
+  recordedAt DateTime @default(now())
+  actorId String?
+  reason String?
+  sourceRef String?
+  @@index([projectId,identityId,recordedAt])
+}
+model ProxyReplacement {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  oldEndpointId String
+  oldEndpoint ProxyIP @relation("ReplacementOld",fields:[oldEndpointId], references:[id], onDelete:Restrict)
+  newEndpointId String @unique
+  newEndpoint ProxyIP @relation("ReplacementNew",fields:[newEndpointId], references:[id], onDelete:Restrict)
+  ownerSnapshot ProxyOwner
+  subgroupSnapshot ProxySubgroup?
+  receivedDate DateTime? @db.Date
+  recordedAt DateTime @default(now())
+  actorId String
+  status String @default("APPLIED")
+  batchId String
+  batch ProxyBatch @relation(fields:[batchId], references:[id], onDelete:Restrict)
+  @@index([projectId,oldEndpointId])
 }
 
 enum ProxyStatus {

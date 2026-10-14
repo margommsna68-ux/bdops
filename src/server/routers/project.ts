@@ -320,7 +320,7 @@ export const projectRouter = router({
         name: z.string().min(1),
         password: z.string().min(6),
         pin: z.string().min(4).max(6).regex(/^\d+$/).optional().or(z.literal("")),
-        role: z.enum(["ADMIN", "MODERATOR", "USER"]),
+        role: z.enum(["ADMIN", "MODERATOR", "USER", "VIEWER"]),
         allowedModules: z.array(z.enum(APP_MODULES as unknown as [string, ...string[]])).default([]),
       })
     )
@@ -405,7 +405,7 @@ export const projectRouter = router({
       z.object({
         projectId: z.string(),
         email: z.string().email(),
-        role: z.enum(["ADMIN", "MODERATOR", "USER"]),
+        role: z.enum(["ADMIN", "MODERATOR", "USER", "VIEWER"]),
         allowedModules: z.array(z.enum(APP_MODULES as unknown as [string, ...string[]])).default([]),
       })
     )
@@ -446,7 +446,7 @@ export const projectRouter = router({
       z.object({
         projectId: z.string(),
         memberId: z.string(),
-        role: z.enum(["ADMIN", "MODERATOR", "USER"]).optional(),
+        role: z.enum(["ADMIN", "MODERATOR", "USER", "VIEWER"]).optional(),
         allowedModules: z.array(z.enum(APP_MODULES as unknown as [string, ...string[]])).optional(),
         canManageUsers: z.boolean().optional(),
         managerId: z.string().nullable().optional(),
