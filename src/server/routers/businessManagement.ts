@@ -14,7 +14,7 @@ import {createProfitPeriod,recalculateProfit,settleProfit,reopenProfit,markProfi
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),revision=z.number().int().nonnegative(),reason=z.string().trim().min(1).max(300);
 const range=project.extend({start:z.string().length(10),end:z.string().length(10),currency:z.enum(['USD','VND'])});
 async function domain<T>(fn:()=>Promise<T>){try{return await fn();}catch(error){
- if(error instanceof ProxyDomainError)throw new TRPCError({code:error.code==='FORBIDDEN'?'FORBIDDEN':error.code==='NOT_FOUND'?'NOT_FOUND':error.code==='INVALID_INPUT'?'BAD_REQUEST':'CONFLICT',message:error.message});
+ if(error instanceof ProxyDomainError)throw new TRPCError({code:error.code==='FORBIDDEN'?'FORBIDDEN':error.code==='NOT_FOUND'?'NOT_FOUND':error.code==='INVALID_INPUT'?'BAD_REQUEST':'CONFLICT',message:error.message==='STALE_PREVIEW'?'Dữ liệu đã được sửa. Đóng form, cập nhật danh sách rồi kiểm tra lại trước khi lưu.':error.message});
  if(error instanceof TRPCError)throw error;
  if(error instanceof Prisma.PrismaClientKnownRequestError&&['P2002','P2034'].includes(error.code))throw new TRPCError({code:'CONFLICT',message:'Dữ liệu đã thay đổi hoặc trùng. Tải lại để kiểm tra.'});
  throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'Chưa nhận được kết quả lưu. Tải lại để kiểm tra trước khi thử lại.'});

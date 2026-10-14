@@ -6,6 +6,7 @@ import { authOptions } from "./auth";
 import { prisma } from "@/lib/prisma";
 import { type ProjectRole } from "@prisma/client";
 import {assertLegacyInfrastructureTargets} from './permissions/legacy-infrastructure';
+import {assertUserTarget} from './permissions/user-target';
 
 export const APP_MODULES = [
   "FUNDS",
@@ -87,7 +88,7 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
   }
   const businessMode=(membership.project.settings as {businessMode?:string}|null)?.businessMode;
-  if(/^(gmail|paypal|paypalEmail|fund|withdrawal|cost|profitSplit|partner|earnWithdrawal|dashboard|editHistory)\./.test(path)){
+  if(/^(gmail|paypal|paypalEmail|fund|withdrawal|cost|profitSplit|partner|earnWithdrawal|dashboard|editHistory|agentPP)\./.test(path)){
     const managedBusiness=businessMode==='PROXY_VM'||await ctx.prisma.operationJournal.findFirst({where:{projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}});
     if(managedBusiness)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng business hợp nhất để giữ dữ liệu, quyền và lịch sử'});
   }
@@ -102,6 +103,7 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});
   }
   if(/^(proxy|vm|server)\./.test(path)) await assertLegacyInfrastructureTargets(ctx.prisma,projectId,path,input);
+  if(typeof input.userId==='string'&&(/^user\.(getDetail|adminResetPin|adminResetPassword|resetPin|resetPassword|adminUnlockAccount|kickAutotypeSession|kickAllAutotypeSessions)$/.test(path)||/^project\.(updateUserInfo|setPin|removePin)$/.test(path)))await assertUserTarget(ctx.prisma,membership,input.userId,type==='mutation');
   return next({
     ctx: {
       ...ctx,

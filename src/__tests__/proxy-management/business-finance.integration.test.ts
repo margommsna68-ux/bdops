@@ -3,11 +3,19 @@ import {randomUUID} from 'node:crypto';
 import {businessDB as db,businessFixture} from './business-fixture';
 import {saveOperatingAccount} from '@/server/business-management/accounts';
 import {saveFinance,voidFinance} from '@/server/business-management/finance';
+import {receiptEmailPatch} from '@/components/business-management/workflow';
 import {businessReport,readFinanceWorkspace} from '@/server/business-management/report';
 import {undoOperation} from '@/server/operation-history/undo';
 import {listOperations} from '@/server/operation-history/journal';
 afterAll(()=>db.$disconnect());
 const range={start:'2026-10-01',end:'2026-10-31',currency:'USD' as const};
+it('editing receipt notes preserves email attribution unless the PayPal account changes',async()=>{
+ const f=await businessFixture();try{
+  const pp=await saveOperatingAccount(f.scope,{kind:'PAYPAL',code:'PP-email',email:randomUUID()+'@fixture.invalid',key:randomUUID()},db),email=await db.payPalEmail.findFirstOrThrow({where:{paypalId:pp.id}}),fund=await saveFinance(f.scope,{kind:'FUND',date:'2026-10-14',currency:'USD',amount:'100',paypalId:pp.id,paypalEmailId:email.id,transactionId:'EMAIL-ATTRIBUTION',confirmed:true,key:randomUUID()},db);
+  const row=(await readFinanceWorkspace(f.scope,range,db)).funds[0];await saveFinance(f.scope,{kind:'FUND',id:fund.id,expectedRevision:row.revision,date:row.date,currency:'USD',amount:row.amount,paypalId:row.paypalId,paypalEmailId:receiptEmailPatch(row.paypalId,pp.id),notes:'Changed notes only',key:randomUUID()},db);
+  expect((await db.fundTransaction.findUniqueOrThrow({where:{id:fund.id}})).paypalEmailId).toBe(email.id);expect(receiptEmailPatch(pp.id,'different-paypal')).toBeNull();
+ }finally{await f.cleanup();}
+});
 it('withdrawn minus costs excludes internal transfers, drafts, voided records and other currencies',async()=>{
  const f=await businessFixture();try{
   const pp=await saveOperatingAccount(f.scope,{kind:'PAYPAL',code:'PP-1',email:randomUUID()+'@fixture.invalid',key:randomUUID()},db),dest=await saveOperatingAccount(f.scope,{kind:'PAYPAL',code:'PP-2',email:randomUUID()+'@fixture.invalid',key:randomUUID()},db);

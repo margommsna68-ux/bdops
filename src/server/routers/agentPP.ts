@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {TRPCError} from '@trpc/server';
 import { router, agentPPProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
 import { loadAgentFees, getFeePercent } from "@/lib/agent-fee";
@@ -271,7 +272,7 @@ export const agentPPRouter = router({
 
       const [received, sold, salesBreakdown] = await Promise.all([
         ctx.prisma.withdrawal.aggregate({
-          where: {
+          where: { businessManaged: false, 
             projectId: input.projectId,
             type: "EXCHANGE",
             agentEmailId: { in: myEmailIds },
@@ -333,7 +334,7 @@ export const agentPPRouter = router({
 
       const [received, sold] = await Promise.all([
         ctx.prisma.withdrawal.aggregate({
-          where: {
+          where: { businessManaged: false, 
             projectId: input.projectId,
             type: "EXCHANGE",
             agentEmailId: { in: allEmailIds },
@@ -374,7 +375,7 @@ export const agentPPRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
-        where: { id: input.id, projectId: input.projectId },
+        where: { businessManaged: false,  id: input.id, projectId: input.projectId },
       });
       const isAdminOrMod = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
 
@@ -405,7 +406,7 @@ export const agentPPRouter = router({
       }
       if (input.collectorNote !== undefined) data.collectorNote = input.collectorNote;
       const result = await ctx.prisma.withdrawal.update({
-        where: { id: input.id },
+        where: { businessManaged: false,  id: input.id },
         data,
       });
       await createAuditLog({
@@ -423,7 +424,7 @@ export const agentPPRouter = router({
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
-        where: { id: input.id, projectId: input.projectId },
+        where: { businessManaged: false,  id: input.id, projectId: input.projectId },
       });
       // Verify this agent owns the email
       if (wd.agentEmailId) {
@@ -435,7 +436,7 @@ export const agentPPRouter = router({
         }
       }
       const result = await ctx.prisma.withdrawal.update({
-        where: { id: input.id },
+        where: { businessManaged: false,  id: input.id },
         data: { agentConfirmed: true, agentDisputed: false, disputeNote: null },
       });
       await createAuditLog({
@@ -457,7 +458,7 @@ export const agentPPRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const wd = await ctx.prisma.withdrawal.findFirstOrThrow({
-        where: { id: input.id, projectId: input.projectId },
+        where: { businessManaged: false,  id: input.id, projectId: input.projectId },
       });
       if (wd.agentEmailId) {
         const email = await ctx.prisma.agentPaypalEmail.findFirst({
@@ -468,7 +469,7 @@ export const agentPPRouter = router({
         }
       }
       const result = await ctx.prisma.withdrawal.update({
-        where: { id: input.id },
+        where: { businessManaged: false,  id: input.id },
         data: { agentDisputed: true, agentConfirmed: false, disputeNote: input.note },
       });
       await createAuditLog({
@@ -673,20 +674,20 @@ export const agentPPRouter = router({
         }),
         // Today received (gross sum)
         ctx.prisma.withdrawal.aggregate({
-          where: { ...baseWhere, date: { gte: today, lt: tomorrow } },
+          where: { businessManaged: false,  ...baseWhere, date: { gte: today, lt: tomorrow } },
           _sum: { amount: true }, _count: true,
         }),
         // Pending (not confirmed, not disputed)
         ctx.prisma.withdrawal.count({
-          where: { ...baseWhere, agentConfirmed: false, agentDisputed: false },
+          where: { businessManaged: false,  ...baseWhere, agentConfirmed: false, agentDisputed: false },
         }),
         // Disputed
         ctx.prisma.withdrawal.count({
-          where: { ...baseWhere, agentDisputed: true },
+          where: { businessManaged: false,  ...baseWhere, agentDisputed: true },
         }),
         // Confirmed
         ctx.prisma.withdrawal.count({
-          where: { ...baseWhere, agentConfirmed: true },
+          where: { businessManaged: false,  ...baseWhere, agentConfirmed: true },
         }),
         // Recent 5 transactions
         ctx.prisma.withdrawal.findMany({
@@ -811,7 +812,7 @@ export const agentPPRouter = router({
       const emailIds = emails.map((e) => e.id);
       const wdAggs = await ctx.prisma.withdrawal.groupBy({
         by: ["agentEmailId"],
-        where: {
+        where: { businessManaged: false, 
           projectId: input.projectId,
           type: "EXCHANGE",
           agentEmailId: { in: emailIds },
@@ -861,7 +862,7 @@ export const agentPPRouter = router({
 
       // Today's withdrawals (sales to agents)
       const todayWithdrawals = await ctx.prisma.withdrawal.findMany({
-        where: {
+        where: { businessManaged: false, 
           projectId: input.projectId,
           type: "EXCHANGE",
           date: { gte: vnTodayStart },
@@ -919,7 +920,7 @@ export const agentPPRouter = router({
       // Auto-heal: backfill agentUserId on withdrawals that have our agent email but null user id
       if (myEmailIds.length > 0) {
         await ctx.prisma.withdrawal.updateMany({
-          where: {
+          where: { businessManaged: false, 
             type: "EXCHANGE",
             agentEmailId: { in: myEmailIds },
             agentUserId: null,
@@ -930,7 +931,7 @@ export const agentPPRouter = router({
 
       // All incoming withdrawals (cross-project) — match by email OR directly by user id
       const withdrawals = await ctx.prisma.withdrawal.findMany({
-        where: {
+        where: { businessManaged: false, 
           type: "EXCHANGE",
           OR: [
             { agentEmailId: { in: myEmailIds } },
@@ -1040,7 +1041,7 @@ export const agentPPRouter = router({
       const wallet = await ctx.prisma.agentPaypalEmail.findMany({ where: { userId }, select: { id: true } });
       const emailIds = wallet.map((e) => e.id);
       const withdrawals = await ctx.prisma.withdrawal.findMany({
-        where: { type: "EXCHANGE", OR: [...(emailIds.length > 0 ? [{ agentEmailId: { in: emailIds } }] : []), { agentUserId: userId }] },
+        where: { businessManaged: false,  type: "EXCHANGE", OR: [...(emailIds.length > 0 ? [{ agentEmailId: { in: emailIds } }] : []), { agentUserId: userId }] },
         select: { amount: true, paypalFee: true, projectId: true },
       });
       const fees = await loadAgentFees(ctx.prisma, [userId]);
@@ -1081,9 +1082,10 @@ export const agentPPRouter = router({
       // Verify linked withdrawals belong to this collector (via agentEmail ownership)
       if (input.linkedWithdrawalIds.length > 0) {
         const wds = await ctx.prisma.withdrawal.findMany({
-          where: { id: { in: input.linkedWithdrawalIds } },
+          where: { id: { in: input.linkedWithdrawalIds },projectId:input.projectId,businessManaged:false },
           select: { id: true, agentEmailId: true, agentEmail: { select: { userId: true } } },
         });
+        if(wds.length!==new Set(input.linkedWithdrawalIds).size)throw new TRPCError({code:'BAD_REQUEST',message:'Giao dịch không thuộc dự án hoặc đang quản lý trong business mới'});
         const owned = wds.every((w) => w.agentEmail && w.agentEmail.userId === ctx.user.id);
         if (!owned && ctx.role !== "ADMIN" && ctx.role !== "MODERATOR") {
           throw new Error("Some withdrawals don't belong to you");
@@ -1109,7 +1111,7 @@ export const agentPPRouter = router({
       // Mark linked withdrawals as paid
       if (input.linkedWithdrawalIds.length > 0) {
         await ctx.prisma.withdrawal.updateMany({
-          where: { id: { in: input.linkedWithdrawalIds } },
+          where: { id: { in: input.linkedWithdrawalIds },projectId:input.projectId,businessManaged:false },
           data: { paidToTeam: true, paidAt: now, expenseId: expense.id },
         });
       }
@@ -1131,9 +1133,11 @@ export const agentPPRouter = router({
   deleteExpense: agentPPProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const exp = await ctx.prisma.collectorExpense.findFirstOrThrow({
-        where: { id: input.id },
+      const exp = await ctx.prisma.collectorExpense.findFirst({
+        where: { id: input.id,projectId:input.projectId },
       });
+      if(!exp)throw new TRPCError({code:'NOT_FOUND',message:'Không tìm thấy khoản chi trong dự án'});
+      if(await ctx.prisma.withdrawal.findFirst({where:{expenseId:input.id,OR:[{projectId:{not:input.projectId}},{businessManaged:true}]},select:{id:true}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Có giao dịch business/khác dự án liên kết; kiểm tra trước khi điều chỉnh'});
       const isAdminOrMod = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
 
       // Ownership check: collector or admin
@@ -1151,7 +1155,7 @@ export const agentPPRouter = router({
       }
       // Unlink withdrawals (revert paid flag)
       await ctx.prisma.withdrawal.updateMany({
-        where: { expenseId: input.id },
+        where: { expenseId: input.id,projectId:input.projectId,businessManaged:false },
         data: { paidToTeam: false, paidAt: null, expenseId: null },
       });
       await ctx.prisma.collectorExpense.delete({ where: { id: input.id } });
@@ -1196,7 +1200,7 @@ export const agentPPRouter = router({
 
       // Find all EXCHANGE withdrawals (cross-project, same as agentPerformance)
       const allW = await ctx.prisma.withdrawal.findMany({
-        where: {
+        where: { businessManaged: false, 
           type: "EXCHANGE",
           OR: [{ agentEmailId: { not: null } }, { agentUserId: { not: null } }],
           ...(currentDateFilter ? { date: currentDateFilter } : {}),
@@ -1253,7 +1257,7 @@ export const agentPPRouter = router({
       let previous = { grossReceived: 0, netReceived: 0, teamRevenue: 0, transactionCount: 0 };
       if (previousDateFilter) {
         const prevW = await ctx.prisma.withdrawal.findMany({
-          where: { type: "EXCHANGE", date: previousDateFilter,
+          where: { businessManaged: false,  type: "EXCHANGE", date: previousDateFilter,
             OR: [{ agentEmailId: { not: null } }, { agentUserId: { not: null } }] },
           select: { amount: true, paypalFee: true, projectId: true, agentEmailId: true, agentUserId: true },
         });
@@ -1300,7 +1304,7 @@ export const agentPPRouter = router({
 
       // ═══ STEP 1: Find ALL agents who have EXCHANGE withdrawals in this project ═══
       const projectWithdrawals = await ctx.prisma.withdrawal.findMany({
-        where: {
+        where: { businessManaged: false, 
           projectId: input.projectId,
           type: "EXCHANGE",
           OR: [
@@ -1344,7 +1348,7 @@ export const agentPPRouter = router({
       for (const ae of agentEmails) {
         userIdSet.add(ae.userId);
         await ctx.prisma.withdrawal.updateMany({
-          where: { agentEmailId: ae.id, agentUserId: null, type: "EXCHANGE" },
+          where: { businessManaged: false,  agentEmailId: ae.id, agentUserId: null, type: "EXCHANGE" },
           data: { agentUserId: ae.userId },
         });
       }
@@ -1386,7 +1390,7 @@ export const agentPPRouter = router({
 
       // One query: ALL withdrawals for ALL agents (cross-project, with optional date filter)
       const allCrossW = await ctx.prisma.withdrawal.findMany({
-        where: {
+        where: { businessManaged: false, 
           type: "EXCHANGE",
           OR: [
             ...(allUserEmailIds.length > 0 ? [{ agentEmailId: { in: allUserEmailIds } }] : []),

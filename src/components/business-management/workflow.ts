@@ -4,3 +4,4 @@ export function commandKeyStore(make:()=>string){let previous='',key='';return (
 export function financialStatus(kind:string,row:{confirmed?:boolean;failed?:boolean;type?:string;paidToTeam?:boolean}){if(kind==='FUND')return row.failed?'Không về':row.confirmed?'Đã nhận':'Chờ nhận';if(kind==='WITHDRAWAL')return row.type==='MIXING'?'Chuyển nội bộ':row.paidToTeam?'Đã về':'Chờ về';return 'Đã ghi chi phí';}
 export const moneyDisplay=(amount:string,currency:string)=>new Intl.NumberFormat('vi-VN',{maximumFractionDigits:2,minimumFractionDigits:currency==='USD'?2:0}).format(Number(amount))+' '+currency;
 export const workLabels={PENDING:'Chờ làm',IN_PROGRESS:'Đang làm',COMPLETED:'Hoàn thành',CANCELLED:'Đã hủy'};
+export const receiptEmailPatch=(previousPaypalId:string|undefined,nextPaypalId:string)=>previousPaypalId===nextPaypalId?undefined:null;

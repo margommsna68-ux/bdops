@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {assertProjectCanBeDestroyed} from '../permissions/legacy-infrastructure';
+import {publicUserFields} from '../permissions/user-target';
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "../trpc";
 import { APP_MODULES } from "../trpc";
@@ -62,9 +63,11 @@ export const projectRouter = router({
           members: {
             include: {
               user: {
-                include: {
+                select: {
+                  ...publicUserFields,
                   memberships: {
-                    include: { project: { select: { id: true, code: true, name: true } } },
+                    where:{project:{members:{some:{userId}}}},
+                    select: {id:true,projectId:true,role:true,project: { select: { id: true, code: true, name: true } } },
                   },
                 },
               },
@@ -349,17 +352,11 @@ export const projectRouter = router({
         where: { username: input.username },
       });
 
-      let user;
       if (existing) {
-        const updateData: any = { password: hashedPassword, name: input.name };
-        if (hashedPin) updateData.pin = hashedPin;
-        user = await ctx.prisma.user.update({
-          where: { id: existing.id },
-          data: updateData,
-        });
-      } else {
+        throw new TRPCError({code:'CONFLICT',message:'Username đã tồn tại. Dùng Thêm thành viên; không đổi đăng nhập qua Tạo user.'});
+      }
         const email = `${input.username}@bdops.local`;
-        user = await ctx.prisma.user.create({
+        const user = await ctx.prisma.user.create({
           data: {
             email,
             username: input.username,
@@ -368,7 +365,6 @@ export const projectRouter = router({
             ...(hashedPin ? { pin: hashedPin } : {}),
           },
         });
-      }
 
       // Get caller's membership ID for managerId
       let managerId: string | undefined;
@@ -391,7 +387,7 @@ export const projectRouter = router({
           allowedModules: input.allowedModules,
           ...(managerId ? { managerId } : {}),
         },
-        include: { user: true },
+        include: { user: {select:publicUserFields} },
       });
       await createAuditLog({ action: "CREATE", entity: "User", entityId: user.id, userId: callerId, projectId: input.projectId, changes: { username: input.username, name: input.name, role: input.role } });
       return member;
@@ -434,7 +430,7 @@ export const projectRouter = router({
           role: input.role,
           allowedModules: input.allowedModules,
         },
-        include: { user: true },
+        include: { user: {select:publicUserFields} },
       });
     }),
 
@@ -501,7 +497,7 @@ export const projectRouter = router({
       const result = await ctx.prisma.projectMember.update({
         where: { id: input.memberId },
         data,
-        include: { user: true },
+        include: { user: {select:publicUserFields} },
       });
       await createAuditLog({ action: "UPDATE", entity: "ProjectMember", entityId: input.memberId, userId: callerId, projectId: input.projectId, changes: data });
       return result;

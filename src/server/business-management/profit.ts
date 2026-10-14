@@ -7,12 +7,12 @@ import {authorizeBusiness} from './scope';
 import {allocateCents,dayText,period} from './money';
 import {financialSources,type ReportInput} from './report';
 type ProfitInput=ReportInput&{partners:{name:string;percentage:string}[];key:string};
-type ProfitSnapshot={range:ReportInput;partners:{name:string;percentage:string}[]};
+type ProfitSnapshot={range:ReportInput;partners:{name:string;percentage:string}[];facts?:Awaited<ReturnType<typeof financialSources>>['facts']};
 export async function createProfitPeriod(scope:ActorScope,input:ProfitInput,db:PrismaClient=prisma){
  const bounds=period(input.start,input.end);allocateCents('0.00',input.partners);
  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_CREATE',module:'PROFIT'},async(tx,images)=>{
   if(await tx.profitSplit.findFirst({where:{projectId:scope.projectId,voidedAt:null,currency:input.currency,periodStart:{lt:bounds.end},periodEnd:{gte:bounds.start}},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Kỳ này trùng với một kỳ đã ghi. Mở kỳ hiện có để xem/cập nhật.');
-  const source=await financialSources(scope.projectId,input,tx),allocations=allocateCents(source.report.net,input.partners),snapshot:ProfitSnapshot={range:{start:input.start,end:input.end,currency:input.currency},partners:input.partners};
+  const source=await financialSources(scope.projectId,input,tx),allocations=allocateCents(source.report.net,input.partners),snapshot:ProfitSnapshot={range:{start:input.start,end:input.end,currency:input.currency},partners:input.partners,facts:source.facts};
   const row=await tx.profitSplit.create({data:{projectId:scope.projectId,periodStart:bounds.start,periodEnd:new Date(bounds.end.getTime()-1),currency:input.currency,basis:'WITHDRAWN',businessManaged:true,totalWithdrawal:source.report.withdrawn,totalCost:source.report.cost,netProfit:source.report.net,sourceHash:source.report.sourceHash,sourceSnapshotCipher:encrypt(JSON.stringify(snapshot)),allocations:{create:allocations.map(a=>({partnerName:a.name,percentage:a.percentage,amount:a.amount}))}}});await images.remember('PROFIT',row.id,true);return {id:row.id};
  },db);
 }
@@ -21,7 +21,7 @@ export async function recalculateProfit(scope:ActorScope,input:{id:string;expect
   const row=await tx.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId,businessManaged:true,voidedAt:null},include:{allocations:true}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');if(row.settled||row.allocations.some(a=>a.paid))throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt hoặc đã ghi trả tiền; chưa được tính lại');
   const snapshot=JSON.parse(decrypt(row.sourceSnapshotCipher!)) as ProfitSnapshot,source=await financialSources(scope.projectId,snapshot.range,tx),allocations=allocateCents(source.report.net,snapshot.partners);await images.remember('PROFIT',row.id);
   for(const entry of row.allocations){const amount=allocations.find(a=>a.name===entry.partnerName)?.amount;if(amount===undefined)throw new ProxyDomainError('INVALID_INPUT');await images.remember('SPLIT_PAYMENT',entry.id);await tx.splitAllocation.update({where:{id:entry.id},data:{amount,revision:{increment:1}}});}
-  await tx.profitSplit.update({where:{id:row.id},data:{totalWithdrawal:source.report.withdrawn,totalCost:source.report.cost,netProfit:source.report.net,sourceHash:source.report.sourceHash,revision:{increment:1}}});return {id:row.id};
+  await tx.profitSplit.update({where:{id:row.id},data:{totalWithdrawal:source.report.withdrawn,totalCost:source.report.cost,netProfit:source.report.net,sourceHash:source.report.sourceHash,sourceSnapshotCipher:encrypt(JSON.stringify({...snapshot,facts:source.facts})),revision:{increment:1}}});return {id:row.id};
  },db);
 }
 export async function settleProfit(scope:ActorScope,input:{id:string;expectedRevision:number;key:string},db:PrismaClient=prisma){

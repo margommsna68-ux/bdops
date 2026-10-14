@@ -2,6 +2,7 @@ import {Prisma,type PrismaClient} from '@prisma/client';
 import {ProxyDomainError} from '../proxy-management/types';
 import type {BusinessResource,BusinessRow,BusinessImage} from './types';
 import {assertPeriodOpen} from './period-lock';
+import {dayText} from './money';
 const fields:Record<BusinessResource,string[]>={
  GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision'],
  PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision'],
@@ -53,7 +54,7 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='SPLIT_PAYMENT')await tx.splitAllocation.update({where:{id:image.id},data:data as Prisma.SplitAllocationUncheckedUpdateInput});
 }
 export function describeBusinessImage(image:BusinessImage){
- const s=image.after,b=image.before,label=String(s.email||s.code||s.title||s.transactionId||s.partnerName||(image.resource==='COST'?s.category+' · '+String(s.date).slice(0,10):image.resource==='PROFIT'?String(s.periodStart).slice(0,10)+' → '+String(s.periodEnd).slice(0,10):image.id));
+ const s=image.after,b=image.before,label=String(s.email||s.code||s.title||s.transactionId||s.partnerName||(image.resource==='COST'?s.category+' · '+dayText(new Date(String(s.date))):image.resource==='PROFIT'?dayText(new Date(String(s.periodStart)))+' → '+dayText(new Date(String(s.periodEnd))):image.id));
  const format=(row:BusinessRow|null)=>{
   if(!row)return 'Chưa có';if(row.voidedAt||row.archivedAt)return 'Đã thu hồi / ẩn';
   if(image.resource==='VM_BINDING')return row.gmailId?'Đã ghi tài khoản':'Chưa gán tài khoản';

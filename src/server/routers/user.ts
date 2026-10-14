@@ -298,6 +298,7 @@ export const userRouter = router({
           id: true, email: true, username: true, name: true, lastActiveAt: true, createdAt: true,
           loginFailedCount: true, loginLockedAt: true, pinFailedCount: true, pinLockedAt: true,
           memberships: {
+            where:{project:{members:{some:{userId:ctx.user.id}}}},
             include: { project: { select: { id: true, code: true, name: true } } },
           },
         },
@@ -311,64 +312,66 @@ export const userRouter = router({
 
       // Current project membership
       const membership = user.memberships.find((m) => m.projectId === input.projectId);
+      const can=(module:string)=>ctx.role==='ADMIN'||ctx.membership.allowedModules.includes(module),managed=(ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM'||!!await ctx.prisma.operationJournal.findFirst({where:{projectId:input.projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}}),agent=can('AGENT_PP')&&!managed;
 
       // Agent emails
-      const agentEmails = await ctx.prisma.agentPaypalEmail.findMany({
+      const agentEmails = agent?await ctx.prisma.agentPaypalEmail.findMany({
         where: { userId: input.userId, projectId: input.projectId },
         orderBy: { createdAt: "desc" },
-      });
+      }):[];
 
       // Agent sales stats
-      const agentSales = await ctx.prisma.agentSale.findMany({
+      const agentSales = agent?await ctx.prisma.agentSale.findMany({
         where: { agentUserId: input.userId, projectId: input.projectId },
         orderBy: { date: "desc" },
         take: 50,
         include: { agentEmail: { select: { email: true } } },
-      });
+      }):[];
       const totalEarning = agentSales.reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
       const totalWithdrawn = agentSales.filter((s) => s.withdrawn).reduce((s, r) => s + Number(r.agentEarning ?? 0), 0);
       const totalSold = agentSales.reduce((s, r) => s + Number(r.amount), 0);
 
       // AutoType sessions
-      const sessions = await ctx.prisma.autotypeSession.findMany({
+      const sessions = can('AUTOTYPE')?await ctx.prisma.autotypeSession.findMany({
         where: { userId: input.userId },
         orderBy: { lastActiveAt: "desc" },
         take: 20,
-      });
+      }):[];
 
       // Edit history by this user
-      const editHistory = await ctx.prisma.editHistory.findMany({
+      const editHistory = ctx.role==='ADMIN'&&!managed?await ctx.prisma.editHistory.findMany({
         where: { userId: input.userId, projectId: input.projectId },
         orderBy: { createdAt: "desc" },
         take: 30,
-      });
+      }):[];
 
       // Fund transactions created/confirmed (recent)
-      const recentFunds = await ctx.prisma.fundTransaction.findMany({
-        where: { projectId: input.projectId },
+      const recentFunds = can('FUNDS')?await ctx.prisma.fundTransaction.findMany({
+        where: { projectId: input.projectId,voidedAt:null },
         orderBy: { createdAt: "desc" },
         take: 200,
         select: { id: true, amount: true, confirmed: true, date: true, transactionId: true, paypal: { select: { code: true } } },
-      });
+      }):[];
 
       // Collector expenses (cross-project for admin view)
-      const collectorExpenses = await ctx.prisma.collectorExpense.findMany({
-        where: { collectorId: input.userId },
+      const collectorExpenses = agent?await ctx.prisma.collectorExpense.findMany({
+        where: { collectorId: input.userId,projectId:input.projectId },
         orderBy: { date: "desc" },
         take: 50,
         include: {
           project: { select: { id: true, code: true } },
           withdrawals: { select: { id: true, transactionId: true, amount: true } },
         },
-      });
+      }):[];
 
       // Agent withdrawals (cross-project, where this user is recipient)
       const agentEmailIds = (await ctx.prisma.agentPaypalEmail.findMany({
-        where: { userId: input.userId },
+        where: { userId: input.userId,projectId:input.projectId },
         select: { id: true },
       })).map((e) => e.id);
-      const agentWithdrawals = agentEmailIds.length > 0 ? await ctx.prisma.withdrawal.findMany({
+      const agentWithdrawals = agent&&agentEmailIds.length > 0 ? await ctx.prisma.withdrawal.findMany({
         where: {
+          projectId:input.projectId,businessManaged:false,
           type: "EXCHANGE",
           OR: [
             { agentEmailId: { in: agentEmailIds } },
