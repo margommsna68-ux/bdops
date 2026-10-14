@@ -8,3 +8,5 @@
 @media(max-width:800px){.pm-heading{align-items:flex-start;flex-direction:column}.pm-heading h1{font-size:23px}.pm-summary{flex-wrap:wrap;gap:20px}.pm-summary>div{flex-basis:40%;padding-left:0}.pm-summary>div:nth-child(2){border:0}.pm-actions{align-items:flex-start;flex-direction:column;padding:15px}.pm-filters{flex-wrap:wrap;padding:0 15px 14px}.pm-search{flex-basis:100%}.pm-filters select{flex:1;min-width:0}.pm-table td,.pm-table th{padding-left:15px;padding-right:15px}.pm-tabs{gap:18px;padding:0 15px}.pm-next{flex-direction:column;align-items:flex-start}.pm-table-footer{align-items:flex-start}.pm-dialog{padding:20px}.pm-summary strong{font-size:24px}}
 @media(prefers-reduced-motion:reduce){.proxy-workspace *, .pm-dialog *{animation-duration:0s!important;transition-duration:0s!important}}
 .proxy-workspace .pm-table th,.pm-dialog .pm-table th{text-transform:none}
+.proxy-workspace .pm-badge-blue,.proxy-workspace .pm-badge-green{background:var(--ds-hover);color:var(--ds-text-secondary)}
+.pm-options{font-size:13px;color:var(--ds-text-secondary)}.pm-options summary{cursor:pointer;padding:5px 0}.pm-options .pm-label{min-width:180px}

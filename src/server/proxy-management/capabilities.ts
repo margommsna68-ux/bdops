@@ -3,6 +3,8 @@ import {prisma} from '@/lib/prisma';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {withProxyTransaction} from './transaction';
 import {ProxyDomainError,type ActorScope} from './types';
+import {recordOperation} from '../operation-history/journal';
+import {captureMember} from '../operation-history/snapshot';
 export const proxyCapabilities=['COPY_CREDENTIALS','PROXY_IMPORT','PROXY_REPLACE'] as const;
 async function administrator(scope:ActorScope,db:Parameters<typeof loadInfrastructureScope>[0]){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
@@ -24,7 +26,8 @@ export async function setProxyCapabilities(scope:ActorScope,memberId:string,capa
     if(member.role==='ADMIN'&&allowInfrastructure===false) throw new ProxyDomainError('FORBIDDEN');
     const next=[...member.capabilities.filter(c=>!proxyCapabilities.includes(c as typeof proxyCapabilities[number])),...Array.from(new Set(capabilities))];
     const allowedModules=allowInfrastructure===undefined?member.allowedModules:allowInfrastructure?Array.from(new Set([...member.allowedModules,'INFRASTRUCTURE'])):member.allowedModules.filter(m=>m!=='INFRASTRUCTURE');
-    await tx.projectMember.update({where:{id:member.id},data:{capabilities:next,allowedModules}});
+    const updated=await tx.projectMember.update({where:{id:member.id},data:{capabilities:next,allowedModules}});
+    await recordOperation(tx,{scope,kind:'ACCESS',summary:{member:member.id,count:next.length},snapshot:{version:1,resources:[{resource:'MEMBER',id:member.id,before:captureMember(member),after:captureMember(updated)}],eventIds:[],replacementIds:[]}});
     await tx.auditLog.create({data:{projectId:scope.projectId,userId:scope.userId,action:'PROXY_CAPABILITIES',entity:'ProjectMember',entityId:member.id,changes:{capabilities:next,allowInfrastructure:allowedModules.includes('INFRASTRUCTURE')}}});
     return {saved:true};
   },db);

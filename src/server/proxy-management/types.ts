@@ -1,6 +1,6 @@
 export type Owner='SELF'|'GENJY'|'UNKNOWN';
 export type Subgroup='PC_CHUNG'|null;
-export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED';
+export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID';
 export type BatchKind='NEW'|'BLOCKED'|'REPLACE'|'SHEET';
 export type Outcome='READY'|'SKIP'|'ERROR';
 export type IssueCode='INVALID_INPUT'|'COUNT_MISMATCH'|'DUPLICATE_INPUT'|'NOT_FOUND'|'AMBIGUOUS_OLD'|'NOT_BLOCKED'|'CURRENT_IP'|'HISTORICAL_IP'|'OWNER_CONFLICT'|'GENJY_RESERVED'|'SOURCE_UNAVAILABLE'|'STALE_PREVIEW'|'KEY_PAYLOAD_MISMATCH'|'UNKNOWN_PACKAGE'|'FORBIDDEN';
@@ -13,10 +13,10 @@ export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;add
 export interface Decision {outcome:Outcome;code?:IssueCode;message:string}
 export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;packageCode?:string|null;sourceRefs:string[]}
 export interface BatchPreview {token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;expiresAt:string}
-export interface CommitResult {batchId:string;replay:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
+export interface CommitResult {batchId:string;replay:boolean;undone?:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
 export interface CatalogAccount {id:string;code:string;username:string;password:string}
 export interface IdentityFact {id:string;ip:string;owner:Owner;subgroup:Subgroup;revision:number;allocationMode:'SINGLE_IP'|'APPROVED_PORT_STREAM'}
-export interface EndpointFact {id:string;projectId:string;identityId:string;proxy:ParsedProxy;inventoryState:InventoryState;revision:number;vmKeys:string[]}
+export interface EndpointFact {id:string;projectId:string;identityId:string;proxy:ParsedProxy;inventoryState:InventoryState;retiredAt?:string|null;revision:number;vmKeys:string[]}
 export interface SourceEvidence {sourceRef:string;ip:string;owner:Owner;subgroup:Subgroup;format:'BARE'|'FULL';hasFullCredentials:boolean;hasManualMetadata:boolean;proxy?:ParsedProxy}
 export interface HistoryFact {ip:string;kind:'RECEIVED'|'BLOCKED'|'DIE'|'REPLACED'|'VOID';occurredAt:string|null;recordedAt:string}
 export interface SourceSnapshotRef {id:string;sourceKey:string;hash:string;fetchedAt:string;scanSucceeded:boolean}

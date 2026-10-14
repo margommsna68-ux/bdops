@@ -76,6 +76,7 @@ model Project {
   holderMergeTargets HolderMergeTarget[]
   earnWithdrawals  EarnWithdrawal[]
   editHistory      EditHistory[]
+  operationJournal OperationJournal[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -89,6 +90,7 @@ model ProjectMember {
   role            ProjectRole @default(USER)
   allowedModules  String[]    @default([])
   capabilities    String[]    @default([])
+  accessRevision  Int         @default(0)
   canManageUsers  Boolean     @default(false)
   managerId       String?
   maxAutotypeDevices Int      @default(2)
@@ -276,6 +278,7 @@ enum ProxyInventoryState {
   REPLACED
   DIE
   QUARANTINED
+  VOID
 }
 model ProxyIdentity {
   id String @id @default(cuid())
@@ -299,6 +302,7 @@ model ProxyProviderAccount {
   label String
   credentialCipher String
   disabled Boolean @default(false)
+  revision Int @default(1)
   createdAt DateTime @default(now())
   @@unique([projectId,code])
 }
@@ -370,10 +374,25 @@ model ProxyStatusEvent {
   kind String
   occurredAt DateTime?
   recordedAt DateTime @default(now())
+  reversedAt DateTime?
   actorId String?
   reason String?
   sourceRef String?
   @@index([projectId,identityId,recordedAt])
+}
+
+model OperationJournal {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Cascade)
+  actorId String
+  kind String
+  summary Json
+  snapshotCipher String
+  batchId String? @unique
+  undoOfId String? @unique
+  createdAt DateTime @default(now())
+  @@index([projectId,createdAt])
 }
 model ProxyReplacement {
   id String @id @default(cuid())

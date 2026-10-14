@@ -10,6 +10,8 @@ import {loadCatalog,loadProxyContext} from './repository';
 import {refreshGenjy} from './sources';
 import {buildReconciliation} from './reconcile';
 import {withProxyTransaction} from './transaction';
+import {recordOperation} from '../operation-history/journal';
+import {captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
 import {ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
 export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
 interface Planned {rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
@@ -101,13 +103,14 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId}});if(!original) throw new ProxyDomainError('NOT_FOUND');
     await scoped(scope,action(original.kind));
     if(original.idempotencyKey!==idempotencyKey) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
-    if(original.status==='APPLIED') return {...original.result as unknown as CommitResult,replay:true};
+    async function replayResult(reader:PrismaClient|Prisma.TransactionClient,batch:NonNullable<typeof original>){const journal=await reader.operationJournal.findUnique({where:{batchId:batch.id}});const undo=journal?await reader.operationJournal.findUnique({where:{undoOfId:journal.id}}):null;return {...batch.result as unknown as CommitResult,replay:true,undone:!!undo};}
+    if(original.status==='APPLIED') return replayResult(db,original);
     if(original.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW','Bản kiểm tra đã hết hạn; kiểm tra lại');
     if(original.kind!=='BLOCKED') {const source=await refresh(scope.projectId,db);if(!source.scanSucceeded) throw new ProxyDomainError('SOURCE_UNAVAILABLE');}
     return withProxyTransaction(async tx=>{
       const batch=await tx.proxyBatch.findFirstOrThrow({where:{id:original.id,token,projectId:scope.projectId,actorId:scope.userId}});
       const current=await scoped(scope,action(batch.kind),tx);
-      if(batch.status==='APPLIED') return {...batch.result as unknown as CommitResult,replay:true};
+      if(batch.status==='APPLIED') return replayResult(tx,batch);
       if(batch.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW');
       const saved=JSON.parse(decrypt(batch.encryptedPlan)) as Planned&{input:BatchInput;sheet?:SheetSnapshot};
       if(hash(saved.input)!==batch.payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
@@ -118,6 +121,8 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
       const planned=planBatch(saved.input,ctx,catalog,scope.projectId,saved.sheet);
       if(hash(planned)!==hash({rows:saved.rows,items:saved.items,reconciliation:saved.reconciliation})) throw new ProxyDomainError('STALE_PREVIEW');
       const now=new Date(),receivedDate=parseReceivedDate(saved.input.receivedDate);
+      const beforeImages=new Map<string,ReturnType<typeof captureEndpoint>|null>();
+      for(const item of planned.items)if(item.oldEndpointId){const row=await tx.proxyIP.findFirstOrThrow({where:{id:item.oldEndpointId,projectId:scope.projectId},include:endpointInclude});beforeImages.set(row.id,captureEndpoint(row));}
       for(const item of planned.items){
         if(batch.kind==='BLOCKED'){
           const old=await tx.proxyIP.findFirstOrThrow({where:{id:item.oldEndpointId,projectId:scope.projectId}});
@@ -132,6 +137,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
             identity=await tx.proxyIdentity.update({where:{id:identity.id},data:{revision:{increment:1},lastSeenAt:now}});
           }else identity=await tx.proxyIdentity.create({data:{ip:p.ip,owner:item.owner,subgroup:item.subgroup}});
           const endpoint=await tx.proxyIP.create({data:{projectId:scope.projectId,identityId:identity.id,address:`${p.ip}:${p.port}`,host:p.ip,port:p.port,credentialCipher:encrypt(JSON.stringify({username:p.username,password:p.password})),packageCode:item.packageCode,inventoryState:item.state,status:item.owner==='GENJY'?'RESERVED':item.state==='BLOCKED'?'BLOCKED':'AVAILABLE',inventoryKey:identity.id,revision:1,statusAt:batch.kind==='SHEET'?null:now,notesCipher:!item.packageCode?encrypt(JSON.stringify({quarantineReason:'UNKNOWN_PACKAGE',intendedState:batch.kind==='SHEET'?'LIVE':'NEW'})):null}});
+          beforeImages.set(endpoint.id,null);
           await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:identity.id,endpointId:endpoint.id,batchId:batch.id,ip:p.ip,kind:batch.kind==='SHEET'?'SHEET_IMPORT':'RECEIVED',occurredAt:batch.kind==='SHEET'?null:receivedDate,actorId:scope.userId,sourceRef:item.sourceRef}});
           if(batch.kind==='SHEET'&&item.sourceSnapshotId) await tx.proxySourceReference.create({data:{snapshotId:item.sourceSnapshotId,identityId:identity.id,endpointId:endpoint.id,sourceRef:item.sourceRef!,format:p.format,owner:item.owner,subgroup:item.subgroup,hasFullCredentials:true,hasManualMetadata:false,dataCipher:encrypt(JSON.stringify(saved.sheet!.rows[item.row-1]))}});
           if(batch.kind==='REPLACE'){
@@ -145,6 +151,12 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
         await deps.afterEvent?.(tx);
       }
       const result:CommitResult={batchId:batch.id,replay:false,rows:planned.rows,applied:planned.items.length,skipped:planned.rows.filter(r=>r.outcome==='SKIP').length,errors:planned.rows.filter(r=>r.outcome==='ERROR').length};
+      if(planned.items.length){
+        const resources:ResourceImage[]=[];
+        for(const [id,before] of Array.from(beforeImages))resources.push({resource:'ENDPOINT',id,before,after:await readImage(tx,scope.projectId,'ENDPOINT',id)} as ResourceImage);
+        const [events,replacements]=await Promise.all([tx.proxyStatusEvent.findMany({where:{batchId:batch.id},select:{id:true}}),tx.proxyReplacement.findMany({where:{batchId:batch.id},select:{id:true}})]);
+        await recordOperation(tx,{scope:current,kind:batch.kind,summary:{count:result.applied,skipped:result.skipped,errors:result.errors},batchId:batch.id,snapshot:{version:1,resources,eventIds:events.map(e=>e.id),replacementIds:replacements.map(r=>r.id)}});
+      }
       await tx.proxyBatch.update({where:{id:batch.id},data:{status:'APPLIED',appliedAt:now,result:result as unknown as Prisma.InputJsonValue}});
       await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_BATCH',entity:'ProxyBatch',entityId:batch.id,changes:{kind:batch.kind,applied:result.applied,skipped:result.skipped,errors:result.errors}}});
       return result;

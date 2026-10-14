@@ -17,10 +17,10 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
   const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),vmRefs:e.vm?[e.vm.server.code+'/'+e.vm.code]:[],statusAt:e.statusAt?.toISOString()||null}]:[]);
   const linked=new Set(endpoints.map(e=>e.identityId));
   for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),vmRefs:[],statusAt:null});
-  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>r.state==='REPLACED').length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
+  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const search=filter.search?.trim().toLowerCase();
   const filtered=rows.filter(r=>
-    (filter.view==='ALL'||(filter.view==='HISTORY'?r.state==='REPLACED':r.state!=='REPLACED'))&&
+    (filter.view==='ALL'||(filter.view==='HISTORY'?['REPLACED','VOID'].includes(r.state):!['REPLACED','VOID'].includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
     (!search||[r.ip,r.packageCode||'',...r.vmRefs].some(v=>v.toLowerCase().includes(search))));
   const numericIP=(ip:string)=>ip.split('.').reduce((n,part)=>n*256+Number(part),0);
