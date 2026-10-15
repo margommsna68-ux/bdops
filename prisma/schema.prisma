@@ -37,6 +37,8 @@ model User {
   agentSales       AgentSale[]     @relation("AgentSales")
   resolvedDisputes Withdrawal[]    @relation("DisputeResolver")
   collectorExpenses CollectorExpense[] @relation("CollectorExpenses")
+  teamCollectedReceipts TeamReceipt[] @relation("TeamReceiptCollector")
+  teamCreatedReceipts TeamReceipt[] @relation("TeamReceiptCreator")
   editHistory   EditHistory[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -66,6 +68,7 @@ model Project {
   fundTransactions FundTransaction[]
   withdrawals      Withdrawal[]
   costRecords      CostRecord[]
+  teamReceipts     TeamReceipt[]
   profitSplits     ProfitSplit[]
   partners         Partner[]
   proxyIPs         ProxyIP[]
@@ -703,6 +706,16 @@ enum WithdrawalType {
 }
 
 model CostRecord {
+  usdtRate Decimal? @db.Decimal(24,12)
+  usdtAmount Decimal? @db.Decimal(24,6)
+  fxAppliedAt DateTime?
+  fxSource String?
+  fxNote String?
+  profitTreatment String @default("CASH_COST")
+  sourceReceiptId String?
+  sourceReceipt TeamReceipt? @relation(fields:[sourceReceiptId],references:[id],onDelete:Restrict)
+  sourceCollectorExpenseId String? @unique
+  sourceCollectorExpense CollectorExpense? @relation(fields:[sourceCollectorExpenseId],references:[id],onDelete:Restrict)
   businessManaged Boolean @default(false)
   revision Int @default(0)
   voidedAt DateTime?
@@ -715,11 +728,11 @@ model CostRecord {
   code          String?
   date          DateTime
   category      String    @default("OTHER")
-  amount        Decimal   @default(0) @db.Decimal(12, 2)
+  amount        Decimal   @default(0) @db.Decimal(24, 8)
   serverCost    Decimal?  @db.Decimal(12, 2)
   ipCost        Decimal?  @db.Decimal(12, 2)
   extraCost     Decimal?  @db.Decimal(12, 2)
-  total         Decimal   @db.Decimal(12, 2)
+  total         Decimal   @db.Decimal(24, 8)
   isPrepaid     Boolean   @default(false)
   note          String?
   fundingSource String?
@@ -761,11 +774,11 @@ model ProfitSplit {
   id              String            @id @default(cuid())
   periodStart     DateTime
   periodEnd       DateTime
-  totalWithdrawal Decimal           @db.Decimal(14, 2)
-  totalCost       Decimal           @db.Decimal(14, 2)
-  netProfit       Decimal           @db.Decimal(14, 2)
+  totalWithdrawal Decimal           @db.Decimal(26, 6)
+  totalCost       Decimal           @db.Decimal(26, 6)
+  netProfit       Decimal           @db.Decimal(26, 6)
   usdtRate        Decimal?          @db.Decimal(10, 4)
-  netProfitUsdt   Decimal?          @db.Decimal(14, 2)
+  netProfitUsdt   Decimal?          @db.Decimal(26, 6)
   settled         Boolean           @default(false)
   notes           String?
   project         Project           @relation(fields: [projectId], references: [id])
@@ -780,8 +793,8 @@ model SplitAllocation {
   id            String      @id @default(cuid())
   partnerName   String
   percentage    Decimal     @db.Decimal(5, 2)
-  amount        Decimal     @db.Decimal(14, 2)
-  amountUsdt    Decimal?    @db.Decimal(14, 2)
+  amount        Decimal     @db.Decimal(26, 6)
+  amountUsdt    Decimal?    @db.Decimal(26, 6)
   note          String?
   paid          Boolean     @default(false)
   split         ProfitSplit @relation(fields: [splitId], references: [id], onDelete: Cascade)
@@ -990,6 +1003,11 @@ model AgentSale {
 // ═══════════════════════════════════════
 
 model CollectorExpense {
+  revision Int @default(0)
+  businessManaged Boolean @default(false)
+  voidedAt DateTime?
+  teamReceipt TeamReceipt?
+  sourcedCost CostRecord?
   id             String       @id @default(cuid())
   date           DateTime     @default(now())
   type           String       // "TEAM_PAYMENT" | "BILL" | "OTHER"
@@ -1006,6 +1024,31 @@ model CollectorExpense {
 
   @@index([collectorId, date])
   @@index([projectId])
+}
+
+model TeamReceipt {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  receivedAt DateTime
+  amountUsdt Decimal? @db.Decimal(24,6)
+  referenceId String?
+  referenceKey String? @unique
+  status String @default("DRAFT")
+  collectorId String?
+  collector User? @relation("TeamReceiptCollector",fields:[collectorId],references:[id],onDelete:Restrict)
+  sourceCollectorExpenseId String? @unique
+  sourceCollectorExpense CollectorExpense? @relation(fields:[sourceCollectorExpenseId],references:[id],onDelete:Restrict)
+  collectorUsdAmount Decimal? @db.Decimal(24,8)
+  createdById String
+  createdBy User @relation("TeamReceiptCreator",fields:[createdById],references:[id],onDelete:Restrict)
+  notes String?
+  revision Int @default(0)
+  voidedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  nettedCosts CostRecord[]
+  @@index([projectId,receivedAt])
 }
 
 // ═══════════════════════════════════════
