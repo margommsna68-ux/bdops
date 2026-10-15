@@ -14,8 +14,8 @@ const fields:Record<BusinessResource,string[]>={
  COLLECTOR_EXPENSE:['date','type','amount','referenceId','note','collectorId','businessManaged','revision','voidedAt'],
  FUND:['date','amount','transactionId','confirmed','failed','company','notes','paypalId','paypalEmailId','serverId','vmId','createdById','currency','businessManaged','voidedAt','revision'],
  WITHDRAWAL:['date','amount','paypalFee','type','sourcePaypalId','destPaypalId','transactionId','paidToTeam','paidAt','notes','currency','businessManaged','voidedAt','revision'],
- PROFIT:['periodStart','periodEnd','totalWithdrawal','totalCost','netProfit','settled','notes','currency','basis','sourceHash','sourceSnapshotCipher','businessManaged','voidedAt','revision'],
- SPLIT_PAYMENT:['splitId','partnerName','percentage','amount','paid','note','revision'],
+ PROFIT:['periodStart','periodEnd','totalWithdrawal','totalCost','netProfit','netProfitUsdt','settled','notes','currency','basis','sourceHash','sourceSnapshotCipher','businessManaged','voidedAt','revision'],
+ SPLIT_PAYMENT:['splitId','partnerName','percentage','amount','amountUsdt','paid','note','revision'],
 };
 export const isBusinessResource=(type:string):type is BusinessResource=>type in fields;
 function capture(type:BusinessResource,row:object):BusinessRow{const data=row as Record<string,unknown>,image:BusinessRow={};for(const key of fields[type]){const value=data[key];image[key]=value instanceof Date?value.toISOString():value instanceof Prisma.Decimal?value.toString():value as BusinessRow[string];}return image;}
@@ -36,6 +36,7 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
  return row?capture(type,row):null;
 }
 export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId:string,image:BusinessImage){
+ if(image.resource==='TEAM_RECEIPT'&&(!image.before||image.before.status!=='CONFIRMED'||image.before.voidedAt)&&await tx.costRecord.findFirst({where:{sourceReceiptId:image.id,voidedAt:null}}))throw new ProxyDomainError('INVALID_INPUT','Thu hồi chi phí đối soát liên kết trước');
  if(['COST','FUND','WITHDRAWAL'].includes(image.resource))for(const state of [image.after,image.before])if(state?.date)await assertPeriodOpen(tx,projectId,new Date(String(state.date)),String(state.currency));
  if(['TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))for(const state of [image.after,image.before]){const date=state?.receivedAt||state?.date;if(date)await assertPeriodOpen(tx,projectId,new Date(String(date)),'USDT');}
  if(image.resource==='PROFIT'&&image.after.settled)throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt; không hoàn tác thông thường');

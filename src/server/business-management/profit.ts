@@ -6,17 +6,20 @@ import {runBusinessCommand} from './idempotency';
 import {authorizeBusiness} from './scope';
 import {allocateCents,dayText,period} from './money';
 import {financialSources,type ReportInput} from './report';
+import {recalculateTeamCashPeriod,settleTeamCashPeriod,reopenTeamCashPeriod} from './team-cash-profit';
 type ProfitInput=ReportInput&{partners:{name:string;percentage:string}[];key:string};
 type ProfitSnapshot={range:ReportInput;partners:{name:string;percentage:string}[];facts?:Awaited<ReturnType<typeof financialSources>>['facts']};
 export async function createProfitPeriod(scope:ActorScope,input:ProfitInput,db:PrismaClient=prisma){
  const bounds=period(input.start,input.end);allocateCents('0.00',input.partners);
- return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_CREATE',module:'PROFIT'},async(tx,images)=>{
+ return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_CREATE',module:'PROFIT'},async(tx,images,current)=>{
+  if(current.teamCashEnabled)throw new ProxyDomainError('INVALID_INPUT','Kỳ mới dùng USDT thực nhận về team');
   if(await tx.profitSplit.findFirst({where:{projectId:scope.projectId,voidedAt:null,currency:input.currency,periodStart:{lt:bounds.end},periodEnd:{gte:bounds.start}},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Kỳ này trùng với một kỳ đã ghi. Mở kỳ hiện có để xem/cập nhật.');
   const source=await financialSources(scope.projectId,input,tx),allocations=allocateCents(source.report.net,input.partners),snapshot:ProfitSnapshot={range:{start:input.start,end:input.end,currency:input.currency},partners:input.partners,facts:source.facts};
   const row=await tx.profitSplit.create({data:{projectId:scope.projectId,periodStart:bounds.start,periodEnd:new Date(bounds.end.getTime()-1),currency:input.currency,basis:'WITHDRAWN',businessManaged:true,totalWithdrawal:source.report.withdrawn,totalCost:source.report.cost,netProfit:source.report.net,sourceHash:source.report.sourceHash,sourceSnapshotCipher:encrypt(JSON.stringify(snapshot)),allocations:{create:allocations.map(a=>({partnerName:a.name,percentage:a.percentage,amount:a.amount}))}}});await images.remember('PROFIT',row.id,true);return {id:row.id};
  },db);
 }
 export async function recalculateProfit(scope:ActorScope,input:{id:string;expectedRevision:number;key:string},db:PrismaClient=prisma){
+ if((await db.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId},select:{basis:true}}))?.basis==='TEAM_RECEIVED')return recalculateTeamCashPeriod(scope,input,db);
  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_RECALCULATE',module:'PROFIT'},async(tx,images)=>{
   const row=await tx.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId,businessManaged:true,voidedAt:null},include:{allocations:true}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');if(row.settled||row.allocations.some(a=>a.paid))throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt hoặc đã ghi trả tiền; chưa được tính lại');
   const snapshot=JSON.parse(decrypt(row.sourceSnapshotCipher!)) as ProfitSnapshot,source=await financialSources(scope.projectId,snapshot.range,tx),allocations=allocateCents(source.report.net,snapshot.partners);await images.remember('PROFIT',row.id);
@@ -25,6 +28,7 @@ export async function recalculateProfit(scope:ActorScope,input:{id:string;expect
  },db);
 }
 export async function settleProfit(scope:ActorScope,input:{id:string;expectedRevision:number;key:string},db:PrismaClient=prisma){
+ if((await db.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId},select:{basis:true}}))?.basis==='TEAM_RECEIVED')return settleTeamCashPeriod(scope,input,db);
  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_SETTLE',module:'PROFIT',reversible:false},async(tx,images)=>{
   const row=await tx.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId,businessManaged:true,voidedAt:null}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||row.settled)throw new ProxyDomainError('STALE_PREVIEW');const snapshot=JSON.parse(decrypt(row.sourceSnapshotCipher!)) as ProfitSnapshot,source=await financialSources(scope.projectId,snapshot.range,tx);
   if(source.report.sourceHash!==row.sourceHash)throw new ProxyDomainError('STALE_PREVIEW','Thu/chi đã đổi; tính lại trước khi chốt');if(source.report.pendingWithdrawals)throw new ProxyDomainError('INVALID_INPUT','Còn khoản rút chưa xác nhận về. Kiểm tra tiền rút trước khi chốt kỳ.');
@@ -44,6 +48,7 @@ export async function correctProfitPaid(scope:ActorScope,input:{allocationId:str
  },db);
 }
 export async function reopenProfit(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){
+ if((await db.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId},select:{basis:true}}))?.basis==='TEAM_RECEIVED')return reopenTeamCashPeriod(scope,input,db);
  if(!input.reason.trim()||input.reason.length>300)throw new ProxyDomainError('INVALID_INPUT');return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_PROFIT_REOPEN',module:'PROFIT',reversible:false},async(tx,images,current)=>{
   if(current.role!=='ADMIN')throw new ProxyDomainError('FORBIDDEN');const row=await tx.profitSplit.findFirst({where:{id:input.id,projectId:scope.projectId,businessManaged:true,voidedAt:null},include:{allocations:true}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||!row.settled)throw new ProxyDomainError('STALE_PREVIEW');if(row.allocations.some(a=>a.paid))throw new ProxyDomainError('INVALID_INPUT','Đã có ghi trả lợi nhuận. Cần điều chỉnh thực tế trước khi mở lại kỳ.');
   await images.remember('PROFIT',row.id);await tx.profitSplit.update({where:{id:row.id},data:{settled:false,notes:[row.notes,'Mở lại: '+input.reason.trim()].filter(Boolean).join('\n'),revision:{increment:1}}});return {id:row.id};

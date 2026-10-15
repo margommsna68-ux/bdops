@@ -23,7 +23,7 @@ export async function runBusinessCommand<T extends Record<string,unknown>>(scope
   await lockCashProject(tx,scope.projectId);
   const current=input.cash?await authorizeTeamCash(scope,input.module as CashArea,true,tx):await authorizeBusiness(scope,input.module,true,tx),prior=await tx.operationJournal.findUnique({where:{projectId_commandKey:{projectId:scope.projectId,commandKey:input.key}}});
   if(prior){if(prior.actorId!==scope.userId)throw new ProxyDomainError('FORBIDDEN');if(prior.requestHash!==hash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');const undo=await tx.operationJournal.findUnique({where:{undoOfId:prior.id}});return {...JSON.parse(decrypt(prior.resultCipher!)) as T,replay:true,undone:!!undo};}
-  const images=await businessCollector(tx,current,input.cash?4:3),result=await fn(tx,images,current),snapshot=await images.finish();
+  const images=await businessCollector(tx,current,input.cash||current.teamCashEnabled?4:3),result=await fn(tx,images,current),snapshot=await images.finish();
   await recordOperation(tx,{scope:current,kind:input.kind,summary:{count:snapshot.resources.length},snapshot,reversible:input.reversible,accessModule:input.module,commandKey:input.key,requestHash:hash,resultCipher:encrypt(JSON.stringify(result))});
   await tx.auditLog.create({data:{projectId:scope.projectId,userId:scope.userId,action:input.kind,entity:'BusinessOperation',entityId:input.key,changes:{count:snapshot.resources.length}}});return {...result,replay:false,undone:false};
  },db);
