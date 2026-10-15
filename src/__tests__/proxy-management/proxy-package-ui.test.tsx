@@ -14,6 +14,7 @@ it('package table lists site, price per cycle, due date with days left, proxy co
     const html=renderToStaticMarkup(<PackageTable packages={[pkg({}),pkg({id:'b',code:'Account VietPhe',site:'vietphe.net',price:null,nextDueDate:'2026-10-01',due:{state:'OVERDUE',daysLeft:-15},proxyCount:200})]} canManage canPay onEdit={()=>{}} onPay={()=>{}}/>);
     expect(html).toContain('proxiware.com');expect(html).toContain('120 USD / 1 tháng');expect(html).toContain('19/10/2026');expect(html).toContain('còn 3 ngày');expect(html).toContain('350');
     expect(html).toContain('quá hạn 15 ngày');expect(html).toContain('Chưa có giá');expect((html.match(/Đã thanh toán/g)||[]).length).toBe(2);
+    const loading=renderToStaticMarkup(<PackageTable packages={[]} loading canManage canPay onEdit={()=>{}} onPay={()=>{}}/>);expect(loading).toContain('Đang tải gói');expect(loading).not.toContain('Chưa có gói proxy');
   }finally{vi.unstubAllGlobals();}
 });
 it('package heading for the registry group shows site, price and due state',()=>{
