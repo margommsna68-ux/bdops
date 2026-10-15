@@ -4,7 +4,7 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 ## Mở và sử dụng
 
-- **Bản Railway đã chạy:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Bản local vẫn ở http://localhost:3010. Tài khoản và cách test trong [hướng dẫn Railway](docs/runbooks/railway-trial.md).
+- **Bản Railway đã chạy:** https://moneytohome.up.railway.app (tên miền mới từ tối 15/10; service `moneytohome`, cùng database thử). Bản local vẫn ở http://localhost:3010. Tài khoản và cách test trong [hướng dẫn Railway](docs/runbooks/railway-trial.md).
 - Dự án dữ liệu thật: **Proxy cá nhân — Sheet 15/10**. Dự án mẫu được tách riêng. Web chưa tự cài proxy lên VM và chưa tự ghi ngược Google Sheet.
 - **Quản lý proxy**: nhập proxy mới, báo BLOCKED hàng loạt, nhận replace bằng hai ô IP cũ/mới, tra IP và lịch sử, copy danh sách BLOCKED đủ thông tin.
 - **Server/VM**: xem proxy được giao và proxy đã xác nhận cài. Nhân viên cài thật rồi mới xác nhận. **Điền VM thiếu** chỉ dùng NEW của anh, chưa dùng, vào chỗ trống thật sự. Cột **SDK EarnApp**: ghi tại dòng hoặc **Dán SDK** nhiều dòng (Server → VM → SDK), xem trước, lịch sử từng VM, hoàn tác; bộ lọc **Chưa có SDK**. Xem [hướng dẫn SDK](docs/runbooks/vm-sdk.md).

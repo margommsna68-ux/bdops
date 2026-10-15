@@ -1,6 +1,6 @@
 # Bản thử Railway — 15/10/2026
 
-**Đã chạy thành công:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Anh có thể đăng nhập và test thực tế.
+**Đã chạy thành công:** https://moneytohome.up.railway.app (từ tối 15/10/2026; tên miền cũ `bdops-proxy-trial-proxy-trial-20261015.up.railway.app` không còn dùng). Service Railway đổi tên thành `moneytohome`, cùng environment/database/volume cũ. Anh có thể đăng nhập và test thực tế.
 
 ## Tài khoản và dữ liệu
 
@@ -26,7 +26,7 @@ Bản thử chứa dữ liệu thật: lưu làm thay đổi database thử, kh�
 |---|---|
 | Project | ingenious-curiosity / `5b92b205-94ed-4407-9b2b-ef3b6575af54` |
 | Environment riêng | proxy-trial-20261015 / `89cf3b0a-e19e-42c0-a789-cb884e3ee624` |
-| Web mới | bdops-proxy-trial / `7de07016-cac4-4292-a5d0-5f2f3a2e919e` |
+| Web mới | moneytohome (tên cũ bdops-proxy-trial) / `7de07016-cac4-4292-a5d0-5f2f3a2e919e` |
 | Postgres mới | Postgres-FNbm / `eb39bf26-de22-4a86-bc0c-ad2d824a8b61` |
 | Volume backup | `d1ec71d7-fce5-44f8-b7b0-707dca84466d`, mount `/data` |
 | Bản cũ | production / bdops / Postgres gốc — giữ nguyên |
