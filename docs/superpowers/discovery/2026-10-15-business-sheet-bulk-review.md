@@ -55,7 +55,17 @@ Cần hỏi tiếp theo câu trả lời: “OK” chứng minh điều gì; ba 
 
 Hướng quy trình sơ bộ để trao đổi: lấy SDK sau cài → nhập/dán nhiều dòng server+VM+SDK → xem mapping và cảnh báo trước/sau → lưu một đợt. Account để trống được. SDK đổi cần giữ lịch sử; không tự ghi đè SDK của VM khác hoặc đoán vị trí từ thứ tự dòng. Đây chưa phải thiết kế đã duyệt hoặc code đã triển khai.
 
-Hai điểm đang hỏi làm rõ:
+Hai điểm đã được user làm rõ tiếp:
 
-1. “Backup SDK” là chuỗi mã như Sheet, file/thư mục phục hồi, hay cả hai? Không hứa khả năng khôi phục máy chỉ dựa trên chuỗi mã.
-2. Tool/cách lấy SDK hiện tại và format list: có server/IP + VM + SDK hay phải copy từng máy? Cần giữ đúng khóa ghép server+VM khi nhập hàng loạt.
+1. **“Backup SDK” nghĩa là sau mỗi lần cài VM có EarnApp, phải cập nhật mã SDK vào web/Sheet theo quy trình.** Không có yêu cầu lưu file/thư mục hoặc phục hồi máy trong phạm vi này.
+2. Nhân viên cập nhật hoặc AI kết nối để ghi vào. Cấu trúc chính xác là **server nào → VM nào → SDK**. Không có yêu cầu phải tích hợp một tool xuất cụ thể, không đợi tài khoản EarnApp mới ghi SDK.
+
+## Phạm vi chức năng đầu tiên được rút ra để trình bày
+
+- Bảng theo server/VM hiển thị SDK hiện hành, thời gian/người ghi và cảnh báo chưa có SDK.
+- Nhập một máy tại dòng; nhập nhiều máy bằng dán bảng. Đã chọn server thì nhận VM+SDK, nhiều server thì nhận đủ server+VM+SDK.
+- Tìm bằng danh tính server+VM, không đoán theo thứ tự dòng; không tạo VM mới khi không tìm được. Dòng ghi lại cùng SDK được coi là không đổi; SDK khác phải hiển thị trước/sau. SDK đang thuộc một VM khác không được tự dời hoặc ghi trùng.
+- Lưu SDK và lịch sử đổi mã theo một đợt có tác giả/thời gian; có kiểm tra revision/quyền và hoàn tác phù hợp. Chưa gán EarnApp account vẫn lưu bình thường.
+- Ghi nhận hoàn tất **cài VM/EarnApp** phải bao gồm cập nhật SDK. Không tự áp điều kiện này vào mọi lần **thay proxy**: xác nhận cấu hình proxy vẫn là sự kiện độc lập; ghi SDK không tự chứng minh app đang chạy/có tiền.
+- Cập nhật do nhân viên hoặc AI phải qua cùng quy tắc/quyền/nhật ký. Chưa tự tạo tài khoản/token AI hay mở quyền tích hợp.
+- Đây là quy trình/phạm vi đang trao đổi, chưa có code hay migration mới. Không mở rộng ngay thành lưu file backup hoặc toàn bộ bảng kiểm tra ngày/tài chính.
