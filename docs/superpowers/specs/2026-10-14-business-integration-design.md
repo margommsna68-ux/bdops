@@ -1,5 +1,7 @@
 # Hợp nhất Proxy/VM với vận hành business BDOps
 
+> Cập nhật 15/10/2026: anh chốt lợi nhuận theo **USDT thực nhận về team − chi phí quy về USDT**. Phần WITHDRAWN và USD/VND bên dưới mô tả mốc local đã xây ngày 14/10, không còn là yêu cầu tài chính mới. Thiết kế thay thế đang chờ duyệt ở [Tiền về team và báo cáo USDT](2026-10-15-team-cash-usdt-design.md); chưa triển khai thay đổi vào code hoặc Railway.
+
 ## Ý định đã xác nhận
 
 Anh yêu cầu tiếp tục kết hợp phần proxy với web BDOps đã có thành một business đầy đủ, thao tác ít bước, theme đơn giản và có thể quản trị lâu dài. Quyền quản lý/thao tác/xem theo dự án; nhân viên được thao tác toàn bộ VM trong dự án đã cấp quyền. Ngày 14/10/2026 anh chốt lợi nhuận mặc định **tiền đã rút − chi phí**, như BDOps cũ. Tiền nhận và tiền rút phải hiển thị riêng, không cộng thành hai lần doanh thu.
