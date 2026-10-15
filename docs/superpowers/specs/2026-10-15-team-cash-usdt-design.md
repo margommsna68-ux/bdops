@@ -4,7 +4,7 @@
 
 Anh muốn dùng một web cho vận hành PayPal hiện có và proxy/VM, giữ dữ liệu cũ làm mẫu kiểm chứng. Hai phần dùng chung source BDOps. Ngày 15/10/2026 anh chốt lợi nhuận theo **tiền thực tế đã chuyển về team − chi phí**, team nhận USDT; chi phí lúc VND, lúc USDT và cần nhập đồng tiền khác rồi quy về USDT.
 
-Đây là thay đổi thiết kế tài chính, gồm số tiền, báo cáo, khóa kỳ và hoàn tác. Tài liệu này thay thế cách tổng EXCHANGE trừ chi phí trong thiết kế ngày 14/10 cho phần business mới. Trạng thái: chờ duyệt thiết kế; code hiện tại vẫn dùng công thức cũ. Railway tiếp tục chạy bản cũ với dữ liệu nguyên trạng.
+Đây là thay đổi thiết kế tài chính, gồm số tiền, báo cáo, khóa kỳ và hoàn tác. Tài liệu này thay thế cách tổng EXCHANGE trừ chi phí trong thiết kế ngày 14/10 cho phần business mới. Anh đã duyệt thiết kế ngày 15/10/2026; kế hoạch triển khai đang chờ anh xem. Code hiện tại vẫn dùng công thức cũ. Railway tiếp tục chạy bản cũ với dữ liệu nguyên trạng.
 
 ## Cách làm được đề xuất
 
