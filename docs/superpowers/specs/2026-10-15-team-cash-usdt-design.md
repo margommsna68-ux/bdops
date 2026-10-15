@@ -4,13 +4,13 @@
 
 Anh muốn dùng một web cho vận hành PayPal hiện có và proxy/VM, giữ dữ liệu cũ làm mẫu kiểm chứng. Hai phần dùng chung source BDOps. Ngày 15/10/2026 anh chốt lợi nhuận theo **tiền thực tế đã chuyển về team − chi phí**, team nhận USDT; chi phí lúc VND, lúc USDT và cần nhập đồng tiền khác rồi quy về USDT.
 
-Đây là thay đổi thiết kế tài chính, gồm số tiền, báo cáo, khóa kỳ và hoàn tác. Tài liệu này thay thế cách tổng EXCHANGE trừ chi phí trong thiết kế ngày 14/10 cho phần business mới. Anh đã duyệt thiết kế ngày 15/10/2026; kế hoạch triển khai đang chờ anh xem. Code hiện tại vẫn dùng công thức cũ. Railway tiếp tục chạy bản cũ với dữ liệu nguyên trạng.
+Đây là thay đổi thiết kế tài chính, gồm số tiền, báo cáo, khóa kỳ và hoàn tác. Tài liệu này thay thế cách tổng EXCHANGE trừ chi phí trong thiết kế ngày 14/10 cho phần business mới. Anh đã duyệt thiết kế và kế hoạch ngày 15/10/2026. Bản local đã triển khai, kiểm chứng và sửa các lỗi của lượt rà độc lập; Railway tiếp tục chạy bản cũ với dữ liệu nguyên trạng. Xem bằng chứng tại ../evidence/2026-10-15-team-cash-usdt.md.
 
 ## Cách làm được đề xuất
 
 Chọn **tỷ giá lưu theo từng khoản**, gợi ý lại tỷ giá đã dùng gần nhất để nhập nhanh. Người nhập nhìn thấy và có thể sửa tỷ giá trước khi lưu; tỷ giá gợi ý không phải dữ liệu thị trường hay tỷ giá đã được xác minh cho giao dịch mới.
 
-Hai lựa chọn khác là dùng một tỷ giá chung cho cả kỳ, hoặc lấy tỷ giá tham khảo tự động. Tỷ giá chung không phản ánh các lần thanh toán khác nhau; tỷ giá tham khảo vẫn cần đối chiếu với giao dịch thực tế. Giai đoạn này dùng tỷ giá từng khoản, không thêm nhà cung cấp tỷ giá tự động.
+Hai lựa chọn khác là dùng một tỷ giá chung cho cả kỳ, hoặc lấy tỷ giá tham khảo tự động. Tỷ giá chung không phản ánh các lần thanh toán khác nhau; tỷ giá tham khảo vẫn cần đối chiếu với giao dịch thực tế. Theo bổ sung đã chốt ngày 15/10, có nút lấy giá tham khảo Binance P2P; VND mặc định chiều mua USDT bằng VND. Giá hiển thị nguồn, chiều và giờ lấy, chỉ lưu khi người nhập chọn; vẫn có thể nhập tỷ giá thực tế. Giá được giữ riêng theo từng khoản và không định giá lại khoản cũ.
 
 ## Thao tác hằng ngày
 
