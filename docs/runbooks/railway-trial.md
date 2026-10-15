@@ -4,7 +4,7 @@
 
 ## Tài khoản và dữ liệu
 
-Tài khoản chủ: `tuntun`. Mật khẩu/PIN riêng tại `C:\Users\TUNTUN\Desktop\project web new\private-config\railway-trial-2026-10-15\owner-access.json`. Đổi mật khẩu/PIN trong Cài đặt trước khi giao nhân viên. Tạo tài khoản nhân viên riêng và cấp đúng dự án; không chia sẻ tài khoản chủ.
+Tài khoản chủ: `tut` (đổi từ `tuntun` theo yêu cầu 15/10 tối, qua API `project.updateUserInfo`/`user.changePassword`/`user.setPin`, script `.runtime/owner-rotate.ts`). Mật khẩu/PIN riêng tại `C:\Users\TUNTUN\Desktop\project web new\private-config\railway-trial-2026-10-15\owner-access.json`. Đổi mật khẩu/PIN trong Cài đặt trước khi giao nhân viên. Tạo tài khoản nhân viên riêng và cấp đúng dự án; không chia sẻ tài khoản chủ.
 
 Chỉ **Proxy cá nhân — Sheet 15/10** được mở trên host. Login demo bị vô hiệu hóa; dữ liệu mẫu được giữ kín để bảo toàn lịch sử. Dữ liệu chính là snapshot 15/10; web chưa tự đọc các chỉnh sửa VM sau đó từ Sheet và không ghi ngược Sheet.
 
