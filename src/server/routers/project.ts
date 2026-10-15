@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {assertProjectCanBeDestroyed} from '../permissions/legacy-infrastructure';
+import {destroyProject} from '../project-lifecycle/destroy';
 import {publicUserFields} from '../permissions/user-target';
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "../trpc";
@@ -177,53 +178,21 @@ export const projectRouter = router({
       });
     }),
 
-  // Delete project + ALL related data
+  // Delete project + ALL related data. ADMIN of the project, or any ADMIN when the project has no members left (orphan sample/test projects).
   deleteProject: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
-      // Must be ADMIN in this project
-      const membership = await ctx.prisma.projectMember.findFirst({
-        where: { userId, projectId: input.projectId, role: "ADMIN" },
-      });
-      if (!membership) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Chỉ ADMIN của project mới được xóa" });
+      const members = await ctx.prisma.projectMember.findMany({ where: { projectId: input.projectId }, select: { userId: true, role: true } });
+      const adminHere = members.some((m) => m.userId === userId && m.role === "ADMIN");
+      if (!adminHere) {
+        if (members.length > 0) throw new TRPCError({ code: "FORBIDDEN", message: "Chỉ ADMIN của project mới được xóa" });
+        const adminAnywhere = await ctx.prisma.projectMember.findFirst({ where: { userId, role: "ADMIN" }, select: { id: true } });
+        if (!adminAnywhere) throw new TRPCError({ code: "FORBIDDEN", message: "Chỉ ADMIN mới được xóa dự án không còn thành viên" });
       }
-
-      const project = await ctx.prisma.project.findUnique({
-        where: { id: input.projectId },
-        select: { code: true, name: true },
-      });
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { id: true } });
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project không tồn tại" });
-
-      await assertProjectCanBeDestroyed(ctx.prisma,input.projectId);
-
-      // Delete in correct FK order (children first)
-      await ctx.prisma.vMTask.deleteMany({ where: { vm: { server: { projectId: input.projectId } } } });
-      await ctx.prisma.proxyAssignmentHistory.deleteMany({ where: { proxy: { projectId: input.projectId } } });
-      await ctx.prisma.earnWithdrawal.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.fundTransaction.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.agentSale.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.withdrawal.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.agentPaypalEmail.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.payPalEmail.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.holderMergeTarget.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.virtualMachine.updateMany({ where: { server: { projectId: input.projectId } }, data: { gmailId: null, proxyId: null } });
-      await ctx.prisma.virtualMachine.deleteMany({ where: { server: { projectId: input.projectId } } });
-      await ctx.prisma.gmailAccount.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.payPalAccount.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.proxyIP.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.server.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.splitAllocation.deleteMany({ where: { split: { projectId: input.projectId } } });
-      await ctx.prisma.profitSplit.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.partner.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.costRecord.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.deleteRequest.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.auditLog.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.projectMember.deleteMany({ where: { projectId: input.projectId } });
-      await ctx.prisma.project.delete({ where: { id: input.projectId } });
-
-      return { deleted: true, code: project.code, name: project.name };
+      return destroyProject(ctx.prisma, input.projectId);
     }),
 
   // Wipe all data in a project but keep the project + members

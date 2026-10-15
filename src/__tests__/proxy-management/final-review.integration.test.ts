@@ -16,7 +16,7 @@ async function fixture(){
   await db.proxyStatusEvent.create({data:{projectId:other,identityId:identity.id,endpointId:proxy.id,ip:identity.ip,kind:'BLOCKED',occurredAt:null}});
   const caller=(id=userId)=>appRouter.createCaller({prisma:db,session:{user:{id},expires:'2099-01-01'} as any});
   const cleanup=async()=>{
-    await db.deleteRequest.deleteMany({where:{projectId:{in:[own,other]}}});await db.auditLog.deleteMany({where:{projectId:{in:[own,other]}}});await db.vMTask.deleteMany({where:{vm:{server:{projectId:{in:[own,other]}}}}});await db.virtualMachine.deleteMany({where:{server:{projectId:{in:[own,other]}}}});await db.proxyStatusEvent.deleteMany({where:{projectId:other}});await db.proxyIP.deleteMany({where:{projectId:{in:[own,other]}}});await db.proxyIdentity.delete({where:{id:identity.id}});await db.server.deleteMany({where:{projectId:{in:[own,other]}}});await db.projectMember.deleteMany({where:{projectId:{in:[own,other]}}});await db.project.deleteMany({where:{id:{in:[own,other]}}});await db.user.deleteMany({where:{id:{in:[userId,workerId]}}});
+    await db.deleteRequest.deleteMany({where:{projectId:{in:[own,other]}}});await db.auditLog.deleteMany({where:{projectId:{in:[own,other]}}});await db.vMTask.deleteMany({where:{vm:{server:{projectId:{in:[own,other]}}}}});await db.virtualMachine.deleteMany({where:{server:{projectId:{in:[own,other]}}}});await db.proxyStatusEvent.deleteMany({where:{projectId:other}});await db.proxyIP.deleteMany({where:{projectId:{in:[own,other]}}});await db.proxyIdentity.deleteMany({where:{id:identity.id}});await db.server.deleteMany({where:{projectId:{in:[own,other]}}});await db.projectMember.deleteMany({where:{projectId:{in:[own,other]}}});await db.project.deleteMany({where:{id:{in:[own,other]}}});await db.user.deleteMany({where:{id:{in:[userId,workerId]}}});
   };
   return {own,other,userId,workerId,a,b,av,bv,proxy,caller,cleanup};
 }
@@ -37,13 +37,16 @@ it('foreign infrastructure delete requests are rejected both on create and on ap
     expect((await db.deleteRequest.findUniqueOrThrow({where:{id:request.id}})).status).toBe('PENDING');expect(await db.virtualMachine.findUnique({where:{id:f.bv.id}})).not.toBeNull();
   }finally{await f.cleanup();}
 });
-it('managed project wipe and deletion reject before any related data is removed',async()=>{
+it('managed project wipe rejects before any data is removed; full deletion needs its ADMIN and then removes every related row',async()=>{
   const f=await fixture();try{
     await db.projectMember.create({data:{projectId:f.other,userId:f.userId,role:'ADMIN'}});
     await expect(f.caller().project.wipeProjectData({projectId:f.other})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
     expect(await db.virtualMachine.findUnique({where:{id:f.bv.id}})).not.toBeNull();
-    await expect(f.caller().project.deleteProject({projectId:f.other})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
+    await expect(f.caller(f.workerId).project.deleteProject({projectId:f.other})).rejects.toMatchObject({code:'FORBIDDEN'});
     expect(await db.virtualMachine.findUnique({where:{id:f.bv.id}})).not.toBeNull();expect(await db.proxyStatusEvent.count({where:{projectId:f.other}})).toBe(1);
+    await expect(f.caller().project.deleteProject({projectId:f.other})).resolves.toMatchObject({deleted:true,name:'Managed'});
+    expect(await db.virtualMachine.findUnique({where:{id:f.bv.id}})).toBeNull();expect(await db.proxyStatusEvent.count({where:{projectId:f.other}})).toBe(0);expect(await db.proxyIP.count({where:{projectId:f.other}})).toBe(0);expect(await db.project.findUnique({where:{id:f.other}})).toBeNull();
+    expect(await db.virtualMachine.findUnique({where:{id:f.av.id}})).not.toBeNull();
   }finally{await f.cleanup();}
 });
 it('project administrators can grant/revoke proxy capabilities without editing foreign memberships',async()=>{
