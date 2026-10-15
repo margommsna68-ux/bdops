@@ -4,7 +4,7 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 ## Mở và sử dụng
 
-- Bản local: http://localhost:3010. Bản Railway thử đang được kiểm chứng; địa chỉ và trạng thái cuối ghi trong [báo cáo Railway](docs/runbooks/railway-trial.md).
+- **Bản Railway đã chạy:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Bản local vẫn ở http://localhost:3010. Tài khoản và cách test trong [hướng dẫn Railway](docs/runbooks/railway-trial.md).
 - Dự án dữ liệu thật: **Proxy cá nhân — Sheet 15/10**. Dự án mẫu được tách riêng. Web chưa tự cài proxy lên VM và chưa tự ghi ngược Google Sheet.
 - **Quản lý proxy**: nhập proxy mới, báo BLOCKED hàng loạt, nhận replace bằng hai ô IP cũ/mới, tra IP và lịch sử, copy danh sách BLOCKED đủ thông tin.
 - **Server/VM**: xem proxy được giao và proxy đã xác nhận cài. Nhân viên cài thật rồi mới xác nhận. **Điền VM thiếu** chỉ dùng NEW của anh, chưa dùng, vào chỗ trống thật sự.
@@ -21,6 +21,7 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 6. Lịch sử trước–sau mã hóa, hoàn tác có kiểm tra xung đột và sao lưu toàn database mã hóa; đã thử khôi phục vào database riêng.
 7. Business hợp nhất cùng dự án: tài khoản, công việc, thu/chi, rút tiền, collector, nhận tiền về team và khóa kỳ. Giữ số tiền gốc/tỷ giá riêng từng khoản. VND mặc định tham chiếu Binance P2P mua USDT; có ghi nguồn/thời gian và điều chỉnh thủ công rõ ràng.
 8. Đọc source và sao dữ liệu Railway cũ để kiểm chứng. Giữ baseline cũ, không tự ghép server cá nhân với Bright Data theo tên; không tự coi tiền collector là USDT team đã nhận.
+9. Đưa dữ liệu thật lên Railway riêng, khóa login demo, tạo tài khoản chủ riêng, đọc Genjy trực tiếp, backup trên volume và tải bản mã hóa ngoài host. 217 tests/58 files, build/types qua; 11 nhóm kiểm tra API host qua. Restore host vào database riêng đủ 39 bảng và 1.362 cặp credentials thật; Railway cũ vẫn nguyên 26 bảng/1.120 dòng.
 
 ## Dữ liệu thật đã nhập
 

@@ -29,7 +29,7 @@ Full tests/types/lint/build; fresh runtime audit; no upload of .env/.runtime/key
 - [x] Release dependencies and packaging: Next 15.5.28, React 19.3.1, NextAuth 4.24.15, ImapFlow 2.4.2, SheetJS official 0.20.3; unused Auth Prisma adapter removed. Scoped compatible PostCSS/nanoid/source-map-js patches. Runtime audit zero. Private files excluded from both upload and Docker image.
 - [x] Live Genjy adapter: shared Google XLSX, all tabs/hidden/notes/formulas; 20 MiB download/expanded budget, XML/reference validation, parser worker with 8-second/192 MiB heap bound. Permanent reservations retained. Live source 721 IPs matches original Genjy snapshot; inventory retains 724 reserved identities including other historical evidence.
 - [x] Isolated cloud data/auth/backup configuration: new environment `proxy-trial-20261015`, app `bdops-proxy-trial`, dedicated Postgres and `/data` volume. Streamed clone verified all 39 tables and all 1362 encrypted credentials. One active password account and one real-project membership; synthetic accounts/data retained without login/membership for history integrity.
-- [ ] Hosted verification and handoff
+- [x] Hosted verification and handoff: deployment SUCCESS, 217 tests/58 files, types/build/runtime audit passed; 11 hosted API groups passed. Encrypted host backup downloaded and GCM verified; host restore into separate empty database preserved 39 tables/13,916 rows and all 1362 real credential pairs. QA accounts disabled, only real owner membership remains. User guide and full work report in source root.
 
 ## Execution evidence / rulings
 
@@ -39,4 +39,6 @@ Full tests/types/lint/build; fresh runtime audit; no upload of .env/.runtime/key
 - Clone diagnostic: only `_prisma_migrations` fingerprint differed because local timezone was Asia/Bangkok and host UTC. Normalize the three migration timestamp instants as epoch; every row, checksum and relation then matched. The already copied target was verified before auth changes; no second import/overwrite occurred.
 - The legacy `serviceInstanceUpdate` endpoint returned an error and CLI name-based edit silently reported no changes for the newly created service. Applied an explicit environment patch scoped to the new service ID and read it back; old services untouched.
 - A temporary password-protected PostgreSQL TCP route is used for guarded data comparison/import. Remove it after hosted verification; application uses private Railway networking.
+- Completed: temporary TCP route closed after comparison/QA. Off-host encrypted backup retained in owner-only private-config. Legacy read-only comparison still matches all 26 tables/1120 rows.
+- Hosted QA initially attempted to undo replace after a VM assignment and its undo; monotonic revisions correctly rejected that older operation as stale. Adjusted QA order to test replace undo before dependent operations, and independent assignment undo. No product change weakened the conflict check.
 - Actual VM installation remains unconfirmed. The 24 review rows, Proxiware notes and Genjy conflict remain unchanged. No source Sheet writes.

@@ -1,6 +1,6 @@
 # Bản thử Railway — 15/10/2026
 
-**Địa chỉ:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Chỉ coi sẵn sàng khi phần kết quả cuối tài liệu ghi triển khai thành công.
+**Đã chạy thành công:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Anh có thể đăng nhập và test thực tế.
 
 ## Tài khoản và dữ liệu
 
@@ -43,4 +43,15 @@ Backup local trước lên host: `4c0614fc-7611-47e5-b68f-84a755b974c8`. Local v
 
 ## Kết quả kiểm chứng
 
-Đang triển khai và kiểm chứng trên host. Sẽ ghi kết quả API/UI, deployment ID, backup/restore vào đây khi hoàn tất.
+Deployment **`adbcc72e-53c3-473f-9587-ff30c5f2aa76`**, trạng thái **SUCCESS**, source chức năng commit **`4fb3764`**. Kiểm tra ngày 15/10/2026:
+
+- 217 tests / 58 files, TypeScript và production build qua; runtime dependency audit 0 cảnh báo. Build còn 4 cảnh báo hook cũ ở agent-pp.
+- 11 nhóm kiểm tra API trên host qua: chặn chưa đăng nhập/seed, đăng nhập chủ và giới hạn dự án, đủ 10 server/574 VM, Genjy trực tiếp, quyền viewer/operator, NEW→BLOCKED→replace viết tắt/kế thừa credentials/chặn trùng/chống bấm lặp, autofill chỉ tạo cấu hình chờ cài, hoàn tác và tạo backup.
+- Genjy trực tiếp mất khoảng **4,1 giây** ở lượt đo, 721 IP trong nguồn hiện hành khớp snapshot gốc; 724 danh tính Genjy có bằng chứng lịch sử vẫn được giữ.
+- QA dùng dự án/IP mẫu riêng, sau đó đóng login/membership QA. Chỉ một tài khoản đăng nhập và một membership thật còn hoạt động. Hash proxy/VM/phân bổ/replace thật không đổi trong QA.
+- Đã mở trang `/dashboard` trên trình duyệt và thấy chuyển đúng sang màn đăng nhập HTTPS; phiên chủ đã được kiểm tra bằng API. Không tự giả nhận đã kiểm tra từng màn bằng trình duyệt.
+- Backup **`93fa4645-3ed0-4c94-bd07-7a490077a86a`**, **35.130.091 bytes**, SHA-256 `f866ef4ac976768c9483351369264c281ff32034993eb4cdf3dfad1488f48c29`. Đã tải bản mã hóa ra máy và xác minh GCM/checksum. File nằm trong private-config cùng manifest, khóa lưu riêng trong cấu hình.
+- Đã restore trên host vào database mới **`proxy_restore_host_1792044921142`**: đủ **39 bảng / 13.916 dòng** (gồm dữ liệu QA kín), mọi giá trị/quan hệ gốc khớp; giải mã được đủ **1.362 cặp credentials** của dự án thật. Database app đang chạy không bị ghi đè.
+- Railway cũ được đối chiếu lại: **26 bảng / 1.120 dòng, 0 bảng thay đổi**. Sheet gốc không bị sửa. Cổng TCP tạm phục vụ import/đối chiếu đã đóng; app dùng mạng riêng Railway.
+
+Bằng chứng chi tiết: [release Railway](../superpowers/evidence/2026-10-15-railway-trial.md).
