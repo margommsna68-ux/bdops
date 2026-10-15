@@ -1,5 +1,15 @@
 # Lịch sử và sao lưu — bản local
 
+## Kiểm chứng USDT ngày 15/10/2026
+
+Nhật ký v4 lưu đầy đủ tiền gốc, tỷ giá, USDT, phiếu nhận và nguồn collector. V1/v2/v3 vẫn đọc được; ảnh cũ được so theo trường đã lưu, không coi cột FX mới là thay đổi giả. Sửa tiền/tỷ giá tăng revision; hoàn tác cũ không ghi đè thay đổi sau. Thu hồi phiếu giữ mã giao dịch và nguồn gốc; hoàn tác liên kết một khoản collector lịch sử không xóa/thu hồi khoản gốc đó.
+
+Backup mã hóa `61ebf9b0-7006-4be9-9b26-b83b086b7299` (248532 bytes, SHA256 `92515019cb5c306c4edd443f16d982df916f466e091b9aa4a87e0661e8597edf`) đã khôi phục vào database local trống riêng. Cả **39 bảng** được đối chiếu, gồm tiền/tỷ giá chính xác, liên kết nguồn phiếu nhận, giải mã nhật ký v4 và credential mẫu. Mọi dòng trước backup được giữ; AuditLog được đối chiếu riêng đúng một sự kiện bắt đầu backup có trong dump. Database đang chạy không bị restore đè.
+
+Backup Railway cũ dùng định dạng **BDB1 + nonce + tag + ciphertext**, khác BDOPSB01 của ứng dụng. `scripts/team-cash-rehearsal.ts` xác minh checksum và GCM trước khi pipe dump trong bộ nhớ vào một database local trống `proxy_cash_verify_*`, so schema với 0_init rồi mới ghi baseline và migration. Không có dump plaintext trên ổ. Khóa giải mã cũ lấy từ nguồn Railway đã kiểm chứng và chỉ nạp trong child thử nghiệm; không thay khóa app local. Bản sao cũ có 26 bảng/1120 dòng, các giá trị/quan hệ giữ nguyên cả sau khi thêm dự án QA riêng.
+
+Các kết quả này xác minh bản sao local; chưa chứng minh một quy trình khôi phục thảm họa trên Railway. Giữ storage độc lập, retention/monitoring và một lượt restore trên host làm bước trước triển khai thật.
+
 Trong Proxy → Lịch sử: chọn thao tác, đọc Trước/Sau, ghi lý do rồi Xác nhận hoàn tác. Chỉ quản lý ADMIN của dự án được hoàn tác. Dữ liệu đã sửa tiếp/gán VM sẽ bị chặn; thao tác cũ trước khi có ảnh trước không thể hoàn tác. Đây là hoàn tác từng thao tác còn nguyên dữ liệu sau, không phải stack Ctrl+Z: hoàn tác thao tác sau vẫn tăng revision, không tự cho phép quay lại một thao tác trước đó.
 
 Nhập mới/nhận replace nhầm được thu hồi khỏi kho hiện hành, không xoá dấu vết IP. Cạnh replace VOID và RECEIVED còn để bắt hàng cũ; sở hữu Genjy/PC chung không đổi. Undo BLOCKED vô hiệu hoá event blocked đó, khôi phục ngày/trạng thái trước; không xác minh mạng thực tế. Thao tác ghi trên web không tự cài lại cấu hình máy. Gói mới tạo được disable khi undo; nếu kho thay đổi sau khi sửa gói thì từ chối undo.

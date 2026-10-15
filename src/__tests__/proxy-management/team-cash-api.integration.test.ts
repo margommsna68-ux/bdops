@@ -11,6 +11,8 @@ it('cash APIs enforce fresh role/module and project checks in a PayPal-only proj
   await expect(admin.businessManagement.cashAccess({projectId:f.scope.projectId})).resolves.toMatchObject({enabled:true,infra:false,writeCosts:true});
   await expect(worker.businessManagement.saveCashCost(i)).rejects.toMatchObject({code:'FORBIDDEN'});
   const saved=await admin.businessManagement.saveCashCost(i);expect(saved.id).toBeTruthy();
+  const oldCost=await db.costRecord.create({data:{projectId:f.scope.projectId,date:new Date('2026-11-01'),total:'10',currency:'USD'}}),history=await db.editHistory.create({data:{projectId:f.scope.projectId,userId:f.scope.userId,entity:'CostRecord',entityId:oldCost.id,field:'date',oldValue:'2026-10-15T00:00:00Z',newValue:'2026-11-01T00:00:00Z'}});
+  await expect(admin.editHistory.revert({projectId:f.scope.projectId,historyId:history.id})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
   await expect(admin.businessManagement.copyAccount({projectId:f.scope.projectId,kind:'PAYPAL',id:'unknown',pin:'123456'})).rejects.toMatchObject({code:'FORBIDDEN'});
   await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{role:'VIEWER',allowedModules:['COSTS']}});
   await expect(worker.businessManagement.cashCosts({projectId:f.scope.projectId,start:'2026-10-01',end:'2026-10-31'})).resolves.toHaveLength(1);

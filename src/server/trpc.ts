@@ -95,6 +95,10 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     if(managedBusiness)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng business hợp nhất để giữ dữ liệu, quyền và lịch sử'});
   }
   if(type==='mutation'&&cashEnabled){
+    if(path==='editHistory.revert'){
+      const entry=await ctx.prisma.editHistory.findFirst({where:{id:input.historyId,projectId},select:{entity:true}});
+      if(entry&&['CostRecord','FundTransaction','Withdrawal','CollectorExpense','ProfitSplit'].includes(entry.entity))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng thu chi và Lịch sử thao tác mới để giữ tỷ giá và khóa kỳ'});
+    }
     if(/^(cost|profitSplit)\./.test(path))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng thu chi USDT để giữ tỷ giá và khóa kỳ'});
     if(/^(fund|withdrawal)\./.test(path)){
       const model=path.startsWith('fund.')?ctx.prisma.fundTransaction:ctx.prisma.withdrawal;

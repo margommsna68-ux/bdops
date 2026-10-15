@@ -1,5 +1,22 @@
 # Business hợp nhất — bản local
 
+## Thu chi USDT — luồng hiện tại từ 15/10/2026
+
+Trong dự án đã bật thu chi USDT, dùng ba mục: **Chi phí**, **Nhận về team**, **Lợi nhuận USDT**. Quyền quản lý/thao tác/xem và module của từng dự án vẫn giữ nguyên. Dự án chỉ có PayPal không cần tạo server/VM. Phần hướng dẫn USD/VND phía dưới là luồng lịch sử trước khi bật USDT.
+
+- Chi phí: nhập số tiền gốc, đồng tiền, ngày chi và loại chi phí. USDT dùng tỷ giá 1. Với VND, mặc định lấy chiều **mua USDT bằng VND từ Binance P2P** qua nút lấy giá. Màn hình ghi nguồn, chiều và thời điểm; giá chỉ là tham khảo, có thể sửa theo giao dịch thực tế. Đồng khác cũng phải có tỷ giá xác nhận; USD không tự bằng USDT. Có thể dùng lại tỷ giá của khoản gần nhất bằng nút riêng, không tự ghi đè khi tải lại form.
+- Quy ước: **1 USDT = … đơn vị tiền gốc**. Số USDT = tiền gốc / tỷ giá. Tỷ giá và tiền quy đổi giữ riêng cho từng khoản; giá mới không đổi các khoản đã lưu. Lưu tối đa 8 số lẻ tiền gốc, 12 số lẻ tỷ giá, 6 số lẻ USDT.
+- Nhận về team: nhập **USDT thực nhận**, ngày nhận và mã giao dịch. Chọn collector/TEAM_PAYMENT gốc khi biết nguồn. Chưa biết số USDT thì lưu Nháp; không lấy số USD điền sang USDT. Có thể nhận gộp hoặc một phần. Có USD gốc nhưng chưa có nguồn thì web tạo một khoản ra collector cùng phiếu; chưa biết USD thì để trống và đối soát sau.
+- Mã giao dịch được kiểm tra toàn hệ thống, giữ nguyên khi thu hồi và không thể dùng lại. Lưu lặp cùng yêu cầu không tạo hai phiếu. ADMIN có thể khôi phục phiếu thu hồi kèm lý do.
+- Đối soát collector: TEAM_PAYMENT cũ chưa có USDT là khoản cần xác minh. BILL/OTHER cần được phân loại thành chi phí đúng USD gốc; COMMISSION_WITHDRAW không tự nhập thành chi phí. Phí đã trừ trước khi team nhận phải chọn **Chỉ đối soát**, liên kết phiếu nhận đã xác nhận, để không trừ hai lần.
+- Lợi nhuận = **USDT thực nhận về team − CASH_COST đã quy đổi**. MIXING, tiền vào PayPal và số USD còn ở collector không làm tăng số USDT này. Thiếu tỷ giá/nguồn chưa xác minh sẽ hiện cần xử lý và chặn chốt kỳ. Phiếu đã xác minh USDT nhưng chưa đối soát USD chỉ hiện cảnh báo.
+- Tạo kỳ → nhập người nhận/tỷ lệ tổng 100% → Tính lại nếu nguồn đổi → Chốt kỳ. Kỳ USDT khóa cả chi phí VND/USD trong khoảng ngày. Sửa/thu hồi/hoàn tác và chốt kỳ dùng cùng khóa giao dịch. Kỳ cũ WITHDRAWN/USD/VND, snapshot và ghi trả vẫn giữ nguyên cơ sở cũ.
+- Sửa nhầm: dùng **Lịch sử** để xem trước/sau và hoàn tác từng thao tác nếu dữ liệu chưa sửa tiếp, hoặc Thu hồi/Khôi phục với lý do. Không dùng lịch sử sửa từng ô cũ để vượt khóa kỳ. Các thao tác này không chuyển hoặc hoàn tiền ngoài thực tế.
+
+Giá tham khảo sử dụng API public Binance P2P, không cần tài khoản giao dịch/API key và không thực hiện giao dịch Binance. Nếu Binance không trả giá, lỗi hiện rõ; không tự điền một tỷ giá phỏng đoán. Giá Binance đã lấy phải được lưu trong 10 phút hoặc lấy lại. Hướng mua/bán theo [tài liệu chính thức Binance](https://www.binance.com/en/skills/detail/binance/p2p).
+
+Kiểm chứng và giới hạn: [bằng chứng USDT](../superpowers/evidence/2026-10-15-team-cash-usdt.md). Bản này vẫn ở local; chưa migration/cutover Railway, chưa nhập Sheet thật.
+
 Mở `http://localhost:3010/dashboard`, chọn đúng dự án. Bản `PROXY_TRIAL` chỉ có dữ liệu mẫu; chưa kết nối Sheet thật hoặc Railway. Không dùng số liệu mẫu làm báo cáo kinh doanh.
 
 ## Việc hàng ngày
