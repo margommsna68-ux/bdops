@@ -1,5 +1,15 @@
 # Nguồn Sheet và đối chiếu
 
+## Lần nhập dữ liệu thật ngày 15/10/2026
+
+Đã đọc hai workbook bằng HTTP GET export XLSX công khai, không gửi yêu cầu sửa Sheet. Bản chụp chính lúc 12:02:55 và Genjy lúc 12:02:44 (Asia/Bangkok), gồm tất cả tab ẩn. Dự án local **PERSONAL_SHEET / Proxy cá nhân — Sheet 15/10** tách khỏi PROXY_TRIAL; chỉ quản lý hiện tại là thành viên, các tài khoản nhân viên mẫu không có quyền xem dữ liệu thật.
+
+Mở **Server / VM → Cần kiểm tra** hoặc **Công việc** để xử lý 24 dòng. Ghi nhận từ Sheet là cấu hình cần xác minh; không tự đánh dấu đã cài, không điều khiển máy hoặc sửa Sheet. Dòng “ko có VM” là PLACEHOLDER, không phải ô trống được autofill. 23.142.16.73 giữ ngoại lệ theo port đã được người dùng xác nhận; không gộp 41 port đang ghi trên VM thành một proxy trùng.
+
+Nguồn Genjy của bản local hiện là LOCAL_SNAPSHOT từ lần đọc mới này, không phải đồng bộ Google liên tục. Nút cập nhật chỉ quét lại bản chụp; giao diện đã ghi rõ. Trước khi thử đợt nhập/thay thế mới, lấy lại nguồn Google hiện hành hoặc cấu hình GOOGLE_AUTH readonly. Không gọi thời điểm quét lại file là thời điểm đọc Google mới.
+
+Bằng chứng và danh sách cần xác minh: [lần nhập 15/10](../superpowers/evidence/2026-10-15-personal-sheet-import.md).
+
 Genjy sử dụng `GENJY_SOURCE_JSON` cấu hình server, không đưa credentials ra browser:
 
 ```json
