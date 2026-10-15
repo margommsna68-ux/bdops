@@ -8,6 +8,7 @@ import {createVMService} from '../vm-management/allocation';
 import {readVMWorkspace} from '../vm-management/repository';
 import {createManagedServer,addManagedVMs,updateManagedServer,archiveManagedResource} from '../vm-management/metadata';
 import {startInstall,copyConfiguration,reportInstallFailure,confirmInstalled} from '../vm-management/installation';
+import {previewSdkUpdate,applySdkUpdate,readSdkHistory} from '../vm-management/sdk';
 import {getEligibleInventory} from '../proxy-management/repository';
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100);
 async function domain<T>(fn:()=>Promise<T>){try{return await fn();}catch(error){
@@ -31,5 +32,8 @@ export const vmManagementRouter=router({
   start:protectedProcedure.input(project.extend({configurationId:id})).mutation(({ctx,input})=>domain(async()=>startInstall(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,ctx.prisma))),
   copy:protectedProcedure.input(project.extend({configurationId:id})).mutation(({ctx,input})=>domain(async()=>copyConfiguration(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,ctx.prisma))),
   reportFailure:protectedProcedure.input(project.extend({configurationId:id,note:z.string().min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>reportInstallFailure(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,input.note,ctx.prisma))),
+  sdkPreview:protectedProcedure.input(project.extend({text:z.string().min(1).max(200000),serverId:id.optional()})).mutation(({ctx,input})=>domain(async()=>previewSdkUpdate(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  sdkApply:protectedProcedure.input(project.extend({key,items:z.array(z.object({vmId:id,sdk:z.string().max(128).nullable(),expectedRevision:z.number().int().nonnegative(),clear:z.boolean().optional()})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>applySdkUpdate(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  sdkHistory:protectedProcedure.input(project.extend({vmId:id})).query(({ctx,input})=>domain(async()=>readSdkHistory(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.vmId,ctx.prisma))),
   confirm:protectedProcedure.input(project.extend({configurationId:id,configurationHash:z.string().length(64),expectedVmRevision:z.number().int().nonnegative()})).mutation(({ctx,input})=>domain(async()=>confirmInstalled(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
 });

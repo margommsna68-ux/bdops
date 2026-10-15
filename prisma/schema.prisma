@@ -83,6 +83,7 @@ model Project {
   operationJournal OperationJournal[]
   vmConfigurations VMConfiguration[]
   vmAllocations VMProxyAllocation[]
+  vmSdkHistory VMSdkHistory[]
   businessWorkItems BusinessWorkItem[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
@@ -170,6 +171,9 @@ model VirtualMachine {
   code          String
   status        VMStatus    @default(NEW)
   sdkId         String?
+  sdkRecordedAt DateTime?
+  sdkRecordedById String?
+  sdkHistory    VMSdkHistory[]
   earnTotal     Decimal?    @db.Decimal(12, 4)
   earn24h       Decimal?    @db.Decimal(12, 4)
   uptime        String?
@@ -842,6 +846,20 @@ enum VMAllocationRole {
   DESIRED
   INSTALLED
   UNCERTAIN
+}
+model VMSdkHistory {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  vmId String
+  vm VirtualMachine @relation(fields:[vmId],references:[id],onDelete:Restrict)
+  previousSdk String?
+  newSdk String?
+  actorId String
+  note String?
+  recordedAt DateTime @default(now())
+  @@index([vmId,recordedAt])
+  @@index([projectId,recordedAt])
 }
 model VMConfiguration {
   id String @id @default(cuid())

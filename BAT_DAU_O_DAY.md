@@ -1,4 +1,4 @@
-# BDOps — source và kết quả đã làm
+# MoneyToHome (nền BDOps) — source và kết quả đã làm
 
 Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\project web new\bdops-proxy-app**. Branch: `feat/proxy-inventory`. Đây là source mới đã kết hợp kho proxy, VM và business; thư mục `../bdops` là baseline cũ dùng đối chiếu.
 
@@ -7,7 +7,7 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 - **Bản Railway đã chạy:** https://bdops-proxy-trial-proxy-trial-20261015.up.railway.app. Bản local vẫn ở http://localhost:3010. Tài khoản và cách test trong [hướng dẫn Railway](docs/runbooks/railway-trial.md).
 - Dự án dữ liệu thật: **Proxy cá nhân — Sheet 15/10**. Dự án mẫu được tách riêng. Web chưa tự cài proxy lên VM và chưa tự ghi ngược Google Sheet.
 - **Quản lý proxy**: nhập proxy mới, báo BLOCKED hàng loạt, nhận replace bằng hai ô IP cũ/mới, tra IP và lịch sử, copy danh sách BLOCKED đủ thông tin.
-- **Server/VM**: xem proxy được giao và proxy đã xác nhận cài. Nhân viên cài thật rồi mới xác nhận. **Điền VM thiếu** chỉ dùng NEW của anh, chưa dùng, vào chỗ trống thật sự.
+- **Server/VM**: xem proxy được giao và proxy đã xác nhận cài. Nhân viên cài thật rồi mới xác nhận. **Điền VM thiếu** chỉ dùng NEW của anh, chưa dùng, vào chỗ trống thật sự. Cột **SDK EarnApp**: ghi tại dòng hoặc **Dán SDK** nhiều dòng (Server → VM → SDK), xem trước, lịch sử từng VM, hoàn tác; bộ lọc **Chưa có SDK**. Xem [hướng dẫn SDK](docs/runbooks/vm-sdk.md).
 - **Business**: công việc, Gmail/PayPal, chi phí, tiền về team, đối soát collector và kỳ lợi nhuận. Lợi nhuận = **USDT thực nhận về team − chi phí quy về USDT**.
 - **Lịch sử**: xem người/thời gian/nội dung trước–sau; hoàn tác khi dữ liệu chưa bị bước sau thay đổi. **Sao lưu** chỉ chủ hệ thống được tạo.
 
@@ -22,6 +22,8 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 7. Business hợp nhất cùng dự án: tài khoản, công việc, thu/chi, rút tiền, collector, nhận tiền về team và khóa kỳ. Giữ số tiền gốc/tỷ giá riêng từng khoản. VND mặc định tham chiếu Binance P2P mua USDT; có ghi nguồn/thời gian và điều chỉnh thủ công rõ ràng.
 8. Đọc source và sao dữ liệu Railway cũ để kiểm chứng. Giữ baseline cũ, không tự ghép server cá nhân với Bright Data theo tên; không tự coi tiền collector là USDT team đã nhận.
 9. Đưa dữ liệu thật lên Railway riêng, khóa login demo, tạo tài khoản chủ riêng, đọc Genjy trực tiếp, backup trên volume và tải bản mã hóa ngoài host. 217 tests/58 files, build/types qua; 11 nhóm kiểm tra API host qua. Restore host vào database riêng đủ 39 bảng và 1.362 cặp credentials thật; Railway cũ vẫn nguyên 26 bảng/1.120 dòng.
+
+10. **15/10 tối — SDK EarnApp (mốc 1):** cột SDK trong bảng Server/VM, ghi một VM tại dòng, dán hàng loạt có xem trước (ghép theo server + mã VM, không theo thứ tự dòng, không tạo VM), chặn mã trùng VM khác (ứng dụng + unique index), dán lại không tạo lịch sử thừa, chống bấm lặp, lịch sử mã cũ/mới/người/giờ, hoàn tác. Đổi tên hiển thị thành **MoneyToHome**, nút tải lại đổi thành **Tải lại** để phân biệt với nhập dữ liệu. Bằng chứng: [SDK](docs/superpowers/evidence/2026-10-15-vm-sdk.md).
 
 ## Dữ liệu thật đã nhập
 
@@ -74,3 +76,4 @@ Kiểm thử dùng `.env.test` trỏ database thử riêng: `npm test`, `npx tsc
 - Anh test thực tế: tìm IP → báo BLOCKED → nhận replace → giao VM → xác nhận cài → hoàn tác thử một thao tác hợp lệ. Xem [hướng dẫn bản thử](docs/runbooks/railway-trial.md).
 - Sau nghiệm thu mới chốt web là nơi sửa chính, bật backup tự động/retention và theo dõi lỗi; tránh sửa cùng một phân bổ ở cả Sheet và web.
 - Chưa có agent tự cài/kiểm tra mạng VM, billing, payroll hay tự lấy số USDT thực nhận từ collector. Những phần này cần dữ liệu và quy trình thực tế tiếp theo.
+- Mốc tiếp theo theo brief 15/10: tài khoản EarnApp (Gmail/Apple ID, nhiều SDK một tài khoản), dán hàng loạt Gmail/PayPal theo cùng mẫu Dán bảng, token API cho AI ghi dữ liệu, trạng thái máy/app theo ngày.

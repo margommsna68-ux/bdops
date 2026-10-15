@@ -136,8 +136,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               B
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight">BDOps</h1>
-              <p className="text-[10px] text-gray-400/70 leading-none">Operations Management</p>
+              <h1 className="text-base font-bold tracking-tight">MoneyToHome</h1>
+              <p className="text-[10px] text-gray-400/70 leading-none">Proxy · VM · EarnApp · business</p>
             </div>
           </div>
         )}

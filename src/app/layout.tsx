@@ -15,8 +15,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "BDOps - Bright Data Operations",
-  description: "Operations management system for Bright Data proxy earning",
+  title: "MoneyToHome",
+  description: "Quản lý proxy, VM, EarnApp và business",
 };
 
 export default function RootLayout({

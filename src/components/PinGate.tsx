@@ -98,7 +98,7 @@ export function PinGate({ children }: { children: React.ReactNode }) {
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-gray-900">Enter PIN</h2>
-              <p className="text-sm text-gray-500 mt-1">Enter your PIN to access BDOps</p>
+              <p className="text-sm text-gray-500 mt-1">Nhập PIN để vào MoneyToHome</p>
             </div>
             <Input
               type="password"

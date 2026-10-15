@@ -14,6 +14,8 @@ Xanh đậm đánh dấu VM đã giao proxy và đang chờ cài; đỏ là prox
 
 Copy từ dòng kho bị chặn với proxy đang giữ cho managed VM. Copy cấu hình đúng phiên bản tại Việc cài; copy proxy đã xác nhận cài tại Server/VM. Proxy từng bắt đầu cài rồi bị thay sang proxy khác được đưa vào Cần kiểm tra, không quay lại pool NEW chưa dùng.
 
+Từ 15/10/2026 bảng Server/VM có thêm cột **SDK EarnApp** (ghi tại dòng, dán hàng loạt, lịch sử, hoàn tác); xem `vm-sdk.md`.
+
 ## Phạm vi quyền và bảo vệ
 
 Nhân viên được thao tác toàn bộ VM trong dự án đã cấp quyền; quyền copy/import/replace tách riêng. Viewer chỉ xem. API kiểm tra quyền từ database và tài nguyên thuộc dự án, không tin nút trên giao diện.

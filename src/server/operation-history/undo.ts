@@ -38,7 +38,7 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
       }else if(image.resource==='MEMBER'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {accessRevision:_accessRevision,...data}=image.before;await tx.projectMember.update({where:{id:image.id},data});
-      }else if(isBusinessResource(image.resource))await restoreBusinessImage(tx,scope.projectId,image as BusinessImage);
+      }else if(isBusinessResource(image.resource))await restoreBusinessImage(tx,scope.projectId,image as BusinessImage,scope.userId);
       else await restoreVMImage(tx,image as Parameters<typeof restoreVMImage>[1],reason.trim());
       reversed.resources.push({...image,before:image.after,after:await readImage(tx,scope.projectId,image.resource,image.id)} as ResourceImage);
       await deps.afterWrite?.();
