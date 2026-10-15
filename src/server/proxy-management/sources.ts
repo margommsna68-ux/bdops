@@ -4,6 +4,7 @@ import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt} from '@/lib/encryption';
 import {parseProxy} from './parse';
+import {fetchPublicWorkbook} from './public-workbook';
 import {withProxyTransaction} from './transaction';
 import {ProxyDomainError,type ParsedProxy,type SheetSource,type SheetSnapshot,type SourceEvidence,type SourceSnapshot,type SourceSnapshotRef} from './types';
 export interface WorkbookCell {a1:string;row:number;column:number;value:string;note?:string;formula?:string}
@@ -71,7 +72,14 @@ export async function fetchGenjySnapshot(source:SheetSource,options:{fetch?:type
       if(!source.localSnapshotPath) throw new ProxyDomainError('SOURCE_UNAVAILABLE');
       return scanWorkbook(JSON.parse(readFileSync(source.localSnapshotPath,'utf8')) as Workbook,source.key);
     }
-    const fetcher=options.fetch||fetch,token=await accessToken(source.credentialRef,fetcher);
+    const fetcher=options.fetch||fetch;
+    if(source.mode==='GOOGLE_PUBLIC_XLSX'){
+      const snapshot=scanWorkbook(await fetchPublicWorkbook(source.spreadsheetId,fetcher),source.key);
+      if(!snapshot.evidence.length)throw new ProxyDomainError('SOURCE_UNAVAILABLE');
+      return snapshot;
+    }
+    if(source.mode!=='GOOGLE_AUTH')throw new ProxyDomainError('SOURCE_UNAVAILABLE');
+    const token=await accessToken(source.credentialRef,fetcher);
     const query=new URLSearchParams({includeGridData:'true',fields:'spreadsheetId,sheets(properties(sheetId,title,hidden),data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,note))))'});
     const response=await fetcher(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(source.spreadsheetId)}?${query}`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20000)});
     if(!response.ok) throw new ProxyDomainError('SOURCE_UNAVAILABLE');

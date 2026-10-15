@@ -1,3 +1,14 @@
 node_modules
 .next
 .git
+.next-build
+.env*
+!.env.example
+.runtime
+.superpowers
+*.dump
+*.backup
+*.pem
+*.key
+*.tsbuildinfo
+Dockerfile.bak

@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BDOps — Proxy, VM và business
+
+Đọc **[BẮT ĐẦU Ở ĐÂY](BAT_DAU_O_DAY.md)** để xem toàn bộ kết quả đã làm, source, dữ liệu, cách dùng và việc tiếp theo. [Hướng dẫn Railway](docs/runbooks/railway-trial.md) là hướng dẫn triển khai hiện hành; phần dưới là template Next.js gốc.
 
 ## Getting Started
 

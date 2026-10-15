@@ -1,0 +1,14 @@
+node_modules
+.next
+.next-build
+.git
+.env*
+!.env.example
+.runtime
+.superpowers
+*.dump
+*.backup
+*.pem
+*.key
+*.tsbuildinfo
+Dockerfile.bak
