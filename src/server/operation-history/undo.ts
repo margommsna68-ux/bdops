@@ -9,18 +9,22 @@ import {assertImagesUnchanged,readImage,type OperationSnapshot,type ResourceImag
 import {restoreVMImage} from '../vm-management/operation-images';
 import {isBusinessResource,restoreBusinessImage} from '../business-management/operation-images';
 import type {BusinessImage} from '../business-management/types';
+import {cashFinancialResources} from '../business-management/team-cash-scope';
+import {lockCashProject} from '../business-management/cash-lock';
 export async function undoOperation(scope:ActorScope,id:string,reason:string,db:PrismaClient=prisma,deps:{afterWrite?:()=>void|Promise<void>}={}){
   if(!reason.trim()||reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Ghi lý do hoàn tác (tối đa 300 ký tự)');
   return withProxyTransaction(async tx=>{
     const current=await loadInfrastructureScope(tx,scope.userId,scope.projectId);
-    if(current.role!=='ADMIN'||current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');
+    if(current.role!=='ADMIN'||!(current.businessMode==='PROXY_VM'||current.teamCashEnabled))throw new ProxyDomainError('FORBIDDEN');
+    await lockCashProject(tx,scope.projectId);
     const original=await tx.operationJournal.findFirst({where:{id,projectId:scope.projectId}});if(!original)throw new ProxyDomainError('NOT_FOUND');
     const prior=await tx.operationJournal.findUnique({where:{undoOfId:id}});if(prior)return {id:prior.id,replay:true};
     if(original.kind==='UNDO'||!original.reversible)throw new ProxyDomainError('INVALID_INPUT','Thao tác này chỉ để xem; cần cấu hình và xác nhận mới');
     const snapshot=openSnapshot(original.snapshotCipher),now=new Date();
+    if(current.businessMode!=='PROXY_VM'&&(!['FUNDS','WITHDRAWALS','COSTS','PROFIT'].includes(original.accessModule)||snapshot.resources.some(r=>!cashFinancialResources.has(r.resource))))throw new ProxyDomainError('FORBIDDEN');
     // Validate ALL resources before changing any of them. No client before-image accepted.
     await assertImagesUnchanged(tx,scope.projectId,snapshot);
-    const reversed:OperationSnapshot={version:2,resources:[],eventIds:[],replacementIds:[]};
+    const reversed:OperationSnapshot={version:snapshot.version===4?4:2,resources:[],eventIds:[],replacementIds:[]};
     const resources=[...snapshot.resources].sort((a,b)=>Number(b.resource==='VM_ALLOCATION'&&!b.before)-Number(a.resource==='VM_ALLOCATION'&&!a.before));
     for(const image of resources){
       if(image.resource==='ENDPOINT'){

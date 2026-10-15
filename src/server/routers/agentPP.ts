@@ -1,4 +1,7 @@
 import { z } from "zod";
+import {withProxyTransaction} from '../proxy-management/transaction';
+import {lockCashProject} from '../business-management/cash-lock';
+import {assertPeriodOpen} from '../business-management/period-lock';
 import {TRPCError} from '@trpc/server';
 import { router, agentPPProcedure, moderatorProcedure } from "../trpc";
 import { createAuditLog } from "@/lib/audit";
@@ -669,7 +672,7 @@ export const agentPPRouter = router({
       ] = await Promise.all([
         // All expenses
         ctx.prisma.collectorExpense.findMany({
-          where: expenseWhere,
+          where: {...expenseWhere,voidedAt:null},
           select: { amount: true },
         }),
         // Today received (gross sum)
@@ -701,7 +704,7 @@ export const agentPPRouter = router({
         }),
         // Recent 5 expenses (replaces "sales")
         ctx.prisma.collectorExpense.findMany({
-          where: expenseWhere,
+          where: {...expenseWhere,voidedAt:null},
           orderBy: { date: "desc" },
           take: 5,
         }),
@@ -986,7 +989,7 @@ export const agentPPRouter = router({
 
       // All my expenses (cross-project) — EXCLUDE COMMISSION_WITHDRAW from wallet calc
       const expenses = await ctx.prisma.collectorExpense.findMany({
-        where: { collectorId: userId },
+        where: { voidedAt:null, collectorId: userId },
         select: { amount: true, type: true },
       });
       // Only team-related expenses affect wallet (not commission withdrawals)
@@ -1055,7 +1058,7 @@ export const agentPPRouter = router({
       }
       // Total withdrawn (COMMISSION_WITHDRAW expenses)
       const cwExpenses = await ctx.prisma.collectorExpense.findMany({
-        where: { collectorId: userId, type: "COMMISSION_WITHDRAW" },
+        where: { voidedAt:null, collectorId: userId, type: "COMMISSION_WITHDRAW" },
         select: { id: true, amount: true, date: true, referenceId: true, note: true },
         orderBy: { date: "desc" },
       });
@@ -1078,10 +1081,11 @@ export const agentPPRouter = router({
       note: z.string().optional(),
       linkedWithdrawalIds: z.array(z.string()).default([]),
     }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => withProxyTransaction(async tx=> {
+      await lockCashProject(tx,input.projectId);await assertPeriodOpen(tx,input.projectId,new Date(),'USDT');
       // Verify linked withdrawals belong to this collector (via agentEmail ownership)
       if (input.linkedWithdrawalIds.length > 0) {
-        const wds = await ctx.prisma.withdrawal.findMany({
+        const wds = await tx.withdrawal.findMany({
           where: { id: { in: input.linkedWithdrawalIds },projectId:input.projectId,businessManaged:false },
           select: { id: true, agentEmailId: true, agentEmail: { select: { userId: true } } },
         });
@@ -1093,7 +1097,7 @@ export const agentPPRouter = router({
       }
 
       const now = new Date();
-      const expense = await ctx.prisma.collectorExpense.create({
+      const expense = await tx.collectorExpense.create({
         data: {
           date: now,
           type: input.type,
@@ -1110,34 +1114,35 @@ export const agentPPRouter = router({
 
       // Mark linked withdrawals as paid
       if (input.linkedWithdrawalIds.length > 0) {
-        await ctx.prisma.withdrawal.updateMany({
+        await tx.withdrawal.updateMany({
           where: { id: { in: input.linkedWithdrawalIds },projectId:input.projectId,businessManaged:false },
           data: { paidToTeam: true, paidAt: now, expenseId: expense.id },
         });
       }
 
-      await createAuditLog({
+      await tx.auditLog.create({data:{
         action: "CREATE",
         entity: "CollectorExpense",
         entityId: expense.id,
         userId: ctx.user.id,
         projectId: input.projectId,
         changes: { type: input.type, amount: input.amount, linkedCount: input.linkedWithdrawalIds.length },
-      });
+      }});
 
       return expense;
-    }),
+    },ctx.prisma)),
 
   // Delete expense (unlinks linked withdrawals)
   // 24h lock for collectors. Admin/Moderator can always delete.
   deleteExpense: agentPPProcedure
     .input(z.object({ projectId: z.string(), id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const exp = await ctx.prisma.collectorExpense.findFirst({
+    .mutation(async ({ ctx, input }) => withProxyTransaction(async tx=> {
+      await lockCashProject(tx,input.projectId);
+      const exp = await tx.collectorExpense.findFirst({
         where: { id: input.id,projectId:input.projectId },
       });
       if(!exp)throw new TRPCError({code:'NOT_FOUND',message:'Không tìm thấy khoản chi trong dự án'});
-      if(await ctx.prisma.withdrawal.findFirst({where:{expenseId:input.id,OR:[{projectId:{not:input.projectId}},{businessManaged:true}]},select:{id:true}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Có giao dịch business/khác dự án liên kết; kiểm tra trước khi điều chỉnh'});
+      if(await tx.withdrawal.findFirst({where:{expenseId:input.id,OR:[{projectId:{not:input.projectId}},{businessManaged:true}]},select:{id:true}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Có giao dịch business/khác dự án liên kết; kiểm tra trước khi điều chỉnh'});
       const isAdminOrMod = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
 
       // Ownership check: collector or admin
@@ -1153,22 +1158,24 @@ export const agentPPRouter = router({
           throw new Error("Expense is locked after 24 hours. Contact admin to modify.");
         }
       }
+      if(exp.businessManaged||await tx.teamReceipt.findFirst({where:{sourceCollectorExpenseId:exp.id}})||await tx.costRecord.findFirst({where:{sourceCollectorExpenseId:exp.id}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng thu chi USDT và lịch sử để điều chỉnh'});
+      await assertPeriodOpen(tx,input.projectId,exp.date,'USDT');
       // Unlink withdrawals (revert paid flag)
-      await ctx.prisma.withdrawal.updateMany({
+      await tx.withdrawal.updateMany({
         where: { expenseId: input.id,projectId:input.projectId,businessManaged:false },
         data: { paidToTeam: false, paidAt: null, expenseId: null },
       });
-      await ctx.prisma.collectorExpense.delete({ where: { id: input.id } });
-      await createAuditLog({
+      await tx.collectorExpense.delete({ where: { id: input.id } });
+      await tx.auditLog.create({data:{
         action: "DELETE",
         entity: "CollectorExpense",
         entityId: input.id,
         userId: ctx.user.id,
         projectId: input.projectId,
         changes: {},
-      });
+      }});
       return { deleted: true };
-    }),
+    },ctx.prisma)),
 
   // ═══════════════════════════════════════════════════════════════
   // ADMIN DASHBOARD + AGENT PERFORMANCE
@@ -1248,7 +1255,7 @@ export const agentPPRouter = router({
 
       // Expenses — cross-project, EXCLUDE COMMISSION_WITHDRAW
       const expenses = userIds.length > 0
-        ? await ctx.prisma.collectorExpense.findMany({ where: { collectorId: { in: userIds }, type: { not: "COMMISSION_WITHDRAW" } }, select: { amount: true } })
+        ? await ctx.prisma.collectorExpense.findMany({ where: { voidedAt:null, collectorId: { in: userIds }, type: { not: "COMMISSION_WITHDRAW" } }, select: { amount: true } })
         : [];
       const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0);
       const walletBalance = teamRevenue - totalExpenses;
@@ -1457,7 +1464,7 @@ export const agentPPRouter = router({
 
       // ═══ STEP 5: Expenses — cross-project, EXCLUDE COMMISSION_WITHDRAW ═══
       const allExpenses = await ctx.prisma.collectorExpense.findMany({
-        where: { collectorId: { in: userIds } },
+        where: { voidedAt:null, collectorId: { in: userIds } },
         select: { collectorId: true, amount: true, type: true },
       });
       const expenseByUser = new Map<string, number>();

@@ -17,5 +17,7 @@ export function assertInfrastructureAction(scope:ActorScope,action:Infrastructur
 export async function loadInfrastructureScope(db:PrismaClient|Prisma.TransactionClient,userId:string,projectId:string):Promise<ActorScope>{
   const member=await db.projectMember.findUnique({where:{userId_projectId:{userId,projectId}},include:{project:{select:{settings:true}}}});
   if(!member) throw new ProxyDomainError('FORBIDDEN','Không có quyền truy cập dự án');
-  return {userId,projectId,role:member.role,allowedModules:member.allowedModules,capabilities:member.capabilities,businessMode:(member.project.settings as {businessMode?:string}|null)?.businessMode};
+  const settings=member.project.settings as {businessMode?:string;teamCashEnabled?:boolean}|null;
+  const teamCashEnabled=!!settings?.teamCashEnabled||!!await db.teamReceipt.findFirst({where:{projectId},select:{id:true}})||!!await db.costRecord.findFirst({where:{projectId,OR:[{usdtRate:{not:null}},{profitTreatment:'ALREADY_NETTED',businessManaged:true}]},select:{id:true}})||!!await db.operationJournal.findFirst({where:{projectId,kind:{startsWith:'TEAM_CASH_'}},select:{id:true}});
+  return {userId,projectId,role:member.role,allowedModules:member.allowedModules,capabilities:member.capabilities,businessMode:settings?.businessMode,teamCashEnabled};
 }

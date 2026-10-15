@@ -45,6 +45,7 @@ export const editHistoryRouter = router({
       if(entry.entity==='Project'&&entry.entityId!==input.projectId)throw new TRPCError({code:'BAD_REQUEST',message:'Dự án trong lịch sử không thuộc phạm vi thao tác'});
       const resource=await (ctx.prisma as any)[model].findFirst({where:{id:entry.entityId,...(entry.entity==='Project'?{}:entry.entity==='VirtualMachine'?{server:{projectId:input.projectId}}:{projectId:input.projectId})}});
       if(!resource)throw new TRPCError({code:'BAD_REQUEST',message:'Dữ liệu lịch sử không thuộc dự án'});
+      if(resource.businessManaged||resource.usdtRate||resource.sourceReceiptId||resource.sourceCollectorExpenseId||entry.entity==='CollectorExpense'&&(resource.businessManaged||await ctx.prisma.teamReceipt.findFirst({where:{sourceCollectorExpenseId:entry.entityId}})||await ctx.prisma.costRecord.findFirst({where:{sourceCollectorExpenseId:entry.entityId}})))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dữ liệu tiền đã quản lý; dùng Lịch sử thao tác mới'});
       if(resource.managed&&['Server','VirtualMachine'].includes(entry.entity))throw new TRPCError({code:'PRECONDITION_FAILED',message:'VM quản lý cấu hình phải dùng hoàn tác mới'});
       if(entry.entity==='Project')await assertProjectCanBeDestroyed(ctx.prisma,input.projectId);
 

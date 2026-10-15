@@ -6,6 +6,7 @@ import { router, protectedProcedure, adminProcedure, moderatorProcedure } from "
 import { APP_MODULES } from "../trpc";
 import bcrypt from "bcryptjs";
 import { createAuditLog } from "@/lib/audit";
+import {loadInfrastructureScope} from '../permissions/infrastructure';
 
 export const projectRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -47,6 +48,7 @@ export const projectRouter = router({
         ...(membership ?? { id: "", role: "USER" as const, allowedModules: [] as string[], canManageUsers: false, managerId: null }),
         projectType: project?.type ?? "FULL",
         businessMode:(project?.settings as {businessMode?:string}|null)?.businessMode||null,
+        teamCashEnabled:(await loadInfrastructureScope(ctx.prisma,userId,input.projectId)).teamCashEnabled||false,
       };
     }),
 

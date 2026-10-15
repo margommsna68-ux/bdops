@@ -1,0 +1,26 @@
+{
+  "version": 3,
+  "resources": [
+    {
+      "resource": "COST",
+      "id": "cmv90n65c00089d90j786azsj",
+      "before": null,
+      "after": {
+        "date": "2026-10-14T17:00:00.000Z",
+        "category": "OTHER",
+        "amount": "2500000",
+        "total": "2500000",
+        "isPrepaid": false,
+        "note": null,
+        "serverId": null,
+        "proxyAccountId": null,
+        "currency": "VND",
+        "businessManaged": true,
+        "voidedAt": null,
+        "revision": 0
+      }
+    }
+  ],
+  "eventIds": [],
+  "replacementIds": []
+}

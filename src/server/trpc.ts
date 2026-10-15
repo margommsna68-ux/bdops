@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { type ProjectRole } from "@prisma/client";
 import {assertLegacyInfrastructureTargets} from './permissions/legacy-infrastructure';
 import {assertUserTarget} from './permissions/user-target';
+import {loadInfrastructureScope} from './permissions/infrastructure';
 
 export const APP_MODULES = [
   "FUNDS",
@@ -88,9 +89,18 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được thay đổi dữ liệu'});
   }
   const businessMode=(membership.project.settings as {businessMode?:string}|null)?.businessMode;
+  const cashEnabled=(await loadInfrastructureScope(ctx.prisma,ctx.user.id,projectId)).teamCashEnabled;
   if(/^(gmail|paypal|paypalEmail|fund|withdrawal|cost|profitSplit|partner|earnWithdrawal|dashboard|editHistory|agentPP)\./.test(path)){
-    const managedBusiness=businessMode==='PROXY_VM'||await ctx.prisma.operationJournal.findFirst({where:{projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}});
+    const managedBusiness=businessMode==='PROXY_VM'||!cashEnabled&&await ctx.prisma.operationJournal.findFirst({where:{projectId,kind:{startsWith:'BUSINESS_'}},select:{id:true}});
     if(managedBusiness)throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng business hợp nhất để giữ dữ liệu, quyền và lịch sử'});
+  }
+  if(type==='mutation'&&cashEnabled){
+    if(/^(cost|profitSplit)\./.test(path))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng thu chi USDT để giữ tỷ giá và khóa kỳ'});
+    if(/^(fund|withdrawal)\./.test(path)){
+      const model=path.startsWith('fund.')?ctx.prisma.fundTransaction:ctx.prisma.withdrawal;
+      const ids=[input.id,...(input.ids||[])].filter((id):id is string=>typeof id==='string');
+      if(ids.length&&await (model as any).findFirst({where:{projectId,id:{in:ids},businessManaged:true},select:{id:true}}))throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dữ liệu đã có lịch sử; dùng nghiệp vụ mới'});
+    }
   }
   if(path==='server.getCredentials'&&membership.role==='VIEWER')throw new TRPCError({code:'FORBIDDEN',message:'Tài khoản chỉ xem không được xem/copy thông tin đăng nhập'});
   if(/^(server|vmTask)\./.test(path)){

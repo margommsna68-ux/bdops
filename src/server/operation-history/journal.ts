@@ -9,7 +9,7 @@ export async function recordOperation(tx:Prisma.TransactionClient,input:{scope:A
 }
 export function openSnapshot(cipher:string):OperationSnapshot{
   const value=JSON.parse(decrypt(cipher)) as OperationSnapshot;
-  if(![1,2,3].includes(value.version)||!Array.isArray(value.resources)||!Array.isArray(value.eventIds)||!Array.isArray(value.replacementIds))throw new ProxyDomainError('INVALID_INPUT','Không có bản trước để hoàn tác');
+  if(![1,2,3,4].includes(value.version)||!Array.isArray(value.resources)||!Array.isArray(value.eventIds)||!Array.isArray(value.replacementIds))throw new ProxyDomainError('INVALID_INPUT','Không có bản trước để hoàn tác');
   return value;
 }
 export async function listOperations(scope:ActorScope,db:PrismaClient=prisma){
@@ -26,5 +26,5 @@ export async function inspectOperation(scope:ActorScope,id:string,db:PrismaClien
   let blockedReason:string|null=operation.reversible?null:operation.kind.startsWith('BUSINESS_')?'Đây là ghi nhận chốt kỳ / trả tiền. Dùng Mở lại kỳ hoặc Sửa ghi trả nhầm với lý do để điều chỉnh.':'Đã bắt đầu xử lý thực tế. Giao một cấu hình mới và xác nhận mới nếu cần đổi lại.';
   try{await assertImagesUnchanged(db,scope.projectId,snapshot);}catch(error){if(error instanceof ProxyDomainError)blockedReason=error.message;else throw error;}
   const rows=await Promise.all(snapshot.resources.map(async image=>{const result=describeImage(image);if(image.resource==='VM_BINDING'){const vm=await db.virtualMachine.findFirst({where:{id:image.id,server:{projectId:scope.projectId}},select:{code:true,server:{select:{code:true}}}});if(vm)result.label=vm.server.code+' / '+vm.code;}return result;}));
-  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&current.businessMode==='PROXY_VM'&&operation.reversible&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows};
+  return {id,kind:operation.kind,createdAt:operation.createdAt.toISOString(),summary:operation.summary,blockedReason,canUndo:current.role==='ADMIN'&&(current.businessMode==='PROXY_VM'||current.teamCashEnabled&&['FUNDS','WITHDRAWALS','COSTS','PROFIT'].includes(operation.accessModule)&&snapshot.resources.every(r=>['COST','FUND','WITHDRAWAL','PROFIT','SPLIT_PAYMENT','TEAM_RECEIPT','COLLECTOR_EXPENSE','PAYPAL'].includes(r.resource)))&&operation.reversible&&operation.kind!=='UNDO'&&!undo&&!blockedReason,rows};
 }
