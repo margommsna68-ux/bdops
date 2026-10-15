@@ -42,3 +42,16 @@ it('global transaction references and source links allow one concurrent claimant
   expect(attempts.filter(x=>x.status==='fulfilled')).toHaveLength(1);
  }finally{await f.cleanup();await other.cleanup();}
 });
+for(const initialStatus of ['DRAFT','CONFIRMED'] as const)it(`keeps wallet ownership when USD reconciliation is added to an existing ${initialStatus} receipt`,async()=>{
+ const f=await teamCashFixture('PAYPAL_ONLY');try{
+  const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'}} as unknown as Context),wallet=()=>caller.agentPP.walletBalance({projectId:f.scope.projectId}),before=(await wallet()).walletBalance;
+  const i={...input(),status:initialStatus},r=await saveTeamReceipt(f.scope,i,db);
+  await saveTeamReceipt(f.scope,{...i,id:r.id,expectedRevision:0,key:randomUUID(),status:'CONFIRMED',collectorId:f.scope.userId,collectorUsdAmount:'110',reason:'Confirm actual team receipt'},db);
+  expect((await wallet()).walletBalance).toBe(before-110);
+  await voidTeamReceipt(f.scope,{id:r.id,expectedRevision:1,key:randomUUID(),reason:'Wrong confirmation'},db);
+  expect((await wallet()).walletBalance).toBe(before);
+  await restoreTeamReceipt(f.scope,{id:r.id,expectedRevision:2,key:randomUUID(),reason:'Transfer verified'},db);
+  expect((await wallet()).walletBalance).toBe(before-110);
+  expect(await db.collectorExpense.count({where:{projectId:f.scope.projectId}})).toBe(1);
+ }finally{await f.cleanup();}
+});

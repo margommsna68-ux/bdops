@@ -1,7 +1,7 @@
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {ProxyDomainError} from '../proxy-management/types';
 import type {BusinessResource,BusinessRow,BusinessImage} from './types';
-import {assertPeriodOpen} from './period-lock';
+import {assertPeriodOpen,assertCollectorSourceOpen} from './period-lock';
 import {dayText} from './money';
 const fields:Record<BusinessResource,string[]>={
  GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision'],
@@ -36,6 +36,7 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
  return row?capture(type,row):null;
 }
 export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId:string,image:BusinessImage){
+ if(['COST','TEAM_RECEIPT'].includes(image.resource))for(const state of [image.after,image.before])if(typeof state?.sourceCollectorExpenseId==='string')await assertCollectorSourceOpen(tx,projectId,state.sourceCollectorExpenseId);
  if(image.resource==='TEAM_RECEIPT'&&(!image.before||image.before.status!=='CONFIRMED'||image.before.voidedAt)&&await tx.costRecord.findFirst({where:{sourceReceiptId:image.id,voidedAt:null}}))throw new ProxyDomainError('INVALID_INPUT','Thu hồi chi phí đối soát liên kết trước');
  if(['COST','FUND','WITHDRAWAL'].includes(image.resource))for(const state of [image.after,image.before])if(state?.date)await assertPeriodOpen(tx,projectId,new Date(String(state.date)),String(state.currency));
  if(['TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))for(const state of [image.after,image.before]){const date=state?.receivedAt||state?.date;if(date)await assertPeriodOpen(tx,projectId,new Date(String(date)),'USDT');}

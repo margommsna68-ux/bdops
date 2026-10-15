@@ -5,7 +5,7 @@ import {runCashCommand} from './cash-command';
 import {authorizeTeamCash} from './team-cash-scope';
 import {dayDate,dayText} from './money';
 import {cashCurrency,normalizeCostMoney,parseOriginalMoney,CashDecimal} from './usdt-money';
-import {assertPeriodOpen} from './period-lock';
+import {assertPeriodOpen,assertCollectorSourceOpen} from './period-lock';
 import type {SaveUsdtCostInput} from './usdt-types';
 import {verifyP2PQuote} from './binance-p2p';
 export function cashReason(reason?:string){if(!reason?.trim()||reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Cần lý do điều chỉnh (tối đa 300 ký tự)');}
@@ -39,9 +39,9 @@ export async function saveUsdtCost(scope:ActorScope,input:SaveUsdtCostInput,db:P
   if(!old)await images.remember('COST',row.id,true);await deps.afterWrite?.(tx);return {id:row.id};
  },db);
 }
-export async function voidUsdtCost(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){
+export async function voidUsdtCost(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
  cashReason(input.reason);return runCashCommand(scope,{key:input.key,payload:input,kind:'TEAM_CASH_COST_VOID',module:'COSTS'},async(tx,images)=>{
-  const row=await tx.costRecord.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||row.voidedAt)throw new ProxyDomainError('STALE_PREVIEW');await assertPeriodOpen(tx,scope.projectId,row.date,row.currency);await images.remember('COST',row.id);await tx.costRecord.update({where:{id:row.id},data:{voidedAt:new Date(),revision:{increment:1}}});return {id:row.id};
+  const row=await tx.costRecord.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||row.voidedAt)throw new ProxyDomainError('STALE_PREVIEW');await assertPeriodOpen(tx,scope.projectId,row.date,row.currency);await assertCollectorSourceOpen(tx,scope.projectId,row.sourceCollectorExpenseId);await images.remember('COST',row.id);await tx.costRecord.update({where:{id:row.id},data:{voidedAt:new Date(),revision:{increment:1}}});await deps.afterWrite?.(tx);return {id:row.id};
  },db);
 }
 export async function lastCostRate(scope:ActorScope,currency:string,db:PrismaClient=prisma){

@@ -7,5 +7,6 @@ it('stores exact original money and nullable unverified receipts',async()=>{
   const receipt=await db.teamReceipt.create({data:{projectId:f.scope.projectId,receivedAt:new Date(),createdById:f.scope.userId}});
   expect(receipt.amountUsdt).toBeNull();
   await expect(db.teamReceipt.create({data:{projectId:f.scope.projectId,receivedAt:new Date(),createdById:f.scope.userId,status:'CONFIRMED'}})).rejects.toThrow();
+  await expect(db.teamReceipt.create({data:{projectId:f.scope.projectId,receivedAt:new Date(),createdById:f.scope.userId,status:'CONFIRMED',amountUsdt:'1',referenceKey:'missing-reference-text'}})).rejects.toThrow();
  }finally{await f.cleanup();}
 });

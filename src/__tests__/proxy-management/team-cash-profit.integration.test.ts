@@ -3,11 +3,11 @@ import {randomUUID} from 'node:crypto';
 import {teamCashFixture,businessDB as db} from './team-cash-fixture';
 import {saveUsdtCost} from '@/server/business-management/usdt-costs';
 import {saveTeamReceipt} from '@/server/business-management/team-receipts';
-import {createTeamCashPeriod,settleTeamCashPeriod,reopenTeamCashPeriod} from '@/server/business-management/team-cash-profit';
+import {createTeamCashPeriod,settleTeamCashPeriod,reopenTeamCashPeriod,readTeamCashPeriods} from '@/server/business-management/team-cash-profit';
 import {createProfitPeriod} from '@/server/business-management/profit';
 import {undoOperation} from '@/server/operation-history/undo';
 import {businessFixture} from './business-fixture';
-import {settleProfit} from '@/server/business-management/profit';
+import {settleProfit,reopenProfit,recalculateProfit} from '@/server/business-management/profit';
 it('locks converted VND edits and undo after USDT settlement, with six-decimal allocation',async()=>{
  const f=await teamCashFixture();try{
   await saveTeamReceipt(f.scope,{key:randomUUID(),receivedDate:'2026-10-15',amountUsdt:'100.000001',referenceId:randomUUID(),status:'CONFIRMED'},db);
@@ -29,5 +29,10 @@ it('keeps historical settled USD amounts, paid facts and encrypted basis unchang
   await db.project.update({where:{id:f.scope.projectId},data:{settings:{businessMode:'PROXY_VM',teamCashEnabled:true}}});
   await saveTeamReceipt(f.scope,{key:randomUUID(),receivedDate:'2026-10-15',amountUsdt:'10',referenceId:randomUUID(),status:'CONFIRMED'},db);
   expect(await db.profitSplit.findUniqueOrThrow({where:{id:p.id},include:{allocations:true}})).toEqual(before);
+  await reopenProfit(f.scope,{id:p.id,expectedRevision:1,key:randomUUID(),reason:'Review original period'},db);
+  expect((await readTeamCashPeriods(f.scope,{start:'2026-09-01',end:'2026-09-30'},db)).find(x=>x.id===p.id)).toMatchObject({businessManaged:true,basis:'WITHDRAWN',settled:false});
+  await recalculateProfit(f.scope,{id:p.id,expectedRevision:2,key:randomUUID()},db);
+  await settleProfit(f.scope,{id:p.id,expectedRevision:3,key:randomUUID()},db);
+  expect((await db.profitSplit.findUniqueOrThrow({where:{id:p.id}})).settled).toBe(true);
  }finally{await f.cleanup();}
 });

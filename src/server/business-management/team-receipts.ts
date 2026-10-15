@@ -6,13 +6,13 @@ import {runCashCommand} from './cash-command';
 import {dayDate,money} from './money';
 import {parseUsdt,CashDecimal} from './usdt-money';
 import {cashReason} from './usdt-costs';
-import {assertPeriodOpen} from './period-lock';
+import {assertPeriodOpen,assertCollectorSourceOpen} from './period-lock';
 import {openSnapshot} from '../operation-history/journal';
 import type {SaveTeamReceiptInput} from './usdt-types';
 const conflict=()=>new ProxyDomainError('INVALID_INPUT','Mã giao dịch hoặc nguồn đã được ghi nhận; kiểm tra trước khi lưu lại');
 async function receiptOwnsSource(tx:Prisma.TransactionClient,projectId:string,id:string,sourceId:string){
  const entries=await tx.operationJournal.findMany({where:{projectId,kind:'TEAM_CASH_RECEIPT'}});
- return entries.some(e=>{const resources=openSnapshot(e.snapshotCipher).resources;return resources.some(r=>r.resource==='TEAM_RECEIPT'&&r.id===id&&!r.before)&&resources.some(r=>r.resource==='COLLECTOR_EXPENSE'&&r.id===sourceId&&!r.before);});
+ return entries.some(e=>{const resources=openSnapshot(e.snapshotCipher).resources;return resources.some(r=>r.resource==='TEAM_RECEIPT'&&r.id===id&&r.after.sourceCollectorExpenseId===sourceId)&&resources.some(r=>r.resource==='COLLECTOR_EXPENSE'&&r.id===sourceId&&!r.before);});
 }
 export async function saveTeamReceipt(scope:ActorScope,input:SaveTeamReceiptInput,db:PrismaClient=prisma,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
  const date=dayDate(input.receivedDate),amount=input.amountUsdt?parseUsdt(input.amountUsdt):null,referenceId=input.referenceId?.trim()||null;
@@ -47,11 +47,12 @@ export async function saveTeamReceipt(scope:ActorScope,input:SaveTeamReceiptInpu
   if(!old)await images.remember('TEAM_RECEIPT',row.id,true);await deps.afterWrite?.(tx);return {id:row.id};
  },db);}catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002')throw conflict();throw error;}
 }
-async function setReceiptVoided(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},restore:boolean,db:PrismaClient){
+async function setReceiptVoided(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},restore:boolean,db:PrismaClient,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
  cashReason(input.reason);return runCashCommand(scope,{key:input.key,payload:input,kind:restore?'TEAM_CASH_RECEIPT_RESTORE':'TEAM_CASH_RECEIPT_VOID',module:'WITHDRAWALS'},async(tx,images,current)=>{
   if(restore&&current.role!=='ADMIN')throw new ProxyDomainError('FORBIDDEN');
   const row=await tx.teamReceipt.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!row)throw new ProxyDomainError('NOT_FOUND');if(row.revision!==input.expectedRevision||!!row.voidedAt!==restore)throw new ProxyDomainError('STALE_PREVIEW');
   await assertPeriodOpen(tx,scope.projectId,row.receivedAt,'USDT');
+  await assertCollectorSourceOpen(tx,scope.projectId,row.sourceCollectorExpenseId);
   if(!restore&&await tx.costRecord.findFirst({where:{sourceReceiptId:row.id,voidedAt:null}}))throw new ProxyDomainError('INVALID_INPUT','Thu hồi chi phí đối soát liên kết trước');
   if(row.sourceCollectorExpenseId&&await receiptOwnsSource(tx,scope.projectId,row.id,row.sourceCollectorExpenseId)){
    const source=await tx.collectorExpense.findUniqueOrThrow({where:{id:row.sourceCollectorExpenseId}});
@@ -60,8 +61,8 @@ async function setReceiptVoided(scope:ActorScope,input:{id:string;expectedRevisi
    if(await tx.withdrawal.findFirst({where:{expenseId:source.id}}))throw new ProxyDomainError('INVALID_INPUT','Có giao dịch khác liên kết nguồn; cần đối soát');
    await images.remember('COLLECTOR_EXPENSE',source.id);await tx.collectorExpense.update({where:{id:source.id},data:{voidedAt:restore?null:new Date(),revision:{increment:1}}});
   }
-  await images.remember('TEAM_RECEIPT',row.id);await tx.teamReceipt.update({where:{id:row.id},data:{voidedAt:restore?null:new Date(),revision:{increment:1}}});return {id:row.id};
+  await images.remember('TEAM_RECEIPT',row.id);await tx.teamReceipt.update({where:{id:row.id},data:{voidedAt:restore?null:new Date(),revision:{increment:1}}});await deps.afterWrite?.(tx);return {id:row.id};
  },db);
 }
-export function voidTeamReceipt(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){return setReceiptVoided(scope,input,false,db);}
+export function voidTeamReceipt(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){return setReceiptVoided(scope,input,false,db,deps);}
 export function restoreTeamReceipt(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma){return setReceiptVoided(scope,input,true,db);}
