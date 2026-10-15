@@ -1020,8 +1020,8 @@ export const agentPPRouter = router({
     .input(z.object({ projectId: z.string(), limit: z.number().min(1).max(500).default(100) }))
     .query(async ({ ctx, input }) => {
       const isAdmin = ctx.role === "ADMIN" || ctx.role === "MODERATOR";
-      // Admin sees ALL expenses cross-project; user sees only own
-      const where: any = isAdmin ? {} : { collectorId: ctx.user.id };
+      // Managers inspect their current project; collectors retain their own wallet history.
+      const where: any = isAdmin ? {projectId:input.projectId} : { collectorId: ctx.user.id };
       const items = await ctx.prisma.collectorExpense.findMany({
         where,
         orderBy: { date: "desc" },

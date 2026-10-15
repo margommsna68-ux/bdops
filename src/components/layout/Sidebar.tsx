@@ -9,6 +9,7 @@ import { useSettingsStore } from "@/lib/settings-store";
 import { useT } from "@/lib/i18n";
 import { isCollectorOnly } from "@/lib/collector-utils";
 import type { AppModule } from "@/server/trpc";
+import {trpc} from '@/lib/trpc';
 
 type NavItem =
   | { href: string; labelKey: string; icon: string; module?: AppModule | null; adminOnly?: boolean; infraOnly?: boolean }
@@ -72,6 +73,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   const { currentRole, currentModules, currentProjectCode, currentProjectType } = useProjectStore();
   const theme = useSettingsStore((s) => s.theme);
   const t = useT();
+  const projectId=useProjectStore(s=>s.currentProjectId),fresh=trpc.project.myMembership.useQuery({projectId:projectId||''},{enabled:!!projectId});
+  const cashMode=!!fresh.data?.teamCashEnabled;
 
   const isAdmin = currentRole === "ADMIN";
   const isModerator = currentRole === "MODERATOR";
@@ -94,7 +97,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   // When no project selected (all deleted), show dashboard + admin + settings
   const noProject = !currentRole;
 
-  const filteredItems = (proxyMode?personalItems:navItems).filter((item) => {
+  const cashItems:NavItem[]=navItems.filter(item=>'type' in item||!item.infraOnly).concat([{href:'/history',labelKey:'Lịch sử thao tác',icon:'H'}]);
+  const filteredItems = (proxyMode?personalItems:cashMode?cashItems:navItems).filter((item) => {
     if ("type" in item) return true;
     if (noProject) {
       // Only show dashboard, admin links, settings when no project

@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 import { useState, useMemo } from "react";
+import Link from 'next/link';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
@@ -886,7 +887,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                 sortedExpenses.map((exp: any) => {
                   const isExpanded = expandedExpenseId === exp.id;
                   const style = EXPENSE_STYLES[exp.type as ExpenseType] ?? EXPENSE_STYLES.OTHER;
-                  const expenseLocked = exp.createdAt && (Date.now() - new Date(exp.createdAt).getTime() > LOCK_MS);
+                  const expenseLocked = exp.businessManaged || exp.voidedAt || exp.createdAt && (Date.now() - new Date(exp.createdAt).getTime() > LOCK_MS);
                   return (
                     <div key={exp.id} className="px-4 py-3">
                       <div className="flex items-center justify-between gap-2">
@@ -902,6 +903,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                             <span className="font-mono text-blue-700 text-xs">{exp.referenceId}</span>
                             {exp.withdrawals?.length > 0 && <span className="text-gray-500 text-xs">({exp.withdrawals.length} {t("history_linked_count")})</span>}
                             {exp.note && <span className="text-gray-400 italic text-xs">{exp.note}</span>}
+                            {exp.voidedAt&&<span>Đã thu hồi, không tính vào ví</span>}
                           </div>
                           <span className="text-red-600 font-bold text-sm">-{formatCurrency(Number(exp.amount))}</span>
                         </button>
@@ -925,6 +927,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                           >×</button>
                         )}
                       </div>
+                      {!exp.voidedAt&&<Link className="text-xs underline" href="/withdrawals?view=sources">Xem đối soát USDT với team (cần quyền nhận team)</Link>}
                       {isExpanded && exp.withdrawals?.length > 0 && (
                         <div className="mt-2 ml-4 bg-gray-50 rounded p-2">
                           <div className="text-[11px] font-semibold text-gray-600 mb-1">{t("history_linked_label")}</div>

@@ -1,7 +1,7 @@
 export type CashRange={start:string;end:string};
 export type CashCommandResult={id:string;replay:boolean;undone:boolean};
 export type ProfitTreatment='CASH_COST'|'ALREADY_NETTED';
-export type SaveUsdtCostInput={id?:string;expectedRevision?:number;key:string;reason?:string;date:string;amount:string;currency:string;rate?:string;notes?:string;category:string;serverId?:string|null;proxyAccountId?:string|null;treatment:ProfitTreatment;sourceReceiptId?:string|null;sourceCollectorExpenseId?:string|null};
+export type SaveUsdtCostInput={id?:string;expectedRevision?:number;key:string;reason?:string;date:string;amount:string;currency:string;rate?:string;p2pQuoteToken?:string;notes?:string;category:string;serverId?:string|null;proxyAccountId?:string|null;treatment:ProfitTreatment;sourceReceiptId?:string|null;sourceCollectorExpenseId?:string|null};
 export type SaveTeamReceiptInput={id?:string;expectedRevision?:number;key:string;reason?:string;receivedDate:string;amountUsdt?:string;referenceId?:string;status:'DRAFT'|'CONFIRMED';collectorId?:string|null;sourceCollectorExpenseId?:string|null;collectorUsdAmount?:string;notes?:string};
 export type CashSourceFacts={receipts:{id:string;revision:number}[];costs:{id:string;revision:number;currency:string;amount:string;rate:string|null;usdt:string|null;treatment:ProfitTreatment}[];collectorCandidates:{id:string;revision:number;fingerprint:string}[]};
 export type TeamCashReport={basis:'TEAM_RECEIVED';currency:'USDT';teamReceived:string;cost:string;net:string;excludedNettedCostCount:number;blockingCount:number;unlinkedReceiptCount:number;blockers:{kind:'MISSING_RATE'|'UNVERIFIED_RECEIPT'|'UNCLASSIFIED_EXPENSE';id:string}[];sourceHash:string};
