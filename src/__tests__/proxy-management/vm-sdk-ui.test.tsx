@@ -2,7 +2,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {it,expect,vi} from 'vitest';
 const state=vi.hoisted(()=>({preview:null as null|object,vms:[] as object[],servers:[] as object[]}));
-vi.mock('next/navigation',()=>({useSearchParams:()=>({get:()=>null}),useRouter:()=>({replace:()=>{}})}));
+vi.mock('next/navigation',()=>({useSearchParams:()=>({get:()=>null,toString:()=>''}),useRouter:()=>({replace:()=>{}}),usePathname:()=>'/infrastructure/servers'}));
 vi.mock('@/lib/trpc',()=>{
   const q=(data:unknown)=>({useQuery:()=>({data,isLoading:false,error:null})}),m=()=>({useMutation:()=>({mutateAsync:async()=>state.preview,mutate:()=>{},isLoading:false,reset:()=>{},data:undefined,error:null})});
   return {trpc:{useUtils:()=>({}),vmManagement:{workspace:q({servers:state.servers,vms:state.vms}),access:q({canManage:true,canAssign:true,canConfirm:true,canCopy:false,sourceConnected:true,trial:false,businessMode:'PROXY_VM'}),eligible:q([]),sdkPreview:m(),sdkApply:m(),sdkHistory:q([]),copy:m()},businessManagement:{access:q({costs:false}),accounts:q({gmails:[],vms:[]})},proxyManagement:{list:q({rows:[]})}}};

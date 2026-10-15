@@ -1,3 +1,4 @@
+import {nextDueAfterPayment} from '../proxy-management/package-terms';
 import type {Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
@@ -36,7 +37,17 @@ export async function saveUsdtCost(scope:ActorScope,input:SaveUsdtCostInput,db:P
   const data={date,amount:original,total:original,currency,category:input.category,note:input.notes,serverId,proxyAccountId,usdtRate:quote?.rate??null,usdtAmount:quote?.usdt??null,fxAppliedAt:p2p?new Date(p2p.fetchedAt):sameQuote?old.fxAppliedAt:quote?new Date():null,fxSource:p2p?'BINANCE_P2P_'+p2p.side:sameQuote?old.fxSource:quote?'MANUAL':null,fxNote:input.reason??null,profitTreatment:input.treatment,sourceReceiptId,sourceCollectorExpenseId,businessManaged:true};
   if(old)await images.remember('COST',old.id);
   const row=old?await tx.costRecord.update({where:{id:old.id},data:{...data,revision:{increment:1}}}):await tx.costRecord.create({data:{...data,projectId:scope.projectId,code:'CP-'+input.key}});
-  if(!old)await images.remember('COST',row.id,true);await deps.afterWrite?.(tx);return {id:row.id};
+  if(!old)await images.remember('COST',row.id,true);
+  if(input.packageDue){
+   if(input.category!=='IP_PROXY'||!proxyAccountId||proxyAccountId!==input.packageDue.proxyAccountId)throw new ProxyDomainError('INVALID_INPUT','Dời hạn chỉ áp dụng cho khoản chi proxy của đúng gói');
+   const account=await tx.proxyProviderAccount.findFirst({where:{id:proxyAccountId,projectId:scope.projectId}});if(!account)throw new ProxyDomainError('NOT_FOUND');
+   if(account.revision!==input.packageDue.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','Gói vừa được sửa; tải lại rồi ghi lại');
+   const utcDay=(v:string)=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(v))throw new ProxyDomainError('INVALID_INPUT','Ngày đến hạn dùng YYYY-MM-DD');const d=new Date(v+'T00:00:00.000Z');if(d.toISOString().slice(0,10)!==v)throw new ProxyDomainError('INVALID_INPUT','Ngày đến hạn không hợp lệ');return d;};
+   const next=input.packageDue.nextDueDate?utcDay(input.packageDue.nextDueDate):nextDueAfterPayment(account.nextDueDate,utcDay(input.date),account.cycleMonths);
+   await images.remember('PACKAGE',account.id);
+   await tx.proxyProviderAccount.update({where:{id:account.id},data:{nextDueDate:next,lastPaidAt:date,revision:{increment:1}}});
+  }
+  await deps.afterWrite?.(tx);return {id:row.id};
  },db);
 }
 export async function voidUsdtCost(scope:ActorScope,input:{id:string;expectedRevision:number;key:string;reason:string},db:PrismaClient=prisma,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){

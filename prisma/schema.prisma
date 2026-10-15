@@ -335,9 +335,18 @@ model ProxyProviderAccount {
   label String
   credentialCipher String
   disabled Boolean @default(false)
+  site String?
+  note String?
+  price Decimal? @db.Decimal(24,8)
+  priceCurrency String?
+  cycleMonths Int @default(1)
+  nextDueDate DateTime? @db.Date
+  lastPaidAt DateTime?
   revision Int @default(1)
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
   @@unique([projectId,code])
+  @@index([projectId,nextDueDate])
 }
 model ProxySourceSnapshot {
   id String @id @default(cuid())

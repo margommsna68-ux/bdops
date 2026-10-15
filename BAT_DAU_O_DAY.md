@@ -24,6 +24,7 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 9. Đưa dữ liệu thật lên Railway riêng, khóa login demo, tạo tài khoản chủ riêng, đọc Genjy trực tiếp, backup trên volume và tải bản mã hóa ngoài host. 217 tests/58 files, build/types qua; 11 nhóm kiểm tra API host qua. Restore host vào database riêng đủ 39 bảng và 1.362 cặp credentials thật; Railway cũ vẫn nguyên 26 bảng/1.120 dòng.
 
 10. **15/10 tối — SDK EarnApp (mốc 1):** cột SDK trong bảng Server/VM, ghi một VM tại dòng, dán hàng loạt có xem trước (ghép theo server + mã VM, không theo thứ tự dòng, không tạo VM), chặn mã trùng VM khác (ứng dụng + unique index), dán lại không tạo lịch sử thừa, chống bấm lặp, lịch sử mã cũ/mới/người/giờ, hoàn tác. Đổi tên hiển thị thành **MoneyToHome**, nút tải lại đổi thành **Tải lại** để phân biệt với nhập dữ liệu. Bằng chứng: [SDK](docs/superpowers/evidence/2026-10-15-vm-sdk.md).
+11. **16/10 — Gói proxy, thanh toán, sắp xếp:** gói proxy có site, giá, chu kỳ, ngày đến hạn (Quản lý proxy → Thiết lập → Gói proxy); Nhập mới chọn gói sẵn có hoặc **Gói mới…**; nút **Đã thanh toán** ghi khoản chi USDT và dời hạn trong một lệnh; Tổng quan và trang proxy nhắc **Gói sắp đến hạn** (≤ 7 ngày / quá hạn); sắp xếp theo gói → server → VM → IP như Sheet, lọc theo gói, giữ trên URL; Server/VM sắp theo mã VM / chưa có SDK / thiếu proxy. Dự án trên host đổi tên **mooon**, thêm **AE** trống, xóa dự án mẫu; ADMIN xóa được dự án proxy/VM. Xem `docs/runbooks/proxy-packages.md`.
 
 ## Dữ liệu thật đã nhập
 

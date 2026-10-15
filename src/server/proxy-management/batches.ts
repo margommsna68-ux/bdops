@@ -11,7 +11,7 @@ import {refreshGenjy} from './sources';
 import {buildReconciliation} from './reconcile';
 import {withProxyTransaction} from './transaction';
 import {recordOperation} from '../operation-history/journal';
-import {captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
+import {captureAccount,captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
 import {ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
 export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
 interface Planned {rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
@@ -25,13 +25,34 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
   parseReceivedDate(input.receivedDate);
   const rows:PreviewRow[]=[],items:ResolvedItem[]=[];
   let reconciliation:ReconciliationPlan|undefined;
-  const addNew=(row:number,p:ParsedProxy,owner:Owner,subgroup:Subgroup,state:InventoryState='NEW',sourceRef?:string)=>{
-    const decision=decideNew(p,owner,ctx),code=matchPackage(p,catalog),resolvedState=code?state:'QUARANTINED';
+  const addNew=(row:number,p:ParsedProxy,owner:Owner,subgroup:Subgroup,state:InventoryState='NEW',sourceRef?:string,pkg?:{code?:string|null;issue?:string})=>{
+    const decision=decideNew(p,owner,ctx);let code=pkg?.code!==undefined?pkg.code:matchPackage(p,catalog);
     if(subgroup&&owner!=='GENJY') Object.assign(decision,{outcome:'ERROR',code:'OWNER_CONFLICT',message:'PC chung phải thuộc Genjy'});
+    if(pkg?.issue&&decision.outcome!=='ERROR'){Object.assign(decision,{outcome:'ERROR',code:'PACKAGE_MISMATCH',message:pkg.issue});code=null;}
+    const resolvedState=code?state:'QUARANTINED';
     rows.push({...decision,row,newIp:p.ip,owner,subgroup,packageCode:code,sourceRefs:sourceRef?[sourceRef]:[],...(decision.outcome==='READY'&&!code?{code:'UNKNOWN_PACKAGE' as const,message:'Lưu để kiểm tra gói; chưa dùng để cấp VM'}:{})});
     if(decision.outcome==='READY') items.push({row,next:p,owner,subgroup,packageCode:code,state:resolvedState,sourceRef});
   };
-  if(input.kind==='NEW') parseProxyList(input.text||'').forEach((p,i)=>addNew(i+1,p,input.owner||'SELF',input.subgroup||null));
+  if(input.kind==='NEW'){
+    const chosen=input.packageCode?.trim()||null,fresh=input.newPackage?.code.trim()||null;
+    if(chosen&&!catalog.some(c=>c.code===chosen)) throw new ProxyDomainError('NOT_FOUND','Không có gói '+chosen);
+    if(input.newPackage){if(!fresh||fresh.length>80) throw new ProxyDomainError('INVALID_INPUT','Cần tên gói mới');if(catalog.some(c=>c.code.toLowerCase()===fresh.toLowerCase())) throw new ProxyDomainError('DUPLICATE_INPUT','Gói '+fresh+' đã có; chọn gói sẵn có');}
+    let first:{username:string;password:string}|null=null;
+    parseProxyList(input.text||'').forEach((p,i)=>{
+      let pkg:{code?:string|null;issue?:string}|undefined;const matched=matchPackage(p,catalog);
+      if(fresh){
+        if(matched) pkg={issue:'User/pass này đã thuộc gói '+matched};
+        else if(!p.username||!p.password) pkg={issue:'Thiếu user/pass để đăng ký gói mới'};
+        else if(first&&(first.username!==p.username||first.password!==p.password)) pkg={issue:'Gói mới chỉ nhận một user/pass; dòng này khác dòng đầu'};
+        else{first=first||{username:p.username,password:p.password};pkg={code:fresh};}
+      }else if(chosen){
+        if(matched===chosen) pkg={code:chosen};
+        else if(matched) pkg={issue:'User/pass thuộc gói '+matched};
+        else pkg={issue:'User/pass không khớp gói '+chosen+'; dùng Gói mới hoặc sửa gói'};
+      }
+      addNew(i+1,p,input.owner||'SELF',input.subgroup||null,'NEW',undefined,pkg);
+    });
+  }
   else if(input.kind==='BLOCKED') parseProxyList(input.text||'').forEach((p,i)=>{
     const found=candidates(ctx,p,projectId),decision=decideBlock(found),endpoint=found[0],identity=ctx.identities.find(v=>v.id===endpoint?.identityId);
     rows.push({...decision,row:i+1,oldIp:p.ip,endpointId:decision.outcome!=='ERROR'?endpoint?.id:undefined,owner:identity?.owner,sourceRefs:[]});
@@ -155,6 +176,12 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
       const result:CommitResult={batchId:batch.id,replay:false,rows:planned.rows,applied:planned.items.length,skipped:planned.rows.filter(r=>r.outcome==='SKIP').length,errors:planned.rows.filter(r=>r.outcome==='ERROR').length};
       if(planned.items.length){
         const resources:ResourceImage[]=[];
+        if(batch.kind==='NEW'&&saved.input.newPackage){
+          const creds=planned.items[0].next!,code=saved.input.newPackage.code.trim();
+          if(await tx.proxyProviderAccount.findUnique({where:{projectId_code:{projectId:scope.projectId,code}}})) throw new ProxyDomainError('STALE_PREVIEW','Gói '+code+' vừa được tạo; kiểm tra lại');
+          const account=await tx.proxyProviderAccount.create({data:{projectId:scope.projectId,code,label:code,site:saved.input.newPackage.site?.trim()||null,credentialCipher:encrypt(JSON.stringify({username:creds.username,password:creds.password}))}});
+          resources.push({resource:'ACCOUNT',id:account.id,before:null,after:captureAccount(account)});
+        }
         for(const [id,before] of Array.from(beforeImages))resources.push({resource:'ENDPOINT',id,before,after:await readImage(tx,scope.projectId,'ENDPOINT',id)} as ResourceImage);
         const [events,replacements]=await Promise.all([tx.proxyStatusEvent.findMany({where:{batchId:batch.id},select:{id:true}}),tx.proxyReplacement.findMany({where:{batchId:batch.id},select:{id:true}})]);
         await recordOperation(tx,{scope:current,kind:batch.kind,summary:{count:result.applied,skipped:result.skipped,errors:result.errors},batchId:batch.id,snapshot:{version:1,resources,eventIds:events.map(e=>e.id),replacementIds:replacements.map(r=>r.id)}});

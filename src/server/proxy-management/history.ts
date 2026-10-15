@@ -3,6 +3,7 @@ import {prisma} from '@/lib/prisma';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
+import {dueState,sortRegistryRows} from './package-terms';
 import {ProxyDomainError,type ActorScope,type ProxyTimeline,type RegistryFilter,type RegistryPage,type RegistryRow} from './types';
 async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
@@ -19,12 +20,12 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
   for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),vmRefs:[],statusAt:null});
   const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const search=filter.search?.trim().toLowerCase();
-  const filtered=rows.filter(r=>
+  const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
+  const filtered=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
     (filter.view==='ALL'||(filter.view==='HISTORY'?['REPLACED','VOID'].includes(r.state):!['REPLACED','VOID'].includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
     (!search||[r.ip,r.packageCode||'',...r.vmRefs].some(v=>v.toLowerCase().includes(search))));
-  const numericIP=(ip:string)=>ip.split('.').reduce((n,part)=>n*256+Number(part),0);
-  filtered.sort((a,b)=>Number(a.packageCode===null)-Number(b.packageCode===null)||(a.packageCode||'').localeCompare(b.packageCode||'',undefined,{numeric:true})||numericIP(a.ip)-numericIP(b.ip)||(a.port||0)-(b.port||0)||(a.endpointId||a.identityId).localeCompare(b.endpointId||b.identityId));
+  sortRegistryRows(filtered,filter.sort);
   let start=0;
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
