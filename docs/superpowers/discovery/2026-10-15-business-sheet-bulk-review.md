@@ -44,3 +44,18 @@ Ba câu đã gửi user:
 3. Web là nơi sửa chính, Sheet nhập lại, hay cả hai có đối chiếu xung đột?
 
 Cần hỏi tiếp theo câu trả lời: “OK” chứng minh điều gì; ba việc lặp nhiều nhất và quy mô mỗi đợt; nguồn file SDK xuất từ đâu/có format nào; server nào đã ngừng dùng; account là loại gì; trạng thái lỗi tự tạo việc cho ai; thế nào xác nhận hết lỗi. Không hỏi lại các quyết định đã chốt về Genjy, phạm vi VM nhân viên và công thức lợi nhuận USDT.
+
+## User trả lời — ưu tiên lưu SDK sau cài VM
+
+- Mỗi VM có một SDK hiện hành. User nói xóa/cài có thể ra SDK; chưa suy đoán quy tắc khôi phục hay cho chuyển SDK giữa máy.
+- Mỗi VM có một tài khoản EarnApp khi đã gán; đăng ký bằng Gmail **hoặc Apple ID**. Nhiều SDK có thể cùng nối vào một tài khoản EarnApp. Không đồng nhất tài khoản EarnApp với Gmail hay PayPal.
+- SDK có thể chưa gán account; gán sau được. Không bắt nhập account để lưu SDK.
+- **Ưu tiên đầu tiên:** mỗi lần cài VM mới phải backup SDK và cập nhật đúng VM đó; việc này rất quan trọng. Chưa coi câu trả lời này là yêu cầu ưu tiên thu/chi hay batch giao việc.
+- **Web là nơi sửa chính** khi dùng ổn. Sheet giữ để đối chiếu và xuất dữ liệu, không thiết kế hai nguồn tự ghi đè nhau.
+
+Hướng quy trình sơ bộ để trao đổi: lấy SDK sau cài → nhập/dán nhiều dòng server+VM+SDK → xem mapping và cảnh báo trước/sau → lưu một đợt. Account để trống được. SDK đổi cần giữ lịch sử; không tự ghi đè SDK của VM khác hoặc đoán vị trí từ thứ tự dòng. Đây chưa phải thiết kế đã duyệt hoặc code đã triển khai.
+
+Hai điểm đang hỏi làm rõ:
+
+1. “Backup SDK” là chuỗi mã như Sheet, file/thư mục phục hồi, hay cả hai? Không hứa khả năng khôi phục máy chỉ dựa trên chuỗi mã.
+2. Tool/cách lấy SDK hiện tại và format list: có server/IP + VM + SDK hay phải copy từng máy? Cần giữ đúng khóa ghép server+VM khi nhập hàng loạt.
