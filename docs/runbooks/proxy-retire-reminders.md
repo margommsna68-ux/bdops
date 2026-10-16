@@ -12,7 +12,7 @@ Triển khai 16/10/2026. Bằng chứng: `../superpowers/evidence/2026-10-16-pro
   | Chưa gán | ngừng quản lý ngay |
   | *Chờ cài* chưa bắt đầu | phải tick **Huỷ giao …** (xem trước nêu rõ server/VM); huỷ cấu hình chờ, việc cài và thả hold; VM về ô trống. Huỷ giao trên web **không** đồng nghĩa đã gỡ ngoài máy |
   | Đã bắt đầu cài / Đã cài / Giữ để kiểm tra | từ chối; thay hoặc gỡ proxy ở Server/VM rồi mới ngừng quản lý |
-  | genjy / PC chung | từ chối: do Sheet Genjy quản, chỉ lọc/ẩn bằng ô *Từ nhóm* |
+  | genjy / PC chung | được ngừng quản lý / khôi phục (từ 16/10); vẫn thuộc genjy, không thành kho TUT, không nhập lại |
 - **Khôi phục**: ở tab *Lịch sử IP*, nút bút → **Khôi phục** (hoặc tick nhiều dòng → **Khôi phục**). Trả về đúng trạng thái trước (NEW/LIVE/BLOCKED…); từ chối nếu IP đã có dòng khác đang quản lý.
 - Mọi thao tác đi qua `editPreview`/`editCommit` (ProxyBatch `PROXY_EDIT`, idempotent, kiểm tra revision), ghi sự kiện `RETIRED`/`RESTORED` kèm lý do, nhật ký *Sửa nhóm / vị trí / ngừng quản lý proxy* và **hoàn tác** (khôi phục cả kế hoạch VM đã huỷ giao). Quyền: như nhập proxy (`IMPORT`), kể cả huỷ giao trong cùng đợt (đây là thu hồi khỏi kho, không phải giao mới).
 

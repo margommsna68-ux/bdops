@@ -17,7 +17,8 @@ Triển khai 16/10/2026 theo yêu cầu "quản lý proxy theo gói, nhóm, serv
 
 - Dữ liệu: bảng `ProxyGroup` (theo dự án, tên chuẩn hóa duy nhất) + cột `ProxyIP.groupId`; giá trị sở hữu mới `OTHER` cho proxy trong nhóm tự đặt. Dữ liệu cũ giữ nguyên: `SELF` hiện là TUT, `GENJY` là genjy.
 - **TUT** không phải dòng trong `ProxyGroup`; nhóm tự đặt không bao giờ là TUT: không được autofill (`getEligibleInventory` chỉ lấy `SELF`), không gán VM, không cài. Chỉ proxy TUT đủ điều kiện mới điền VM.
-- **genjy / PC chung** luôn thuộc Genjy: không đổi nhóm, không gán VM từ bảng; giữ qua blocked/replace như trước.
+- **genjy / PC chung** luôn thuộc Genjy: không đổi nhóm, không gán vào VM của anh; giữ qua blocked/replace như trước. Từ 16/10 dòng genjy vẫn có nút bút: ô *Từ nhóm* hiện *genjy — cố định*, có **Bỏ gán** (thả vị trí trên VM) và **Ngừng quản lý / Khôi phục**; sở hữu không đổi.
+- Bản **Giữ để kiểm tra** chưa ai bắt đầu cài (sinh ra khi đối chiếu Sheet) được **Bỏ gán** từ bảng, xem trước ghi rõ *chưa gỡ ngoài máy*. Bản giữ vì đã bắt đầu cài vẫn phải xử lý ở Server/VM.
 - Tên nhóm: cắt khoảng trắng thừa, so trùng không phân biệt hoa/thường (`Nhóm A` = `nhóm  a`); tên có sẵn (`TUT`, `genjy`, `PC chung`…) bị từ chối. Tối đa 60 ký tự.
 - **Nhập mới**: ô *Từ nhóm* chọn TUT / genjy / nhóm đã có / *Nhóm mới…* (nhập tên). Nhóm mới được tạo lúc lưu đợt nhập và chọn lại được ở lần sau; tên trùng báo `Nhóm "X" đã có; chọn nhóm sẵn có`.
 - **Lọc Từ nhóm** (thay ô sở hữu): Tất cả / TUT / genjy / từng nhóm / Chưa xác định; kết hợp với gói, server, trạng thái, tìm kiếm; URL `?group=TUT|GENJY|UNKNOWN|<id nhóm>`. Ô tìm kiếm khớp cả tên nhóm.

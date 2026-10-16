@@ -36,6 +36,8 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 16. **16/10 — Kiểm tra trùng khi mua mới và nhận replace:** mọi dòng dán có kết quả riêng (không bỏ dòng, không lệch cặp); cùng IP là trùng dù khác port/user/pass/gói; đối chiếu kho, VM, Genjy, lịch sử replace / ngừng quản lý / hoàn tác, các lần nhận trước và dự án khác (chỉ báo "thuộc dự án khác"); dòng trùng nêu trạng thái, server/VM và có nút **Lịch sử**; tóm tắt **N hợp lệ | N trùng | N cần kiểm tra**, **Lưu N dòng hợp lệ** một lần, **Copy dòng bị từ chối** (IP + lý do, không user/pass); replace ghép dòng N với dòng N kể cả khi có dòng trống / lỗi / trùng, báo từng cặp; ngoại lệ nhiều cổng chỉ với danh tính đã duyệt (cùng chủ, khác cổng, khoá `identity:port`). Backend kiểm tra lại quyền / revision / nguồn Genjy khi lưu; hai người cùng nhập một IP chỉ một thành công; bấm lại không tạo thêm. Không đổi schema. Xem `docs/runbooks/proxy-duplicate-check.md`.
 
+17. **16/10 — Sửa dòng genjy và cập nhật moon1/M-029 theo Sheet:** dòng genjy có nút bút (Bỏ gán, Ngừng quản lý / Khôi phục; nhóm genjy cố định, không gán vào VM của anh); bản *Giữ để kiểm tra* chưa ai bắt đầu cài được Bỏ gán từ bảng. Theo Sheet hiện tại: `84.32.137.52` (genjy / PC chung) rời moon1/M-029; `178.95.180.143` (Account VietPhe) chuyển từ moon05/VM_078 sang moon1/M-029 (Chờ cài); moon05/VM_078 trống vì tab moon05 không còn dòng này. Sau cập nhật 573/573 ô VM trên Sheet khớp web.
+
 ## Dữ liệu thật đã nhập
 
 Snapshot Sheet/Genjy ngày 15/10/2026: **10 server, 574 dòng VM, 1.362 endpoint, 101 liên kết replace, 1.172 IP khác nhau trong final**. Đã giữ **724 danh tính Genjy**, trong đó 33 có bằng chứng PC chung (bao gồm lịch sử).
