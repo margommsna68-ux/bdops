@@ -38,6 +38,8 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 17. **16/10 — Sửa dòng genjy và cập nhật moon1/M-029 theo Sheet:** dòng genjy có nút bút (Bỏ gán, Ngừng quản lý / Khôi phục; nhóm genjy cố định, không gán vào VM của anh); bản *Giữ để kiểm tra* chưa ai bắt đầu cài được Bỏ gán từ bảng. Theo Sheet hiện tại: `84.32.137.52` (genjy / PC chung) rời moon1/M-029; `178.95.180.143` (Account VietPhe) chuyển từ moon05/VM_078 sang moon1/M-029 (Chờ cài); moon05/VM_078 trống vì tab moon05 không còn dòng này. Sau cập nhật 573/573 ô VM trên Sheet khớp web.
 
+18. **16/10 — Nhóm chung mooon–Genjy:** "PC chung" = proxy mooon và Genjy cùng đầu tư, hiện **Chung mooon–Genjy** (màu xanh ngọc nhạt), tách khỏi TUT và **Genjy riêng**; nút lọc nhanh có số lượng theo bộ lọc đang xem, kết hợp gói/server/trạng thái/tìm IP, giữ trên URL, lọc trước khi phân trang; gán server/VM thủ công (một dòng hoặc hàng loạt) và cài được, không vào autofill TUT; BLOCKED/replace giữ nhóm; Thiết lập → **Xác nhận nhóm chung** dán danh sách, xem trước từng dòng, lưu một lần, có hoàn tác. Xem `docs/runbooks/proxy-shared-group.md`.
+
 ## Dữ liệu thật đã nhập
 
 Snapshot Sheet/Genjy ngày 15/10/2026: **10 server, 574 dòng VM, 1.362 endpoint, 101 liên kết replace, 1.172 IP khác nhau trong final**. Đã giữ **724 danh tính Genjy**, trong đó 33 có bằng chứng PC chung (bao gồm lịch sử).
