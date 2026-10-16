@@ -50,7 +50,7 @@ export async function getEligibleInventory(projectId:string,db:Reader=prisma):Pr
   const held=new Set((await db.vMProxyAllocation.findMany({where:{releasedAt:null},select:{allocationKey:true}})).map(a=>a.allocationKey));
   const rows=await db.proxyIP.findMany({where:{projectId,inventoryState:'NEW',retiredAt:null,credentialCipher:{not:null},packageCode:{not:null},vm:null,identity:{owner:'SELF'}},include:{identity:{include:{events:true,endpoints:true,sourceRefs:true}}}});
   return rows.flatMap(r=>{
-    const i=r.identity;if(!i||!r.port||!r.inventoryKey||held.has(r.inventoryKey)||i.sourceRefs.some(s=>s.owner==='GENJY')||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID','INSTALL_STARTED','INSTALLED'].includes(e.kind))) return [];
+    const i=r.identity;if(!i||!r.port||!r.inventoryKey||held.has(r.inventoryKey)||(!i.ownerDecidedAt&&i.sourceRefs.some(s=>s.owner==='GENJY'))||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID','INSTALL_STARTED','INSTALLED'].includes(e.kind))) return [];
     if(i.allocationMode==='SINGLE_IP'&&i.endpoints.filter(e=>!e.retiredAt).length!==1) return [];
     if(i.allocationMode==='APPROVED_PORT_STREAM'&&!i.policyEvidenceCipher) return [];
     return [{identityId:i.id,endpointId:r.id,ip:i.ip,port:r.port,revision:r.revision,allocationKey:r.inventoryKey}];

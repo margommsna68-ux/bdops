@@ -57,10 +57,12 @@ export interface ProxyGroupRef {id:string;name:string;archivedAt?:string|null;pr
 // GENJY = Genjy riêng only; SHARED = Chung mooon–Genjy.
 export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_SHARED='SHARED',GROUP_UNKNOWN='UNKNOWN';
 // Row edits from the registry (single row or bulk). Group and location are independent; each produces its own preview row.
-export type GroupChoice={kind:'TUT'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
+// SHARED = Chung mooon–Genjy, GENJY = Genjy riêng. Any row may move between classes (owner decision 16/10/2026).
+export type GroupChoice={kind:'TUT'}|{kind:'SHARED'}|{kind:'GENJY'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
 export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
 // manage: RETIRE = "Ngừng quản lý" (keeps IP, credentials, ownership and history; releasePlans lets it drop an unstarted plan), RESTORE brings a retired row back.
-export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'};
+// STATE flips a current row between NEW and LIVE only; BLOCKED/replace/retire keep their own flows.
+export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'}|{kind:'STATE';state:'NEW'|'LIVE'};
 export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice;manage?:ManageChoice}
 // sharedList: the owner's confirmed list of shared proxies (IP or full proxy per line); classifies matching identities as Chung mooon–Genjy.
 export interface EditInput {items?:EditItem[];paste?:string;sharedList?:string;idempotencyKey:string}

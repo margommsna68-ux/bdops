@@ -120,3 +120,34 @@ it('confirmed shared list: preview shows found, missing, conflicts and duplicate
     await expect(db.proxyIdentity.update({where:{id:f.shared[1].identityId!},data:{subgroup:null}})).rejects.toThrow(/permanent/);
   }finally{await f.cleanup();}
 });
+it('any row can change group (TUT, Chung mooon–Genjy, Genjy riêng, operator groups) one by one or in bulk, with VM rules, journal, undo and a sticky operator decision',async()=>{
+  const f=await fixture();try{
+    const [s1,s2,,,s5]=f.shared;
+    await apply(f.scope,{items:[{endpointId:s1.id,location:{kind:'VM',vmId:f.vms.v1.id}}],idempotencyKey:key()});
+    const one=await apply(f.scope,{items:[{endpointId:s1.id,group:{kind:'TUT'}}],idempotencyKey:key()});
+    expect(one.preview.rows[0]).toMatchObject({outcome:'READY',before:'Chung mooon–Genjy',after:'TUT'});expect(one.result?.applied).toBe(1);
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:s1.identityId!}})).toMatchObject({owner:'SELF',subgroup:null,ownerDecidedBy:f.userId});
+    expect(await db.vMProxyAllocation.count({where:{endpointId:s1.id,releasedAt:null}})).toBe(1); // stays on its VM
+    expect(await db.proxyStatusEvent.count({where:{endpointId:s1.id,kind:'OWNER_CHANGED'}})).toBe(1);
+    const bulk=await apply(f.scope,{items:[{endpointId:f.g1.id,group:{kind:'TUT'}},{endpointId:f.g2.id,group:{kind:'SHARED'}},{endpointId:f.t1.id,group:{kind:'GENJY'}},{endpointId:f.t3.id,group:{kind:'GENJY'}},{endpointId:s2.id,group:{kind:'NEW',name:'Nhóm X'}},{endpointId:f.shared[2].id,group:{kind:'SHARED'}}],idempotencyKey:key()});
+    expect(bulk.preview.rows.map(r=>[r.outcome,r.before,r.after])).toEqual([['READY','Genjy riêng','TUT'],['READY','Genjy riêng','Chung mooon–Genjy'],['READY','TUT','Genjy riêng'],['ERROR','TUT','Genjy riêng'],['READY','Chung mooon–Genjy','Nhóm X'],['SKIP','Chung mooon–Genjy','Chung mooon–Genjy']]);
+    expect(bulk.preview.rows[3].message).toMatch(/VM/);
+    expect(bulk.result?.applied).toBe(4);
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g2.identityId!}})).toMatchObject({owner:'GENJY',subgroup:'PC_CHUNG'});
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.t1.identityId!}})).toMatchObject({owner:'GENJY',subgroup:null});
+    expect(await db.proxyIP.findUniqueOrThrow({where:{id:s2.id},include:{identity:true,group:true}})).toMatchObject({identity:{owner:'OTHER',subgroup:null},group:{name:'Nhóm X'}});
+    // state NEW ↔ LIVE; BLOCKED is not changed here
+    const st=await apply(f.scope,{items:[{endpointId:f.g1.id,manage:{kind:'STATE',state:'NEW'}},{endpointId:s5.id,manage:{kind:'STATE',state:'NEW'}},{endpointId:f.t2.id,manage:{kind:'STATE',state:'NEW'}}],idempotencyKey:key()});
+    expect(st.preview.rows.map(r=>[r.outcome,r.before,r.after])).toEqual([['READY','LIVE','NEW'],['ERROR','BLOCKED','NEW'],['SKIP','NEW','NEW']]);
+    expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.g1.id}})).inventoryState).toBe('NEW');
+    expect((await getEligibleInventory(f.projectId,db)).map(e=>e.ip)).toContain(f.ip(21)); // former Genjy riêng, now TUT NEW: eligible despite its old Genjy source
+    // a Genjy refresh keeps the operator's decision
+    const {persistSourceSnapshot}=await import('@/server/proxy-management/sources');
+    await persistSourceSnapshot(f.projectId,{id:randomUUID(),sourceKey:'GENJY',hash:'refresh-'+randomUUID(),fetchedAt:new Date().toISOString(),scanSucceeded:true,evidence:[{sourceRef:'Genjy!Z1',ip:f.ip(21),owner:'GENJY',subgroup:'PC_CHUNG',format:'BARE',hasFullCredentials:false,hasManualMetadata:false}]},db);
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g1.identityId!}})).toMatchObject({owner:'SELF',subgroup:null});
+    // undo the first change: s1 back to the shared class
+    const op=(await listOperations(f.scope,db)).find(o=>o.batchId===one.result!.batchId)!;await undoOperation(f.scope,op.id,'nhầm',db);
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:s1.identityId!}})).toMatchObject({owner:'GENJY',subgroup:'PC_CHUNG',ownerDecidedAt:null});
+    await expect(db.proxyIdentity.update({where:{id:f.g2.identityId!},data:{owner:'SELF'}})).rejects.toThrow(/permanent/); // direct writes stay blocked
+  }finally{await f.cleanup();}
+});

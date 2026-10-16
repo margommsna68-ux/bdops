@@ -38,11 +38,12 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
         if(image.before){const {revision:_revision,...data}=image.before;await tx.proxyProviderAccount.update({where:{id:image.id},data});}
         else await tx.proxyProviderAccount.update({where:{id:image.id},data:{disabled:true}});
       }else if(image.resource==='IDENTITY'){
-        // Only the shared-list classification records IDENTITY images; its undo is the one write allowed past the permanent-ownership trigger.
-        if(!image.before||!(image.after.owner==='GENJY'&&image.after.subgroup==='PC_CHUNG'))throw new ProxyDomainError('INVALID_INPUT');
-        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.shared_classification_undo','on',true)");
-        await tx.proxyIdentity.update({where:{id:image.id},data:{owner:image.before.owner,subgroup:image.before.subgroup,revision:{increment:1}}});
-        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.shared_classification_undo','off',true)");
+        // IDENTITY images come from class changes (shared list, group edits); undoing one is allowed past the permanent-ownership trigger.
+        if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
+        const decided=(image.before as {ownerDecidedAt?:string|null;ownerDecidedBy?:string|null});
+        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.owner_change','on',true)");
+        await tx.proxyIdentity.update({where:{id:image.id},data:{owner:image.before.owner,subgroup:image.before.subgroup,...('ownerDecidedAt' in decided?{ownerDecidedAt:decided.ownerDecidedAt?new Date(decided.ownerDecidedAt):null,ownerDecidedBy:decided.ownerDecidedBy??null}:{}),revision:{increment:1}}});
+        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.owner_change','off',true)");
       }else if(image.resource==='GROUP'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {revision:_revision,...data}=image.before;await tx.proxyGroup.update({where:{id:image.id},data:{...data,archivedAt:data.archivedAt?new Date(data.archivedAt):null,revision:{increment:1}}});

@@ -75,21 +75,22 @@ it('import can register a new group or pick an existing one; grouped proxies are
     await expect(batches.preview(f.scope,{kind:'NEW',text:f.net+'24:80:u24:p24',owner:'OTHER',idempotencyKey:key()})).rejects.toMatchObject({code:'INVALID_INPUT'}); // OTHER needs a group
   }finally{await f.cleanup();}
 });
-it('changes the group of a row with journal and undo; held, installed and genjy rows are refused; same edit again is a no-op',async()=>{
+it('changes the group of a row with journal and undo; a held row cannot join an operator group; genjy rows may move to TUT; same edit again is a no-op',async()=>{
   const f=await fixture();try{
     const first=await apply(f.scope,{items:[{endpointId:f.e2.id,group:{kind:'NEW',name:'Nhóm A'}},{endpointId:f.e1.id,group:{kind:'NEW',name:'Nhóm A'}},{endpointId:f.g.id,group:{kind:'TUT'}}],idempotencyKey:key()});
-    expect(first.preview.rows.map(r=>[r.field,r.outcome,r.before,r.after])).toEqual([['GROUP','READY','TUT','Nhóm A'],['GROUP','ERROR','TUT','Nhóm A'],['GROUP','ERROR','Genjy riêng','TUT']]);
-    expect(first.preview.rows[1].message).toMatch(/đang giữ|VM/);expect(first.preview.rows[2].code).toBe('GENJY_RESERVED');
-    expect(first.result).toMatchObject({applied:1,errors:2,skipped:0});
+    expect(first.preview.rows.map(r=>[r.field,r.outcome,r.before,r.after])).toEqual([['GROUP','READY','TUT','Nhóm A'],['GROUP','ERROR','TUT','Nhóm A'],['GROUP','READY','Genjy riêng','TUT']]);
+    expect(first.preview.rows[1].message).toMatch(/đang giữ|VM/);
+    expect(first.result).toMatchObject({applied:2,errors:1,skipped:0});
     const group=await db.proxyGroup.findFirstOrThrow({where:{projectId:f.projectId,normalizedName:'nhóm a'}});
     const e2=await db.proxyIP.findUniqueOrThrow({where:{id:f.e2.id},include:{identity:true}});expect(e2.groupId).toBe(group.id);expect(e2.identity!.owner).toBe('OTHER');
-    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'GENJY'});
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'SELF',subgroup:null,ownerDecidedBy:f.userId});
     const ops=await db.operationJournal.findMany({where:{projectId:f.projectId,kind:'PROXY_EDIT'}});expect(ops).toHaveLength(1);
     const same=await apply(f.scope,{items:[{endpointId:f.e2.id,group:{kind:'GROUP',id:group.id}}],idempotencyKey:key()});expect(same.preview.rows[0]).toMatchObject({outcome:'SKIP'});expect(same.result).toBeNull();
     expect(await db.operationJournal.count({where:{projectId:f.projectId,kind:'PROXY_EDIT'}})).toBe(1);
     const replay=await service().commit(f.scope,first.preview.token,(await db.proxyBatch.findFirstOrThrow({where:{token:first.preview.token}})).idempotencyKey);expect(replay.replay).toBe(true);
     await undoOperation(f.scope,ops[0].id,'nhầm nhóm',db);
     const restored=await db.proxyIP.findUniqueOrThrow({where:{id:f.e2.id},include:{identity:true}});expect(restored.groupId).toBeNull();expect(restored.identity!.owner).toBe('SELF');
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'GENJY',ownerDecidedAt:null});
     const back=await apply(f.scope,{items:[{endpointId:f.e2.id,group:{kind:'GROUP',id:group.id}}],idempotencyKey:key()});expect(back.result?.applied).toBe(1);
     const toTut=await apply(f.scope,{items:[{endpointId:f.e2.id,group:{kind:'TUT'}}],idempotencyKey:key()});expect(toTut.result?.applied).toBe(1);expect((await db.proxyIdentity.findUniqueOrThrow({where:{id:f.e2.identityId!}})).owner).toBe('SELF');
   }finally{await f.cleanup();}
@@ -138,7 +139,8 @@ it('genjy rows: unassign from a review hold nobody started, retire and restore; 
     await db.virtualMachine.update({where:{id:f.vms.m1_2.id},data:{desiredConfigurationId:config.id,configurationSequence:1,proxySlotState:'FULL'}});
     const refused=await apply(f.scope,{items:[{endpointId:f.g.id,group:{kind:'TUT'}},{endpointId:f.g.id,location:{kind:'VM',vmId:f.vms.m1_3.id}}],idempotencyKey:key()});
     expect(refused.preview.rows.map(r=>r.code)).toEqual(['DUPLICATE_INPUT','DUPLICATE_INPUT']);
-    const group=await apply(f.scope,{items:[{endpointId:f.g.id,group:{kind:'TUT'}}],idempotencyKey:key()});expect(group.preview.rows[0]).toMatchObject({outcome:'ERROR',code:'GENJY_RESERVED'});
+    const group=await service().preview(f.scope,{items:[{endpointId:f.g.id,group:{kind:'NEW',name:'Nhóm Y'}}],idempotencyKey:key()});expect(group.rows[0]).toMatchObject({outcome:'ERROR',code:'OWNER_CONFLICT'}); // held on a VM: cannot join an operator group
+    const toTut=await service().preview(f.scope,{items:[{endpointId:f.g.id,group:{kind:'TUT'}}],idempotencyKey:key()});expect(toTut.rows[0]).toMatchObject({outcome:'READY',after:'TUT'}); // TUT may keep the VM position (preview only)
     const assign=await apply(f.scope,{items:[{endpointId:f.g.id,location:{kind:'VM',vmId:f.vms.m1_3.id}}],idempotencyKey:key()});expect(assign.preview.rows[0]).toMatchObject({outcome:'ERROR',code:'GENJY_RESERVED'});
     const off=await apply(f.scope,{items:[{endpointId:f.g.id,location:{kind:'UNASSIGN'}}],idempotencyKey:key()});
     expect(off.preview.rows[0]).toMatchObject({outcome:'READY',before:'moon1/VM_002 · Giữ để kiểm tra',after:'Bỏ gán'});expect(off.preview.rows[0].message).toContain('chưa gỡ ngoài máy');

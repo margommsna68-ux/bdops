@@ -98,8 +98,9 @@ export async function persistSourceSnapshot(projectId:string,snapshot:SourceSnap
       for(const evidence of snapshot.evidence){
         const previous=await tx.proxyIdentity.findUnique({where:{ip:evidence.ip}});
         const subgroup=previous?.subgroup==='PC_CHUNG'?'PC_CHUNG':evidence.subgroup;
+        // An operator's explicit class decision (ownerDecidedAt) wins over the Genjy scan; the reference is still recorded.
         const identity=previous?
-          (previous.owner==='GENJY'&&previous.subgroup===subgroup?previous:await tx.proxyIdentity.update({where:{id:previous.id},data:{owner:'GENJY',subgroup,revision:{increment:1},lastSeenAt:new Date()}})):
+          (previous.ownerDecidedAt||(previous.owner==='GENJY'&&previous.subgroup===subgroup)?previous:await tx.proxyIdentity.update({where:{id:previous.id},data:{owner:'GENJY',subgroup,revision:{increment:1},lastSeenAt:new Date()}})):
           await tx.proxyIdentity.create({data:{ip:evidence.ip,owner:'GENJY',subgroup}});
         await tx.proxySourceReference.create({data:{snapshotId:record.id,identityId:identity.id,sourceRef:evidence.sourceRef,format:evidence.format,owner:'GENJY',subgroup,hasFullCredentials:evidence.hasFullCredentials,hasManualMetadata:evidence.hasManualMetadata,dataCipher:encrypt(JSON.stringify(evidence))}});
       }

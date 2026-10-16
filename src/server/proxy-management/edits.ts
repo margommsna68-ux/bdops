@@ -59,7 +59,7 @@ const reviewHolds=(e:EndpointRow)=>e.allocations.filter(a=>a.role==='UNCERTAIN')
 function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|null{
   // TUT and Chung mooon–Genjy may be placed by hand; Genjy riêng never sits on the user's VMs.
   const shared=isShared(e.identity?.owner,e.identity?.subgroup);
-  if(!shared&&(e.identity?.owner==='GENJY'||e.identity?.sourceRefs.some(s=>s.owner==='GENJY'))) return {code:'GENJY_RESERVED',message:'Proxy Genjy riêng không gán vào VM'};
+  if(!shared&&(e.identity?.owner==='GENJY'||(!e.identity?.ownerDecidedAt&&e.identity?.sourceRefs.some(s=>s.owner==='GENJY')))) return {code:'GENJY_RESERVED',message:'Proxy Genjy riêng không gán vào VM'};
   if(!shared&&e.identity?.owner!=='SELF') return {code:'OWNER_CONFLICT',message:'Chỉ proxy TUT hoặc nhóm chung mới được gán VM'};
   const proxy=decodeEndpoint(e);
   if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)||proxy?.format!=='FULL'||!e.inventoryKey||!e.port) return {code:'INVALID_INPUT',message:'Proxy chưa đủ điều kiện (cần NEW/LIVE, đủ user/pass)'};
@@ -70,7 +70,8 @@ export async function listVmTargets(scope:ActorScope,db:Reader=prisma):Promise<V
   const vms=await db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:vmInclude});
   return vms.sort((a,b)=>compareCodes(a.server.code,b.server.code)||compareCodes(a.code,b.code)).map(v=>({id:v.id,code:v.code,serverId:v.serverId,serverCode:v.server.code,occupant:occupantOf(v)}));
 }
-type PlannedItem={row:number;endpointId:string;group?:{owner:'SELF'|'OTHER';groupId:string|null;newName:string|null};location?:{kind:'UNASSIGN'}|{kind:'VM';vmId:string};manage?:ManageChoice};
+type GroupTarget={owner:'SELF'|'OTHER'|'GENJY';subgroup:'PC_CHUNG'|null;groupId:string|null;newName:string|null};
+type PlannedItem={row:number;endpointId:string;group?:GroupTarget;location?:{kind:'UNASSIGN'}|{kind:'VM';vmId:string};manage?:ManageChoice};
 type Plan={rows:EditRow[];items:PlannedItem[];needs:{group:boolean;location:boolean;manage:boolean;share?:boolean};shares?:{row:number;identityId:string;endpointIds:string[]}[];notListed?:NotListedRef[]};
 const SHARED_LABEL='Chung mooon–Genjy';
 const ipOrder=(a:string,b:string)=>{const x=a.split('.').map(Number),y=b.split('.').map(Number);for(let i=0;i<4;i++) if(x[i]!==y[i]) return x[i]-y[i];return 0;};
@@ -165,17 +166,18 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
     const duplicate=seen.get(e.id)!>1;
     if(item.group){
       const before=ownerLabel(e.identity!.owner,e.identity!.subgroup,e.group?.name);
-      let after='',target:{owner:'SELF'|'OTHER';groupId:string|null;newName:string|null}|null=null,fail:{code:IssueCode;message:string}|null=null;
-      if(item.group.kind==='TUT'){after='TUT';target={owner:'SELF',groupId:null,newName:null};}
-      else if(item.group.kind==='GROUP'){const g=groups.find(g=>g.id===(item.group as {id:string}).id);if(!g) fail={code:'NOT_FOUND',message:'Không có nhóm này'};else if(g.archivedAt&&g.id!==e.groupId) fail={code:'INVALID_INPUT',message:'Nhóm "'+g.name+'" đã lưu trữ; mở lại nhóm hoặc chọn nhóm khác'};else{after=g.name;target={owner:'OTHER',groupId:g.id,newName:null};}}
-      else{try{const n=assertGroupName(item.group.name);const existing=groups.find(g=>g.normalizedName===n.normalized);after=existing?existing.name:n.name;target=existing?{owner:'OTHER',groupId:existing.id,newName:null}:{owner:'OTHER',groupId:null,newName:n.name};}catch(err){fail={code:'INVALID_INPUT',message:err instanceof ProxyDomainError?err.message.replace(/^INVALID_INPUT: /,''):'Tên nhóm không hợp lệ'};}}
+      let after='',target:GroupTarget|null=null,fail:{code:IssueCode;message:string}|null=null;
+      if(item.group.kind==='TUT'){after='TUT';target={owner:'SELF',subgroup:null,groupId:null,newName:null};}
+      else if(item.group.kind==='SHARED'){after='Chung mooon–Genjy';target={owner:'GENJY',subgroup:'PC_CHUNG',groupId:null,newName:null};}
+      else if(item.group.kind==='GENJY'){after='Genjy riêng';target={owner:'GENJY',subgroup:null,groupId:null,newName:null};}
+      else if(item.group.kind==='GROUP'){const g=groups.find(g=>g.id===(item.group as {id:string}).id);if(!g) fail={code:'NOT_FOUND',message:'Không có nhóm này'};else if(g.archivedAt&&g.id!==e.groupId) fail={code:'INVALID_INPUT',message:'Nhóm "'+g.name+'" đã lưu trữ; mở lại nhóm hoặc chọn nhóm khác'};else{after=g.name;target={owner:'OTHER',subgroup:null,groupId:g.id,newName:null};}}
+      else{try{const n=assertGroupName(item.group.name);const existing=groups.find(g=>g.normalizedName===n.normalized);after=existing?existing.name:n.name;target=existing?{owner:'OTHER',subgroup:null,groupId:existing.id,newName:null}:{owner:'OTHER',subgroup:null,groupId:null,newName:n.name};}catch(err){fail={code:'INVALID_INPUT',message:err instanceof ProxyDomainError?err.message.replace(/^INVALID_INPUT: /,''):'Tên nhóm không hợp lệ'};}}
       if(fail) push('GROUP',before,after,'ERROR',fail.message,fail.code);
       else if(duplicate) push('GROUP',before,after,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
-      else if(isShared(e.identity!.owner,e.identity!.subgroup)) push('GROUP',before,after,'ERROR','Proxy nhóm chung mooon–Genjy; đổi phân loại qua Xác nhận nhóm chung','GENJY_RESERVED');
-      else if(e.identity!.owner==='GENJY'||e.identity!.sourceRefs.some(s=>s.owner==='GENJY')) push('GROUP',before,after,'ERROR','Proxy Genjy riêng luôn thuộc Genjy; không đổi nhóm','GENJY_RESERVED');
-      else if(target!.owner===e.identity!.owner&&(target!.groupId||null)===(e.groupId||null)&&!target!.newName) push('GROUP',before,after,'SKIP','Đã ở nhóm này');
-      else if(e.allocations.length||e.vm) push('GROUP',before,after,'ERROR','Proxy đang giữ hoặc đã cài trên VM; bỏ gán trước khi đổi nhóm','OWNER_CONFLICT');
-      else{push('GROUP',before,after,'READY',target!.owner==='SELF'?'Chuyển về kho TUT':'Chuyển sang nhóm '+after);plan.group=target!;}
+      else if(target!.owner===e.identity!.owner&&target!.subgroup===(e.identity!.subgroup||null)&&(target!.groupId||null)===(e.groupId||null)&&!target!.newName) push('GROUP',before,after,'SKIP','Đã ở nhóm này');
+      // TUT and Chung mooon–Genjy may sit on VMs; Genjy riêng and operator groups never do.
+      else if((e.allocations.length||e.vm)&&(target!.owner==='OTHER'||(target!.owner==='GENJY'&&!target!.subgroup))) push('GROUP',before,after,'ERROR','Proxy đang giữ hoặc đã cài trên VM; nhóm '+after+' không ở VM — bỏ gán trước','OWNER_CONFLICT');
+      else{push('GROUP',before,after,'READY',(target!.owner==='SELF'?'Chuyển về kho TUT':'Chuyển sang '+after)+(e.allocations.length||e.vm?'; giữ vị trí VM':'')+'; giữ IP, user/pass, nguồn và lịch sử');plan.group=target!;}
     }
     if(item.location){
       const loc=item.location,blocked=immovableReason(e);
@@ -210,7 +212,13 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
     }
     if(item.manage){
       const m=item.manage,genjy=e.identity!.owner==='GENJY',stateLabel=genjy?'genjy':STATE_LABEL[e.inventoryState],retired=e.inventoryState==='RETIRED';
-      if(m.kind==='RETIRE'){
+      if(m.kind==='STATE'){
+        const from=STATE_LABEL[e.inventoryState],to=STATE_LABEL[m.state];
+        if(duplicate) push('STATE',from,to,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
+        else if(e.inventoryState===m.state) push('STATE',from,to,'SKIP','Đã ở trạng thái '+to);
+        else if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)) push('STATE',from,to,'ERROR','Chỉ đổi qua lại NEW / LIVE; '+from+' xử lý bằng BLOCKED / replace / khôi phục','INVALID_INPUT');
+        else{push('STATE',from,to,'READY','Đổi trạng thái '+from+' → '+to+'; không đổi vị trí VM');plan.manage=m;}
+      }else if(m.kind==='RETIRE'){
         const plans=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code),blocked=immovableReason(e);
         if(duplicate) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
         else if(retired) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ngừng quản lý');
@@ -293,7 +301,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
       const current=await authorize(scope,saved.plan.needs,tx),plan=await planEdits(current,saved.input,tx);
       if(vmHash(plan)!==vmHash(saved.plan)||vmHash(await facts(current,plan,tx))!==vmHash(saved.facts)) throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã thay đổi; kiểm tra lại');
       const images=await snapshotCollector(tx,current),now=new Date(),createdGroups=new Map<string,string>();
-      let groupsChanged=0,moved=0,unassigned=0,retired=0,restored=0,shared=0;
+      let groupsChanged=0,moved=0,unassigned=0,retired=0,restored=0,shared=0,states=0;
       for(const share of plan.shares||[]){
         await images.remember('IDENTITY',share.identityId);
         const identity=await tx.proxyIdentity.findUniqueOrThrow({where:{id:share.identityId}});if(isShared(identity.owner,identity.subgroup)) throw new ProxyDomainError('STALE_PREVIEW');
@@ -308,9 +316,16 @@ export function createProxyEditService(db:PrismaClient=prisma){
         if(item.group){
           let groupId=item.group.groupId;
           if(item.group.newName){const normalized=item.group.newName.toLocaleLowerCase('vi');groupId=createdGroups.get(normalized)||(await tx.proxyGroup.findUnique({where:{projectId_normalizedName:{projectId:scope.projectId,normalizedName:normalized}}}))?.id||(await tx.proxyGroup.create({data:{projectId:scope.projectId,name:item.group.newName,normalizedName:normalized,createdById:scope.userId}})).id;createdGroups.set(normalized,groupId);}
-          if(endpoint.identity!.owner==='GENJY') throw new ProxyDomainError('GENJY_RESERVED');
-          await tx.proxyIdentity.update({where:{id:endpoint.identityId!},data:{owner:item.group.owner,revision:{increment:1},lastSeenAt:now}});
-          await tx.proxyIP.update({where:{id:endpoint.id},data:{groupId:item.group.owner==='OTHER'?groupId:null,revision:{increment:1}}});groupsChanged++;
+          const identity=endpoint.identity!,target=item.group;
+          if(identity.owner!==target.owner||(identity.subgroup||null)!==target.subgroup){
+            // An owner/class change is an explicit operator decision: recorded on the identity (Genjy refreshes keep it), journaled for undo.
+            await images.remember('IDENTITY',identity.id);
+            await tx.$executeRawUnsafe("SELECT set_config('moneytohome.owner_change','on',true)");
+            await tx.proxyIdentity.update({where:{id:identity.id},data:{owner:target.owner,subgroup:target.subgroup,ownerDecidedAt:now,ownerDecidedBy:scope.userId,revision:{increment:1},lastSeenAt:now}});
+            await tx.$executeRawUnsafe("SELECT set_config('moneytohome.owner_change','off',true)");
+            await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:identity.id,endpointId:endpoint.id,batchId:batch.id,ip:identity.ip,kind:'OWNER_CHANGED',occurredAt:now,actorId:scope.userId,reason:ownerLabel(identity.owner,identity.subgroup,endpoint.group?.name)+' → '+ownerLabel(target.owner,target.subgroup,item.group.newName||null)}});
+          }
+          await tx.proxyIP.update({where:{id:endpoint.id},data:{groupId:target.owner==='OTHER'?groupId:null,revision:{increment:1}}});groupsChanged++;
         }
         if(item.location){
           if(immovableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');
@@ -330,7 +345,11 @@ export function createProxyEditService(db:PrismaClient=prisma){
         if(item.manage){
           // Genjy rows may be retired/restored like any other; ownership is untouched (identity.owner never changes here).
           const notes=readNotes(endpoint.notesCipher);
-          if(item.manage.kind==='RETIRE'){
+          if(item.manage.kind==='STATE'){
+            if(endpoint.retiredAt||!['NEW','LIVE'].includes(endpoint.inventoryState)) throw new ProxyDomainError('STALE_PREVIEW');
+            await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:item.manage.state,statusAt:now,revision:{increment:1}}});
+            await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:'STATE_CHANGED',occurredAt:now,actorId:scope.userId,reason:'Đổi trạng thái '+endpoint.inventoryState+' → '+item.manage.state}});states++;
+          }else if(item.manage.kind==='RETIRE'){
             if(endpoint.inventoryState==='RETIRED'||immovableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');
             if(endpoint.allocations.length||endpoint.vm){if(!item.manage.releasePlans) throw new ProxyDomainError('STALE_PREVIEW');await releasePlans(tx,images,endpoint,'Ngừng quản lý proxy: '+item.manage.reason,now);}
             const note:RetiredNote={reason:item.manage.reason,previousState:endpoint.inventoryState,previousStatus:endpoint.status,previousStatusAt:endpoint.statusAt?.toISOString()||null,by:scope.userId,at:now.toISOString()};
@@ -347,7 +366,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
         }
       }
       const result:EditResult={batchId:batch.id,replay:false,rows:plan.rows,applied:plan.items.length+(plan.shares||[]).length,skipped:plan.rows.filter(r=>r.outcome==='SKIP').length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length};
-      if(result.applied) await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:result.applied,groups:groupsChanged,moved,unassigned,retired,restored,shared},snapshot:await images.finish(),batchId:batch.id});
+      if(result.applied) await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:result.applied,groups:groupsChanged,moved,unassigned,retired,restored,shared,states},snapshot:await images.finish(),batchId:batch.id});
       await tx.proxyBatch.update({where:{id:batch.id},data:{status:'APPLIED',appliedAt:now,result:result as unknown as Prisma.InputJsonValue}});
       await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_EDIT',entity:'ProxyBatch',entityId:batch.id,changes:{applied:result.applied,skipped:result.skipped,errors:result.errors,groups:groupsChanged,moved,unassigned,retired,restored,shared}}});
       return result;
