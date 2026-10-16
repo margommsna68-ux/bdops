@@ -37,6 +37,12 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
       }else if(image.resource==='ACCOUNT'){
         if(image.before){const {revision:_revision,...data}=image.before;await tx.proxyProviderAccount.update({where:{id:image.id},data});}
         else await tx.proxyProviderAccount.update({where:{id:image.id},data:{disabled:true}});
+      }else if(image.resource==='IDENTITY'){
+        // Only the shared-list classification records IDENTITY images; its undo is the one write allowed past the permanent-ownership trigger.
+        if(!image.before||!(image.after.owner==='GENJY'&&image.after.subgroup==='PC_CHUNG'))throw new ProxyDomainError('INVALID_INPUT');
+        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.shared_classification_undo','on',true)");
+        await tx.proxyIdentity.update({where:{id:image.id},data:{owner:image.before.owner,subgroup:image.before.subgroup,revision:{increment:1}}});
+        await tx.$executeRawUnsafe("SELECT set_config('moneytohome.shared_classification_undo','off',true)");
       }else if(image.resource==='GROUP'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {revision:_revision,...data}=image.before;await tx.proxyGroup.update({where:{id:image.id},data:{...data,archivedAt:data.archivedAt?new Date(data.archivedAt):null,revision:{increment:1}}});

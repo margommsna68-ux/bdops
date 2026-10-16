@@ -45,7 +45,7 @@ const location=async(endpointId:string)=>(await db.vMProxyAllocation.findMany({w
 
 it('group names are normalized, reserved names and case/space duplicates are rejected, labels show TUT',()=>{
   expect(normalizeGroupName('  Nhóm   A ')).toEqual({name:'Nhóm A',normalized:'nhóm a'});
-  expect(ownerLabel('SELF',null,null)).toBe('TUT');expect(ownerLabel('GENJY','PC_CHUNG',null)).toBe('genjy · PC chung');expect(ownerLabel('OTHER',null,'Nhóm A')).toBe('Nhóm A');expect(ownerLabel('UNKNOWN',null,null)).toBe('Chưa xác định');
+  expect(ownerLabel('SELF',null,null)).toBe('TUT');expect(ownerLabel('GENJY','PC_CHUNG',null)).toBe('Chung mooon–Genjy');expect(ownerLabel('GENJY',null,null)).toBe('Genjy riêng');expect(ownerLabel('OTHER',null,'Nhóm A')).toBe('Nhóm A');expect(ownerLabel('UNKNOWN',null,null)).toBe('Chưa xác định');
 });
 it('creates reusable groups per project and blocks duplicates and reserved names',async()=>{
   const f=await fixture();try{
@@ -78,7 +78,7 @@ it('import can register a new group or pick an existing one; grouped proxies are
 it('changes the group of a row with journal and undo; held, installed and genjy rows are refused; same edit again is a no-op',async()=>{
   const f=await fixture();try{
     const first=await apply(f.scope,{items:[{endpointId:f.e2.id,group:{kind:'NEW',name:'Nhóm A'}},{endpointId:f.e1.id,group:{kind:'NEW',name:'Nhóm A'}},{endpointId:f.g.id,group:{kind:'TUT'}}],idempotencyKey:key()});
-    expect(first.preview.rows.map(r=>[r.field,r.outcome,r.before,r.after])).toEqual([['GROUP','READY','TUT','Nhóm A'],['GROUP','ERROR','TUT','Nhóm A'],['GROUP','ERROR','genjy','TUT']]);
+    expect(first.preview.rows.map(r=>[r.field,r.outcome,r.before,r.after])).toEqual([['GROUP','READY','TUT','Nhóm A'],['GROUP','ERROR','TUT','Nhóm A'],['GROUP','ERROR','Genjy riêng','TUT']]);
     expect(first.preview.rows[1].message).toMatch(/đang giữ|VM/);expect(first.preview.rows[2].code).toBe('GENJY_RESERVED');
     expect(first.result).toMatchObject({applied:1,errors:2,skipped:0});
     const group=await db.proxyGroup.findFirstOrThrow({where:{projectId:f.projectId,normalizedName:'nhóm a'}});

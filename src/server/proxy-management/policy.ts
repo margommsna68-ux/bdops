@@ -16,7 +16,7 @@ export function findConflict(p:ParsedProxy,owner:Owner,ctx:ProxyContext,projectI
   const active=sameIp.filter(e=>!e.retiredAt&&!HISTORICAL_STATES.includes(e.inventoryState));
   if(!options.ignoreGenjy&&(identity?.owner==='GENJY'||ctx.evidence.some(e=>e.ip===p.ip&&e.owner==='GENJY'))){
     // Genjy rows: only this project's own endpoint (if any) is described; the reservation itself is the reason, wherever the IP sits.
-    const e=active.find(mine);return {code:'GENJY_RESERVED',message:'IP đã dành cho Genjy'+(e?` (${STATE_LABEL[e.inventoryState]}${e.vmKeys.length?' · '+e.vmKeys.join(', '):''})`:''),existing:existing(e)};
+    const e=active.find(mine),label=identity?.subgroup==='PC_CHUNG'||ctx.evidence.some(v=>v.ip===p.ip&&v.subgroup==='PC_CHUNG')?'IP thuộc nhóm chung mooon–Genjy':'IP đã dành cho Genjy';return {code:'GENJY_RESERVED',message:label+(e?` (${STATE_LABEL[e.inventoryState]}${e.vmKeys.length?' · '+e.vmKeys.join(', '):''})`:''),existing:existing(e)};
   }
   const stream=identity?.allocationMode==='APPROVED_PORT_STREAM'&&identity.owner===owner&&p.format==='FULL';
   const samePort=(e:EndpointFact)=>e.proxy.port===p.port;

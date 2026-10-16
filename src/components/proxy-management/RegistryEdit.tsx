@@ -9,16 +9,17 @@ import {roleLabel} from './RegistryCells';
 import {AlertCircle,Check,Loader2,X,Ban,RotateCcw} from 'lucide-react';
 import toast from 'react-hot-toast';
 // "Từ nhóm": TUT is the own stock (owner SELF), genjy is reserved, anything else is an operator-defined group (owner OTHER).
-export type GroupPick={kind:'TUT'}|{kind:'GENJY'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
-export const groupLabel=(row:Pick<RegistryRow,'owner'|'subgroup'|'groupName'>)=>row.owner==='SELF'?'TUT':row.owner==='GENJY'?(row.subgroup==='PC_CHUNG'?'genjy · PC chung':'genjy'):row.owner==='OTHER'?(row.groupName||'Nhóm khác'):'Chưa xác định';
+// GENJY = Genjy riêng, SHARED = Chung mooon–Genjy (both only offered on import).
+export type GroupPick={kind:'TUT'}|{kind:'GENJY'}|{kind:'SHARED'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
+export const groupLabel=(row:Pick<RegistryRow,'owner'|'subgroup'|'groupName'>)=>row.owner==='SELF'?'TUT':row.owner==='GENJY'?(row.subgroup==='PC_CHUNG'?'Chung mooon–Genjy':'Genjy riêng'):row.owner==='OTHER'?(row.groupName||'Nhóm khác'):'Chưa xác định';
 export function GroupCell({row}:{row:RegistryRow}){
-  return <td>{row.owner==='GENJY'?<><strong className="font-medium">genjy</strong>{row.subgroup==='PC_CHUNG'&&<div className="pm-muted text-xs mt-1">PC chung</div>}</>:row.owner==='SELF'?<strong className="font-medium">TUT</strong>:row.owner==='OTHER'?<span>{row.groupName||'Nhóm khác'}</span>:<span className="text-amber-600">Chưa xác định</span>}</td>;
+  return <td>{row.owner==='GENJY'?(row.subgroup==='PC_CHUNG'?<span className="pm-badge pm-badge-shared" title="Proxy mooon và Genjy cùng đầu tư">Chung mooon–Genjy</span>:<strong className="font-medium">Genjy riêng</strong>):row.owner==='SELF'?<strong className="font-medium">TUT</strong>:row.owner==='OTHER'?<span>{row.groupName||'Nhóm khác'}</span>:<span className="text-amber-600">Chưa xác định</span>}</td>;
 }
 export function GroupChoiceSelect({groups,value,onChange,disabled,allowGenjy,className=''}:{groups:ProxyGroupRef[];value:GroupPick;onChange:(v:GroupPick)=>void;disabled?:boolean;allowGenjy?:boolean;className?:string}){
-  const current=value.kind==='TUT'?'TUT':value.kind==='GENJY'?'GENJY':value.kind==='NEW'?'__NEW__':value.id;
+  const current=value.kind==='TUT'?'TUT':value.kind==='GENJY'?'GENJY':value.kind==='SHARED'?'SHARED':value.kind==='NEW'?'__NEW__':value.id;
   return <div className={'flex gap-2 flex-wrap '+className}>
-    <select aria-label="Từ nhóm" className="pm-input" disabled={disabled} value={current} onChange={e=>{const v=e.target.value;onChange(v==='TUT'?{kind:'TUT'}:v==='GENJY'?{kind:'GENJY'}:v==='__NEW__'?{kind:'NEW',name:''}:{kind:'GROUP',id:v});}}>
-      <option value="TUT">TUT</option>{allowGenjy&&<option value="GENJY">genjy — giữ riêng</option>}{groups.filter(g=>!g.archivedAt||(value.kind==='GROUP'&&value.id===g.id)).map(g=><option key={g.id} value={g.id}>{g.name}{g.archivedAt?' (lưu trữ)':''}</option>)}<option value="__NEW__">Nhóm mới…</option>
+    <select aria-label="Từ nhóm" className="pm-input" disabled={disabled} value={current} onChange={e=>{const v=e.target.value;onChange(v==='TUT'?{kind:'TUT'}:v==='GENJY'?{kind:'GENJY'}:v==='SHARED'?{kind:'SHARED'}:v==='__NEW__'?{kind:'NEW',name:''}:{kind:'GROUP',id:v});}}>
+      <option value="TUT">TUT</option>{allowGenjy&&<option value="SHARED">Chung mooon–Genjy</option>}{allowGenjy&&<option value="GENJY">Genjy riêng</option>}{groups.filter(g=>!g.archivedAt||(value.kind==='GROUP'&&value.id===g.id)).map(g=><option key={g.id} value={g.id}>{g.name}{g.archivedAt?' (lưu trữ)':''}</option>)}<option value="__NEW__">Nhóm mới…</option>
     </select>
     {value.kind==='NEW'&&<input autoFocus aria-label="Tên nhóm mới" className="pm-input" maxLength={60} placeholder="Tên nhóm mới" disabled={disabled} value={value.name} onChange={e=>onChange({kind:'NEW',name:e.target.value})}/>}
   </div>;
@@ -74,7 +75,7 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUn
   </div>;
   return <div className="pm-editor" role="group" aria-label={'Sửa proxy '+row.ip}>
     <div className="pm-editor-fields">
-      {canGroup&&genjy&&<div className="pm-label">Từ nhóm<div className="pm-muted text-xs font-normal mt-2">{groupLabel(row)} — cố định, không đổi nhóm</div></div>}
+      {canGroup&&genjy&&<div className="pm-label">Từ nhóm<div className="pm-muted text-xs font-normal mt-2">{groupLabel(row)} — cố định{row.subgroup==='PC_CHUNG'?'; đổi qua Thiết lập → Xác nhận nhóm chung':', không đổi nhóm'}</div></div>}
       {canGroup&&!genjy&&<label className="pm-label">Từ nhóm<GroupChoiceSelect groups={groups} value={group} disabled={busy} onChange={v=>{setGroup(v);setRows(null);}}/></label>}
       {canLocate&&<><label className="pm-label">Server<select aria-label="Server" className="pm-input" disabled={busy} value={serverId} onChange={e=>{setServerId(e.target.value);setRows(null);}}><option value="">— Chọn server —</option>{servers.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
       <label className="pm-label">VM<select aria-label="VM" className="pm-input" disabled={busy||!serverId} value={vmId} onChange={e=>{setVmId(e.target.value);setRows(null);}}>{!vms.length&&<option value="">{serverId?'Server không còn VM trống':'Chọn server trước'}</option>}{vms.map(v=><option key={v.id} value={v.id}>{v.code}{row.locations.some(l=>l.vmId===v.id)?' (hiện tại)':''}</option>)}</select></label></>}

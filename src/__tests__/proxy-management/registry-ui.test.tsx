@@ -15,7 +15,7 @@ describe('location cells',()=>{
       expect(cells[1]).toContain('VM_001');expect(cells[1]).toContain('VM_010');expect(cells[1]).not.toContain('An-01');
       expect(cells[2]).toContain('Chờ cài');expect(cells[2]).toContain('Đã cài');expect(html).not.toContain('An-01/VM_001');
       const empty=renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({})}/></tr></tbody></table>);expect(empty).toContain('Chưa gán');
-      const genjy=renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({owner:'GENJY',endpointId:null})}/></tr></tbody></table>);expect(genjy).toContain('genjy');expect(genjy).not.toContain('Chưa gán');
+      const genjy=renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({owner:'GENJY',endpointId:null})}/></tr></tbody></table>);expect(genjy).toContain('Genjy riêng');expect(genjy).not.toContain('Chưa gán');expect(renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({owner:'GENJY',subgroup:'PC_CHUNG'})}/></tr></tbody></table>)).toContain('Chưa gán');
     }finally{vi.unstubAllGlobals();}
   });
   it('maps allocation roles to short operating notes',()=>{
@@ -64,7 +64,7 @@ describe('group cell and row edit helpers',()=>{
     vi.stubGlobal('React',React);try{
       const html=(r:RegistryRow)=>renderToStaticMarkup(<table><tbody><tr><GroupCell row={r}/></tr></tbody></table>);
       expect(html(row({}))).toContain('TUT');expect(html(row({}))).not.toContain('Của anh');
-      expect(html(row({owner:'GENJY',subgroup:'PC_CHUNG'}))).toContain('genjy');expect(html(row({owner:'GENJY',subgroup:'PC_CHUNG'}))).toContain('PC chung');
+      expect(html(row({owner:'GENJY',subgroup:'PC_CHUNG'}))).toContain('Chung mooon–Genjy');expect(html(row({owner:'GENJY',subgroup:'PC_CHUNG'}))).toContain('pm-badge-shared');expect(html(row({owner:'GENJY',subgroup:null}))).toContain('Genjy riêng');
       expect(html(row({owner:'OTHER',groupId:'g1',groupName:'Khách C'}))).toContain('Khách C');expect(html(row({owner:'OTHER',groupId:'g1',groupName:'Khách C'}))).not.toContain('TUT');
       expect(html(row({owner:'UNKNOWN'}))).toContain('Chưa xác định');
     }finally{vi.unstubAllGlobals();}

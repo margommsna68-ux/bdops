@@ -5,7 +5,7 @@ import {UNASSIGNED_SERVER,type CopyResult,type LocationRole,type RegistryRow} fr
 export const roleLabel=(role:LocationRole)=>role==='DESIRED'?'Chờ cài':role==='INSTALLED'?'Đã cài':role==='UNCERTAIN'?'Giữ để kiểm tra':'';
 // Server, VM and the operating note are three cells; a proxy with several positions lists each on its own line.
 export function LocationCells({row}:{row:RegistryRow}){
-  if(!row.locations.length) return <><td>{row.owner==='GENJY'?<span className="pm-muted">genjy</span>:<span className="pm-badge pm-badge-purple">Chưa gán</span>}</td><td></td><td></td></>;
+  if(!row.locations.length) return <><td>{row.owner==='GENJY'&&row.subgroup!=='PC_CHUNG'?<span className="pm-muted">Genjy riêng</span>:<span className="pm-badge pm-badge-purple">Chưa gán</span>}</td><td></td><td></td></>;
   return <>
     <td className="pm-cell-lines">{row.locations.map(l=><div key={l.vmId}>{l.serverCode}</div>)}</td>
     <td className="pm-cell-lines">{row.locations.map(l=><div key={l.vmId} className="pm-code">{l.vmCode}</div>)}</td>

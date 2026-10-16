@@ -1,6 +1,10 @@
 // OTHER = a proxy in an operator-defined group (never TUT, never autofilled or planned onto a VM).
 export type Owner='SELF'|'GENJY'|'UNKNOWN'|'OTHER';
+// PC_CHUNG on a GENJY identity = "Chung mooon–Genjy" (proxies mooon and Genjy invest in together, decided 16/10/2026).
+// Without the subgroup a GENJY identity is "Genjy riêng". Shared proxies keep every Genjy protection (never re-imported as new,
+// classification survives BLOCKED/replace and Genjy refreshes) but may be placed on VMs by hand; they never join TUT autofill.
 export type Subgroup='PC_CHUNG'|null;
+export const isShared=(owner:string|null|undefined,subgroup:string|null|undefined)=>owner==='GENJY'&&subgroup==='PC_CHUNG';
 export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID'|'RETIRED';
 // States that leave the current inventory (still listed under history, never re-imported silently).
 export const HISTORICAL_STATES:InventoryState[]=['REPLACED','VOID','RETIRED'];
@@ -44,20 +48,24 @@ export interface RegistryLocation {serverId:string;serverCode:string;vmId:string
 // group: TUT | GENJY | UNKNOWN | <ProxyGroup id>
 export interface RegistryFilter {owner?:Owner;group?:string;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
 export interface RegistryRow {identityId:string;endpointId:string|null;ip:string;port:number|null;owner:Owner;subgroup:Subgroup;groupId:string|null;groupName:string|null;packageCode:string|null;state:InventoryState;revision:number;sourceRefs:string[];locations:RegistryLocation[];statusAt?:string|null}
-export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[]}
+// groupCounts: rows per "Từ nhóm" choice under every other active filter (view, state, package, server, search); keys ALL, TUT, SHARED, GENJY, UNKNOWN and group ids.
+export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;shared:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[];groupCounts:Record<string,number>}
 export type CopySkipReason='NO_CREDENTIALS'|'NO_ENDPOINT';
 export interface CopyResult {proxies:string[];copied:number;total:number;skipped:{reason:CopySkipReason;count:number}[]}
 export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
 export interface ProxyGroupRef {id:string;name:string;archivedAt?:string|null;proxyCount?:number}
-export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_UNKNOWN='UNKNOWN';
+// GENJY = Genjy riêng only; SHARED = Chung mooon–Genjy.
+export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_SHARED='SHARED',GROUP_UNKNOWN='UNKNOWN';
 // Row edits from the registry (single row or bulk). Group and location are independent; each produces its own preview row.
 export type GroupChoice={kind:'TUT'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
 export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
 // manage: RETIRE = "Ngừng quản lý" (keeps IP, credentials, ownership and history; releasePlans lets it drop an unstarted plan), RESTORE brings a retired row back.
 export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'};
 export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice;manage?:ManageChoice}
-export interface EditInput {items?:EditItem[];paste?:string;idempotencyKey:string}
+// sharedList: the owner's confirmed list of shared proxies (IP or full proxy per line); classifies matching identities as Chung mooon–Genjy.
+export interface EditInput {items?:EditItem[];paste?:string;sharedList?:string;idempotencyKey:string}
+export interface NotListedRef {ip:string;identityId:string;state:InventoryState|null}
 export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION'|'STATE';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
-export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string}
+export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string;notListed:NotListedRef[]}
 export interface EditResult {batchId:string;replay:boolean;undone?:boolean;rows:EditRow[];applied:number;skipped:number;errors:number}
 export interface VmTarget {id:string;code:string;serverId:string;serverCode:string;occupant:string|null}

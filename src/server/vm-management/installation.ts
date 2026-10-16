@@ -1,7 +1,7 @@
 import type {PrismaClient,Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {decrypt,encrypt} from '@/lib/encryption';
-import {ProxyDomainError,type ActorScope,type SourceSnapshotRef} from '../proxy-management/types';
+import {ProxyDomainError,isShared,type ActorScope,type SourceSnapshotRef} from '../proxy-management/types';
 import {refreshGenjy} from '../proxy-management/sources';
 import {fullProxy} from '../proxy-management/parse';
 import {withProxyTransaction} from '../proxy-management/transaction';
@@ -17,7 +17,7 @@ async function begin(tx:Prisma.TransactionClient,scope:ActorScope,id:string){
   const config=await currentConfiguration(tx,scope,id);
   if(config.status==='CONFIRMED'&&config.vm.installedConfigurationId===config.id)return config;
   if(config.vm.desiredConfigurationId!==config.id||config.status==='CANCELLED')throw new ProxyDomainError('STALE_PREVIEW');
-  if(config.endpoint?.identity?.owner!=='SELF')throw new ProxyDomainError('OWNER_CONFLICT','Proxy không còn thuộc kho TUT. Giữ lại để kiểm tra.');
+  if(!config.endpoint?.identity||(config.endpoint.identity.owner!=='SELF'&&!isShared(config.endpoint.identity.owner,config.endpoint.identity.subgroup)))throw new ProxyDomainError('OWNER_CONFLICT','Proxy không còn thuộc kho TUT hoặc nhóm chung. Giữ lại để kiểm tra.');
   if(config.endpoint.retiredAt||!['NEW','LIVE'].includes(config.endpoint.inventoryState))throw new ProxyDomainError('INVALID_INPUT','Proxy đang lỗi hoặc đã ngừng dùng. Giao proxy mới trước khi cài.');
   if(config.status==='IN_PROGRESS')return config;
   const images=await snapshotCollector(tx,scope);await images.remember('VM_CONFIG',id);await images.remember('VM',config.vmId);if(config.task)await images.remember('VM_TASK',config.task.id);
@@ -47,7 +47,7 @@ export async function confirmInstalled(scope:ActorScope,input:{configurationId:s
     if(config.vm.desiredConfigurationId!==config.id||config.configurationHash!==input.configurationHash)throw new ProxyDomainError('STALE_PREVIEW','Cần xác nhận đúng cấu hình hiện hành');
     if(config.status==='CONFIRMED'&&config.vm.installedConfigurationId===config.id)return {confirmed:true,replay:true};
     if(config.vm.revision!==input.expectedVmRevision||!config.startedAt||!['IN_PROGRESS','FAILED'].includes(config.status))throw new ProxyDomainError('STALE_PREVIEW','Thông tin cài đã thay đổi; tải lại trước khi xác nhận');
-    const endpoint=config.endpoint;if(!endpoint?.identity||endpoint.identity.owner!=='SELF')throw new ProxyDomainError('OWNER_CONFLICT','Sở hữu Genjy/chưa rõ: giữ proxy và kiểm tra thực tế trước khi xác nhận');
+    const endpoint=config.endpoint;if(!endpoint?.identity||(endpoint.identity.owner!=='SELF'&&!isShared(endpoint.identity.owner,endpoint.identity.subgroup)))throw new ProxyDomainError('OWNER_CONFLICT','Sở hữu Genjy/chưa rõ: giữ proxy và kiểm tra thực tế trước khi xác nhận');
     if(endpoint.retiredAt||['VOID','REPLACED','DIE','QUARANTINED'].includes(endpoint.inventoryState))throw new ProxyDomainError('INVALID_INPUT','Proxy đã ngừng dùng hoặc cần kiểm tra');
     const holds=await tx.vMProxyAllocation.findMany({where:{vmId:config.vmId,releasedAt:null}}),target=holds.find(h=>h.endpointId===endpoint.id);if(!target)throw new ProxyDomainError('STALE_PREVIEW','Không còn bản giữ proxy đúng máy');
     const images=await snapshotCollector(tx,current);await images.remember('VM',config.vmId);await images.remember('VM_CONFIG',config.id);await images.remember('ENDPOINT',endpoint.id);if(config.task)await images.remember('VM_TASK',config.task.id);

@@ -1,8 +1,8 @@
 export type VMView='MISSING'|'PENDING'|'INSTALLED'|'REVIEW'|'ARCHIVED';
-type ViewInput={archivedAt:string|null;slotState:string;desired:{id:string;status:string}|null;installed:{id:string;status:string}|null;holds:{role:string;owner:string;state:string}[]};
+type ViewInput={archivedAt:string|null;slotState:string;desired:{id:string;status:string}|null;installed:{id:string;status:string}|null;holds:{role:string;owner:string;state:string;shared?:boolean}[]};
 export function vmView(vm:ViewInput):VMView{
   if(vm.archivedAt)return 'ARCHIVED';
-  if(vm.holds.some(h=>h.role==='UNCERTAIN'||h.owner!=='SELF'||!['NEW','LIVE'].includes(h.state))||vm.desired?.status==='FAILED')return 'REVIEW';
+  if(vm.holds.some(h=>h.role==='UNCERTAIN'||(h.owner!=='SELF'&&!h.shared)||!['NEW','LIVE'].includes(h.state))||vm.desired?.status==='FAILED')return 'REVIEW';
   if(vm.desired&&vm.desired.id!==vm.installed?.id)return 'PENDING';
   if(vm.installed&&vm.desired?.id===vm.installed.id)return 'INSTALLED';
   if(vm.slotState==='BLANK'&&!vm.desired&&!vm.installed&&!vm.holds.length)return 'MISSING';

@@ -11,7 +11,8 @@ import {decodeEndpoint} from './repository';
 import {fullProxy,parseProxy} from './parse';
 import {withProxyTransaction} from './transaction';
 import {assertGroupName,ownerLabel} from './groups';
-import {HISTORICAL_STATES,ProxyDomainError,type ActorScope,type EditInput,type EditItem,type EditPreview,type EditResult,type EditRow,type InventoryState,type IssueCode,type LocationChoice,type ManageChoice,type VmTarget} from './types';
+import {INVALID_LINE} from './parse';
+import {HISTORICAL_STATES,isShared,ProxyDomainError,type NotListedRef,type ActorScope,type EditInput,type EditItem,type EditPreview,type EditResult,type EditRow,type InventoryState,type IssueCode,type LocationChoice,type ManageChoice,type VmTarget} from './types';
 const STATE_LABEL:Record<InventoryState,string>={NEW:'NEW',LIVE:'LIVE',BLOCKED:'BLOCKED',REPLACED:'Đã replace',DIE:'Ngừng dùng',QUARANTINED:'Cần kiểm tra',VOID:'Đã thu hồi',RETIRED:'Ngừng quản lý'};
 export const RETIRED_LABEL=STATE_LABEL.RETIRED;
 type RetiredNote={reason:string;previousState:InventoryState;previousStatus:string;previousStatusAt:string|null;by:string;at:string};
@@ -56,8 +57,10 @@ function immovableReason(e:EndpointRow):string|null{
 }
 const reviewHolds=(e:EndpointRow)=>e.allocations.filter(a=>a.role==='UNCERTAIN').map(a=>a.vm.server.code+'/'+a.vm.code);
 function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|null{
-  if(e.identity?.owner==='GENJY'||e.identity?.sourceRefs.some(s=>s.owner==='GENJY')) return {code:'GENJY_RESERVED',message:'Proxy của genjy/PC chung không gán vào VM'};
-  if(e.identity?.owner!=='SELF') return {code:'OWNER_CONFLICT',message:'Chỉ proxy TUT mới được gán VM'};
+  // TUT and Chung mooon–Genjy may be placed by hand; Genjy riêng never sits on the user's VMs.
+  const shared=isShared(e.identity?.owner,e.identity?.subgroup);
+  if(!shared&&(e.identity?.owner==='GENJY'||e.identity?.sourceRefs.some(s=>s.owner==='GENJY'))) return {code:'GENJY_RESERVED',message:'Proxy Genjy riêng không gán vào VM'};
+  if(!shared&&e.identity?.owner!=='SELF') return {code:'OWNER_CONFLICT',message:'Chỉ proxy TUT hoặc nhóm chung mới được gán VM'};
   const proxy=decodeEndpoint(e);
   if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)||proxy?.format!=='FULL'||!e.inventoryKey||!e.port) return {code:'INVALID_INPUT',message:'Proxy chưa đủ điều kiện (cần NEW/LIVE, đủ user/pass)'};
   return null;
@@ -68,7 +71,46 @@ export async function listVmTargets(scope:ActorScope,db:Reader=prisma):Promise<V
   return vms.sort((a,b)=>compareCodes(a.server.code,b.server.code)||compareCodes(a.code,b.code)).map(v=>({id:v.id,code:v.code,serverId:v.serverId,serverCode:v.server.code,occupant:occupantOf(v)}));
 }
 type PlannedItem={row:number;endpointId:string;group?:{owner:'SELF'|'OTHER';groupId:string|null;newName:string|null};location?:{kind:'UNASSIGN'}|{kind:'VM';vmId:string};manage?:ManageChoice};
-type Plan={rows:EditRow[];items:PlannedItem[];needs:{group:boolean;location:boolean;manage:boolean}};
+type Plan={rows:EditRow[];items:PlannedItem[];needs:{group:boolean;location:boolean;manage:boolean;share?:boolean};shares?:{row:number;identityId:string;endpointIds:string[]}[];notListed?:NotListedRef[]};
+const SHARED_LABEL='Chung mooon–Genjy';
+const ipOrder=(a:string,b:string)=>{const x=a.split('.').map(Number),y=b.split('.').map(Number);for(let i=0;i<4;i++) if(x[i]!==y[i]) return x[i]-y[i];return 0;};
+// The owner's confirmed list of shared proxies. Each line is matched by IP (and, for a full proxy, by its exact port/user/pass) against
+// identities linked to this project; nothing is created. Rows: READY (will be classified), SKIP (already shared), ERROR (bad line,
+// repeat, unknown IP, credentials that match no current proxy, IP only left in history). Shared IPs absent from the list are reported
+// in notListed and left unchanged: the list confirms, it never silently declassifies.
+async function planShared(scope:ActorScope,text:string,db:Reader):Promise<Plan>{
+  const lines=text.split(/\r?\n/).map(l=>l.replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/^[|`*\s]+|[|`*\s\\]+$/g,'')).filter(Boolean);
+  if(!lines.length||lines.length>MAX_EDIT_ROWS) throw new ProxyDomainError('INVALID_INPUT','Dán mỗi dòng một IP hoặc proxy đầy đủ');
+  const parsed=lines.map((raw,i)=>{try{return {row:i+1,raw,proxy:parseProxy(raw)};}catch{return {row:i+1,raw,proxy:null};}});
+  const ips=Array.from(new Set(parsed.flatMap(p=>p.proxy?[p.proxy.ip]:[])));
+  const linked={OR:[{endpoints:{some:{projectId:scope.projectId}}},{sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}}]};
+  const endpointSelect={where:{projectId:scope.projectId},select:{id:true,host:true,port:true,address:true,credentialCipher:true,inventoryState:true,retiredAt:true,groupId:true,group:{select:{name:true}}},orderBy:{id:'asc' as const}};
+  const [identities,shared]=await Promise.all([
+    db.proxyIdentity.findMany({where:{ip:{in:ips},...linked},include:{endpoints:endpointSelect}}),
+    db.proxyIdentity.findMany({where:{owner:'GENJY',subgroup:'PC_CHUNG',...linked},include:{endpoints:endpointSelect}}),
+  ]);
+  const byIp=new Map(identities.map(i=>[i.ip,i])),seen=new Map<string,number>(),rows:EditRow[]=[],shares:NonNullable<Plan['shares']>=[];
+  const live=(e:{retiredAt:Date|null;inventoryState:InventoryState})=>!e.retiredAt&&!HISTORICAL_STATES.includes(e.inventoryState);
+  for(const p of parsed){
+    const push=(ip:string,before:string,after:string,outcome:EditRow['outcome'],message:string,code?:IssueCode)=>rows.push({row:p.row,endpointId:null,ip,field:'GROUP',before,after,outcome,code,message});
+    if(!p.proxy){push(p.raw.slice(0,80),'','','ERROR',INVALID_LINE,'INVALID_INPUT');continue;}
+    const ip=p.proxy.ip,identity=byIp.get(ip),current=identity?.endpoints.filter(live)||[];
+    const before=identity?ownerLabel(identity.owner,identity.subgroup,(current[0]||identity.endpoints[0])?.group?.name):'',after=identity?SHARED_LABEL:'';
+    const dup=seen.get(ip);if(dup){push(ip,before,after,'ERROR','Trùng IP với dòng '+dup+' trong danh sách','DUPLICATE_INPUT');continue;}
+    seen.set(ip,p.row);
+    if(!identity){push(ip,'','','ERROR','Không có trong kho hoặc nguồn Genjy của dự án; danh sách này không nhập proxy mới','NOT_FOUND');continue;}
+    const proxy=p.proxy;
+    if(proxy.format==='FULL'&&!current.some(e=>{const d=decodeEndpoint(e);return d?.format==='FULL'&&fullProxy(d)===fullProxy(proxy);})){push(ip,before,after,'ERROR','Port hoặc user/pass không khớp proxy đang có; dán IP hoặc đúng proxy','AMBIGUOUS_OLD');continue;}
+    if(identity.endpoints.length&&!current.length){push(ip,before,after,'ERROR','IP chỉ còn trong lịch sử (đã replace / ngừng quản lý); không đổi phân loại','HISTORICAL_IP');continue;}
+    if(isShared(identity.owner,identity.subgroup)){push(ip,before,after,'SKIP','Đã ở nhóm chung mooon–Genjy');continue;}
+    const grouped=current.filter(e=>e.groupId);
+    push(ip,before,after,'READY','Xác nhận nhóm chung; giữ nguồn Sheet, lịch sử, vị trí VM'+(grouped.length?'; rời nhóm '+grouped[0].group!.name:''));
+    shares.push({row:p.row,identityId:identity.id,endpointIds:grouped.map(e=>e.id)});
+  }
+  const notListed=shared.filter(i=>!seen.has(i.ip)&&(!i.endpoints.length||i.endpoints.some(live))).map(i=>({ip:i.ip,identityId:i.id,state:(i.endpoints.find(live)?.inventoryState as InventoryState|undefined)||null})).sort((a,b)=>ipOrder(a.ip,b.ip));
+  return {rows,items:[],needs:{group:false,location:false,manage:false,share:true},shares,notListed};
+}
+
 async function resolveItems(scope:ActorScope,input:EditInput,db:Reader):Promise<{items:(EditItem&{row:number})[];rows:EditRow[]}>{
   if(input.items&&input.paste||!input.items&&!input.paste) throw new ProxyDomainError('INVALID_INPUT');
   if(input.items){
@@ -99,6 +141,7 @@ async function resolveItems(scope:ActorScope,input:EditInput,db:Reader):Promise<
   return {items,rows};
 }
 async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Plan>{
+  if(input.sharedList!==undefined){if(input.items||input.paste) throw new ProxyDomainError('INVALID_INPUT');return planShared(scope,input.sharedList,db);}
   const {items,rows:parseRows}=await resolveItems(scope,input,db);
   const needs={group:items.some(i=>i.group),location:items.some(i=>i.location),manage:items.some(i=>i.manage)};
   const ids=Array.from(new Set(items.map(i=>i.endpointId)));
@@ -128,7 +171,8 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
       else{try{const n=assertGroupName(item.group.name);const existing=groups.find(g=>g.normalizedName===n.normalized);after=existing?existing.name:n.name;target=existing?{owner:'OTHER',groupId:existing.id,newName:null}:{owner:'OTHER',groupId:null,newName:n.name};}catch(err){fail={code:'INVALID_INPUT',message:err instanceof ProxyDomainError?err.message.replace(/^INVALID_INPUT: /,''):'Tên nhóm không hợp lệ'};}}
       if(fail) push('GROUP',before,after,'ERROR',fail.message,fail.code);
       else if(duplicate) push('GROUP',before,after,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
-      else if(e.identity!.owner==='GENJY'||e.identity!.sourceRefs.some(s=>s.owner==='GENJY')) push('GROUP',before,after,'ERROR','Proxy genjy/PC chung luôn thuộc Genjy; không đổi nhóm','GENJY_RESERVED');
+      else if(isShared(e.identity!.owner,e.identity!.subgroup)) push('GROUP',before,after,'ERROR','Proxy nhóm chung mooon–Genjy; đổi phân loại qua Xác nhận nhóm chung','GENJY_RESERVED');
+      else if(e.identity!.owner==='GENJY'||e.identity!.sourceRefs.some(s=>s.owner==='GENJY')) push('GROUP',before,after,'ERROR','Proxy Genjy riêng luôn thuộc Genjy; không đổi nhóm','GENJY_RESERVED');
       else if(target!.owner===e.identity!.owner&&(target!.groupId||null)===(e.groupId||null)&&!target!.newName) push('GROUP',before,after,'SKIP','Đã ở nhóm này');
       else if(e.allocations.length||e.vm) push('GROUP',before,after,'ERROR','Proxy đang giữ hoặc đã cài trên VM; bỏ gán trước khi đổi nhóm','OWNER_CONFLICT');
       else{push('GROUP',before,after,'READY',target!.owner==='SELF'?'Chuyển về kho TUT':'Chuyển sang nhóm '+after);plan.group=target!;}
@@ -189,21 +233,22 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
   return {rows,items:planned,needs};
 }
 async function facts(scope:ActorScope,plan:Plan,db:Reader){
-  const ids=Array.from(new Set(plan.items.map(i=>i.endpointId)));
+  const ids=Array.from(new Set([...plan.items.map(i=>i.endpointId),...(plan.shares||[]).flatMap(s=>s.endpointIds)]));
+  const identities=await db.proxyIdentity.findMany({where:{id:{in:(plan.shares||[]).map(s=>s.identityId)}},select:{id:true,revision:true,owner:true,subgroup:true},orderBy:{id:'asc'}});
   const [endpoints,vms,holds,groups]=await Promise.all([
     db.proxyIP.findMany({where:{id:{in:ids}},select:{id:true,revision:true,identity:{select:{revision:true}}},orderBy:{id:'asc'}}),
     db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId}},select:{id:true,revision:true,desiredConfigurationId:true,installedConfigurationId:true,proxyId:true},orderBy:{id:'asc'}}),
     db.vMProxyAllocation.findMany({where:{projectId:scope.projectId,releasedAt:null},select:{id:true,revision:true,endpointId:true,vmId:true},orderBy:{id:'asc'}}),
     db.proxyGroup.findMany({where:{projectId:scope.projectId},select:{id:true,name:true},orderBy:{id:'asc'}}),
   ]);
-  return {endpoints,vms,holds,groups};
+  return {endpoints,vms,holds,groups,identities};
 }
 async function authorize(scope:ActorScope,needs:Plan['needs'],db:Reader){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   assertInfrastructureAction(current,'READ');if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');
-  if(needs.group||needs.manage) assertInfrastructureAction(current,'IMPORT');
+  if(needs.group||needs.manage||needs.share) assertInfrastructureAction(current,'IMPORT');
   if(needs.location) assertInfrastructureAction(current,'ASSIGN');
-  if(!needs.group&&!needs.location&&!needs.manage) assertInfrastructureAction(current,'ASSIGN');
+  if(!needs.group&&!needs.location&&!needs.manage&&!needs.share) assertInfrastructureAction(current,'ASSIGN');
   return current;
 }
 // Drop every unstarted plan of the endpoint: cancel configuration + task, release the hold, clear the VM pointer/Sheet link and blank the slot when nothing else sits there.
@@ -219,18 +264,19 @@ async function releasePlans(tx:Prisma.TransactionClient,images:Awaited<ReturnTyp
   }
   if(endpoint.vm&&!endpoint.allocations.some(a=>a.vmId===endpoint.vm!.id)){await images.remember('VM',endpoint.vm.id);const vm=await tx.virtualMachine.findUniqueOrThrow({where:{id:endpoint.vm.id},include:{allocations:{where:{releasedAt:null}}}});await tx.virtualMachine.update({where:{id:vm.id},data:{proxyId:null,...(!vm.installedConfigurationId&&!vm.desiredConfigurationId&&!vm.allocations.length?{proxySlotState:'BLANK' as const}:{}),revision:{increment:1}}});}
 }
-const dto=(batch:{token:string;previewRows:Prisma.JsonValue;expiresAt:Date}):EditPreview=>{const rows=batch.previewRows as unknown as EditRow[];return {token:batch.token,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,expiresAt:batch.expiresAt.toISOString()};};
+// previewRows is the row array, or {rows, notListed} for a shared-list preview.
+const dto=(batch:{token:string;previewRows:Prisma.JsonValue;expiresAt:Date}):EditPreview=>{const stored=batch.previewRows as unknown as EditRow[]|{rows:EditRow[];notListed:NotListedRef[]};const rows=Array.isArray(stored)?stored:stored.rows,notListed=Array.isArray(stored)?[]:stored.notListed;return {token:batch.token,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,expiresAt:batch.expiresAt.toISOString(),notListed};};
 // Registry edits (group / server / VM) for one or many rows. Preview stores the plan; commit re-plans inside the transaction and
 // refuses when anything moved (revision facts), exactly like the import and VM allocation flows. Same key + same payload replays.
 export function createProxyEditService(db:PrismaClient=prisma){
   async function preview(scope:ActorScope,input:EditInput):Promise<EditPreview>{
-    const needs={group:!!input.items?.some(i=>i.group),location:!!input.paste||!!input.items?.some(i=>i.location),manage:!!input.items?.some(i=>i.manage)};
+    const needs={group:!!input.items?.some(i=>i.group),location:!!input.paste||!!input.items?.some(i=>i.location),manage:!!input.items?.some(i=>i.manage),share:input.sharedList!==undefined};
     const current=await authorize(scope,needs,db),payloadHash=vmHash(input);
     const prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
     if(prior){if(prior.actorId!==scope.userId) throw new ProxyDomainError('FORBIDDEN');if(prior.kind!=='PROXY_EDIT'||prior.payloadHash!==payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');if(prior.status==='APPLIED') return dto(prior);}
     const plan=await planEdits(current,input,db),known=await facts(current,plan,db);
     // Facts travel inside the encrypted plan: jsonb would reorder keys and break the hash comparison at commit.
-    const data={actorId:scope.userId,kind:'PROXY_EDIT',payloadHash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,plan,facts:known})),sourceHash:'n/a',revisionFacts:known as unknown as Prisma.InputJsonValue,previewRows:plan.rows as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
+    const data={actorId:scope.userId,kind:'PROXY_EDIT',payloadHash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,plan,facts:known})),sourceHash:'n/a',revisionFacts:known as unknown as Prisma.InputJsonValue,previewRows:(plan.notListed?{rows:plan.rows,notListed:plan.notListed}:plan.rows) as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
     const batch=prior?await db.proxyBatch.update({where:{id:prior.id},data}):await db.proxyBatch.create({data:{...data,projectId:scope.projectId,idempotencyKey:input.idempotencyKey}});
     return dto(batch);
   }
@@ -247,7 +293,15 @@ export function createProxyEditService(db:PrismaClient=prisma){
       const current=await authorize(scope,saved.plan.needs,tx),plan=await planEdits(current,saved.input,tx);
       if(vmHash(plan)!==vmHash(saved.plan)||vmHash(await facts(current,plan,tx))!==vmHash(saved.facts)) throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã thay đổi; kiểm tra lại');
       const images=await snapshotCollector(tx,current),now=new Date(),createdGroups=new Map<string,string>();
-      let groupsChanged=0,moved=0,unassigned=0,retired=0,restored=0;
+      let groupsChanged=0,moved=0,unassigned=0,retired=0,restored=0,shared=0;
+      for(const share of plan.shares||[]){
+        await images.remember('IDENTITY',share.identityId);
+        const identity=await tx.proxyIdentity.findUniqueOrThrow({where:{id:share.identityId}});if(isShared(identity.owner,identity.subgroup)) throw new ProxyDomainError('STALE_PREVIEW');
+        for(const endpointId of share.endpointIds){await images.remember('ENDPOINT',endpointId);await tx.proxyIP.update({where:{id:endpointId},data:{groupId:null,revision:{increment:1}}});}
+        await tx.proxyIdentity.update({where:{id:identity.id},data:{owner:'GENJY',subgroup:'PC_CHUNG',revision:{increment:1}}});
+        const endpoint=await tx.proxyIP.findFirst({where:{projectId:scope.projectId,identityId:identity.id,retiredAt:null},select:{id:true},orderBy:{id:'asc'}});
+        await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:identity.id,endpointId:endpoint?.id||null,batchId:batch.id,ip:identity.ip,kind:'SHARED_CONFIRMED',occurredAt:now,actorId:scope.userId,reason:'Danh sách xác nhận nhóm chung mooon–Genjy; trước: '+ownerLabel(identity.owner,identity.subgroup,null)}});shared++;
+      }
       for(const item of plan.items){
         const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:item.endpointId,projectId:scope.projectId},include:endpointInclude});
         await images.remember('ENDPOINT',endpoint.id);
@@ -292,10 +346,10 @@ export function createProxyEditService(db:PrismaClient=prisma){
           }
         }
       }
-      const result:EditResult={batchId:batch.id,replay:false,rows:plan.rows,applied:plan.items.length,skipped:plan.rows.filter(r=>r.outcome==='SKIP').length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length};
-      if(plan.items.length) await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:plan.items.length,groups:groupsChanged,moved,unassigned,retired,restored},snapshot:await images.finish(),batchId:batch.id});
+      const result:EditResult={batchId:batch.id,replay:false,rows:plan.rows,applied:plan.items.length+(plan.shares||[]).length,skipped:plan.rows.filter(r=>r.outcome==='SKIP').length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length};
+      if(result.applied) await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:result.applied,groups:groupsChanged,moved,unassigned,retired,restored,shared},snapshot:await images.finish(),batchId:batch.id});
       await tx.proxyBatch.update({where:{id:batch.id},data:{status:'APPLIED',appliedAt:now,result:result as unknown as Prisma.InputJsonValue}});
-      await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_EDIT',entity:'ProxyBatch',entityId:batch.id,changes:{applied:result.applied,skipped:result.skipped,errors:result.errors,groups:groupsChanged,moved,unassigned,retired,restored}}});
+      await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_EDIT',entity:'ProxyBatch',entityId:batch.id,changes:{applied:result.applied,skipped:result.skipped,errors:result.errors,groups:groupsChanged,moved,unassigned,retired,restored,shared}}});
       return result;
     },db);
   }

@@ -16,7 +16,7 @@ export function assertGroupName(raw:string){
   if(RESERVED.has(n.normalized)) throw new ProxyDomainError('INVALID_INPUT','"'+n.name+'" là tên có sẵn; chọn tên nhóm khác');
   return n;
 }
-export const ownerLabel=(owner:Owner,subgroup:Subgroup,groupName:string|null|undefined)=>owner==='SELF'?'TUT':owner==='GENJY'?(subgroup==='PC_CHUNG'?'genjy · PC chung':'genjy'):owner==='OTHER'?(groupName||'Nhóm khác'):'Chưa xác định';
+export const ownerLabel=(owner:Owner,subgroup:Subgroup,groupName:string|null|undefined)=>owner==='SELF'?'TUT':owner==='GENJY'?(subgroup==='PC_CHUNG'?'Chung mooon–Genjy':'Genjy riêng'):owner==='OTHER'?(groupName||'Nhóm khác'):'Chưa xác định';
 export const sortGroups=<T extends {name:string}>(list:T[])=>list.sort((a,b)=>a.name.localeCompare(b.name,'vi',{sensitivity:'base',numeric:true}));
 export async function listGroups(scope:ActorScope,db:Reader=prisma,options:{activeOnly?:boolean}={}):Promise<ProxyGroupRef[]>{
   assertInfrastructureAction(await loadInfrastructureScope(db,scope.userId,scope.projectId),'READ');
