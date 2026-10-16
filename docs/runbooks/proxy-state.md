@@ -5,7 +5,7 @@ Quy tắc chốt ngày 16/10/2026. Bằng chứng: `../superpowers/evidence/2026
 ## Quy tắc
 
 - **NEW**: proxy đủ điều kiện trong kho, chưa gán VM.
-- **LIVE**: proxy đã được gán cho VM trên web, tức có bản giao *Chờ cài* hoặc *Đã cài*. LIVE **không** có nghĩa đã cài thật hay đã kiểm tra mạng.
+- **LIVE**: proxy người dùng ghi nhận **đang sử dụng**, kể cả khi chưa cập nhật vị trí VM (quyết định 16/10, thay quy tắc cũ bắt LIVE phải có VM). Gán VM thành công thì tự chuyển LIVE. LIVE **không** có nghĩa đã cài thật hay đã kiểm tra mạng.
 - Bản *Giữ để kiểm tra* không tính là đã gán. Khi còn bản này, proxy không được đưa lại vào kho NEW.
 - Chỉ áp cho **TUT** và **Chung mooon–Genjy**, hai nhóm được nằm trên VM của anh. Genjy riêng và nhóm tự đặt giữ trạng thái như cũ.
 - **BLOCKED, cần kiểm tra, đã replace, ngừng quản lý** không bao giờ tự đổi thành NEW hay LIVE.
@@ -22,18 +22,17 @@ Hàm `syncAssignmentState` (`src/server/proxy-management/assignment-state.ts`) c
 
 API cho nhân viên và AI dùng chung các endpoint này, không có đường tắt.
 
-Chọn server mà chưa chọn VM thì không lưu gì, nên proxy vẫn NEW. Nút *Chuyển server* hàng loạt tự lấy VM trống, nên đó là gán VM thật và chuyển LIVE.
+Chọn server mà chưa chọn VM thì không lưu gì. Gán lại đúng vị trí hiện tại thì giữ nguyên, không báo lỗi. Bỏ gán bản cuối cùng thì về NEW; LIVE không có VM do người dùng chọn thì không bị tự đổi. Nút *Chuyển server* hàng loạt tự lấy VM trống, nên đó là gán VM thật và chuyển LIVE.
 
-## Thao tác trạng thái
+## Thao tác (ít bước nhất)
 
-- **Tại dòng**: bấm huy hiệu NEW/LIVE (hoặc nút bút) rồi chọn ô *Trạng thái*.
-  - **LIVE** khi chưa có VM: hướng dẫn chọn Server/VM bên cạnh. Lưu thì giao VM và chuyển LIVE trong một lần.
-  - **NEW** khi đang giữ VM: lưu sẽ bỏ gán hoặc huỷ giao rồi về NEW (chưa gỡ ngoài máy).
-  - **BLOCKED**: theo quyền báo BLOCKED; giữ vị trí VM, ghi sự kiện BLOCKED. Nhận replace sau như cũ.
-- **Hàng loạt**: tick dòng rồi bấm **Trạng thái**, chọn NEW (tick *Bỏ gán / huỷ giao* nếu cần), LIVE hoặc BLOCKED. Xem trước nêu từng dòng hợp lệ hay bị chặn và lý do.
-- Không sửa trạng thái được để vượt chặn cấp trùng, gói tắt hay Genjy riêng, cũng không xoá lịch sử replace. Server luôn kiểm tra quyền, revision, lưu lặp và thao tác đồng thời.
-- Bộ lọc trạng thái hiện số dòng của từng trạng thái theo các bộ lọc đang bật.
+- **Tại dòng**: ô trạng thái ngay trong bảng, chọn NEW / LIVE / BLOCKED là lưu, hiện "Đã lưu". Chọn lại giá trị đang có thì không làm gì, không ghi lịch sử. Riêng NEW trên dòng đang giữ VM sẽ hỏi một lần "Bỏ gán … để về NEW?", vì thao tác này thay đổi phân bổ.
+- **Hàng loạt**: tick dòng, chọn ở ô *Trạng thái…*, bấm **Áp dụng**. Dòng hợp lệ được lưu; dòng bị chặn hiện lý do ở thông báo.
+- **Gán VM**: nút bút, chọn Server, chọn VM là lưu ngay. Danh sách chỉ có VM trống và VM hiện tại. Đổi nhóm cũng lưu khi chọn; nhóm mới thì gõ tên rồi bấm *Lưu nhóm mới*.
+- **Sửa hàng loạt** (Đổi nhóm, Chuyển server, Gán VM theo bảng dán, Ngừng quản lý, Khôi phục): bấm **Áp dụng** một lần, không qua bước xem trước. Dòng bị chặn hiện ngay trong khung, nội dung đang nhập vẫn giữ.
+- **Hoàn tác**: lý do không bắt buộc, bấm **Hoàn tác** là xong.
+- Backend vẫn kiểm tra quyền, dự án, revision, cấp trùng VM, trùng IP, sở hữu và nhóm chung. Trạng thái không thay cho điều kiện cấp phát: autofill vẫn chỉ lấy NEW chưa ai giữ và đủ điều kiện kho. Không đổi trạng thái được để hồi sinh proxy đã replace hay ngừng quản lý; phải dùng *Khôi phục*.
 
 ## Đồng bộ dữ liệu cũ
 
-**Thiết lập → Đồng bộ NEW / LIVE**: bấm xem trước để thấy danh sách dòng lệch kèm lý do (*Đang giữ ở … · Chờ cài* hoặc *Không còn VM nào giữ*), rồi lưu một lần. Mỗi dòng ghi sự kiện `STATE_SYNC` và hoàn tác được.
+**Thiết lập → Đồng bộ NEW / LIVE**: chỉ sửa dòng NEW mà VM đang giữ thành LIVE (*Đang giữ ở … · Chờ cài*). LIVE không có VM là hợp lệ nên không bị liệt kê. Xem trước rồi lưu một lần; mỗi dòng ghi sự kiện `STATE_SYNC` và hoàn tác được.
