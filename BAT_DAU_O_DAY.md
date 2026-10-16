@@ -30,6 +30,8 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 13. **16/10 — Logo C + slogan:** biểu tượng M xanh (phương án C đã duyệt, `public/brand/moneytohome-mark.png`, nền trong suốt, không kéo méo) thay ô chữ B ở trang đăng nhập (căn giữa trên tên) và đầu sidebar (thu gọn chỉ còn biểu tượng); slogan chữ thật **Forward, Together.** dưới tên; icon tab `src/app/icon.png`; middleware cho phép `/brand/*` không cần đăng nhập. Thành phần `src/components/BrandMark.tsx`.
 
+14. **16/10 — Nhóm proxy và sửa nhóm / server / VM trong bảng:** cột **Gói proxy** trước IP; *Thuộc về* → **Từ nhóm** (TUT = kho của anh, genjy, nhóm tự đặt); nhập mới chọn hoặc tạo nhóm ngay trong form (tên chuẩn hóa, chặn trùng hoa/thường/khoảng trắng); lọc theo nhóm kết hợp gói/server/trạng thái (`?group=`); nút bút mở dải chỉnh ngay dưới dòng (nhóm, server, VM trống, Bỏ gán); tick nhiều dòng → **Đổi nhóm / Chuyển server / Gán VM** (dán `Proxy | Server | VM`) với xem trước rồi lưu một lần; chỉ bản giao *Chờ cài* chưa bắt đầu mới chuyển/bỏ gán được, VM đích phải trống, genjy không đổi, nhóm tự đặt không autofill; mọi lần lưu qua `ProxyBatch` (idempotency + revision), nhật ký `PROXY_EDIT` và hoàn tác. Migration `20261016120000_proxy_groups` (chỉ thêm). Xem `docs/runbooks/proxy-groups-edit.md`.
+
 ## Dữ liệu thật đã nhập
 
 Snapshot Sheet/Genjy ngày 15/10/2026: **10 server, 574 dòng VM, 1.362 endpoint, 101 liên kết replace, 1.172 IP khác nhau trong final**. Đã giữ **724 danh tính Genjy**, trong đó 33 có bằng chứng PC chung (bao gồm lịch sử).

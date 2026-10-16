@@ -10,10 +10,11 @@ import {loadCatalog,loadProxyContext} from './repository';
 import {refreshGenjy} from './sources';
 import {buildReconciliation} from './reconcile';
 import {withProxyTransaction} from './transaction';
+import {findGroupByName} from './groups';
 import {recordOperation} from '../operation-history/journal';
 import {captureAccount,captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
 import {ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
-export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
+export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;groupId?:string|null;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
 interface Planned {rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
 export function parseReceivedDate(value?:string|null):Date|null{
   if(!value) return null;
@@ -21,7 +22,8 @@ export function parseReceivedDate(value?:string|null):Date|null{
   const date=new Date(value+'T00:00:00.000Z');if(!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==value) throw new ProxyDomainError('INVALID_INPUT','Ngày nhận không hợp lệ');return date;
 }
 function candidates(ctx:ProxyContext,p:ParsedProxy,projectId?:string){return ctx.endpoints.filter(e=>(!projectId||e.projectId===projectId)&&e.proxy.ip===p.ip&&(p.format==='BARE'||(e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(p))));}
-export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccount[],projectId?:string,sheet?:SheetSnapshot):Planned{
+// group: the resolved "Từ nhóm" for NEW imports with owner OTHER ({id:null} while the group is still to be created at commit).
+export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccount[],projectId?:string,sheet?:SheetSnapshot,group?:{id:string|null;name:string}|null):Planned{
   parseReceivedDate(input.receivedDate);
   const rows:PreviewRow[]=[],items:ResolvedItem[]=[];
   let reconciliation:ReconciliationPlan|undefined;
@@ -30,10 +32,12 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
     if(subgroup&&owner!=='GENJY') Object.assign(decision,{outcome:'ERROR',code:'OWNER_CONFLICT',message:'PC chung phải thuộc Genjy'});
     if(pkg?.issue&&decision.outcome!=='ERROR'){Object.assign(decision,{outcome:'ERROR',code:'PACKAGE_MISMATCH',message:pkg.issue});code=null;}
     const resolvedState=code?state:'QUARANTINED';
-    rows.push({...decision,row,newIp:p.ip,owner,subgroup,packageCode:code,sourceRefs:sourceRef?[sourceRef]:[],...(decision.outcome==='READY'&&!code?{code:'UNKNOWN_PACKAGE' as const,message:'Lưu để kiểm tra gói; chưa dùng để cấp VM'}:{})});
-    if(decision.outcome==='READY') items.push({row,next:p,owner,subgroup,packageCode:code,state:resolvedState,sourceRef});
+    rows.push({...decision,row,newIp:p.ip,owner,subgroup,groupName:owner==='OTHER'?group?.name||null:null,packageCode:code,sourceRefs:sourceRef?[sourceRef]:[],...(decision.outcome==='READY'&&!code?{code:'UNKNOWN_PACKAGE' as const,message:'Lưu để kiểm tra gói; chưa dùng để cấp VM'}:{})});
+    if(decision.outcome==='READY') items.push({row,next:p,owner,subgroup,groupId:owner==='OTHER'?group?.id??null:null,packageCode:code,state:resolvedState,sourceRef});
   };
   if(input.kind==='NEW'){
+    if(input.owner==='OTHER'&&!group) throw new ProxyDomainError('INVALID_INPUT','Chọn nhóm có sẵn hoặc đặt tên nhóm mới');
+    if(input.owner!=='OTHER'&&(input.groupId||input.newGroup)) throw new ProxyDomainError('INVALID_INPUT','Nhóm chỉ dùng cho proxy ngoài kho TUT');
     const chosen=input.packageCode?.trim()||null,fresh=input.newPackage?.code.trim()||null;
     if(chosen&&!catalog.some(c=>c.code===chosen)) throw new ProxyDomainError('NOT_FOUND','Không có gói '+chosen);
     if(input.newPackage){if(!fresh||fresh.length>80) throw new ProxyDomainError('INVALID_INPUT','Cần tên gói mới');if(catalog.some(c=>c.code.toLowerCase()===fresh.toLowerCase())) throw new ProxyDomainError('DUPLICATE_INPUT','Gói '+fresh+' đã có; chọn gói sẵn có');}
@@ -108,6 +112,13 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     if(snapshots.some(s=>!s||!Array.isArray(s.rows)||!Array.isArray(s.snapshots))) throw new ProxyDomainError('INVALID_INPUT');
     return {rows:snapshots.flatMap(s=>s!.rows.map(row=>({...row,snapshotId:s!.recordId}))),snapshots:snapshots.flatMap(s=>s!.snapshots)};
   }
+  // "Từ nhóm" for NEW imports: an existing group by id, or a new name that must not collide (case/space-insensitive).
+  async function resolveGroup(scope:ActorScope,input:BatchInput,reader:PrismaClient|Prisma.TransactionClient,committing:boolean){
+    if(input.kind!=='NEW'||input.owner!=='OTHER') return null;
+    if(input.newGroup){const {name,group}=await findGroupByName(reader,scope.projectId,input.newGroup.name);if(group) throw new ProxyDomainError(committing?'STALE_PREVIEW':'DUPLICATE_INPUT','Nhóm "'+group.name+'" đã có; chọn nhóm sẵn có');return {id:null,name};}
+    if(input.groupId){const group=await reader.proxyGroup.findFirst({where:{id:input.groupId,projectId:scope.projectId}});if(!group) throw new ProxyDomainError('NOT_FOUND','Không có nhóm này');return {id:group.id,name:group.name};}
+    return null;
+  }
   async function preview(scope:ActorScope,input:BatchInput):Promise<BatchPreview>{
     const current=await scoped(scope,action(input.kind)),payloadHash=hash(input);
     const prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
@@ -115,13 +126,13 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     if(input.kind!=='BLOCKED') await refresh(scope.projectId,db);
     const sheet=await loadSheet(current,input);
     const [ctx,catalog]=await Promise.all([loadProxyContext(current,input,db,sheet),loadCatalog(scope.projectId,db)]);
-    const planned=planBatch(input,ctx,catalog,scope.projectId,sheet);
+    const planned=planBatch(input,ctx,catalog,scope.projectId,sheet,await resolveGroup(current,input,db,false));
     const data={actorId:scope.userId,kind:input.kind,payloadHash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,sheet,...planned})),sourceHash:ctx.source.hash,revisionFacts:revisionFacts(ctx,catalog) as Prisma.InputJsonValue,previewRows:planned.rows as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
     const batch=prior?await db.proxyBatch.update({where:{id:prior.id},data}):await db.proxyBatch.create({data:{...data,projectId:scope.projectId,idempotencyKey:input.idempotencyKey}});
     return dto(batch);
   }
   async function commit(scope:ActorScope,token:string,idempotencyKey:string):Promise<CommitResult>{
-    const vmBatch=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:'VM_ALLOCATION'},select:{id:true}});
+    const vmBatch=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:{in:['VM_ALLOCATION','PROXY_EDIT']}},select:{id:true}});
     if(vmBatch)throw new ProxyDomainError('INVALID_INPUT','Đợt gán VM phải lưu qua luồng Server/VM');
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId}});if(!original) throw new ProxyDomainError('NOT_FOUND');
     await scoped(scope,action(original.kind));
@@ -141,8 +152,9 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
       if(batch.kind==='SHEET'&&hash(currentSheet)!==hash(saved.sheet)) throw new ProxyDomainError('STALE_PREVIEW','Snapshot đối chiếu đã đổi; kiểm tra lại');
       const [ctx,catalog]=await Promise.all([loadProxyContext(current,saved.input,tx,currentSheet),loadCatalog(scope.projectId,tx)]);
       if(hash(revisionFacts(ctx,catalog))!==hash(batch.revisionFacts)||(batch.kind!=='BLOCKED'&&ctx.source.hash!==batch.sourceHash)) throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã thay đổi; kiểm tra lại');
-      const planned=planBatch(saved.input,ctx,catalog,scope.projectId,saved.sheet);
+      const group=await resolveGroup(current,saved.input,tx,true),planned=planBatch(saved.input,ctx,catalog,scope.projectId,saved.sheet,group);
       if(hash(planned)!==hash({rows:saved.rows,items:saved.items,reconciliation:saved.reconciliation})) throw new ProxyDomainError('STALE_PREVIEW');
+      const groupId=group&&planned.items.length?group.id||(await tx.proxyGroup.create({data:{projectId:scope.projectId,name:group.name,normalizedName:group.name.toLocaleLowerCase('vi'),createdById:scope.userId}})).id:null;
       const now=new Date(),receivedDate=parseReceivedDate(saved.input.receivedDate);
       const beforeImages=new Map<string,ReturnType<typeof captureEndpoint>|null>();
       for(const item of planned.items)if(item.oldEndpointId){const row=await tx.proxyIP.findFirstOrThrow({where:{id:item.oldEndpointId,projectId:scope.projectId},include:endpointInclude});beforeImages.set(row.id,captureEndpoint(row));}
@@ -159,7 +171,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
             if(identity.owner!==item.owner||identity.subgroup!==item.subgroup||(batch.kind!=='SHEET'&&item.owner!=='GENJY')) throw new ProxyDomainError('STALE_PREVIEW');
             identity=await tx.proxyIdentity.update({where:{id:identity.id},data:{revision:{increment:1},lastSeenAt:now}});
           }else identity=await tx.proxyIdentity.create({data:{ip:p.ip,owner:item.owner,subgroup:item.subgroup}});
-          const endpoint=await tx.proxyIP.create({data:{projectId:scope.projectId,identityId:identity.id,address:`${p.ip}:${p.port}`,host:p.ip,port:p.port,credentialCipher:encrypt(JSON.stringify({username:p.username,password:p.password})),packageCode:item.packageCode,inventoryState:item.state,status:item.owner==='GENJY'?'RESERVED':item.state==='BLOCKED'?'BLOCKED':'AVAILABLE',inventoryKey:identity.id,revision:1,statusAt:batch.kind==='SHEET'?null:now,notesCipher:!item.packageCode?encrypt(JSON.stringify({quarantineReason:'UNKNOWN_PACKAGE',intendedState:batch.kind==='SHEET'?'LIVE':'NEW'})):null}});
+          const endpoint=await tx.proxyIP.create({data:{projectId:scope.projectId,identityId:identity.id,address:`${p.ip}:${p.port}`,host:p.ip,port:p.port,credentialCipher:encrypt(JSON.stringify({username:p.username,password:p.password})),packageCode:item.packageCode,groupId:item.owner==='OTHER'?groupId:null,inventoryState:item.state,status:item.owner==='GENJY'?'RESERVED':item.state==='BLOCKED'?'BLOCKED':'AVAILABLE',inventoryKey:identity.id,revision:1,statusAt:batch.kind==='SHEET'?null:now,notesCipher:!item.packageCode?encrypt(JSON.stringify({quarantineReason:'UNKNOWN_PACKAGE',intendedState:batch.kind==='SHEET'?'LIVE':'NEW'})):null}});
           beforeImages.set(endpoint.id,null);
           await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:identity.id,endpointId:endpoint.id,batchId:batch.id,ip:p.ip,kind:batch.kind==='SHEET'?'SHEET_IMPORT':'RECEIVED',occurredAt:batch.kind==='SHEET'?null:receivedDate,actorId:scope.userId,sourceRef:item.sourceRef}});
           if(batch.kind==='SHEET'&&item.sourceSnapshotId) await tx.proxySourceReference.create({data:{snapshotId:item.sourceSnapshotId,identityId:identity.id,endpointId:endpoint.id,sourceRef:item.sourceRef!,format:p.format,owner:item.owner,subgroup:item.subgroup,hasFullCredentials:true,hasManualMetadata:false,dataCipher:encrypt(JSON.stringify(saved.sheet!.rows[item.row-1]))}});

@@ -29,7 +29,9 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
     for(const image of resources){
       if(image.resource==='ENDPOINT'){
         const before=image.before;
-        if(before){const {revision:_revision,owner:_owner,subgroup:_subgroup,identityId:_identityId,vmId:_vmId,updatedAt:_updatedAt,...data}=before;await tx.proxyIP.update({where:{id:image.id},data:{...data,statusAt:data.statusAt?new Date(data.statusAt):null,retiredAt:data.retiredAt?new Date(data.retiredAt):null,revision:{increment:1}}});}
+        if(before){const {revision:_revision,owner,subgroup:_subgroup,identityId:_identityId,vmId:_vmId,updatedAt:_updatedAt,...data}=before;await tx.proxyIP.update({where:{id:image.id},data:{...data,statusAt:data.statusAt?new Date(data.statusAt):null,retiredAt:data.retiredAt?new Date(data.retiredAt):null,revision:{increment:1}}});
+          // A group change moved the identity between TUT and OTHER; put it back (genjy ownership is never touched here).
+          if(owner&&owner!==image.after.owner&&image.after.identityId&&owner!=='GENJY'&&image.after.owner!=='GENJY')await tx.proxyIdentity.update({where:{id:image.after.identityId},data:{owner,revision:{increment:1}}});}
         else await tx.proxyIP.update({where:{id:image.id},data:{inventoryState:'VOID',status:'RESERVED',retiredAt:now,statusAt:now,notesCipher:encrypt(JSON.stringify({withdrawnByOperation:id,reason:reason.trim()})),revision:{increment:1}}});
         const event=await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:image.after.identityId!,endpointId:image.id,ip:image.after.host!,kind:'UNDO',occurredAt:now,actorId:scope.userId,reason:reason.trim()}});reversed.eventIds.push(event.id);
       }else if(image.resource==='ACCOUNT'){

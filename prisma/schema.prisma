@@ -72,6 +72,7 @@ model Project {
   profitSplits     ProfitSplit[]
   partners         Partner[]
   proxyIPs         ProxyIP[]
+  proxyGroups      ProxyGroup[]
   gmailAccounts    GmailAccount[]
   deleteRequests   DeleteRequest[]
   agentPaypalEmails AgentPaypalEmail[]
@@ -265,6 +266,8 @@ model ProxyIP {
   identity      ProxyIdentity? @relation(fields: [identityId], references: [id], onDelete: Restrict)
   credentialCipher String?
   packageCode   String?
+  groupId       String?
+  group         ProxyGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
   inventoryState ProxyInventoryState @default(QUARANTINED)
   inventoryKey  String?
   revision      Int @default(0)
@@ -289,12 +292,14 @@ model ProxyIP {
   @@index([projectId, status])
   @@index([identityId])
   @@index([projectId, inventoryState])
+  @@index([projectId, groupId])
 }
 
 enum ProxyOwner {
   SELF
   GENJY
   UNKNOWN
+  OTHER
 }
 enum ProxySubgroup {
   PC_CHUNG
@@ -326,6 +331,21 @@ model ProxyIdentity {
   sourceRefs ProxySourceReference[]
   events ProxyStatusEvent[]
 }
+// Operator-defined proxy group ("Từ nhóm"). TUT (owner SELF) and genjy are not rows here; a group row always means owner OTHER.
+model ProxyGroup {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict)
+  name String
+  normalizedName String
+  createdById String?
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  endpoints ProxyIP[]
+  @@unique([projectId,normalizedName])
+}
+
 model ProxyProviderAccount {
   costRecords CostRecord[]
   id String @id @default(cuid())

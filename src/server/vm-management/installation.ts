@@ -17,7 +17,7 @@ async function begin(tx:Prisma.TransactionClient,scope:ActorScope,id:string){
   const config=await currentConfiguration(tx,scope,id);
   if(config.status==='CONFIRMED'&&config.vm.installedConfigurationId===config.id)return config;
   if(config.vm.desiredConfigurationId!==config.id||config.status==='CANCELLED')throw new ProxyDomainError('STALE_PREVIEW');
-  if(config.endpoint?.identity?.owner!=='SELF')throw new ProxyDomainError('OWNER_CONFLICT','Proxy không còn thuộc kho của anh. Giữ lại để kiểm tra.');
+  if(config.endpoint?.identity?.owner!=='SELF')throw new ProxyDomainError('OWNER_CONFLICT','Proxy không còn thuộc kho TUT. Giữ lại để kiểm tra.');
   if(config.endpoint.retiredAt||!['NEW','LIVE'].includes(config.endpoint.inventoryState))throw new ProxyDomainError('INVALID_INPUT','Proxy đang lỗi hoặc đã ngừng dùng. Giao proxy mới trước khi cài.');
   if(config.status==='IN_PROGRESS')return config;
   const images=await snapshotCollector(tx,scope);await images.remember('VM_CONFIG',id);await images.remember('VM',config.vmId);if(config.task)await images.remember('VM_TASK',config.task.id);

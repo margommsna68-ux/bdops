@@ -27,7 +27,7 @@ async function planAllocation(projectId:string,input:AllocationInput,db:VMReader
       const existing=hold?await db.proxyIP.findFirst({where:{id:hold.endpointId,projectId,retiredAt:null,inventoryState:{in:['NEW','LIVE']},identity:{owner:'SELF'}},include:{identity:true}}):null;
       if(existing?.identity&&existing.port&&existing.inventoryKey&&existing.credentialCipher&&existing.packageCode){endpoint={identityId:existing.identity.id,endpointId:existing.id,ip:existing.identity.ip,port:existing.port,revision:existing.revision,allocationKey:existing.inventoryKey};reuseInstalled=true;}
     }
-    if(!endpoint){rows.push({...row,outcome:'ERROR',message:input.mode==='AUTO'?'Thiếu proxy NEW chưa dùng của anh':'Proxy chưa đủ điều kiện hoặc đã được giữ cho máy khác'});continue;}
+    if(!endpoint){rows.push({...row,outcome:'ERROR',message:input.mode==='AUTO'?'Thiếu proxy NEW TUT chưa dùng':'Proxy chưa đủ điều kiện hoặc đã được giữ cho máy khác'});continue;}
     rows.push({...row,outcome:'READY',message:reuseInstalled?'Giao lại cấu hình đã cài; cần xác nhận mới':'Giao proxy; chờ cài thực tế',ip:endpoint.ip,endpointId:endpoint.endpointId});items.push({vmId:vm.id,endpointId:endpoint.endpointId,reuseInstalled});
     const index=pool.findIndex(e=>e.endpointId===endpoint!.endpointId);if(index>=0)pool.splice(index,1);
   }

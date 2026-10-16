@@ -33,6 +33,7 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.proxyBatch.deleteMany({where});
     await tx.proxySourceSnapshot.deleteMany({where});
     await tx.proxyIP.deleteMany({where});
+    await tx.proxyGroup.deleteMany({where});
     if(identityIds.length) await tx.proxyIdentity.deleteMany({where:{id:{in:identityIds},endpoints:{none:{}},sourceRefs:{none:{}},events:{none:{}}}});
     await tx.proxyProviderAccount.deleteMany({where});
     await tx.server.deleteMany({where});

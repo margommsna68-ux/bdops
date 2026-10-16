@@ -1,4 +1,5 @@
-export type Owner='SELF'|'GENJY'|'UNKNOWN';
+// OTHER = a proxy in an operator-defined group (never TUT, never autofilled or planned onto a VM).
+export type Owner='SELF'|'GENJY'|'UNKNOWN'|'OTHER';
 export type Subgroup='PC_CHUNG'|null;
 export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID';
 export type BatchKind='NEW'|'BLOCKED'|'REPLACE'|'SHEET';
@@ -9,9 +10,9 @@ export class ProxyDomainError extends Error {
 }
 export interface ParsedProxy {ip:string;port:number|null;username:string|null;password:string|null;format:'BARE'|'FULL'}
 export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[];businessMode?:string;teamCashEnabled?:boolean}
-export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}
+export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;groupId?:string|null;newGroup?:{name:string}|null;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}
 export interface Decision {outcome:Outcome;code?:IssueCode;message:string}
-export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;packageCode?:string|null;sourceRefs:string[]}
+export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;groupName?:string|null;packageCode?:string|null;sourceRefs:string[]}
 export interface BatchPreview {token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;expiresAt:string}
 export interface CommitResult {batchId:string;replay:boolean;undone?:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
 export interface CatalogAccount {id:string;code:string;username:string;password:string}
@@ -32,9 +33,21 @@ export const UNASSIGNED_SERVER='__NONE__';
 export type LocationRole='DESIRED'|'INSTALLED'|'UNCERTAIN'|null;
 // One VM position of a proxy: a hold (role from the allocation) or the VM link recorded from the Sheet (role null). Server and VM stay separate fields; never parse display strings.
 export interface RegistryLocation {serverId:string;serverCode:string;vmId:string;vmCode:string;role:LocationRole}
-export interface RegistryFilter {owner?:Owner;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
-export interface RegistryRow {identityId:string;endpointId:string|null;ip:string;port:number|null;owner:Owner;subgroup:Subgroup;packageCode:string|null;state:InventoryState;revision:number;sourceRefs:string[];locations:RegistryLocation[];statusAt?:string|null}
-export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;quarantined:number};total:number;servers:string[]}
+// group: TUT | GENJY | UNKNOWN | <ProxyGroup id>
+export interface RegistryFilter {owner?:Owner;group?:string;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
+export interface RegistryRow {identityId:string;endpointId:string|null;ip:string;port:number|null;owner:Owner;subgroup:Subgroup;groupId:string|null;groupName:string|null;packageCode:string|null;state:InventoryState;revision:number;sourceRefs:string[];locations:RegistryLocation[];statusAt?:string|null}
+export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[]}
 export type CopySkipReason='NO_CREDENTIALS'|'NO_ENDPOINT';
 export interface CopyResult {proxies:string[];copied:number;total:number;skipped:{reason:CopySkipReason;count:number}[]}
 export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
+export interface ProxyGroupRef {id:string;name:string}
+export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_UNKNOWN='UNKNOWN';
+// Row edits from the registry (single row or bulk). Group and location are independent; each produces its own preview row.
+export type GroupChoice={kind:'TUT'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
+export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
+export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice}
+export interface EditInput {items?:EditItem[];paste?:string;idempotencyKey:string}
+export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
+export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string}
+export interface EditResult {batchId:string;replay:boolean;undone?:boolean;rows:EditRow[];applied:number;skipped:number;errors:number}
+export interface VmTarget {id:string;code:string;serverId:string;serverCode:string;occupant:string|null}

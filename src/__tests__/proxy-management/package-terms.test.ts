@@ -24,7 +24,7 @@ describe('compareCodes',()=>{
     expect(['VM_10','VM_2','vm_1','M-010','M-002'].sort(compareCodes)).toEqual(['M-002','M-010','vm_1','VM_2','VM_10']);
   });
 });
-const row=(o:Partial<RegistryRow>):RegistryRow=>({identityId:o.ip||'i',endpointId:o.endpointId===undefined?'e-'+(o.ip||'i'):o.endpointId,ip:'10.0.0.1',port:80,owner:'SELF',subgroup:null,packageCode:null,state:'LIVE',revision:1,sourceRefs:[],locations:[],statusAt:null,...o});
+const row=(o:Partial<RegistryRow>):RegistryRow=>({identityId:o.ip||'i',endpointId:o.endpointId===undefined?'e-'+(o.ip||'i'):o.endpointId,ip:'10.0.0.1',port:80,owner:'SELF',subgroup:null,groupId:null,groupName:null,packageCode:null,state:'LIVE',revision:1,sourceRefs:[],locations:[],statusAt:null,...o});
 const at=(server:string,vm:string,role:RegistryRow['locations'][number]['role']='INSTALLED')=>({serverId:'s-'+server,serverCode:server,vmId:'v-'+server+vm,vmCode:vm,role});
 describe('sortRegistryRows',()=>{
   const rows=[
