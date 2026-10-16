@@ -12,7 +12,8 @@ import type {BusinessImage} from '../business-management/types';
 import {cashFinancialResources} from '../business-management/team-cash-scope';
 import {lockCashProject} from '../business-management/cash-lock';
 export async function undoOperation(scope:ActorScope,id:string,reason:string,db:PrismaClient=prisma,deps:{afterWrite?:()=>void|Promise<void>}={}){
-  if(!reason.trim()||reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Ghi lý do hoàn tác (tối đa 300 ký tự)');
+  if(reason.length>300)throw new ProxyDomainError('INVALID_INPUT','Lý do hoàn tác tối đa 300 ký tự');
+  reason=reason.trim()||'Hoàn tác'; // the reason is optional; the journal records who undid what and when
   return withProxyTransaction(async tx=>{
     const current=await loadInfrastructureScope(tx,scope.userId,scope.projectId);
     if(current.role!=='ADMIN'||!(current.businessMode==='PROXY_VM'||current.teamCashEnabled))throw new ProxyDomainError('FORBIDDEN');

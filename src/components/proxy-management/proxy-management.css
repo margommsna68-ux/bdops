@@ -30,3 +30,4 @@
 @media(max-width:800px){.pm-quick{padding:0 15px 12px}}
 .pm-table-pager-top{border-top:none;border-bottom:1px solid var(--ds-border)}
 .pm-badge-action{cursor:pointer;border:1px solid transparent}.pm-badge-action:hover{border-color:currentColor}.pm-badge-action:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+.pm-status-select{appearance:none;-webkit-appearance:none;cursor:pointer;border:1px solid transparent;padding-right:16px;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 8px) 50%,calc(100% - 5px) 50%;background-size:3px 3px,3px 3px;background-repeat:no-repeat}.pm-status-select:hover{border-color:currentColor}.pm-status-select:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}.pm-status-select option{color:var(--ds-text-primary);background:var(--ds-card)}.pm-bulk-state{width:auto;padding:6px 8px}

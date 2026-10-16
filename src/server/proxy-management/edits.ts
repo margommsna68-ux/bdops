@@ -151,7 +151,7 @@ async function planSync(scope:ActorScope,db:Reader):Promise<Plan>{
   const sorted=endpoints.map(e=>({e,t:expectedAssignmentState(e)})).filter(x=>x.t&&x.t.to!==x.e.inventoryState).sort((a,b)=>ipOrder(a.e.identity!.ip,b.e.identity!.ip)||(a.e.port||0)-(b.e.port||0));
   for(const [i,{e,t}] of sorted.entries()){
     const from=STATE_LABEL[e.inventoryState];
-    if(!t!.to){rows.push({row:i+1,endpointId:e.id,ip:e.identity!.ip,field:'STATE',before:from,after:from,outcome:'SKIP',message:t!.reason});continue;}
+    if(t!.to!=='LIVE') continue; // LIVE without a VM is a valid "in use" record (16/10 decision); only held NEW rows are corrected
     rows.push({row:i+1,endpointId:e.id,ip:e.identity!.ip,field:'STATE',before:from,after:STATE_LABEL[t!.to],outcome:'READY',message:(t!.to==='LIVE'?'Đã gán trên web: ':'Về kho NEW: ')+t!.reason});
     items.push({row:i+1,endpointId:e.id,manage:{kind:'STATE',state:t!.to as 'NEW'|'LIVE'}});
   }
@@ -216,7 +216,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         if(duplicate) push('LOCATION',current,after,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
         else if(!server||server.archivedAt||!server.managed) push('LOCATION',current,after,'ERROR','Server không có hoặc đã ẩn','NOT_FOUND');
         else if(loc.kind==='SERVER'&&e.allocations.some(a=>a.vm.serverId===loc.serverId)) push('LOCATION',current,current,'SKIP','Đã ở server này');
-        else if(loc.kind==='VM'&&e.allocations.some(a=>a.vmId===loc.vmId&&a.role==='DESIRED')) push('LOCATION',current,after,'SKIP','Đã ở VM này');
+        else if(loc.kind==='VM'&&(e.allocations.some(a=>a.vmId===loc.vmId)||e.vm?.id===loc.vmId)) push('LOCATION',current,after,'SKIP','Đã ở VM này'); // re-assigning the current position is never an error
         else if(eligible) push('LOCATION',current,after,'ERROR',eligible.message,eligible.code);
         else if(blocked) push('LOCATION',current,after,'ERROR',blocked,'STALE_PREVIEW');
         else if(loc.kind==='VM'){
@@ -243,11 +243,10 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         else if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)) push('STATE',from,to,'ERROR',from+' không đổi ở đây; dùng Báo BLOCKED / Nhận replace / Khôi phục','INVALID_INPUT');
         else if(m.state==='BLOCKED'){push('STATE',from,to,'READY','Báo BLOCKED và ngày giờ hiện tại'+(e.allocations.length?'; giữ vị trí '+at:'')+'; nhận replace ở Nhận replace');plan.manage=m;}
         else if(rule&&loc&&(m.state==='LIVE')===willHold) push('STATE',from,to,'SKIP','Trạng thái theo vị trí: '+(willHold?'gán VM → LIVE':'bỏ gán → NEW'));
-        else if(rule&&m.state==='LIVE'&&!willHold) push('STATE',from,to,'ERROR','Chưa gán VM; chọn Server/VM để chuyển LIVE','INVALID_INPUT');
         else if(rule&&m.state==='NEW'&&willHold) push('STATE',from,to,'ERROR','Đang giữ ở '+at+'; chọn Bỏ gán / Huỷ giao (cùng lần lưu) để về NEW','INVALID_INPUT');
         else if(rule&&m.state==='NEW'&&e.allocations.length) push('STATE',from,to,'ERROR','Còn bản Giữ để kiểm tra ở '+at+'; xử lý ở Server/VM trước','INVALID_INPUT');
         else if(e.inventoryState===m.state) push('STATE',from,to,'SKIP','Đã ở trạng thái '+to);
-        else{push('STATE',from,to,'READY',rule?'Đồng bộ với vị trí VM thật':'Đổi trạng thái '+from+' → '+to);plan.manage=m;}
+        else{push('STATE',from,to,'READY',m.state==='LIVE'&&!willHold?'Ghi nhận đang sử dụng (chưa cập nhật vị trí VM)':'Đổi trạng thái '+from+' → '+to);plan.manage=m;}
       }else if(m.kind==='RETIRE'){
         const plans=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code),blocked=immovableReason(e);
         if(duplicate) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
@@ -372,7 +371,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
             await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});moved++;
           }else unassigned++;
           await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
-          await syncAssignmentState(tx,endpoint.id); // NEW ↔ LIVE in the same transaction as the hold
+          await syncAssignmentState(tx,endpoint.id,{released:item.location.kind==='UNASSIGN'}); // NEW ↔ LIVE in the same transaction as the hold
         }
         if(item.manage){
           // Genjy rows may be retired/restored like any other; ownership is untouched (identity.owner never changes here).

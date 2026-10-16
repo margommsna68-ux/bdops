@@ -34,7 +34,7 @@ export const proxyManagementRouter=router({
   createBackup:protectedProcedure.mutation(({ctx})=>domain(()=>createSystemBackup(ctx.user.id,ctx.prisma))),
   operations:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>listOperations(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
   operation:protectedProcedure.input(project.extend({id:z.string().min(1)})).query(({ctx,input})=>domain(async()=>inspectOperation(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.id,ctx.prisma))),
-  undo:protectedProcedure.input(project.extend({id:z.string().min(1),reason:z.string().min(1).max(300)})).mutation(({ctx,input})=>domain(async()=>undoOperation(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.id,input.reason,ctx.prisma))),
+  undo:protectedProcedure.input(project.extend({id:z.string().min(1),reason:z.string().max(300).default('')})).mutation(({ctx,input})=>domain(async()=>undoOperation(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.id,input.reason,ctx.prisma))),
   access:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>{
     const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'READ');
     const can=(action:InfrastructureAction)=>{try{assertInfrastructureAction(scope,action);return true;}catch{return false;}};

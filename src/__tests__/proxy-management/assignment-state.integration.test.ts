@@ -61,12 +61,18 @@ it('assigning makes NEW → LIVE on every path; unassigning the last hold return
     expect(await db.vMProxyAllocation.count({where:{endpointId:f.t1.id}})).toBeGreaterThanOrEqual(2);
   }finally{await f.cleanup();}
 });
-it('the status action guides instead of bypassing allocation: LIVE needs a VM, NEW needs an unassign, BLOCKED goes through the controlled path',async()=>{
+it('the status action saves directly: LIVE without a VM is allowed (in use), NEW on a held row needs an unassign, BLOCKED goes through the controlled path',async()=>{
   const f=await fixture();try{
     await apply(f.scope,{items:[{endpointId:f.t2.id,location:{kind:'VM',vmId:f.vms.v2.id}}],idempotencyKey:key()});
-    const bad=await apply(f.scope,{items:[{endpointId:f.t1.id,manage:{kind:'STATE',state:'LIVE'}},{endpointId:f.t2.id,manage:{kind:'STATE',state:'NEW'}},{endpointId:f.t3.id,manage:{kind:'STATE',state:'NEW'}}],idempotencyKey:key()});
-    expect(bad.preview.rows.map(r=>[r.outcome,r.code])).toEqual([['ERROR','INVALID_INPUT'],['ERROR','INVALID_INPUT'],['ERROR','INVALID_INPUT']]);
-    expect(bad.preview.rows[0].message).toMatch(/Server\/VM/);expect(bad.preview.rows[1].message).toMatch(/Bỏ gán/);
+    const bad=await apply(f.scope,{items:[{endpointId:f.t1.id,manage:{kind:'STATE',state:'LIVE'}},{endpointId:f.t2.id,manage:{kind:'STATE',state:'NEW'}},{endpointId:f.t3.id,manage:{kind:'STATE',state:'NEW'}},{endpointId:f.t7.id,manage:{kind:'STATE',state:'NEW'}}],idempotencyKey:key()});
+    expect(bad.preview.rows.map(r=>[r.outcome,r.code||null])).toEqual([['READY',null],['ERROR','INVALID_INPUT'],['ERROR','INVALID_INPUT'],['SKIP',null]]);
+    expect(bad.preview.rows[1].message).toMatch(/Bỏ gán/);
+    expect(await state(f.t1.id)).toBe('LIVE');expect(await db.vMProxyAllocation.count({where:{endpointId:f.t1.id,releasedAt:null}})).toBe(0); // in use, no VM recorded
+    expect(await db.proxyStatusEvent.count({where:{endpointId:f.t7.id}})).toBe(0); // same value: no history
+    const back=await apply(f.scope,{items:[{endpointId:f.t1.id,manage:{kind:'STATE',state:'NEW'}}],idempotencyKey:key()});expect(back.result?.applied).toBe(1);
+    // re-assigning the current position is a no-op, also for an installed proxy
+    const same=await apply(f.scope,{items:[{endpointId:f.t2.id,location:{kind:'VM',vmId:f.vms.v2.id}},{endpointId:f.t10.id,location:{kind:'VM',vmId:f.vms.v3.id}}],idempotencyKey:key()});
+    expect(same.preview.rows.map(r=>[r.outcome,r.message])).toEqual([['SKIP','Đã ở VM này'],['SKIP','Đã ở VM này']]);
     // one save: unassign + NEW together
     const both=await apply(f.scope,{items:[{endpointId:f.t2.id,location:{kind:'UNASSIGN'},manage:{kind:'STATE',state:'NEW'}}],idempotencyKey:key()});expect(both.result?.applied).toBe(1);expect(await state(f.t2.id)).toBe('NEW');
     const vmLive=await apply(f.scope,{items:[{endpointId:f.t2.id,location:{kind:'VM',vmId:f.vms.v2.id},manage:{kind:'STATE',state:'LIVE'}}],idempotencyKey:key()});expect(vmLive.result?.applied).toBe(1);expect(await state(f.t2.id)).toBe('LIVE');
@@ -83,19 +89,14 @@ it('the status action guides instead of bypassing allocation: LIVE needs a VM, N
 it('state sync previews rows whose NEW/LIVE does not match their holds, applies once, leaves BLOCKED, review holds and Genjy riêng alone, and counts follow',async()=>{
   const f=await fixture();try{
     const k=key(),{preview,result}=await apply(f.scope,{syncStates:true,idempotencyKey:k});
-    expect(preview.rows.map(r=>[r.ip,r.outcome,r.before,r.after])).toEqual([
-      [f.ip(4),'READY','LIVE','NEW'],
-      [f.ip(5),'READY','NEW','LIVE'],
-      [f.ip(9),'SKIP','LIVE','LIVE'],
-      [f.ip(11),'READY','LIVE','NEW'],
-    ]);
-    expect(preview.rows[2].message).toMatch(/kiểm tra/);
-    expect(result?.applied).toBe(3);
-    expect([await state(f.t4.id),await state(f.t5.id),await state(f.s1.id),await state(f.g1.id),await state(f.t3.id),await state(f.t8.id)]).toEqual(['NEW','LIVE','NEW','LIVE','BLOCKED','BLOCKED']);
-    expect(await db.proxyStatusEvent.count({where:{projectId:f.projectId,kind:'STATE_SYNC'}})).toBe(3);
+    // LIVE without a VM is a valid "in use" record now; only NEW rows that a VM already holds are corrected
+    expect(preview.rows.map(r=>[r.ip,r.outcome,r.before,r.after])).toEqual([[f.ip(5),'READY','NEW','LIVE']]);
+    expect(result?.applied).toBe(1);
+    expect([await state(f.t4.id),await state(f.t5.id),await state(f.s1.id),await state(f.g1.id),await state(f.t3.id),await state(f.t8.id)]).toEqual(['LIVE','LIVE','LIVE','LIVE','BLOCKED','BLOCKED']);
+    expect(await db.proxyStatusEvent.count({where:{projectId:f.projectId,kind:'STATE_SYNC'}})).toBe(1);
     const again=await apply(f.scope,{syncStates:true,idempotencyKey:key()});expect(again.preview.ready).toBe(0);
-    const page=await queryRegistry(f.scope,{view:'CURRENT',limit:100},db);expect(page.stateCounts).toMatchObject({NEW:5,LIVE:4,BLOCKED:2});
-    const op=(await listOperations(f.scope,db)).find(o=>o.batchId===result!.batchId)!;await undoOperation(f.scope,op.id,'thử',db);
-    expect([await state(f.t4.id),await state(f.t5.id),await state(f.s1.id)]).toEqual(['LIVE','NEW','LIVE']);
+    const page=await queryRegistry(f.scope,{view:'CURRENT',limit:100},db);expect(page.stateCounts).toMatchObject({NEW:3,LIVE:6,BLOCKED:2});
+    const op=(await listOperations(f.scope,db)).find(o=>o.batchId===result!.batchId)!;await undoOperation(f.scope,op.id,'',db); // no reason needed
+    expect(await state(f.t5.id)).toBe('NEW');
   }finally{await f.cleanup();}
 });

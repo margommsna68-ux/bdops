@@ -1,6 +1,7 @@
 import type {Prisma} from '@prisma/client';
 import type {InventoryState} from './types';
-// Decided 16/10/2026: NEW = eligible stock not on a VM, LIVE = assigned to a VM on the web (a "Chờ cài" or "Đã cài" hold).
+// Decided 16/10/2026: a "Chờ cài" / "Đã cài" hold makes the proxy LIVE; releasing its last hold returns it to NEW. LIVE may also be
+// recorded by the user without a VM ("in use, position not updated") — that is never reverted automatically, only by a release.
 // A "Giữ để kiểm tra" hold is not a valid assignment, but while one remains the proxy is not put back into NEW stock.
 // Only TUT and Chung mooon–Genjy follow the rule (the classes that sit on the user's VMs); BLOCKED, QUARANTINED, REPLACED,
 // RETIRED, VOID and DIE are never changed here. LIVE does not mean installed or network-checked.
@@ -17,11 +18,12 @@ export function expectedAssignmentState(e:EndpointForState):AssignmentTarget|nul
   return {from:e.inventoryState,to:'NEW',reason:'Không còn VM nào giữ'};
 }
 // Bring NEW/LIVE in line with the holds, inside the caller's transaction. Returns the change, or null when nothing changed.
-export async function syncAssignmentState(tx:Prisma.TransactionClient,endpointId:string){
+export async function syncAssignmentState(tx:Prisma.TransactionClient,endpointId:string,options:{released?:boolean}={}){
   const e=await tx.proxyIP.findUnique({where:{id:endpointId},include:{identity:{select:{owner:true,subgroup:true}},allocations:{where:{releasedAt:null},select:{role:true}}}});
   if(!e) return null;
   const target=expectedAssignmentState(e);
   if(!target?.to||target.to===e.inventoryState) return null;
+  if(target.to==='NEW'&&!options.released) return null; // only an actual release puts a LIVE proxy back in stock
   await tx.proxyIP.update({where:{id:e.id},data:{inventoryState:target.to,status:target.to==='LIVE'?'IN_USE':'AVAILABLE',revision:{increment:1}}});
   return {from:e.inventoryState,to:target.to};
 }
