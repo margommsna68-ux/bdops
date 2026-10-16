@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {BrandMark} from '@/components/BrandMark';
 import { useSession } from "next-auth/react";
 import { useProjectStore } from "@/lib/store";
 import { trpc } from "@/lib/trpc";
@@ -65,7 +66,7 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900">
         <div className="text-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-lg font-bold mx-auto mb-4 shadow-lg animate-pulse">B</div>
+          <div className="flex justify-center mb-4 animate-pulse"><BrandMark size={44}/></div>
           <p className="text-gray-400 text-sm">Đang tải...</p>
         </div>
       </div>
@@ -80,7 +81,7 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900">
         <div className="text-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-lg font-bold mx-auto mb-4 shadow-lg">B</div>
+          <div className="flex justify-center mb-3"><BrandMark size={52}/></div>
           <p className="text-white text-sm font-medium">{projects[0].code} — {projects[0].name}</p>
           <p className="text-gray-400 text-xs mt-1">Đang vào...</p>
         </div>
@@ -94,7 +95,7 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
       <div className="w-full max-w-sm mx-4">
         {/* Logo */}
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xl font-bold mx-auto mb-3 shadow-lg shadow-blue-500/30">B</div>
+          <div className="flex justify-center mb-3"><BrandMark size={52}/></div>
           <h1 className="text-xl font-bold text-white tracking-tight">Chọn dự án</h1>
           <p className="text-sm text-gray-400 mt-1">Chọn project để bắt đầu làm việc</p>
         </div>

@@ -1,0 +1,28 @@
+# Nhóm proxy và sửa nhóm / server / VM trong bảng — bằng chứng 16/10/2026
+
+Yêu cầu của anh (16/10): cột Gói proxy trước IP; "Thuộc về" → "Từ nhóm", "Của anh" → "TUT"; nhóm proxy chọn/tạo ngay khi nhập, chuẩn hóa tên, lọc nhóm kết hợp; sửa một dòng (đổi nhóm, chọn/chuyển server, gán/chuyển VM, bỏ gán rõ ràng) ngay tại dòng; sửa hàng loạt từ checkbox (Đổi nhóm / Chuyển server / Gán VM bằng bảng dán `Proxy | Server | VM`) có xem trước và lưu một lần; liên kết server/VM có cấu trúc, không tự chiếm/ghi đè, không đổi cấu hình đã cài; quyền, revision, chống lưu lặp, nhật ký, hoàn tác; giữ copy; không SDK trên trang proxy; không sửa Sheet/production cũ. Hướng dẫn: `../../runbooks/proxy-groups-edit.md`.
+
+## Đã làm
+
+- Commit `094ab69` (feat) trên `feat/proxy-inventory`; migration **`20261016120000_proxy_groups`** chỉ thêm (`ProxyGroup`, `ProxyIP.groupId`, enum `ProxyOwner.OTHER`), dữ liệu cũ không đổi.
+- Server: `groups.ts` (chuẩn hóa tên, tên có sẵn bị cấm, `listGroups`/`createGroup`, nhãn TUT/genjy/nhóm), `edits.ts` (`parsePasteMapping`, `listVmTargets`, `createProxyEditService` preview/commit qua `ProxyBatch` kind `PROXY_EDIT`, facts revision trong plan mã hóa, journal `PROXY_EDIT`), `history.ts` (cột nhóm, facet `groups`, lọc `group`), `batches.ts` (nhập mới với `groupId`/`newGroup`, tạo nhóm lúc lưu, trùng tên → `DUPLICATE_INPUT`), `snapshot.ts` (ảnh proxy có `groupId`, mô tả đổi nhóm), `undo.ts` (khôi phục sở hữu TUT↔nhóm cùng vị trí), `destroy.ts` (xoá nhóm khi xoá dự án), router (`groups`, `createGroup`, `vmTargets`, `editPreview`, `editCommit`, `list.group`).
+- UI: `RegistryEdit.tsx` (ô Từ nhóm, chọn nhóm có "Nhóm mới…", dải sửa tại dòng, bảng sửa hàng loạt với xem trước, mẫu dán sẵn), `RegistryTable.tsx` (cột Gói proxy, Từ nhóm, lọc nhóm `?group=`, nút bút, thanh chọn với Đổi nhóm / Chuyển server / Gán VM / Copy / Bỏ chọn, "Kho TUT"), `BatchDialog.tsx` (Từ nhóm khi nhập mới), nhãn TUT ở AllocationDialog / ProxyDashboard / InstallWorkspace / thông báo, `OperationHistoryDialog` nhãn "Sửa nhóm / vị trí proxy".
+
+## Kiểm chứng
+
+- TDD RED→GREEN: `proxy-edit.integration.test.ts` (9: chuẩn hóa/cấm tên/trùng hoa-thường/quyền; nhập mới tạo nhóm + chọn lại + trùng tên bị chặn + nhóm không vào pool autofill + lọc nhóm kết hợp server/trạng thái; đổi nhóm có journal/hoàn tác, dòng đang giữ và genjy bị từ chối, lặp lại là no-op, replay cùng token; chuyển kế hoạch chờ cài sang VM trống, từ chối đã cài / giữ để kiểm tra / VM đang dùng / genjy / VM trùng trong đợt / VM đã ẩn, hoàn tác trả cả hai VM; bỏ gán + từ chối khi đã bắt đầu cài + USER không có PROXY_IMPORT chỉ được chuyển VM; chuyển server tự chọn VM trống theo thứ tự tự nhiên và báo hết VM; dán `Proxy | Server | VM` ghép theo danh tính, dòng trùng/không tìm thấy/thiếu VM/VM bận, dán lại là giữ nguyên không thêm lịch sử; tRPC + CONFLICT khi revision đổi), `registry-ui.test.tsx` (+1: ô nhóm TUT/genjy/tên nhóm, mẫu dán, tóm tắt, VM được chọn). Suite **265 tests / 68 files** qua; tsc, lint (4 cảnh báo cũ), production build qua.
+- Trình duyệt local (Chrome 155 headless, dự án mẫu, `scratchpad/pw/edit-ui-check.js`, ảnh `local-*.png` trong `2026-10-16-proxy-edit/`): tiêu đề `Gói proxy | IP proxy | Trạng thái | Từ nhóm | Server | VM | Ghi chú vận hành`, không còn "Của anh"/"Thuộc về"; Nhập mới với *Nhóm mới* "Khách Test …" → lưu, nhóm xuất hiện trong bộ lọc, lọc ra đúng 1 dòng; nhập lại với tên `  KHÁCH TEST …  ` → *đã có; chọn nhóm sẵn có*; sửa dòng: chuyển proxy Chờ cài sang server khác/VM trống → *Đã ghi 1 dòng* và dòng đổi vị trí; Bỏ gán → *Chưa gán*; dòng đã cài → *Đã cài trên demo-server/VM_001; đổi proxy qua Server/VM…*; đổi nhóm dòng đang giữ → *bỏ gán trước khi đổi nhóm*; đổi nhóm dòng trống → ghi; hàng loạt Đổi nhóm (1 ghi, 1 giữ nguyên), Chuyển server (2 proxy nhận VM_002, VM_003 tự chọn), Gán VM dán (1 lỗi VM đang dùng, 1 bỏ gán), dán lại → giữ nguyên; Lịch sử → *Sửa nhóm / vị trí proxy* → hoàn tác trả lại vị trí; màn hình 390 px dải sửa xếp dọc.
+
+## Railway
+
+- Backup host trước deploy: **`ffa0270f-0a27-4807-b84f-4c000a85b378`** (33.559.043 bytes, SHA-256 `5f48cfbd…`).
+- Deploy **`ae739a76-50fa-4945-92c6-2ae981967d17`** SUCCESS (05:32 UTC), pre-deploy `prisma migrate deploy` áp migration `20261016120000_proxy_groups`. `vm-sdk-host.ts` MODE=verify: 10 server / 574 VM.
+- Trình duyệt host, tài khoản chủ, dự án mooon (ảnh `host-*.png`): 1.261 dòng; lọc genjy = 674, TUT = 562, TUT + BLOCKED = 3 (URL `group=TUT&state=BLOCKED`); dải sửa dòng `84.32.138.211` hiện 10 server, VM chỉ còn `VM_001 (hiện tại)` vì mọi VM đều đang dùng; xem trước Chuyển server 3 dòng → *Đã ở server này*; xem trước dán (đổi sang VM đang dùng, giữ chỗ, bỏ gán) → 1 lỗi *VM được gán cho nhiều proxy*, 1 giữ nguyên, 1 sẽ ghi; xem trước Đổi nhóm trên dòng đang giữ → 3 lỗi; các xem trước không tạo nhóm, không ghi gì.
+- Vòng ghi thật có hoàn tác: **Bỏ gán** `84.32.138.211` (An-01/VM_001 Chờ cài) → *Đã ghi 1 dòng*, dòng *Chưa gán*; Lịch sử thao tác hiện ảnh trước/sau (proxy, giữ proxy, VM, cấu hình #1, việc cài) → **Hoàn tác** → dòng trở lại An-01/VM_001 · Chờ cài. Host chỉ còn hai dòng nhật ký (sửa + hoàn tác) và các audit tương ứng; proxy/phân bổ/trạng thái cài/tài chính như trước. Railway production cũ và Sheet gốc không bị đụng.
+
+## Chưa đạt / giới hạn
+
+1. Chưa đổi tên / xoá nhóm; nhóm trống vẫn nằm trong bộ lọc.
+2. Gán VM tay vẫn cho chọn VM có ô Sheet là công thức / placeholder / chưa rõ (Chuyển server tự chọn thì bỏ qua các VM này).
+3. Trên mooon mọi VM đều đang có proxy nên chuyển/gán chỉ thành công sau khi bỏ gán proxy đang ở đó; chưa thử chuyển thật giữa hai server trên host (đã thử trên local và test).
+4. Lựa chọn dòng và bảng sửa hàng loạt chỉ trong trang hiện tại (50 dòng); dán `Proxy | Server | VM` không giới hạn theo trang.
