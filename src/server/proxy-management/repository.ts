@@ -26,7 +26,7 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
   const [identities,rows,references,events,replacements,source]=await Promise.all([
     db.proxyIdentity.findMany({where:identityWhere}),
     db.proxyIP.findMany({where:endpointWhere,include:{vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
-    db.proxySourceReference.findMany({where:{identity:identityWhere,snapshot:{scanSucceeded:true}},include:{identity:true,snapshot:true}}),
+    db.proxySourceReference.findMany({where:{identity:identityWhere,snapshot:{scanSucceeded:true}},include:{identity:{select:{ip:true}},snapshot:{select:{projectId:true}}}}),
     db.proxyStatusEvent.findMany({where:ips?{ip:{in:ips}}:{}}),
     db.proxyReplacement.findMany({where:ips?{OR:[{oldEndpoint:{identity:identityWhere}},{newEndpoint:{identity:identityWhere}}]}:{},include:{oldEndpoint:{include:{identity:true}},newEndpoint:{include:{identity:true}}}}),
     db.proxySourceSnapshot.findFirst({where:{projectId:scope.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}}),
