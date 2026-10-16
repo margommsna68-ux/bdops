@@ -24,3 +24,11 @@ Yêu cầu: "PC chung" = proxy mooon và Genjy cùng đầu tư; hiện "Chung m
 1. **Đối chiếu danh sách 30 proxy của anh (16/10, sau deploy)**: xem trước trên host qua *Xác nhận nhóm chung* cho kết quả *0 sẽ cập nhật | 30 đã ở nhóm chung | 0 cần kiểm tra*. Cả 30 IP đều đã là Chung mooon–Genjy, port/user/pass khớp đúng proxy đang có. Không cần ghi, nên host không đổi gì.
 2. Có 3 IP host đang ghi nhóm chung nhưng không có trong danh sách: `84.32.136.45`, `84.32.136.144`, `84.32.137.32`. Cả ba thuộc gói 231243, LIVE, chưa gán VM. Sheet ghi "pc chung" (Proxy Server B12/B34/B79) và "PC GEN +MOON" (final A3/A25/A70). Giữ nguyên chờ anh chốt; bỏ phân loại chung cần quyết định từng IP vì luật DB giữ phân loại vĩnh viễn.
 3. Không tính tỷ lệ góp vốn hay chia chi phí.
+
+## Cập nhật theo Sheet và bộ chia trang (16/10, tối)
+
+- Anh cập nhật Sheet: tab moon05 dùng lại VM_078 và thêm VM_079, VM_080 với `84.32.136.45`, `84.32.136.144`, `84.32.137.32` (3 IP nhóm chung ngoài danh sách 30). Tab Proxy Server đổi trạng thái 3 IP này LIVE → NEW. Tab Total vẫn để chúng trong khối "EARN MOON - PC GEN +MOON"; tab PCchung của Genjy có đúng 30 IP. Ngoài ra Proxy Server không đổi gì (1.310 IP).
+- Host: backup `b7075be8-6c1f-4440-b147-14bb59827b08`, thêm VM_079 / VM_080 vào moon05 (Thêm VM), gán 3 IP qua bảng dán `Proxy | Server | VM` (xem trước 3 hợp lệ → lưu 3). Sau đó 576/576 ô VM của Sheet khớp web; 3 VM ở trạng thái *Chờ cài*. Phân loại nhóm chung của 3 IP giữ nguyên.
+- Bảng proxy: dòng tổng *Dòng a–b / tổng · Trang x/y* và nút trang ở cả trên và dưới bảng; 100 dòng mỗi trang; bấm trang ở dưới thì cuộn về dòng tổng phía trên. Commit `ea7fe1c`, backup `981c4c3c-39e3-4def-a54f-1ea8aa53a08e`, deploy `5d83d763-24d1-4988-9d23-31a151118bdb` SUCCESS, verify 10 server / 576 VM. Host: trang 1 *Dòng 1–100 / 1261 · Trang 1/13*, trang 2 *101–200*, lọc nhóm chung *1–33 / 33* (ảnh `host-10-pager-top.png`, `host-11-pager-bottom.png`).
+- Trạng thái web của 3 IP vẫn là LIVE (Sheet ghi NEW); chưa có thao tác đổi trạng thái LIVE ↔ NEW trên web.
+

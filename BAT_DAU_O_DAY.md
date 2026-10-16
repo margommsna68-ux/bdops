@@ -92,3 +92,5 @@ Kiểm thử dùng `.env.test` trỏ database thử riêng: `npm test`, `npx tsc
 - Sau nghiệm thu mới chốt web là nơi sửa chính, bật backup tự động/retention và theo dõi lỗi; tránh sửa cùng một phân bổ ở cả Sheet và web.
 - Chưa có agent tự cài/kiểm tra mạng VM, billing, payroll hay tự lấy số USDT thực nhận từ collector. Những phần này cần dữ liệu và quy trình thực tế tiếp theo.
 - Mốc tiếp theo theo brief 15/10: tài khoản EarnApp (Gmail/Apple ID, nhiều SDK một tài khoản), dán hàng loạt Gmail/PayPal theo cùng mẫu Dán bảng, token API cho AI ghi dữ liệu, trạng thái máy/app theo ngày.
+
+19. **16/10 tối — Theo Sheet mới và chia trang:** moon05 thêm VM_079, VM_080; 3 IP nhóm chung `84.32.136.45`, `84.32.136.144`, `84.32.137.32` ở moon05/VM_078–080 (Chờ cài), web khớp 576/576 ô VM. Bảng proxy 100 dòng mỗi trang, dòng tổng và nút trang ở cả trên và dưới.
