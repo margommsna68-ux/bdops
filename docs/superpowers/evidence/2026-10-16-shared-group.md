@@ -21,6 +21,6 @@ Yêu cầu: "PC chung" = proxy mooon và Genjy cùng đầu tư; hiện "Chung m
 
 ## Chưa làm / giới hạn
 
-1. **Danh sách 30 proxy chưa được gửi kèm**, nên chưa ghi phân loại thật. Host đang có 33 proxy nhóm chung (lấy từ tab PC của Sheet). Khi có danh sách: dán vào Xác nhận nhóm chung, đọc phần xem trước, rồi lưu.
-2. Nếu danh sách ít hơn 33, phần dư hiện ở mục "không có trong danh sách". Bỏ phân loại chung cho các IP đó cần anh chốt từng IP, vì luật DB giữ phân loại vĩnh viễn.
+1. **Đối chiếu danh sách 30 proxy của anh (16/10, sau deploy)**: xem trước trên host qua *Xác nhận nhóm chung* cho kết quả *0 sẽ cập nhật | 30 đã ở nhóm chung | 0 cần kiểm tra*. Cả 30 IP đều đã là Chung mooon–Genjy, port/user/pass khớp đúng proxy đang có. Không cần ghi, nên host không đổi gì.
+2. Có 3 IP host đang ghi nhóm chung nhưng không có trong danh sách: `84.32.136.45`, `84.32.136.144`, `84.32.137.32`. Cả ba thuộc gói 231243, LIVE, chưa gán VM. Sheet ghi "pc chung" (Proxy Server B12/B34/B79) và "PC GEN +MOON" (final A3/A25/A70). Giữ nguyên chờ anh chốt; bỏ phân loại chung cần quyết định từng IP vì luật DB giữ phân loại vĩnh viễn.
 3. Không tính tỷ lệ góp vốn hay chia chi phí.
