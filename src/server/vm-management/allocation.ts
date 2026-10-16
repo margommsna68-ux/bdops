@@ -9,6 +9,7 @@ import {withProxyTransaction} from '../proxy-management/transaction';
 import {recordOperation} from '../operation-history/journal';
 import {readImage,type ResourceImage,type OperationSnapshot} from '../operation-history/snapshot';
 import {authorizeVM,requireGenjy,readManagedVMs,type VMReader} from './repository';
+import {syncAssignmentState} from '../proxy-management/assignment-state';
 import {vmHash,type AllocationInput,type AllocationPreview,type AllocationRow,type ConfigurationSnapshot} from './types';
 async function planAllocation(projectId:string,input:AllocationInput,db:VMReader){
   if(!['AUTO','MANUAL'].includes(input.mode)||input.vmIds&&(!input.vmIds.length||input.vmIds.length>1000||new Set(input.vmIds).size!==input.vmIds.length)||input.mode==='MANUAL'&&(!input.endpointId||input.vmIds?.length!==1))throw new ProxyDomainError('INVALID_INPUT');
@@ -66,7 +67,7 @@ export function createVMService(db:PrismaClient=prisma,deps:{refreshSource?:(pro
           await images.remember('VM_CONFIG',old.id);await tx.vMConfiguration.update({where:{id:old.id},data:{status:'CANCELLED',revision:{increment:1}}});
           if(old.task){await images.remember('VM_TASK',old.task.id);await tx.vMTask.update({where:{id:old.task.id},data:{status:'CANCELLED'}});}
           const holds=await tx.vMProxyAllocation.findMany({where:{vmId:vm.id,configurationId:old.id,role:'DESIRED',releasedAt:null}});
-          for(const hold of holds){await images.remember('VM_ALLOCATION',hold.id);await images.remember('ENDPOINT',hold.endpointId);await tx.vMProxyAllocation.update({where:{id:hold.id},data:old.startedAt?{role:'UNCERTAIN',revision:{increment:1}}:{releasedAt:new Date(),releaseReason:'Thay kế hoạch chưa bắt đầu',revision:{increment:1}}});await tx.proxyIP.update({where:{id:hold.endpointId},data:{revision:{increment:1}}});}
+          for(const hold of holds){await images.remember('VM_ALLOCATION',hold.id);await images.remember('ENDPOINT',hold.endpointId);await tx.vMProxyAllocation.update({where:{id:hold.id},data:old.startedAt?{role:'UNCERTAIN',revision:{increment:1}}:{releasedAt:new Date(),releaseReason:'Thay kế hoạch chưa bắt đầu',revision:{increment:1}}});await tx.proxyIP.update({where:{id:hold.endpointId},data:{revision:{increment:1}}});await syncAssignmentState(tx,hold.endpointId);}
         }
         const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:item.endpointId,projectId:scope.projectId},include:{identity:true}}),proxy=decodeEndpoint(endpoint);
         if(!proxy||proxy.format!=='FULL'||!endpoint.identity||endpoint.identity.owner!=='SELF'||!endpoint.inventoryKey)throw new ProxyDomainError('OWNER_CONFLICT');
@@ -74,7 +75,7 @@ export function createVMService(db:PrismaClient=prisma,deps:{refreshSource?:(pro
         const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
         if(!item.reuseInstalled){const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);}
         const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version}`,scheduledAt:new Date()}});await images.remember('VM_TASK',task.id,true);
-        await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});await deps.afterWrite?.(tx);
+        await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await syncAssignmentState(tx,endpoint.id);await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});await deps.afterWrite?.(tx);
       }
       const result={batchId:batch.id,applied:plan.items.length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length,rows:plan.rows,replay:false,undone:false};
       if(plan.items.length)await recordOperation(tx,{scope:current,kind:'VM_PLAN',summary:{count:plan.items.length},snapshot:await images.finish(),batchId:batch.id});

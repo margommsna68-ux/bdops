@@ -12,6 +12,7 @@ import {fullProxy,parseProxy} from './parse';
 import {withProxyTransaction} from './transaction';
 import {assertGroupName,ownerLabel} from './groups';
 import {INVALID_LINE} from './parse';
+import {expectedAssignmentState,syncAssignmentState} from './assignment-state';
 import {HISTORICAL_STATES,isShared,ProxyDomainError,type NotListedRef,type ActorScope,type EditInput,type EditItem,type EditPreview,type EditResult,type EditRow,type InventoryState,type IssueCode,type LocationChoice,type ManageChoice,type VmTarget} from './types';
 const STATE_LABEL:Record<InventoryState,string>={NEW:'NEW',LIVE:'LIVE',BLOCKED:'BLOCKED',REPLACED:'Đã replace',DIE:'Ngừng dùng',QUARANTINED:'Cần kiểm tra',VOID:'Đã thu hồi',RETIRED:'Ngừng quản lý'};
 export const RETIRED_LABEL=STATE_LABEL.RETIRED;
@@ -72,7 +73,7 @@ export async function listVmTargets(scope:ActorScope,db:Reader=prisma):Promise<V
 }
 type GroupTarget={owner:'SELF'|'OTHER'|'GENJY';subgroup:'PC_CHUNG'|null;groupId:string|null;newName:string|null};
 type PlannedItem={row:number;endpointId:string;group?:GroupTarget;location?:{kind:'UNASSIGN'}|{kind:'VM';vmId:string};manage?:ManageChoice};
-type Plan={rows:EditRow[];items:PlannedItem[];needs:{group:boolean;location:boolean;manage:boolean;share?:boolean};shares?:{row:number;identityId:string;endpointIds:string[]}[];notListed?:NotListedRef[]};
+type Plan={rows:EditRow[];items:PlannedItem[];needs:{group:boolean;location:boolean;manage:boolean;share?:boolean;state?:boolean;block?:boolean;sync?:boolean};shares?:{row:number;identityId:string;endpointIds:string[]}[];notListed?:NotListedRef[]};
 const SHARED_LABEL='Chung mooon–Genjy';
 const ipOrder=(a:string,b:string)=>{const x=a.split('.').map(Number),y=b.split('.').map(Number);for(let i=0;i<4;i++) if(x[i]!==y[i]) return x[i]-y[i];return 0;};
 // The owner's confirmed list of shared proxies. Each line is matched by IP (and, for a full proxy, by its exact port/user/pass) against
@@ -141,10 +142,31 @@ async function resolveItems(scope:ActorScope,input:EditInput,db:Reader):Promise<
   }
   return {items,rows};
 }
+
+// Whole-project check that NEW/LIVE match the real holds (TUT and Chung mooon–Genjy only). READY rows change, SKIP rows explain
+// why they stay (review holds). BLOCKED, unclear and historical rows are never listed or changed.
+async function planSync(scope:ActorScope,db:Reader):Promise<Plan>{
+  const endpoints=await db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null},retiredAt:null,inventoryState:{in:['NEW','LIVE']}},include:{identity:{select:{ip:true,owner:true,subgroup:true}},allocations:{where:{releasedAt:null},select:{role:true,vm:{select:{code:true,server:{select:{code:true}}}}}}},orderBy:{id:'asc'}});
+  const rows:EditRow[]=[],items:PlannedItem[]=[];
+  const sorted=endpoints.map(e=>({e,t:expectedAssignmentState(e)})).filter(x=>x.t&&x.t.to!==x.e.inventoryState).sort((a,b)=>ipOrder(a.e.identity!.ip,b.e.identity!.ip)||(a.e.port||0)-(b.e.port||0));
+  for(const [i,{e,t}] of sorted.entries()){
+    const from=STATE_LABEL[e.inventoryState];
+    if(!t!.to){rows.push({row:i+1,endpointId:e.id,ip:e.identity!.ip,field:'STATE',before:from,after:from,outcome:'SKIP',message:t!.reason});continue;}
+    rows.push({row:i+1,endpointId:e.id,ip:e.identity!.ip,field:'STATE',before:from,after:STATE_LABEL[t!.to],outcome:'READY',message:(t!.to==='LIVE'?'Đã gán trên web: ':'Về kho NEW: ')+t!.reason});
+    items.push({row:i+1,endpointId:e.id,manage:{kind:'STATE',state:t!.to as 'NEW'|'LIVE'}});
+  }
+  return {rows,items,needs:{group:false,location:false,manage:false,sync:true}};
+}
+// Rights per kind of change; preview and commit derive them from the same input.
+function needsOf(input:EditInput):Plan['needs']{
+  const manage=(input.items||[]).map(i=>i.manage).filter(Boolean) as ManageChoice[];
+  return {group:!!input.items?.some(i=>i.group),location:!!input.paste||!!input.items?.some(i=>i.location),manage:manage.some(m=>m.kind!=='STATE'),share:input.sharedList!==undefined,state:manage.some(m=>m.kind==='STATE'&&m.state!=='BLOCKED'),block:manage.some(m=>m.kind==='STATE'&&m.state==='BLOCKED'),sync:!!input.syncStates};
+}
 async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Plan>{
+  if(input.syncStates){if(input.items||input.paste||input.sharedList!==undefined) throw new ProxyDomainError('INVALID_INPUT');return planSync(scope,db);}
   if(input.sharedList!==undefined){if(input.items||input.paste) throw new ProxyDomainError('INVALID_INPUT');return planShared(scope,input.sharedList,db);}
   const {items,rows:parseRows}=await resolveItems(scope,input,db);
-  const needs={group:items.some(i=>i.group),location:items.some(i=>i.location),manage:items.some(i=>i.manage)};
+  const needs={...needsOf(input),location:items.some(i=>i.location)};
   const ids=Array.from(new Set(items.map(i=>i.endpointId)));
   const [endpoints,vms,groups]=await Promise.all([
     db.proxyIP.findMany({where:{id:{in:ids},projectId:scope.projectId},include:endpointInclude}),
@@ -213,11 +235,19 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
     if(item.manage){
       const m=item.manage,genjy=e.identity!.owner==='GENJY',stateLabel=genjy?'genjy':STATE_LABEL[e.inventoryState],retired=e.inventoryState==='RETIRED';
       if(m.kind==='STATE'){
-        const from=STATE_LABEL[e.inventoryState],to=STATE_LABEL[m.state];
+        // NEW/LIVE follow the real holds (TUT, Chung mooon–Genjy): the status action never bypasses allocation, it points to it.
+        const from=STATE_LABEL[e.inventoryState],to=STATE_LABEL[m.state],rule=isShared(e.identity!.owner,e.identity!.subgroup)||e.identity!.owner==='SELF';
+        const active=e.allocations.filter(a=>a.role==='DESIRED'||a.role==='INSTALLED'),at=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code).join(', ');
+        const loc=item.location,willHold=loc?.kind==='VM'||loc?.kind==='SERVER'?true:loc?.kind==='UNASSIGN'?false:active.length>0;
         if(duplicate) push('STATE',from,to,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
+        else if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)) push('STATE',from,to,'ERROR',from+' không đổi ở đây; dùng Báo BLOCKED / Nhận replace / Khôi phục','INVALID_INPUT');
+        else if(m.state==='BLOCKED'){push('STATE',from,to,'READY','Báo BLOCKED và ngày giờ hiện tại'+(e.allocations.length?'; giữ vị trí '+at:'')+'; nhận replace ở Nhận replace');plan.manage=m;}
+        else if(rule&&loc&&(m.state==='LIVE')===willHold) push('STATE',from,to,'SKIP','Trạng thái theo vị trí: '+(willHold?'gán VM → LIVE':'bỏ gán → NEW'));
+        else if(rule&&m.state==='LIVE'&&!willHold) push('STATE',from,to,'ERROR','Chưa gán VM; chọn Server/VM để chuyển LIVE','INVALID_INPUT');
+        else if(rule&&m.state==='NEW'&&willHold) push('STATE',from,to,'ERROR','Đang giữ ở '+at+'; chọn Bỏ gán / Huỷ giao (cùng lần lưu) để về NEW','INVALID_INPUT');
+        else if(rule&&m.state==='NEW'&&e.allocations.length) push('STATE',from,to,'ERROR','Còn bản Giữ để kiểm tra ở '+at+'; xử lý ở Server/VM trước','INVALID_INPUT');
         else if(e.inventoryState===m.state) push('STATE',from,to,'SKIP','Đã ở trạng thái '+to);
-        else if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)) push('STATE',from,to,'ERROR','Chỉ đổi qua lại NEW / LIVE; '+from+' xử lý bằng BLOCKED / replace / khôi phục','INVALID_INPUT');
-        else{push('STATE',from,to,'READY','Đổi trạng thái '+from+' → '+to+'; không đổi vị trí VM');plan.manage=m;}
+        else{push('STATE',from,to,'READY',rule?'Đồng bộ với vị trí VM thật':'Đổi trạng thái '+from+' → '+to);plan.manage=m;}
       }else if(m.kind==='RETIRE'){
         const plans=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code),blocked=immovableReason(e);
         if(duplicate) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
@@ -254,9 +284,10 @@ async function facts(scope:ActorScope,plan:Plan,db:Reader){
 async function authorize(scope:ActorScope,needs:Plan['needs'],db:Reader){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   assertInfrastructureAction(current,'READ');if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');
-  if(needs.group||needs.manage||needs.share) assertInfrastructureAction(current,'IMPORT');
-  if(needs.location) assertInfrastructureAction(current,'ASSIGN');
-  if(!needs.group&&!needs.location&&!needs.manage&&!needs.share) assertInfrastructureAction(current,'ASSIGN');
+  if(needs.group||needs.manage||needs.share||needs.sync) assertInfrastructureAction(current,'IMPORT');
+  if(needs.location||needs.state) assertInfrastructureAction(current,'ASSIGN');
+  if(needs.block) assertInfrastructureAction(current,'BLOCK');
+  if(!needs.group&&!needs.location&&!needs.manage&&!needs.share&&!needs.state&&!needs.block&&!needs.sync) assertInfrastructureAction(current,'ASSIGN');
   return current;
 }
 // Drop every unstarted plan of the endpoint: cancel configuration + task, release the hold, clear the VM pointer/Sheet link and blank the slot when nothing else sits there.
@@ -278,7 +309,7 @@ const dto=(batch:{token:string;previewRows:Prisma.JsonValue;expiresAt:Date}):Edi
 // refuses when anything moved (revision facts), exactly like the import and VM allocation flows. Same key + same payload replays.
 export function createProxyEditService(db:PrismaClient=prisma){
   async function preview(scope:ActorScope,input:EditInput):Promise<EditPreview>{
-    const needs={group:!!input.items?.some(i=>i.group),location:!!input.paste||!!input.items?.some(i=>i.location),manage:!!input.items?.some(i=>i.manage),share:input.sharedList!==undefined};
+    const needs=needsOf(input);
     const current=await authorize(scope,needs,db),payloadHash=vmHash(input);
     const prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
     if(prior){if(prior.actorId!==scope.userId) throw new ProxyDomainError('FORBIDDEN');if(prior.kind!=='PROXY_EDIT'||prior.payloadHash!==payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');if(prior.status==='APPLIED') return dto(prior);}
@@ -341,14 +372,21 @@ export function createProxyEditService(db:PrismaClient=prisma){
             await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});moved++;
           }else unassigned++;
           await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
+          await syncAssignmentState(tx,endpoint.id); // NEW ↔ LIVE in the same transaction as the hold
         }
         if(item.manage){
           // Genjy rows may be retired/restored like any other; ownership is untouched (identity.owner never changes here).
           const notes=readNotes(endpoint.notesCipher);
           if(item.manage.kind==='STATE'){
-            if(endpoint.retiredAt||!['NEW','LIVE'].includes(endpoint.inventoryState)) throw new ProxyDomainError('STALE_PREVIEW');
-            await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:item.manage.state,statusAt:now,revision:{increment:1}}});
-            await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:'STATE_CHANGED',occurredAt:now,actorId:scope.userId,reason:'Đổi trạng thái '+endpoint.inventoryState+' → '+item.manage.state}});states++;
+            const fresh=await tx.proxyIP.findUniqueOrThrow({where:{id:endpoint.id}});
+            if(fresh.retiredAt||!['NEW','LIVE'].includes(fresh.inventoryState)) throw new ProxyDomainError('STALE_PREVIEW');
+            if(item.manage.state==='BLOCKED'){
+              await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:now,revision:{increment:1}}});
+              await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:'BLOCKED',occurredAt:now,actorId:scope.userId}});states++;
+            }else if(fresh.inventoryState!==item.manage.state){
+              await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:item.manage.state,status:item.manage.state==='LIVE'?'IN_USE':'AVAILABLE',statusAt:now,revision:{increment:1}}});
+              await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:plan.needs.sync?'STATE_SYNC':'STATE_CHANGED',occurredAt:now,actorId:scope.userId,reason:fresh.inventoryState+' → '+item.manage.state}});states++;
+            }
           }else if(item.manage.kind==='RETIRE'){
             if(endpoint.inventoryState==='RETIRED'||immovableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');
             if(endpoint.allocations.length||endpoint.vm){if(!item.manage.releasePlans) throw new ProxyDomainError('STALE_PREVIEW');await releasePlans(tx,images,endpoint,'Ngừng quản lý proxy: '+item.manage.reason,now);}
@@ -362,6 +400,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
             const {retired:_r,...rest}=notes;
             await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:previous,status:(note?.previousStatus as 'AVAILABLE'|'IN_USE'|'BLOCKED'|'RESERVED'|undefined)||'AVAILABLE',retiredAt:null,statusAt:note?.previousStatusAt?new Date(note.previousStatusAt):now,notesCipher:Object.keys(rest).length?encrypt(JSON.stringify(rest)):null,revision:{increment:1}}});
             await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,ip:endpoint.identity!.ip,kind:'RESTORED',occurredAt:now,actorId:scope.userId}});restored++;
+            await syncAssignmentState(tx,endpoint.id);
           }
         }
       }

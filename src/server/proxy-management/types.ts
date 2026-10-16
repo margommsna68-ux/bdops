@@ -49,7 +49,7 @@ export interface RegistryLocation {serverId:string;serverCode:string;vmId:string
 export interface RegistryFilter {owner?:Owner;group?:string;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
 export interface RegistryRow {identityId:string;endpointId:string|null;ip:string;port:number|null;owner:Owner;subgroup:Subgroup;groupId:string|null;groupName:string|null;packageCode:string|null;state:InventoryState;revision:number;sourceRefs:string[];locations:RegistryLocation[];statusAt?:string|null}
 // groupCounts: rows per "Từ nhóm" choice under every other active filter (view, state, package, server, search); keys ALL, TUT, SHARED, GENJY, UNKNOWN and group ids.
-export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;shared:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[];groupCounts:Record<string,number>}
+export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;shared:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[];groupCounts:Record<string,number>;stateCounts:Record<string,number>}
 export type CopySkipReason='NO_CREDENTIALS'|'NO_ENDPOINT';
 export interface CopyResult {proxies:string[];copied:number;total:number;skipped:{reason:CopySkipReason;count:number}[]}
 export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
@@ -62,10 +62,11 @@ export type GroupChoice={kind:'TUT'}|{kind:'SHARED'}|{kind:'GENJY'}|{kind:'GROUP
 export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
 // manage: RETIRE = "Ngừng quản lý" (keeps IP, credentials, ownership and history; releasePlans lets it drop an unstarted plan), RESTORE brings a retired row back.
 // STATE flips a current row between NEW and LIVE only; BLOCKED/replace/retire keep their own flows.
-export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'}|{kind:'STATE';state:'NEW'|'LIVE'};
+export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'}|{kind:'STATE';state:'NEW'|'LIVE'|'BLOCKED'};
 export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice;manage?:ManageChoice}
 // sharedList: the owner's confirmed list of shared proxies (IP or full proxy per line); classifies matching identities as Chung mooon–Genjy.
-export interface EditInput {items?:EditItem[];paste?:string;sharedList?:string;idempotencyKey:string}
+// syncStates: re-align NEW/LIVE with the real VM holds for the whole project (preview first).
+export interface EditInput {items?:EditItem[];paste?:string;sharedList?:string;syncStates?:boolean;idempotencyKey:string}
 export interface NotListedRef {ip:string;identityId:string;state:InventoryState|null}
 export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION'|'STATE';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
 export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string;notListed:NotListedRef[]}
