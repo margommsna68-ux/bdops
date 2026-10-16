@@ -14,6 +14,9 @@ export type IssueCode='INVALID_INPUT'|'COUNT_MISMATCH'|'DUPLICATE_INPUT'|'NOT_FO
 export class ProxyDomainError extends Error {
   constructor(public readonly code:IssueCode, message?:string){super(message?`${code}: ${message}`:code);this.name='ProxyDomainError';}
 }
+// Text for people: the domain code stays in the tRPC error code, never in the sentence shown on screen.
+const FALLBACK:Partial<Record<IssueCode,string>>={STALE_PREVIEW:'Dữ liệu vừa thay đổi; tải lại rồi thử lại',FORBIDDEN:'Bạn chưa có quyền thao tác này',NOT_FOUND:'Không tìm thấy dữ liệu (có thể đã bị xoá hoặc đổi)',INVALID_INPUT:'Dữ liệu chưa hợp lệ',DUPLICATE_INPUT:'Dữ liệu bị trùng',KEY_PAYLOAD_MISMATCH:'Yêu cầu đã đổi so với lần kiểm tra; kiểm tra lại',SOURCE_UNAVAILABLE:'Chưa kết nối được nguồn Genjy',CURRENT_IP:'IP đang được dùng',OWNER_CONFLICT:'Sở hữu proxy chưa rõ hoặc không phù hợp',GENJY_RESERVED:'Proxy thuộc Genjy'};
+export function userMessage(e:ProxyDomainError){const text=e.message.replace(/^[A-Z_]+(: )?/,'').trim();return text||FALLBACK[e.code]||'Chưa lưu được; tải lại để kiểm tra';}
 export interface ParsedProxy {ip:string;port:number|null;username:string|null;password:string|null;format:'BARE'|'FULL'}
 export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[];businessMode?:string;teamCashEnabled?:boolean}
 export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;groupId?:string|null;newGroup?:{name:string}|null;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}

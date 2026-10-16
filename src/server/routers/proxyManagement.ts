@@ -6,7 +6,7 @@ import {assertInfrastructureAction,loadInfrastructureScope,type InfrastructureAc
 import {createProxyBatchService} from '../proxy-management/batches';
 import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint,copyProxyRows,MAX_COPY_ROWS} from '../proxy-management/history';
 import {refreshGenjy} from '../proxy-management/sources';
-import {ProxyDomainError} from '../proxy-management/types';
+import {ProxyDomainError,userMessage} from '../proxy-management/types';
 import {saveProviderAccount,listPackages,setPackageRenewal} from '../proxy-management/catalog-management';
 import {listProxyMembers,setProxyCapabilities} from '../proxy-management/capabilities';
 import {archiveGroup,createGroup,listGroups,renameGroup,MAX_GROUP_NAME} from '../proxy-management/groups';
@@ -24,7 +24,7 @@ const editInput=project.extend({items:z.array(z.object({endpointId:z.string().mi
 const state=z.enum(['NEW','LIVE','BLOCKED','REPLACED','DIE','QUARANTINED','VOID','RETIRED']);
 const registryFilter=project.extend({owner:owner.optional(),group:z.string().max(64).optional(),packageCode:z.string().max(80).optional(),state:state.optional(),view:z.enum(['CURRENT','HISTORY','ALL']).default('CURRENT'),search:z.string().max(100).optional(),sort:z.enum(['PACKAGE','SERVER','STATUS','IP']).optional(),due:z.boolean().optional(),servers:z.array(z.string().min(1).max(80)).max(100).optional()});
 async function domain<T>(fn:()=>Promise<T>):Promise<T>{try{return await fn();}catch(e){
-  if(e instanceof ProxyDomainError){const code=e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'||e.code==='COUNT_MISMATCH'||e.code==='DUPLICATE_INPUT'?'BAD_REQUEST':e.code==='SOURCE_UNAVAILABLE'?'PRECONDITION_FAILED':'CONFLICT';throw new TRPCError({code,message:e.message});}
+  if(e instanceof ProxyDomainError){const code=e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'||e.code==='COUNT_MISMATCH'||e.code==='DUPLICATE_INPUT'?'BAD_REQUEST':e.code==='SOURCE_UNAVAILABLE'?'PRECONDITION_FAILED':'CONFLICT';throw new TRPCError({code,message:userMessage(e)});}
   if(e instanceof Prisma.PrismaClientKnownRequestError&&['P2002','P2034'].includes(e.code)) throw new TRPCError({code:'CONFLICT',message:'IP hoặc đợt này vừa được ghi; kiểm tra lại'});
   if(e instanceof TRPCError) throw e;
   throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'Chưa lưu được; dữ liệu được giữ nguyên. Tải lại và kiểm tra đợt nhập.'});

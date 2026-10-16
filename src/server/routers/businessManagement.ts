@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {TRPCError} from '@trpc/server';
 import {Prisma} from '@prisma/client';
 import {router,protectedProcedure} from '../trpc';
-import {ProxyDomainError} from '../proxy-management/types';
+import {ProxyDomainError,userMessage} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {assertBusinessArea} from '../business-management/scope';
 import type {BusinessArea} from '../business-management/types';
@@ -24,7 +24,7 @@ const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z
 const range=project.extend({start:z.string().length(10),end:z.string().length(10),currency:z.enum(['USD','VND'])});
 const cashRange=project.extend({start:z.string().length(10),end:z.string().length(10)}),cashChange=project.extend({id,expectedRevision:revision,key,reason:reason.optional()}),cashVoid=cashChange.extend({reason});
 async function domain<T>(fn:()=>Promise<T>){try{return await fn();}catch(error){
- if(error instanceof ProxyDomainError)throw new TRPCError({code:error.code==='FORBIDDEN'?'FORBIDDEN':error.code==='NOT_FOUND'?'NOT_FOUND':error.code==='INVALID_INPUT'?'BAD_REQUEST':'CONFLICT',message:error.message==='STALE_PREVIEW'?'Dữ liệu đã được sửa. Đóng form, cập nhật danh sách rồi kiểm tra lại trước khi lưu.':error.message});
+ if(error instanceof ProxyDomainError)throw new TRPCError({code:error.code==='FORBIDDEN'?'FORBIDDEN':error.code==='NOT_FOUND'?'NOT_FOUND':error.code==='INVALID_INPUT'?'BAD_REQUEST':'CONFLICT',message:error.message==='STALE_PREVIEW'?'Dữ liệu đã được sửa. Đóng form, cập nhật danh sách rồi kiểm tra lại trước khi lưu.':userMessage(error)});
  if(error instanceof TRPCError)throw error;
  if(error instanceof Prisma.PrismaClientKnownRequestError&&['P2002','P2034'].includes(error.code))throw new TRPCError({code:'CONFLICT',message:'Dữ liệu đã thay đổi hoặc trùng. Tải lại để kiểm tra.'});
  throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'Chưa nhận được kết quả lưu. Tải lại để kiểm tra trước khi thử lại.'});

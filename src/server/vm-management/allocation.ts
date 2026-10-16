@@ -19,7 +19,7 @@ async function planAllocation(projectId:string,input:AllocationInput,db:VMReader
   const rows:AllocationRow[]=[],items:{vmId:string;endpointId:string;reuseInstalled:boolean}[]=[];
   for(const vm of vms){
     const row:AllocationRow={vmId:vm.id,server:vm.server.code,vm:vm.code,outcome:'SKIP',message:'VM chưa đủ điều kiện'};
-    if(vm.archivedAt||vm.server.archivedAt){rows.push({...row,message:'Máy đã ẩn'});continue;}
+    if(vm.archivedAt||vm.server.archivedAt){rows.push({...row,message:'Máy đã xoá'});continue;}
     if(input.mode==='AUTO'&&(vm.proxySlotState!=='BLANK'||vm.desiredConfigurationId||vm.installedConfigurationId||vm.proxyId||vm.allocations.length)){rows.push({...row,message:'Giữ nguyên: không phải ô proxy trống chưa giao'});continue;}
     let endpoint=pool.find(e=>input.mode==='AUTO'||e.endpointId===input.endpointId),reuseInstalled=false;
     if(input.mode==='MANUAL'&&vm.desiredConfiguration?.endpointId===input.endpointId){rows.push({...row,message:'Proxy đã là cấu hình đang giao'});continue;}
