@@ -61,7 +61,11 @@ it('retires rows (single and bulk, one reason) keeping IP/credentials/ownership/
     expect(await ips(f.scope,'CURRENT')).toEqual([f.net+'1',f.net+'2',f.net+'3',f.net+'9']);
     const retireOp=await db.operationJournal.findFirstOrThrow({where:{projectId:f.projectId,kind:'PROXY_EDIT'},orderBy:{createdAt:'asc'}});
     await expect(undoOperation(f.scope,retireOp.id,'thử',db)).rejects.toMatchObject({code:'STALE_PREVIEW'}); // e2 changed since (restored) → refused
-    const e5op=await apply(f.scope,{items:[{endpointId:f.e5.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});expect(e5op.result?.applied).toBe(1);
+    // port streams: another current port of the same IP does not block a restore; a single-IP identity does
+    const twin=await db.proxyIP.create({data:{projectId:f.projectId,identityId:f.e5.identityId!,address:f.net+'5:81',host:f.net+'5',port:81,credentialCipher:f.e5.credentialCipher,packageCode:'231243',inventoryState:'NEW',inventoryKey:f.e5.identityId!+':81'}});
+    const single=await apply(f.scope,{items:[{endpointId:f.e5.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});expect(single.preview.rows[0]).toMatchObject({outcome:'ERROR',code:'CURRENT_IP'});
+    await db.proxyIdentity.update({where:{id:f.e5.identityId!},data:{allocationMode:'APPROVED_PORT_STREAM'}});
+    const e5op=await apply(f.scope,{items:[{endpointId:f.e5.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});expect(e5op.result?.applied).toBe(1);await db.proxyIP.delete({where:{id:twin.id}});
     const last=await db.operationJournal.findFirstOrThrow({where:{projectId:f.projectId,kind:'PROXY_EDIT'},orderBy:{createdAt:'desc'}});await undoOperation(f.scope,last.id,'nhầm',db);
     expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e5.id}})).inventoryState).toBe('RETIRED');
   }finally{await f.cleanup();}

@@ -106,7 +106,9 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
   ]);
   vms.sort((a,b)=>compareCodes(a.server.code,b.server.code)||compareCodes(a.code,b.code));
   const byId=new Map(endpoints.map(e=>[e.id,e])),vmById=new Map(vms.map(v=>[v.id,v]));
-  const activeTwins=new Set((await db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{in:endpoints.map(e=>e.identityId!)},inventoryState:{notIn:HISTORICAL_STATES},retiredAt:null},select:{identityId:true}})).map(r=>r.identityId!));
+  // Another current endpoint of the same IP blocks a restore, except for approved port streams where several ports per IP are normal (same port still conflicts).
+  const twins=await db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{in:endpoints.map(e=>e.identityId!)},inventoryState:{notIn:HISTORICAL_STATES},retiredAt:null},select:{id:true,identityId:true,port:true,identity:{select:{allocationMode:true}}}});
+  const twinConflict=(e:EndpointRow)=>twins.some(t=>t.identityId===e.identityId&&t.id!==e.id&&(t.identity?.allocationMode!=='APPROVED_PORT_STREAM'||t.port===e.port));
   const seen=new Map<string,number>();for(const i of items) seen.set(i.endpointId,(seen.get(i.endpointId)||0)+1);
   const rows:EditRow[]=[...parseRows],planned:PlannedItem[]=[];
   const taken=new Map<string,number>();for(const i of items) if(i.location?.kind==='VM') taken.set(i.location.vmId,(taken.get(i.location.vmId)||0)+1);
@@ -175,7 +177,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         const note=readNotes(e.notesCipher).retired as RetiredNote|undefined,previous=note?.previousState&&STATE_LABEL[note.previousState]?note.previousState:'QUARANTINED';
         if(duplicate) push('STATE',stateLabel,'Khôi phục','ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
         else if(!retired) push('STATE',stateLabel,'Khôi phục','SKIP','Đang quản lý; không cần khôi phục');
-        else if(activeTwins.has(e.identityId!)) push('STATE',stateLabel,STATE_LABEL[previous],'ERROR','IP đã có dòng khác đang quản lý; không khôi phục trùng','CURRENT_IP');
+        else if(twinConflict(e)) push('STATE',stateLabel,STATE_LABEL[previous],'ERROR','IP đã có dòng khác đang quản lý; không khôi phục trùng','CURRENT_IP');
         else{push('STATE',stateLabel,STATE_LABEL[previous],'READY','Khôi phục về trạng thái trước ('+STATE_LABEL[previous]+')');plan.manage={kind:'RESTORE'};}
       }
     }
@@ -281,7 +283,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
           }else{
             if(endpoint.inventoryState!=='RETIRED') throw new ProxyDomainError('STALE_PREVIEW');
             const note=notes.retired as RetiredNote|undefined,previous:InventoryState=note?.previousState&&STATE_LABEL[note.previousState]?note.previousState:'QUARANTINED';
-            if(await tx.proxyIP.findFirst({where:{projectId:scope.projectId,identityId:endpoint.identityId!,id:{not:endpoint.id},inventoryState:{notIn:HISTORICAL_STATES},retiredAt:null},select:{id:true}})) throw new ProxyDomainError('CURRENT_IP');
+            if(await tx.proxyIP.findFirst({where:{projectId:scope.projectId,identityId:endpoint.identityId!,id:{not:endpoint.id},inventoryState:{notIn:HISTORICAL_STATES},retiredAt:null,...(endpoint.identity!.allocationMode==='APPROVED_PORT_STREAM'?{port:endpoint.port}:{})},select:{id:true}})) throw new ProxyDomainError('CURRENT_IP');
             const {retired:_r,...rest}=notes;
             await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:previous,status:(note?.previousStatus as 'AVAILABLE'|'IN_USE'|'BLOCKED'|'RESERVED'|undefined)||'AVAILABLE',retiredAt:null,statusAt:note?.previousStatusAt?new Date(note.previousStatusAt):now,notesCipher:Object.keys(rest).length?encrypt(JSON.stringify(rest)):null,revision:{increment:1}}});
             await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,ip:endpoint.identity!.ip,kind:'RESTORED',occurredAt:now,actorId:scope.userId}});restored++;
