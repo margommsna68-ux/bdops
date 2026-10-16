@@ -11,6 +11,7 @@ import {SdkCell} from './SdkCell';
 import {SdkPasteDialog} from './SdkPasteDialog';
 import {InlineText} from './InlineText';
 import {AddVmDialog,CreateServerDialog} from './VmForms';
+import {displayNote} from '@/server/vm-management/vm-codes';
 import {useVMRefresh,type ManagedVM} from './shared';
 import {vmView,summarizeVMs,viewLabels,proxyAddress,type VMView} from './workflow';
 import {ProxyCopy} from '@/components/proxy-management/ProxyCopy';
@@ -30,7 +31,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const inScope=(workspace.data?.vms||[]).filter(v=>!scopeId||v.serverId===scopeId);
   const active=inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),deleted=inScope.filter(v=>v.archivedAt);
   const deletedView=filter==='DELETED',counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdk).length;
-  const rows=(deletedView?deleted:active).filter(v=>(deletedView||!filter||(filter==='SDK_MISSING'?!v.sdk:vmView(v)===filter))&&(!search||`${v.server} ${v.code} ${v.notes||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''}`.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>(sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code));
+  const rows=(deletedView?deleted:active).filter(v=>(deletedView||!filter||(filter==='SDK_MISSING'?!v.sdk:vmView(v)===filter))&&(!search||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''}`.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>(sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code));
   const rights=access.data,manage=!!rights?.canManage,single=!!current;
   const businessAccess=trpc.businessManagement.access.useQuery({projectId}); const [copyOpen,setCopyOpen]=useState(false),[binding,setBinding]=useState<string|null>(null); const accounts=trpc.businessManagement.accounts.useQuery({projectId});
   const copy=trpc.vmManagement.copy.useMutation({onSuccess:()=>void refresh(),onError:e=>toast.error(e.message)});
@@ -65,7 +66,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     try{const r=await restoreServer.mutateAsync({projectId,serverId:id});undoToast(`Đã khôi phục server · ${r.restoredVMs} VM`+(r.skipped.length?` · ${r.skipped.length} VM cần xử lý SDK`:''),r.operationId);setBlocked(r.skipped);void refresh();}
     catch(e){toast.error(e instanceof Error?e.message:'Chưa khôi phục được');}
   }
-  const saveServer=(patch:{code?:string;notes?:string;ipAddress?:string})=>async(value:string)=>{if(!current)return;const next={code:current.code,notes:current.notes||'',ipAddress:current.ipAddress||'',...Object.fromEntries(Object.entries(patch).map(([k])=>[k,value]))};const r=await updateServer.mutateAsync({projectId,serverId:current.id,code:next.code,notes:next.notes,ipAddress:next.ipAddress,expectedRevision:current.revision});if(r.saved){toast.success('Đã lưu');await refresh();}};
+  // Only the edited field is sent; untouched fields (including hidden import notes) stay exactly as stored.
+  const saveServer=(field:'code'|'notes'|'ipAddress')=>async(value:string)=>{if(!current)return;const r=await updateServer.mutateAsync({projectId,serverId:current.id,code:field==='code'?value:current.code,...(field==='notes'?{notes:value}:{}),...(field==='ipAddress'?{ipAddress:value}:{}),expectedRevision:current.revision});if(r.saved){toast.success('Đã lưu');await refresh();}};
   const saveVM=(v:ManagedVM,field:'code'|'notes')=>async(value:string)=>{const r=await updateVM.mutateAsync({projectId,vmId:v.id,...(field==='code'?{code:value}:{notes:value||null}),expectedRevision:v.revision});if(r.saved){toast.success('Đã lưu');await refresh();}};
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
@@ -73,8 +75,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const allOnPage=rows.length>0&&rows.every(v=>selected.has(v.id)),toggle=(id:string,on:boolean)=>setSelected(prev=>{const n=new Set(prev);if(on)n.add(id);else n.delete(id);return n;});
   const columns=(manage?1:0)+(single?0:1)+7;
   return <div className="proxy-workspace space-y-5"><div className="pm-heading"><div>
-      {single?<h1><InlineText value={current!.code} label="tên server" canEdit={manage} onSave={saveServer({code:''})}/></h1>:<h1>Server / VM</h1>}
-      {single&&<div className="pm-muted text-sm flex gap-4 flex-wrap mt-1"><span>IP: <InlineText value={current!.ipAddress} label="IP server" placeholder="chưa có" canEdit={manage} onSave={saveServer({ipAddress:''})}/></span><span>Ghi chú: <InlineText value={current!.notes} label="ghi chú server" placeholder="thêm ghi chú" canEdit={manage} onSave={saveServer({notes:''})}/></span></div>}
+      {single?<h1><InlineText value={current!.code} label="tên server" canEdit={manage} onSave={saveServer('code')}/></h1>:<h1>Server / VM</h1>}
+      {single&&<div className="pm-muted text-sm flex gap-4 flex-wrap mt-1"><span>IP: <InlineText value={current!.ipAddress} label="IP server" placeholder="chưa có" canEdit={manage} onSave={saveServer('ipAddress')}/></span><span>Ghi chú: <InlineText value={displayNote(current!.notes)} label="ghi chú server" placeholder="thêm ghi chú" canEdit={manage} onSave={saveServer('notes')}/></span></div>}
     </div><div className="flex gap-2 flex-wrap"><button className="pm-button" onClick={()=>void refresh()}><RefreshCw size={16}/>Tải lại</button>{manage&&<button className="pm-button" onClick={()=>setForm('CREATE')}><Plus size={16}/>Thêm server</button>}{manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{rights?.canAssign&&<button className="pm-button" onClick={()=>setPaste(true)}><ClipboardPaste size={16}/>Dán SDK</button>}{rights?.canAssign&&<button className="pm-button pm-button-primary" disabled={!rights.sourceConnected||!counts.missing} onClick={()=>setAllocation('AUTO')}>Điền VM thiếu</button>}{manage&&single&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void removeServer()}><Trash2 size={16}/>Xoá server</button>}</div></div>
     {rights&&!rights.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Quản lý proxy → Cập nhật).</p>}
     <div className="pm-summary"><div><span>Tổng VM</span><strong>{counts.total}</strong></div><div><span>Thiếu proxy</span><strong>{counts.missing}</strong></div><div><span>Chờ cài</span><strong>{counts.pending}</strong></div><div><span>Cần kiểm tra</span><strong>{counts.review}</strong></div><div><span>Chưa có SDK</span><strong>{noSdk}</strong></div></div>
@@ -88,7 +90,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         {manage&&<td className="pm-check"><input type="checkbox" aria-label={'Chọn '+v.code} checked={selected.has(v.id)} onChange={e=>toggle(v.id,e.target.checked)}/></td>}
         {!single&&<td><Link href={`/infrastructure/servers/${v.serverId}`} className="pm-link">{v.server}</Link></td>}
         <td><div className="font-semibold"><InlineText value={v.code} label={'mã VM '+v.code} canEdit={editable} mono onSave={saveVM(v,'code')}/></div>{email&&<div className="pm-muted text-xs mt-1">{email}</div>}</td>
-        <td className="pm-notes"><InlineText value={v.notes} label={'ghi chú '+v.code} placeholder={editable?'—':''} canEdit={editable} onSave={saveVM(v,'notes')}/></td>
+        <td className="pm-notes"><InlineText value={displayNote(v.notes)} label={'ghi chú '+v.code} placeholder={editable?'—':''} canEdit={editable} onSave={saveVM(v,'notes')}/></td>
         <td>{v.installed?proxyAddress(v.installed):<span className="pm-muted">Chưa xác nhận</span>}{v.installed&&<div className="pm-muted text-xs mt-1">Cấu hình #{v.installed.version}</div>}</td>
         <td>{proxyAddress(v.desired)}{v.desired&&<div className="pm-muted text-xs mt-1">Cấu hình #{v.desired.version}</div>}</td>
         <td>{deletedView?(v.sdk?<span className="pm-code">{v.sdk.id}</span>:<span className="pm-muted">—</span>):<SdkCell projectId={projectId} vm={v} canEdit={!!rights?.canAssign} onSaved={()=>void refresh()}/>}</td>

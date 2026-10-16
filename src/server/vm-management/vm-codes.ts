@@ -22,3 +22,7 @@ export function suggestNextVmCode(codes:string[]):string|null{
   const next=Math.max(...parts.map(m=>Number(m[2])))+1;
   return prefix+String(next).padStart(width,'0');
 }
+// Notes written by the 15/10 Sheet import are system text, not the owner's notes: hidden (or translated) when shown, never deleted.
+const SYSTEM_NOTES=[/^Recorded on Sheet; actual installation not yet confirmed\.?$/,/^Imported from personal Sheet; actual host credentials/];
+const NOTE_CODES:Record<string,string>={VM_GENJY_CONFLICT:'Đối chiếu Sheet: proxy Genjy đang ghi trên VM này',VM_UNRESOLVED:'Đối chiếu Sheet: ô proxy chưa đọc được'};
+export function displayNote(raw:string|null|undefined):string|null{if(!raw) return null;const t=raw.trim();if(SYSTEM_NOTES.some(r=>r.test(t))) return null;return NOTE_CODES[t]||t;}

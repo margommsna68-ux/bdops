@@ -61,6 +61,9 @@ it('renames a VM or server keeping its id and links; duplicates, stale revisions
     const s7=await db.server.findUniqueOrThrow({where:{id:f.s7.id}});expect(await updateManagedServer(f.scope,f.s7.id,{code:'moon7',expectedRevision:s7.revision},db)).toMatchObject({saved:false});
     expect(await db.operationJournal.count({where:{projectId:f.projectId}})).toBe(before);
     await expect(updateManagedServer(f.scope,f.s7.id,{code:'moon8',expectedRevision:s7.revision},db)).rejects.toMatchObject({code:'DUPLICATE_INPUT'});
+    await db.server.update({where:{id:f.s7.id},data:{notes:'Imported from personal Sheet; actual host credentials'}});const s7b=await db.server.findUniqueOrThrow({where:{id:f.s7.id}});
+    expect(await updateManagedServer(f.scope,f.s7.id,{code:'moon7-new',expectedRevision:s7b.revision},db)).toMatchObject({saved:true});
+    expect(await db.server.findUniqueOrThrow({where:{id:f.s7.id}})).toMatchObject({code:'moon7-new',notes:'Imported from personal Sheet; actual host credentials'}); // untouched fields stay
   }finally{await f.cleanup();}
 });
 it('deletes VMs that hold nothing (single and bulk), reports blocked rows, undoes, restores with conflict checks and never autofills a deleted VM',async()=>{
