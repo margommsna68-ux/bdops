@@ -37,6 +37,9 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
       }else if(image.resource==='ACCOUNT'){
         if(image.before){const {revision:_revision,...data}=image.before;await tx.proxyProviderAccount.update({where:{id:image.id},data});}
         else await tx.proxyProviderAccount.update({where:{id:image.id},data:{disabled:true}});
+      }else if(image.resource==='GROUP'){
+        if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
+        const {revision:_revision,...data}=image.before;await tx.proxyGroup.update({where:{id:image.id},data:{...data,archivedAt:data.archivedAt?new Date(data.archivedAt):null,revision:{increment:1}}});
       }else if(image.resource==='MEMBER'){
         if(!image.before)throw new ProxyDomainError('INVALID_INPUT');
         const {accessRevision:_accessRevision,...data}=image.before;await tx.projectMember.update({where:{id:image.id},data});

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, memberProcedure } from "../trpc";
 import {readVMWorkspace} from '../vm-management/repository';
 import {summarizeVMs} from '../vm-management/state';
+import {packageReminders} from '../proxy-management/reminders';
 
 export const notificationRouter = router({
   // Compute real-time alerts — filtered by user's role & modules
@@ -35,6 +36,9 @@ export const notificationRouter = router({
         if(counts.missing)alerts.push({id:'vm-missing',type:'VM_MISSING',severity:'warning',title:`${counts.missing} VM thiếu proxy`,message:'Điền NEW TUT chưa dùng',link:'/infrastructure/servers',createdAt:now});
         if(counts.pending)alerts.push({id:'vm-install',type:'VM_INSTALL',severity:'info',title:`${counts.pending} VM chờ cài`,message:'Cài cấu hình được giao rồi xác nhận',link:'/vm-tasks',createdAt:now});
         if(counts.review)alerts.push({id:'vm-review',type:'VM_REVIEW',severity:'warning',title:`${counts.review} VM cần kiểm tra`,message:'Kiểm tra proxy lỗi, sở hữu và dữ liệu cũ',link:'/infrastructure/servers',createdAt:now});
+        // One live reminder per package (stable id), amounts only for members with the COSTS module.
+        const packages=await ctx.prisma.proxyProviderAccount.findMany({where:{projectId,nextDueDate:{not:null},renewalStoppedAt:null}});
+        for(const r of packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,hasModule('COSTS')))alerts.push({id:r.id,type:r.type,severity:r.severity,title:r.title,message:r.message,link:r.link,createdAt:r.createdAt});
         return alerts;
       }
 

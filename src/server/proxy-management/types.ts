@@ -1,7 +1,9 @@
 // OTHER = a proxy in an operator-defined group (never TUT, never autofilled or planned onto a VM).
 export type Owner='SELF'|'GENJY'|'UNKNOWN'|'OTHER';
 export type Subgroup='PC_CHUNG'|null;
-export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID';
+export type InventoryState='NEW'|'LIVE'|'BLOCKED'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID'|'RETIRED';
+// States that leave the current inventory (still listed under history, never re-imported silently).
+export const HISTORICAL_STATES:InventoryState[]=['REPLACED','VOID','RETIRED'];
 export type BatchKind='NEW'|'BLOCKED'|'REPLACE'|'SHEET';
 export type Outcome='READY'|'SKIP'|'ERROR';
 export type IssueCode='INVALID_INPUT'|'COUNT_MISMATCH'|'DUPLICATE_INPUT'|'NOT_FOUND'|'AMBIGUOUS_OLD'|'NOT_BLOCKED'|'CURRENT_IP'|'HISTORICAL_IP'|'OWNER_CONFLICT'|'GENJY_RESERVED'|'SOURCE_UNAVAILABLE'|'STALE_PREVIEW'|'KEY_PAYLOAD_MISMATCH'|'UNKNOWN_PACKAGE'|'PACKAGE_MISMATCH'|'FORBIDDEN';
@@ -40,14 +42,16 @@ export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:
 export type CopySkipReason='NO_CREDENTIALS'|'NO_ENDPOINT';
 export interface CopyResult {proxies:string[];copied:number;total:number;skipped:{reason:CopySkipReason;count:number}[]}
 export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
-export interface ProxyGroupRef {id:string;name:string}
+export interface ProxyGroupRef {id:string;name:string;archivedAt?:string|null;proxyCount?:number}
 export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_UNKNOWN='UNKNOWN';
 // Row edits from the registry (single row or bulk). Group and location are independent; each produces its own preview row.
 export type GroupChoice={kind:'TUT'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
 export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
-export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice}
+// manage: RETIRE = "Ngừng quản lý" (keeps IP, credentials, ownership and history; releasePlans lets it drop an unstarted plan), RESTORE brings a retired row back.
+export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'};
+export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice;manage?:ManageChoice}
 export interface EditInput {items?:EditItem[];paste?:string;idempotencyKey:string}
-export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
+export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION'|'STATE';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
 export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string}
 export interface EditResult {batchId:string;replay:boolean;undone?:boolean;rows:EditRow[];applied:number;skipped:number;errors:number}
 export interface VmTarget {id:string;code:string;serverId:string;serverCode:string;occupant:string|null}

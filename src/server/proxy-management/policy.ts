@@ -6,7 +6,7 @@ export function decideNew(proxy:ParsedProxy,owner:Owner,ctx:ProxyContext):Decisi
   if(proxy.format!=='FULL') return error('INVALID_INPUT','Nhập mới cần đủ port, user và pass');
   if(owner==='UNKNOWN') return error('OWNER_CONFLICT','Chưa xác định proxy của ai');
   if(ctx.evidence.some(e=>e.ip===proxy.ip&&e.owner==='GENJY')||ctx.identities.some(i=>i.ip===proxy.ip&&i.owner==='GENJY')) return error('GENJY_RESERVED','IP đã dành cho Genjy');
-  if(ctx.endpoints.some(e=>e.proxy.ip===proxy.ip&&!e.retiredAt&&!['REPLACED','VOID'].includes(e.inventoryState))) return error('CURRENT_IP','IP đã có trong hệ thống');
+  if(ctx.endpoints.some(e=>e.proxy.ip===proxy.ip&&!e.retiredAt&&!['REPLACED','VOID','RETIRED'].includes(e.inventoryState))) return error('CURRENT_IP','IP đã có trong hệ thống');
   if(ctx.history.some(h=>h.ip===proxy.ip)||ctx.identities.some(i=>i.ip===proxy.ip)) return error('HISTORICAL_IP','IP đã xuất hiện trước đây');
   return ready('Sẵn sàng nhập proxy mới');
 }
@@ -14,7 +14,7 @@ export function decideBlock(candidates:EndpointFact[]):Decision{
   if(!candidates.length) return error('NOT_FOUND','Không tìm thấy proxy');
   if(candidates.length!==1) return error('AMBIGUOUS_OLD','IP có nhiều endpoint; cần nhập đầy đủ proxy');
   if(candidates[0].inventoryState==='BLOCKED') return {outcome:'SKIP',message:'Đã BLOCKED; giữ ngày ghi nhận cũ'};
-  if(candidates[0].retiredAt||['REPLACED','DIE','VOID'].includes(candidates[0].inventoryState)) return error('HISTORICAL_IP','Proxy đã ngừng dùng; mở lịch sử để kiểm tra');
+  if(candidates[0].retiredAt||['REPLACED','DIE','VOID','RETIRED'].includes(candidates[0].inventoryState)) return error('HISTORICAL_IP','Proxy đã ngừng dùng; mở lịch sử để kiểm tra');
   return ready('Ghi BLOCKED và ngày giờ hiện tại');
 }
 export function decideReplacement(c:ReplacementContext):Decision{

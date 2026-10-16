@@ -4,7 +4,7 @@ import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permi
 import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
 import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-terms';
-import {GROUP_GENJY,GROUP_TUT,GROUP_UNKNOWN,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
+import {GROUP_GENJY,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
 type VMRef={id:string;code:string;serverId:string;server:{code:string}};
 // Every valid position of an endpoint: active holds (with their role) plus the VM link recorded from the Sheet (role null) when it is not already held.
 function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VMRef}[]}):RegistryLocation[]{
@@ -23,14 +23,14 @@ async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClie
   const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,groupId:e.groupId,groupName:e.group?.name||null,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),locations:locationsOf(e),statusAt:e.statusAt?.toISOString()||null}]:[]);
   const linked=new Set(endpoints.map(e=>e.identityId));
   for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,groupId:null,groupName:null,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),locations:[],statusAt:null});
-  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
+  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['QUARANTINED',...HISTORICAL_STATES].includes(r.state)).length,historical:rows.filter(r=>HISTORICAL_STATES.includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
   const search=filter.search?.trim().toLowerCase(),serverSet=filter.servers?.length?new Set(filter.servers):null;
   // Group filter: the built-in groups map to owners; anything else is a ProxyGroup id.
   const groupMatch=(r:RegistryRow)=>!filter.group||(filter.group===GROUP_TUT?r.owner==='SELF':filter.group===GROUP_GENJY?r.owner==='GENJY':filter.group===GROUP_UNKNOWN?r.owner==='UNKNOWN':r.groupId===filter.group);
   const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
   const filtered=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
-    (filter.view==='ALL'||(filter.view==='HISTORY'?['REPLACED','VOID'].includes(r.state):!['REPLACED','VOID'].includes(r.state)))&&
+    (filter.view==='ALL'||(filter.view==='HISTORY'?HISTORICAL_STATES.includes(r.state):!HISTORICAL_STATES.includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&groupMatch(r)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
     (!search||[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search))));

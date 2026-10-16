@@ -5,10 +5,10 @@ export const DUE_SOON_DAYS=7;
 const utcDay=(d:Date)=>Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
 // Calendar day as the team sees it (Asia/Bangkok), expressed as a UTC day number so it compares with DATE columns.
 export function businessDay(now:Date=new Date()){const [y,m,d]=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(now).split('-').map(Number);return Date.UTC(y,m-1,d);}
-export function dueState(nextDueDate:Date|null|undefined,today:Date=new Date()):{state:DueState;daysLeft:number|null}{
+export function dueState(nextDueDate:Date|null|undefined,today:Date=new Date(),reminderDays:number=DUE_SOON_DAYS):{state:DueState;daysLeft:number|null}{
   if(!nextDueDate) return {state:'NONE',daysLeft:null};
   const daysLeft=Math.round((utcDay(nextDueDate)-businessDay(today))/86400000);
-  return {state:daysLeft<0?'OVERDUE':daysLeft<=DUE_SOON_DAYS?'DUE_SOON':'OK',daysLeft};
+  return {state:daysLeft<0?'OVERDUE':daysLeft<=reminderDays?'DUE_SOON':'OK',daysLeft};
 }
 export function addMonthsClamped(date:Date,months:number){
   const y=date.getUTCFullYear(),m=date.getUTCMonth()+months,d=date.getUTCDate();

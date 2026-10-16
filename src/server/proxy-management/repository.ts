@@ -9,8 +9,9 @@ export function decodeEndpoint(row:Pick<ProxyIP,'address'|'host'|'port'|'credent
   if(row.credentialCipher&&row.host&&row.port){const c=JSON.parse(decrypt(row.credentialCipher)) as {username:string;password:string};return {ip:row.host,port:row.port,...c,format:'FULL'};}
   try{return parseProxy(row.address);}catch{return null;}
 }
-export async function loadCatalog(projectId:string,db:Reader=prisma):Promise<CatalogAccount[]>{
-  const accounts=await db.proxyProviderAccount.findMany({where:{projectId,disabled:false}});
+// Imports and allocations see only enabled packages; pass includeDisabled to keep matching existing proxies to a disabled package.
+export async function loadCatalog(projectId:string,db:Reader=prisma,includeDisabled=false):Promise<CatalogAccount[]>{
+  const accounts=await db.proxyProviderAccount.findMany({where:{projectId,...(includeDisabled?{}:{disabled:false})}});
   return accounts.map(a=>({id:a.id,code:a.code,...JSON.parse(decrypt(a.credentialCipher))}));
 }
 function requestedIps(input:BatchInput,sheet?:SheetSnapshot):string[]|null{

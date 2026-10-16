@@ -316,6 +316,7 @@ enum ProxyInventoryState {
   DIE
   QUARANTINED
   VOID
+  RETIRED
 }
 model ProxyIdentity {
   id String @id @default(cuid())
@@ -339,6 +340,7 @@ model ProxyGroup {
   name String
   normalizedName String
   createdById String?
+  archivedAt DateTime?
   revision Int @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -362,6 +364,9 @@ model ProxyProviderAccount {
   cycleMonths Int @default(1)
   nextDueDate DateTime? @db.Date
   lastPaidAt DateTime?
+  reminderDays Int @default(7)
+  renewalStoppedAt DateTime?
+  renewalStopNote String?
   revision Int @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
