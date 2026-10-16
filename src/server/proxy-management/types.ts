@@ -14,8 +14,13 @@ export interface ParsedProxy {ip:string;port:number|null;username:string|null;pa
 export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[];businessMode?:string;teamCashEnabled?:boolean}
 export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;groupId?:string|null;newGroup?:{name:string}|null;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}
 export interface Decision {outcome:Outcome;code?:IssueCode;message:string}
-export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;groupName?:string|null;packageCode?:string|null;sourceRefs:string[]}
-export interface BatchPreview {token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;expiresAt:string}
+// Error codes that mean "this IP already exists somewhere" (paste, stock, VM, Genjy or history), as opposed to input/package/permission problems.
+export const DUPLICATE_CODES:IssueCode[]=['DUPLICATE_INPUT','CURRENT_IP','HISTORICAL_IP','GENJY_RESERVED'];
+// What an input IP collided with. locations are server/VM keys of this project only; foreign rows keep nothing but the fact that they exist.
+export interface ExistingRef {identityId:string;state:InventoryState|null;owner:Owner;locations:string[];foreign:boolean}
+export interface Conflict {code:IssueCode;message:string;existing?:ExistingRef}
+export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;groupName?:string|null;packageCode?:string|null;sourceRefs:string[];existing?:ExistingRef}
+export interface BatchPreview {token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;duplicates:number;expiresAt:string}
 export interface CommitResult {batchId:string;replay:boolean;undone?:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
 export interface CatalogAccount {id:string;code:string;username:string;password:string}
 export interface IdentityFact {id:string;ip:string;owner:Owner;subgroup:Subgroup;revision:number;allocationMode:'SINGLE_IP'|'APPROVED_PORT_STREAM'}
@@ -26,7 +31,8 @@ export interface SourceSnapshotRef {id:string;sourceKey:string;hash:string;fetch
 export interface SourceSnapshot extends SourceSnapshotRef {evidence:SourceEvidence[];tabs?:{id:string;name:string;hidden:boolean}[]}
 export interface SheetSource {key:string;spreadsheetId:string;credentialRef:string;mode:'GOOGLE_AUTH'|'GOOGLE_PUBLIC_XLSX'|'LOCAL_SNAPSHOT';localSnapshotPath?:string}
 export interface ProxyContext {identities:IdentityFact[];endpoints:EndpointFact[];evidence:SourceEvidence[];history:HistoryFact[];receipts:{oldIp:string;newIp:string;status:'APPLIED'|'VOID';oldEndpointId?:string;newEndpointId?:string}[];source:SourceSnapshotRef}
-export interface ReplacementContext {old:EndpointFact|null;oldIdentity:IdentityFact|null;oldCandidates:number;next:ParsedProxy;nextEvidence:SourceEvidence[];nextIdentities:IdentityFact[];nextInInventory:boolean;nextInVmOrReservation:boolean;nextHistory:HistoryFact[];exactReceiptReplay:boolean;sourceScanSucceeded:boolean}
+// nextConflict: findConflict() for the new IP (stock, VM, other project, history, same port of a port stream), computed without the Genjy evidence rule so the bare-completion exception below can still apply.
+export interface ReplacementContext {old:EndpointFact|null;oldIdentity:IdentityFact|null;oldCandidates:number;next:ParsedProxy;nextEvidence:SourceEvidence[];nextIdentities:IdentityFact[];nextConflict:Conflict|null;exactReceiptReplay:boolean;sourceScanSucceeded:boolean}
 export interface SheetSnapshot {snapshots:SourceSnapshot[];rows:{sourceRef:string;rawValue:string;proxy:ParsedProxy|null;kind:'CURRENT_INVENTORY'|'LOOKUP_HISTORY'|'VM'|'GENJY_REFERENCE'|'OWNER_DECISION';owner:Owner;subgroup:Subgroup;vmKey:string|null;valueState:'BLANK'|'FORMULA'|'PLACEHOLDER'|'UNRESOLVED'|'FULL';snapshotId?:string}[]}
 export interface ReconciliationPlan {rows:PreviewRow[];snapshots:SourceSnapshotRef[];ownership:{ip:string;owner:Owner;subgroup:Subgroup;sourceRefs:string[]}[];vmRefs:{vmKey:string;sourceRef:string;valueState:'BLANK'|'FORMULA'|'PLACEHOLDER'|'UNRESOLVED'|'FULL';endpointId:string|null}[]}
 export interface EligibleProxy {identityId:string;endpointId:string;ip:string;port:number;revision:number;allocationKey:string}

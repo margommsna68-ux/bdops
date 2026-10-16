@@ -3,8 +3,8 @@ import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
 import {assertInfrastructureAction,loadInfrastructureScope,type InfrastructureAction} from '@/server/permissions/infrastructure';
-import {fullProxy,parseProxyList,parseReplacementLists,resolvePair} from './parse';
-import {decideBlock,decideNew,decideReplacement} from './policy';
+import {fullProxy,pairReplacementRows,parseProxyRows,resolvePair} from './parse';
+import {decideBlock,decideNew,decideReplacement,findConflict} from './policy';
 import {matchPackage} from './catalog';
 import {loadCatalog,loadProxyContext} from './repository';
 import {refreshGenjy} from './sources';
@@ -13,7 +13,7 @@ import {withProxyTransaction} from './transaction';
 import {findGroupByName} from './groups';
 import {recordOperation} from '../operation-history/journal';
 import {captureAccount,captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
-import {ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
+import {DUPLICATE_CODES,HISTORICAL_STATES,ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type IssueCode,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
 export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;groupId?:string|null;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
 interface Planned {rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
 export function parseReceivedDate(value?:string|null):Date|null{
@@ -23,16 +23,21 @@ export function parseReceivedDate(value?:string|null):Date|null{
 }
 function candidates(ctx:ProxyContext,p:ParsedProxy,projectId?:string){return ctx.endpoints.filter(e=>(!projectId||e.projectId===projectId)&&e.proxy.ip===p.ip&&(p.format==='BARE'||(e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(p))));}
 // group: the resolved "Từ nhóm" for NEW imports with owner OTHER ({id:null} while the group is still to be created at commit).
+// Every pasted line gets its own preview row: malformed lines, repeats inside the paste and pairs with a missing side are
+// reported in place (never dropped, never re-ordered), so the operator sees exactly which IPs the provider handed back.
 export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccount[],projectId?:string,sheet?:SheetSnapshot,group?:{id:string|null;name:string}|null):Planned{
   parseReceivedDate(input.receivedDate);
   const rows:PreviewRow[]=[],items:ResolvedItem[]=[];
   let reconciliation:ReconciliationPlan|undefined;
+  const reject=(row:number,code:IssueCode,message:string,extra:Partial<PreviewRow>={})=>rows.push({row,outcome:'ERROR',code,message,sourceRefs:[],...extra});
+  // Repeats inside one paste are judged by IP, except for approved port streams where each IP:port is its own line.
+  const pasteKey=(p:ParsedProxy)=>ctx.identities.some(i=>i.ip===p.ip&&i.allocationMode==='APPROVED_PORT_STREAM')?`${p.ip}:${p.port}`:p.ip;
   const addNew=(row:number,p:ParsedProxy,owner:Owner,subgroup:Subgroup,state:InventoryState='NEW',sourceRef?:string,pkg?:{code?:string|null;issue?:string})=>{
-    const decision=decideNew(p,owner,ctx);let code=pkg?.code!==undefined?pkg.code:matchPackage(p,catalog);
+    const decision=decideNew(p,owner,ctx,projectId);let code=pkg?.code!==undefined?pkg.code:matchPackage(p,catalog);
     if(subgroup&&owner!=='GENJY') Object.assign(decision,{outcome:'ERROR',code:'OWNER_CONFLICT',message:'PC chung phải thuộc Genjy'});
     if(pkg?.issue&&decision.outcome!=='ERROR'){Object.assign(decision,{outcome:'ERROR',code:'PACKAGE_MISMATCH',message:pkg.issue});code=null;}
     const resolvedState=code?state:'QUARANTINED';
-    rows.push({...decision,row,newIp:p.ip,owner,subgroup,groupName:owner==='OTHER'?group?.name||null:null,packageCode:code,sourceRefs:sourceRef?[sourceRef]:[],...(decision.outcome==='READY'&&!code?{code:'UNKNOWN_PACKAGE' as const,message:'Lưu để kiểm tra gói; chưa dùng để cấp VM'}:{})});
+    rows.push({...decision,row,newIp:p.ip,owner,subgroup,groupName:owner==='OTHER'?group?.name||null:null,packageCode:code,sourceRefs:sourceRef?[sourceRef]:Array.from(new Set(ctx.evidence.filter(e=>e.ip===p.ip).map(e=>e.sourceRef))),...(decision.outcome==='READY'&&!code?{code:'UNKNOWN_PACKAGE' as const,message:'Lưu để kiểm tra gói; chưa dùng để cấp VM'}:{})});
     if(decision.outcome==='READY') items.push({row,next:p,owner,subgroup,groupId:owner==='OTHER'?group?.id??null:null,packageCode:code,state:resolvedState,sourceRef});
   };
   if(input.kind==='NEW'){
@@ -41,8 +46,12 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
     const chosen=input.packageCode?.trim()||null,fresh=input.newPackage?.code.trim()||null;
     if(chosen&&!catalog.some(c=>c.code===chosen)) throw new ProxyDomainError('NOT_FOUND','Không có gói '+chosen);
     if(input.newPackage){if(!fresh||fresh.length>80) throw new ProxyDomainError('INVALID_INPUT','Cần tên gói mới');if(catalog.some(c=>c.code.toLowerCase()===fresh.toLowerCase())) throw new ProxyDomainError('DUPLICATE_INPUT','Gói '+fresh+' đã có; chọn gói sẵn có');}
-    let first:{username:string;password:string}|null=null;
-    parseProxyList(input.text||'').forEach((p,i)=>{
+    let first:{username:string;password:string}|null=null;const seen=new Map<string,number>();
+    for(const line of parseProxyRows(input.text||'')){
+      if(!line.proxy){reject(line.row,line.issue!.code,line.issue!.message);continue;}
+      const p=line.proxy,dup=seen.get(pasteKey(p));
+      if(dup){reject(line.row,'DUPLICATE_INPUT',`Trùng IP với dòng ${dup} trong danh sách dán`,{newIp:p.ip});continue;}
+      seen.set(pasteKey(p),line.row);
       let pkg:{code?:string|null;issue?:string}|undefined;const matched=matchPackage(p,catalog);
       if(fresh){
         if(matched) pkg={issue:'User/pass này đã thuộc gói '+matched};
@@ -54,25 +63,45 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
         else if(matched) pkg={issue:'User/pass thuộc gói '+matched};
         else pkg={issue:'User/pass không khớp gói '+chosen+'; dùng Gói mới hoặc sửa gói'};
       }
-      addNew(i+1,p,input.owner||'SELF',input.subgroup||null,'NEW',undefined,pkg);
-    });
+      addNew(line.row,p,input.owner||'SELF',input.subgroup||null,'NEW',undefined,pkg);
+    }
   }
-  else if(input.kind==='BLOCKED') parseProxyList(input.text||'').forEach((p,i)=>{
-    const found=candidates(ctx,p,projectId),decision=decideBlock(found),endpoint=found[0],identity=ctx.identities.find(v=>v.id===endpoint?.identityId);
-    rows.push({...decision,row:i+1,oldIp:p.ip,endpointId:decision.outcome!=='ERROR'?endpoint?.id:undefined,owner:identity?.owner,sourceRefs:[]});
-    if(decision.outcome==='READY') items.push({row:i+1,oldEndpointId:endpoint.id,owner:identity?.owner||'UNKNOWN',subgroup:identity?.subgroup||null,packageCode:null,state:'BLOCKED'});
-  });
-  else if(input.kind==='REPLACE') parseReplacementLists(input.removedText||input.text||'',input.addedText||'').forEach(pair=>{
-    const found=candidates(ctx,pair.old,projectId),old=found[0]||null,identity=ctx.identities.find(i=>i.id===old?.identityId)||null;
-    let next=pair.next;
-    if(old&&old.proxy.format==='FULL') next=resolvePair(old.proxy,pair.next);
-    const evidence=ctx.evidence.filter(e=>e.ip===next.ip);
-    const exactReceiptReplay=!!old&&found.length===1&&next.format==='FULL'&&ctx.receipts.some(r=>r.status==='APPLIED'&&r.oldIp===pair.old.ip&&r.newIp===next.ip&&(!r.oldEndpointId||r.oldEndpointId===old.id)&&ctx.endpoints.some(e=>(!projectId||e.projectId===projectId)&&(!r.newEndpointId||e.id===r.newEndpointId)&&e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(next)));
-    const decision=decideReplacement({old,oldIdentity:identity,oldCandidates:found.length,next,nextEvidence:evidence,nextIdentities:ctx.identities.filter(i=>i.ip===next.ip),nextInInventory:ctx.endpoints.some(e=>e.proxy.ip===next.ip),nextInVmOrReservation:ctx.endpoints.some(e=>e.proxy.ip===next.ip&&e.vmKeys.length>0),nextHistory:ctx.history.filter(e=>e.ip===next.ip),exactReceiptReplay,sourceScanSucceeded:ctx.source.scanSucceeded});
-    const packageCode=matchPackage(next,catalog);
-    rows.push({...decision,row:pair.row,oldIp:pair.old.ip,newIp:next.ip,owner:identity?.owner,subgroup:identity?.subgroup,packageCode,endpointId:decision.outcome!=='ERROR'?old?.id:undefined,sourceRefs:evidence.map(e=>e.sourceRef),...(decision.outcome==='READY'&&!packageCode?{code:'UNKNOWN_PACKAGE' as const,message:'Nhận replace, cần xác định gói trước khi cấp VM'}:{})});
-    if(decision.outcome==='READY'&&identity&&old) items.push({row:pair.row,oldEndpointId:old.id,next,owner:identity.owner,subgroup:identity.subgroup,packageCode,state:packageCode?'NEW':'QUARANTINED'});
-  });
+  else if(input.kind==='BLOCKED'){
+    const seen=new Map<string,number>();
+    for(const line of parseProxyRows(input.text||'')){
+      if(!line.proxy){reject(line.row,line.issue!.code,line.issue!.message);continue;}
+      const p=line.proxy,dup=seen.get(p.ip);
+      if(dup){rows.push({row:line.row,outcome:'SKIP',message:`Trùng dòng ${dup}; đã xử lý ở dòng đó`,oldIp:p.ip,sourceRefs:[]});continue;}
+      seen.set(p.ip,line.row);
+      const found=candidates(ctx,p,projectId),decision=decideBlock(found),endpoint=found[0],identity=ctx.identities.find(v=>v.id===endpoint?.identityId);
+      rows.push({...decision,row:line.row,oldIp:p.ip,endpointId:decision.outcome!=='ERROR'?endpoint?.id:undefined,owner:identity?.owner,sourceRefs:[]});
+      if(decision.outcome==='READY') items.push({row:line.row,oldEndpointId:endpoint.id,owner:identity?.owner||'UNKNOWN',subgroup:identity?.subgroup||null,packageCode:null,state:'BLOCKED'});
+    }
+  }
+  else if(input.kind==='REPLACE'){
+    const pairs=pairReplacementRows(input.removedText||input.text||'',input.addedText||'');
+    const oldSeen=new Map<string,number>(),nextSeen=new Map<string,number>(),oldIps=new Map<string,number>();
+    for(const pair of pairs) if(pair.old?.proxy&&!oldIps.has(pair.old.proxy.ip)) oldIps.set(pair.old.proxy.ip,pair.row);
+    for(const pair of pairs){
+      const base={oldIp:pair.old?.proxy?.ip,newIp:pair.next?.proxy?.ip};
+      if(!pair.old||!pair.next){reject(pair.row,'COUNT_MISMATCH',pair.old?'Thiếu dòng proxy mới cho cặp này':'Thiếu dòng proxy cũ cho cặp này',base);continue;}
+      if(!pair.old.proxy||!pair.next.proxy){const bad=pair.old.proxy?pair.next:pair.old;reject(pair.row,bad.issue!.code,(pair.old.proxy?'Proxy mới: ':'Proxy cũ: ')+bad.issue!.message,base);continue;}
+      const oldIp=pair.old.proxy.ip,nextIp=pair.next.proxy.ip;
+      const oldDup=oldSeen.get(oldIp);if(oldDup){reject(pair.row,'DUPLICATE_INPUT',`Proxy cũ trùng cặp dòng ${oldDup}`,base);continue;}oldSeen.set(oldIp,pair.row);
+      const nextKey=pasteKey(pair.next.proxy),nextDup=nextSeen.get(nextKey);if(nextDup){reject(pair.row,'DUPLICATE_INPUT',`IP mới trùng cặp dòng ${nextDup}`,base);continue;}nextSeen.set(nextKey,pair.row);
+      const crossed=oldIps.get(nextIp);if(crossed!==undefined&&crossed!==pair.row&&nextIp!==oldIp){reject(pair.row,'DUPLICATE_INPUT',`IP mới trùng proxy cũ ở cặp dòng ${crossed} trong cùng đợt`,base);continue;}
+      const found=candidates(ctx,pair.old.proxy,projectId),old=found[0]||null,identity=ctx.identities.find(i=>i.id===old?.identityId)||null;
+      let next=pair.next.proxy;
+      if(old&&old.proxy.format==='FULL') next=resolvePair(old.proxy,pair.next.proxy);
+      const evidence=ctx.evidence.filter(e=>e.ip===next.ip);
+      const exactReceiptReplay=!!old&&found.length===1&&next.format==='FULL'&&ctx.receipts.some(r=>r.status==='APPLIED'&&r.oldIp===oldIp&&r.newIp===next.ip&&(!r.oldEndpointId||r.oldEndpointId===old.id)&&ctx.endpoints.some(e=>(!projectId||e.projectId===projectId)&&(!r.newEndpointId||e.id===r.newEndpointId)&&e.proxy.format==='FULL'&&fullProxy(e.proxy)===fullProxy(next)));
+      const conflict=findConflict(next,identity?.owner||'UNKNOWN',ctx,projectId,{ignoreGenjy:true});
+      const decision=decideReplacement({old,oldIdentity:identity,oldCandidates:found.length,next,nextEvidence:evidence,nextIdentities:ctx.identities.filter(i=>i.ip===next.ip),nextConflict:conflict,exactReceiptReplay,sourceScanSucceeded:ctx.source.scanSucceeded});
+      const packageCode=matchPackage(next,catalog);
+      rows.push({...decision,row:pair.row,oldIp,newIp:next.ip,owner:identity?.owner,subgroup:identity?.subgroup,packageCode,endpointId:decision.outcome!=='ERROR'?old?.id:undefined,sourceRefs:evidence.map(e=>e.sourceRef),...(decision.outcome==='ERROR'&&conflict&&decision.code===conflict.code?{existing:conflict.existing}:{}),...(decision.outcome==='READY'&&!packageCode?{code:'UNKNOWN_PACKAGE' as const,message:'Nhận replace, cần xác định gói trước khi cấp VM'}:{})});
+      if(decision.outcome==='READY'&&identity&&old) items.push({row:pair.row,oldEndpointId:old.id,next,owner:identity.owner,subgroup:identity.subgroup,packageCode,state:packageCode?'NEW':'QUARANTINED'});
+    }
+  }
   else {
     if(!sheet) throw new ProxyDomainError('INVALID_INPUT','Cần snapshot Sheet đã lưu để đối chiếu');
     reconciliation=buildReconciliation(sheet,ctx);
@@ -95,7 +124,7 @@ const action=(kind:string):InfrastructureAction=>kind==='BLOCKED'?'BLOCK':kind==
 function revisionFacts(ctx:ProxyContext,catalog:CatalogAccount[]){return {identities:ctx.identities.map(i=>[i.id,i.revision]).sort(),endpoints:ctx.endpoints.map(e=>[e.id,e.revision]).sort(),catalog:hash(catalog)};}
 function dto(batch:{token:string;kind:string;previewRows:Prisma.JsonValue;expiresAt:Date}):BatchPreview{
   const rows=batch.previewRows as unknown as PreviewRow[];
-  return {token:batch.token,kind:batch.kind as BatchInput['kind'],rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,expiresAt:batch.expiresAt.toISOString()};
+  return {token:batch.token,kind:batch.kind as BatchInput['kind'],rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,duplicates:rows.filter(r=>r.outcome==='ERROR'&&!!r.code&&DUPLICATE_CODES.includes(r.code)).length,expiresAt:batch.expiresAt.toISOString()};
 }
 export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSource?:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>;afterEvent?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
   const refresh=deps.refreshSource||refreshGenjy;
@@ -168,10 +197,14 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
           const p=item.next!;
           let identity=await tx.proxyIdentity.findUnique({where:{ip:p.ip}});
           if(identity){
-            if(identity.owner!==item.owner||identity.subgroup!==item.subgroup||(batch.kind!=='SHEET'&&item.owner!=='GENJY')) throw new ProxyDomainError('STALE_PREVIEW');
+            // An existing identity only takes a new endpoint for Genjy (bare completion), the Sheet, or another port of an approved port stream of the same owner.
+            const stream=identity.allocationMode==='APPROVED_PORT_STREAM'&&identity.owner===item.owner&&item.owner!=='GENJY';
+            if(!stream&&(identity.owner!==item.owner||identity.subgroup!==item.subgroup||(batch.kind!=='SHEET'&&item.owner!=='GENJY'))) throw new ProxyDomainError('STALE_PREVIEW');
+            if(stream&&await tx.proxyIP.findFirst({where:{identityId:identity.id,port:p.port,retiredAt:null,inventoryState:{notIn:HISTORICAL_STATES}},select:{id:true}})) throw new ProxyDomainError('STALE_PREVIEW','Cổng này vừa được nhập; kiểm tra lại');
             identity=await tx.proxyIdentity.update({where:{id:identity.id},data:{revision:{increment:1},lastSeenAt:now}});
           }else identity=await tx.proxyIdentity.create({data:{ip:p.ip,owner:item.owner,subgroup:item.subgroup}});
-          const endpoint=await tx.proxyIP.create({data:{projectId:scope.projectId,identityId:identity.id,address:`${p.ip}:${p.port}`,host:p.ip,port:p.port,credentialCipher:encrypt(JSON.stringify({username:p.username,password:p.password})),packageCode:item.packageCode,groupId:item.owner==='OTHER'?groupId:null,inventoryState:item.state,status:item.owner==='GENJY'?'RESERVED':item.state==='BLOCKED'?'BLOCKED':'AVAILABLE',inventoryKey:identity.id,revision:1,statusAt:batch.kind==='SHEET'?null:now,notesCipher:!item.packageCode?encrypt(JSON.stringify({quarantineReason:'UNKNOWN_PACKAGE',intendedState:batch.kind==='SHEET'?'LIVE':'NEW'})):null}});
+          const inventoryKey=identity.allocationMode==='APPROVED_PORT_STREAM'?identity.id+':'+p.port:identity.id;
+          const endpoint=await tx.proxyIP.create({data:{projectId:scope.projectId,identityId:identity.id,address:`${p.ip}:${p.port}`,host:p.ip,port:p.port,credentialCipher:encrypt(JSON.stringify({username:p.username,password:p.password})),packageCode:item.packageCode,groupId:item.owner==='OTHER'?groupId:null,inventoryState:item.state,status:item.owner==='GENJY'?'RESERVED':item.state==='BLOCKED'?'BLOCKED':'AVAILABLE',inventoryKey,revision:1,statusAt:batch.kind==='SHEET'?null:now,notesCipher:!item.packageCode?encrypt(JSON.stringify({quarantineReason:'UNKNOWN_PACKAGE',intendedState:batch.kind==='SHEET'?'LIVE':'NEW'})):null}});
           beforeImages.set(endpoint.id,null);
           await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:identity.id,endpointId:endpoint.id,batchId:batch.id,ip:p.ip,kind:batch.kind==='SHEET'?'SHEET_IMPORT':'RECEIVED',occurredAt:batch.kind==='SHEET'?null:receivedDate,actorId:scope.userId,sourceRef:item.sourceRef}});
           if(batch.kind==='SHEET'&&item.sourceSnapshotId) await tx.proxySourceReference.create({data:{snapshotId:item.sourceSnapshotId,identityId:identity.id,endpointId:endpoint.id,sourceRef:item.sourceRef!,format:p.format,owner:item.owner,subgroup:item.subgroup,hasFullCredentials:true,hasManualMetadata:false,dataCipher:encrypt(JSON.stringify(saved.sheet!.rows[item.row-1]))}});

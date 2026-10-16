@@ -1,5 +1,10 @@
-import {ProxyDomainError, type ParsedProxy} from './types';
-const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Dòng không phải IP hoặc IP:port:user:pass hợp lệ');};
+import {ProxyDomainError, type IssueCode, type ParsedProxy} from './types';
+export const INVALID_LINE='Dòng không phải IP hoặc IP:port:user:pass hợp lệ';
+const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT',INVALID_LINE);};
+// One pasted line after presentation cleanup. proxy is null when the line could not be read (issue says why) or when it is missing.
+export interface InputLine {row:number;raw:string;proxy:ParsedProxy|null;issue?:{code:IssueCode;message:string}}
+// Line N of the Removed box with line N of the Added box. A side is null when that box has no line at this position (blank or shorter list).
+export interface ReplacementPairInput {row:number;old:InputLine|null;next:InputLine|null}
 export function parseProxy(text:string):ParsedProxy {
   const value=text.trim();
   const match=/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+):([^:\s]+):(\S+))?$/.exec(value);
@@ -13,7 +18,7 @@ export function parseProxy(text:string):ParsedProxy {
   return {ip,port,username:match[3],password:match[4],format:'FULL'};
 }
 function clean(line:string){
-  let value=line.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();
+  let value=line.replace(/[​-‍﻿]/g,'').trim();
   // FULL tokens are recognized before presentation cleanup: suffix punctuation is credential data.
   try {if(parseProxy(value).format==='FULL') return value;} catch {}
   if(value.startsWith('|')&&value.endsWith('|')) value=value.slice(1,-1).trim();
@@ -24,33 +29,45 @@ function clean(line:string){
   return value;
 }
 const heading=(value:string)=>/^(removed|added)\s+ips?\s*:??$/i.exec(value);
-function lines(text:string){
+const isBlank=(value:string)=>!value||/^[:\-|\s]+$/.test(value);
+// Every line in order, blanks kept, so positions stay meaningful for pairing.
+function rawLines(text:string){
   if(text.length>300000) invalid();
-  return text.split(/\r?\n/).map(clean).filter(v=>v&&!/^[:\-|\s]+$/.test(v));
+  return text.split(/\r?\n/).map(clean).map(v=>isBlank(v)?'':v);
 }
-function unique(values:ParsedProxy[]){
-  if(!values.length||values.length>1000) invalid();
-  const seen=new Set<string>();for(const p of values){if(seen.has(p.ip)) throw new ProxyDomainError('DUPLICATE_INPUT');seen.add(p.ip);}return values;
+function toLine(row:number,raw:string):InputLine{
+  try{return {row,raw,proxy:parseProxy(raw)};}catch{return {row,raw,proxy:null,issue:{code:'INVALID_INPUT',message:INVALID_LINE}};}
 }
-export function parseProxyList(text:string):ParsedProxy[]{return unique(lines(text).map(parseProxy));}
-function splitBox(text:string, expected:'removed'|'added'){
-  const values=lines(text);const h=heading(values[0]||'');
-  if(h){if(h[1].toLowerCase()!==expected) invalid();values.shift();}
-  return unique(values.map(parseProxy));
+function bounded(values:string[]){if(!values.length||values.length>1000) invalid();return values;}
+// Purchase / BLOCKED lists: blank lines carry nothing, so rows are numbered over the non-blank lines. Malformed lines stay in place with an issue.
+export function parseProxyRows(text:string):InputLine[]{return bounded(rawLines(text).filter(v=>v)).map((v,i)=>toLine(i+1,v));}
+function trimBlank(values:string[]){let start=0,end=values.length;while(start<end&&!values[start]) start++;while(end>start&&!values[end-1]) end--;return values.slice(start,end);}
+// A box optionally starts with its heading; a second heading anywhere means the boxes were pasted in the wrong order.
+function section(values:string[],expected:'removed'|'added'){
+  const trimmed=trimBlank(values);const h=heading(trimmed[0]||'');
+  if(h){if(h[1].toLowerCase()!==expected) invalid();trimmed.shift();}
+  if(trimmed.some(v=>heading(v))) invalid();
+  return trimBlank(trimmed);
 }
-export function parseReplacementLists(removed:string,added:string){
-  let old:ParsedProxy[], next:ParsedProxy[];
-  const values=lines(removed);
+export function pairReplacementRows(removed:string,added:string):ReplacementPairInput[]{
+  let old:string[], next:string[];
+  const values=rawLines(removed);
   if(values.some(v=>heading(v)?.[1].toLowerCase()==='added')){
+    // Provider message pasted whole into the first box: "Removed IPs … Added IPs …".
     if(added.trim()) invalid();
-    if(/^updated\.\s*check please\.?$/i.test(values[0]||'')) values.shift();
-    if(heading(values.shift()||'')?.[1].toLowerCase()!=='removed') invalid();
-    const index=values.findIndex(v=>heading(v)?.[1].toLowerCase()==='added');
-    if(index<0) invalid();
-    old=unique(values.slice(0,index).map(parseProxy));next=unique(values.slice(index+1).map(parseProxy));
-  } else {old=splitBox(removed,'removed');next=splitBox(added,'added');}
-  if(old.length!==next.length) throw new ProxyDomainError('COUNT_MISMATCH','Số dòng proxy cũ và mới phải bằng nhau');
-  return old.map((p,i)=>({old:p,next:next[i],row:i+1}));
+    const body=trimBlank(values);
+    if(/^updated\.\s*check please\.?$/i.test(body[0]||'')) body.shift();
+    if(heading(body[0]||'')?.[1].toLowerCase()!=='removed') invalid();
+    const index=body.findIndex(v=>heading(v)?.[1].toLowerCase()==='added');
+    old=section(body.slice(1,index),'removed');next=section(body.slice(index+1),'added');
+  } else {old=section(values,'removed');next=section(rawLines(added),'added');}
+  bounded(old);if(next.length>1000) invalid();
+  const pairs:ReplacementPairInput[]=[];
+  for(let i=0;i<Math.max(old.length,next.length);i++){
+    const o=old[i]||'',n=next[i]||'';if(!o&&!n) continue;
+    pairs.push({row:i+1,old:o?toLine(i+1,o):null,next:n?toLine(i+1,n):null});
+  }
+  return pairs;
 }
 export function resolvePair(old:ParsedProxy,next:ParsedProxy):ParsedProxy{
   if(next.format==='FULL') return {...next};

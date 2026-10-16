@@ -1,7 +1,7 @@
 import type {Prisma,PrismaClient,ProxyIP} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
-import {parseProxy,parseProxyList,parseReplacementLists} from './parse';
+import {pairReplacementRows,parseProxy,parseProxyRows} from './parse';
 import {withProxyTransaction} from './transaction';
 import type {ActorScope,BatchInput,CatalogAccount,EligibleProxy,EndpointFact,HistoryFact,ParsedProxy,ProxyContext,SheetSnapshot} from './types';
 type Reader=PrismaClient|Prisma.TransactionClient;
@@ -16,8 +16,8 @@ export async function loadCatalog(projectId:string,db:Reader=prisma,includeDisab
 }
 function requestedIps(input:BatchInput,sheet?:SheetSnapshot):string[]|null{
   if(input.kind==='SHEET') return sheet?Array.from(new Set(sheet.rows.flatMap(r=>r.proxy?[r.proxy.ip]:[]))):null;
-  const parsed=input.kind==='REPLACE'?parseReplacementLists(input.removedText||input.text||'',input.addedText||'').flatMap(p=>[p.old,p.next]):parseProxyList(input.text||'');
-  return Array.from(new Set(parsed.map(p=>p.ip)));
+  const parsed=input.kind==='REPLACE'?pairReplacementRows(input.removedText||input.text||'',input.addedText||'').flatMap(p=>[p.old?.proxy,p.next?.proxy]):parseProxyRows(input.text||'').map(l=>l.proxy);
+  return Array.from(new Set(parsed.flatMap(p=>p?[p.ip]:[])));
 }
 export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Reader=prisma,sheet?:SheetSnapshot):Promise<ProxyContext>{
   const ips=requestedIps(input,sheet);
