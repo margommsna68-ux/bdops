@@ -1,6 +1,6 @@
 # Bảng proxy: lọc server, cột Server/VM tách riêng, copy một bấm và copy hàng loạt
 
-Triển khai 16/10/2026 theo yêu cầu của anh ("bảng proxy dễ tìm, dễ lọc và copy nhanh như bảng tính"). Bằng chứng: `../superpowers/evidence/2026-10-16-proxy-registry.md`. Gói proxy, thanh toán và sắp xếp theo gói xem `proxy-packages.md`.
+Triển khai 16/10/2026 (commit `8a2d009`, deploy Railway `3ed8ac87`, backup trước `e744a26a`) theo yêu cầu của anh ("bảng proxy dễ tìm, dễ lọc và copy nhanh như bảng tính"). Bằng chứng: `../superpowers/evidence/2026-10-16-proxy-registry.md`. Gói proxy, thanh toán và sắp xếp theo gói xem `proxy-packages.md`.
 
 ## Cột vị trí
 
