@@ -32,3 +32,10 @@ Yêu cầu: "PC chung" = proxy mooon và Genjy cùng đầu tư; hiện "Chung m
 - Bảng proxy: dòng tổng *Dòng a–b / tổng · Trang x/y* và nút trang ở cả trên và dưới bảng; 100 dòng mỗi trang; bấm trang ở dưới thì cuộn về dòng tổng phía trên. Commit `ea7fe1c`, backup `981c4c3c-39e3-4def-a54f-1ea8aa53a08e`, deploy `5d83d763-24d1-4988-9d23-31a151118bdb` SUCCESS, verify 10 server / 576 VM. Host: trang 1 *Dòng 1–100 / 1261 · Trang 1/13*, trang 2 *101–200*, lọc nhóm chung *1–33 / 33* (ảnh `host-10-pager-top.png`, `host-11-pager-bottom.png`).
 - Trạng thái web của 3 IP vẫn là LIVE (Sheet ghi NEW); chưa có thao tác đổi trạng thái LIVE ↔ NEW trên web.
 
+## Đổi nhóm mọi dòng, đổi trạng thái và 3 IP moon05 (16/10, khuya)
+
+- Yêu cầu: ghi trạng thái theo Sheet, đưa 3 IP ở moon05 (anh lỡ bỏ gán) sang nhóm TUT, và cho dòng genjy / đã có nhóm đổi nhóm từng dòng và hàng loạt.
+- Commit `26a54da`, migration `20261016220000_owner_decision` (thêm `ownerDecidedAt/By`, cờ trigger `moneytohome.owner_change`). Test mới trong `shared-group.integration.test.ts` (đổi nhóm từng dòng / hàng loạt, luật VM, NEW ↔ LIVE, quét Genjy giữ quyết định, hoàn tác, ghi thẳng DB vẫn bị chặn); 2 test cũ sửa theo luật mới. Suite 290 / 72, tsc, lint (4 cảnh báo cũ), build qua.
+- Local (bản sao): đổi nhóm hàng loạt 2 dòng chung → TUT (dòng ở VM giữ VM), đổi trạng thái hàng loạt LIVE → NEW.
+- Host: backup `d7dca48c-799b-472c-997e-02a432d3d4f8`, deploy `a4256298-5a1d-462b-8a53-35be791818d0` SUCCESS, verify 10 / 576. Gán lại `84.32.136.144` → moon05/VM_079 (lần bỏ gán lúc 11:24). Qua giao diện: tick 3 IP → Đổi nhóm → TUT (xem trước 3 hợp lệ, giữ vị trí VM) → lưu; Đổi trạng thái → NEW → lưu. Kết quả: 3 dòng *NEW · TUT · moon05 VM_078/079/080 · Chờ cài*. Đếm host: TUT 565, Chung 30, Genjy riêng 641; 576/576 ô VM khớp Sheet. Ảnh `host-20…23-*.png`.
+

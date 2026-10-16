@@ -94,3 +94,5 @@ Kiểm thử dùng `.env.test` trỏ database thử riêng: `npm test`, `npx tsc
 - Mốc tiếp theo theo brief 15/10: tài khoản EarnApp (Gmail/Apple ID, nhiều SDK một tài khoản), dán hàng loạt Gmail/PayPal theo cùng mẫu Dán bảng, token API cho AI ghi dữ liệu, trạng thái máy/app theo ngày.
 
 19. **16/10 tối — Theo Sheet mới và chia trang:** moon05 thêm VM_079, VM_080; 3 IP nhóm chung `84.32.136.45`, `84.32.136.144`, `84.32.137.32` ở moon05/VM_078–080 (Chờ cài), web khớp 576/576 ô VM. Bảng proxy 100 dòng mỗi trang, dòng tổng và nút trang ở cả trên và dưới.
+
+20. **16/10 khuya — Đổi nhóm mọi dòng và trạng thái:** mọi proxy (kể cả genjy, nhóm chung, nhóm tự đặt) đổi *Từ nhóm* từng dòng hoặc hàng loạt; TUT/nhóm chung giữ VM, Genjy riêng/nhóm tự đặt phải bỏ gán trước; quét Genjy không tự trả lại; hoàn tác được. Đổi trạng thái NEW ↔ LIVE từng dòng hoặc hàng loạt. 3 IP moon05/VM_078–080 nay là TUT, NEW, Chờ cài.

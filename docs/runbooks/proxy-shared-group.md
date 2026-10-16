@@ -13,7 +13,9 @@ Quyết định của anh ngày 16/10/2026: "PC chung" là proxy do mooon và Ge
 
 - **Gán server / VM thủ công**: một dòng (nút bút) hoặc hàng loạt (*Chuyển server*, *Gán VM* theo bảng dán), theo quyền gán VM. Vẫn kiểm tra VM trống, chặn hai proxy cùng một VM và chặn bản đã bắt đầu cài. Proxy nhóm chung cài và xác nhận được ở *Việc cài proxy*.
 - **Không vào autofill**: *Điền VM thiếu* và kho cấp tự động vẫn chỉ dùng TUT.
-- **Genjy riêng** vẫn không gán vào VM của anh. Đổi nhóm cho dòng genjy hay nhóm chung bị từ chối.
+- **Genjy riêng** vẫn không gán vào VM của anh.
+- **Đổi nhóm mọi dòng** (từ 16/10 tối): nút bút hoặc tick nhiều dòng → **Đổi nhóm**, chọn TUT / Chung mooon–Genjy / Genjy riêng / nhóm tự đặt → Xem trước → Lưu. TUT và nhóm chung giữ vị trí VM; Genjy riêng và nhóm tự đặt phải bỏ gán trước. Mỗi lần đổi ghi sự kiện *Đổi nhóm*, lưu là quyết định của người vận hành (lần quét Genjy sau không tự trả lại), hoàn tác được.
+- **Đổi trạng thái NEW ↔ LIVE**: ô *Trạng thái* khi sửa một dòng, hoặc tick nhiều dòng → **Đổi trạng thái**. Dòng BLOCKED, đã replace hay ngừng quản lý không đổi ở đây.
 - **BLOCKED / replace** giữ phân loại: IP mới thay cho proxy nhóm chung cũng thuộc nhóm chung, chuỗi A→B→C giữ nguyên.
 - Nhập mới có lựa chọn *Chung mooon–Genjy* ở ô *Từ nhóm*, dành cho lần mua chung sau này.
 
@@ -38,5 +40,5 @@ Nhóm chung lưu là `ProxyIdentity.owner = GENJY` cộng `subgroup = PC_CHUNG`,
 
 ## Giới hạn
 
-- Bỏ một IP khỏi nhóm chung (ngoài hoàn tác) chưa có thao tác riêng, vì phân loại là vĩnh viễn. Nếu danh sách xác nhận ít hơn số đang ghi, cần anh chốt từng IP.
+- Đổi nhóm chỉ qua luồng sửa có kiểm tra; ghi thẳng vào DB vẫn bị trigger chặn.
 - Lần quét Genjy vẫn tự gắn PC chung cho IP nằm ở tab "PC / pc chung" của Sheet Genjy, như trước.
