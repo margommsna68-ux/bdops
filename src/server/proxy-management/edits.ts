@@ -42,16 +42,19 @@ function occupantOf(vm:VMRow,except?:string){
   return null;
 }
 const positionLabel=(e:EndpointRow)=>{const parts=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code+' · '+ROLE_LABEL[a.role]);if(e.vm&&!e.allocations.some(a=>a.vmId===e.vm!.id)) parts.push(e.vm.server.code+'/'+e.vm.code);return parts.length?parts.join(', '):'Chưa gán';};
-// Only a plan that nobody has started installing can be moved or dropped from the registry; everything else goes through the install flow.
+// Only a position that nobody has started installing can be moved or dropped from the registry; everything else goes through the install flow.
+// A "Giữ để kiểm tra" hold that no one started (the Sheet import flags doubtful VM cells this way) counts as unstarted: the operator
+// resolves it here against the Sheet. Holds kept because a real install had started stay with Server/VM.
 function immovableReason(e:EndpointRow):string|null{
   for(const a of e.allocations){
     const at=a.vm.server.code+'/'+a.vm.code;
     if(a.role==='INSTALLED') return 'Đã cài trên '+at+'; đổi proxy qua Server/VM và xác nhận lại';
-    if(a.role==='UNCERTAIN') return 'Đang giữ để kiểm tra trên '+at+'; xử lý ở Server/VM trước';
-    if(a.configuration.startedAt||a.configuration.status!=='PLANNED') return 'Đã bắt đầu cài trên '+at+'; xác nhận hoặc báo lỗi ở Việc cài trước';
+    if(a.configuration.startedAt) return a.role==='UNCERTAIN'?'Đang giữ để kiểm tra trên '+at+' (đã bắt đầu cài); xử lý ở Server/VM trước':'Đã bắt đầu cài trên '+at+'; xác nhận hoặc báo lỗi ở Việc cài trước';
+    if(!['PLANNED','FAILED'].includes(a.configuration.status)) return 'Đã bắt đầu cài trên '+at+'; xác nhận hoặc báo lỗi ở Việc cài trước';
   }
   return null;
 }
+const reviewHolds=(e:EndpointRow)=>e.allocations.filter(a=>a.role==='UNCERTAIN').map(a=>a.vm.server.code+'/'+a.vm.code);
 function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|null{
   if(e.identity?.owner==='GENJY'||e.identity?.sourceRefs.some(s=>s.owner==='GENJY')) return {code:'GENJY_RESERVED',message:'Proxy của genjy/PC chung không gán vào VM'};
   if(e.identity?.owner!=='SELF') return {code:'OWNER_CONFLICT',message:'Chỉ proxy TUT mới được gán VM'};
@@ -136,7 +139,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         if(duplicate) push('LOCATION',current,'Bỏ gán','ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
         else if(!e.allocations.length&&!e.vm) push('LOCATION',current,'Bỏ gán','SKIP','Chưa gán; giữ nguyên');
         else if(blocked) push('LOCATION',current,'Bỏ gán','ERROR',blocked,'STALE_PREVIEW');
-        else{push('LOCATION',current,'Bỏ gán','READY','Thả bản giao chưa cài; VM trống lại');plan.location={kind:'UNASSIGN'};}
+        else{const review=reviewHolds(e);push('LOCATION',current,'Bỏ gán','READY',review.length?'Thả bản giữ để kiểm tra ở '+review.join(', ')+' (chưa ai bắt đầu cài); VM trống lại, chưa gỡ ngoài máy':'Thả bản giao chưa cài; VM trống lại');plan.location={kind:'UNASSIGN'};}
       }else{
         const server=loc.kind==='SERVER'?vms.find(v=>v.serverId===loc.serverId)?.server:vmById.get(loc.vmId)?.server;
         const serverLabel=server?.code||'?';
@@ -166,13 +169,12 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
       if(m.kind==='RETIRE'){
         const plans=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code),blocked=immovableReason(e);
         if(duplicate) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
-        else if(genjy||e.identity!.sourceRefs.some(s=>s.owner==='GENJY')) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy genjy/PC chung do Sheet Genjy quản; chỉ có thể lọc/ẩn, không ngừng quản lý','GENJY_RESERVED');
         else if(retired) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ngừng quản lý');
         else if(HISTORICAL_STATES.includes(e.inventoryState)) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ra khỏi kho hiện tại');
         else if(blocked) push('STATE',stateLabel,RETIRED_LABEL,'ERROR',blocked.replace(/; .*$/,'')+'; thay hoặc gỡ proxy ở Server/VM trước','STALE_PREVIEW');
         else if(plans.length&&!m.releasePlans) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Đang giao chờ cài cho '+plans.join(', ')+'; chọn "Huỷ giao" để ngừng quản lý','STALE_PREVIEW');
         else if(!m.reason.trim()) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Cần lý do ngừng quản lý','INVALID_INPUT');
-        else{push('STATE',stateLabel,RETIRED_LABEL,'READY',plans.length?'Ngừng quản lý và huỷ giao '+plans.join(', ')+' (chưa gỡ ngoài máy)':'Ngừng quản lý; giữ IP, user/pass và lịch sử');plan.manage={kind:'RETIRE',reason:m.reason.trim(),releasePlans:!!plans.length};}
+        else{push('STATE',stateLabel,RETIRED_LABEL,'READY',(plans.length?'Ngừng quản lý và huỷ giao '+plans.join(', ')+' (chưa gỡ ngoài máy)':'Ngừng quản lý; giữ IP, user/pass và lịch sử')+(genjy?'; vẫn thuộc genjy, không nhập lại thành kho TUT':''));plan.manage={kind:'RETIRE',reason:m.reason.trim(),releasePlans:!!plans.length};}
       }else{
         const note=readNotes(e.notesCipher).retired as RetiredNote|undefined,previous=note?.previousState&&STATE_LABEL[note.previousState]?note.previousState:'QUARANTINED';
         if(duplicate) push('STATE',stateLabel,'Khôi phục','ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
@@ -272,7 +274,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
           await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
         }
         if(item.manage){
-          if(endpoint.identity!.owner==='GENJY') throw new ProxyDomainError('GENJY_RESERVED');
+          // Genjy rows may be retired/restored like any other; ownership is untouched (identity.owner never changes here).
           const notes=readNotes(endpoint.notesCipher);
           if(item.manage.kind==='RETIRE'){
             if(endpoint.inventoryState==='RETIRED'||immovableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');

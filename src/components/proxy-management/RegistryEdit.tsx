@@ -40,7 +40,9 @@ export function EditPreviewTable({rows}:{rows:EditRow[]}){
   </tbody></table></div>;
 }
 // One row, edited in place: group, server, VM, explicit unassign. One click checks and saves when nothing is wrong.
-export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,onClose,onSaved}:{projectId:string;row:RegistryRow;groups:ProxyGroupRef[];targets:VmTarget[];canGroup:boolean;canLocate:boolean;onClose:()=>void;onSaved:()=>void}){
+// genjy rows: the group is fixed (ownership is permanent) and they are never placed on a VM; they can still be unassigned, retired and restored.
+export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUnassign=canLocate,onClose,onSaved}:{projectId:string;row:RegistryRow;groups:ProxyGroupRef[];targets:VmTarget[];canGroup:boolean;canLocate:boolean;canUnassign?:boolean;onClose:()=>void;onSaved:()=>void}){
+  const genjy=row.owner==='GENJY';
   const current=row.locations[0];
   const [group,setGroup]=useState<GroupPick>(row.owner==='OTHER'&&row.groupId?{kind:'GROUP',id:row.groupId}:{kind:'TUT'}),[serverId,setServerId]=useState(current?.serverId||''),[vmId,setVmId]=useState(current?.vmId||''),[rows,setRows]=useState<EditRow[]|null>(null),[error,setError]=useState('');
   const retired=row.state==='RETIRED',pendingPlan=row.locations.some(l=>l.role==='DESIRED');
@@ -48,7 +50,7 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,onClo
   const preview=trpc.proxyManagement.editPreview.useMutation(),commit=trpc.proxyManagement.editCommit.useMutation(),busy=preview.isLoading||commit.isLoading;
   const servers=serverChoices(targets),vms=serverId?vmChoices(targets,serverId,row):[];
   useEffect(()=>{if(serverId&&!vms.some(v=>v.id===vmId)) setVmId(vms.find(v=>row.locations.some(l=>l.vmId===v.id))?.id||vms[0]?.id||'');},[serverId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const groupChanged=canGroup&&(group.kind==='NEW'||(group.kind==='TUT'?row.owner!=='SELF':group.kind==='GROUP'&&group.id!==row.groupId));
+  const groupChanged=canGroup&&!genjy&&(group.kind==='NEW'||(group.kind==='TUT'?row.owner!=='SELF':group.kind==='GROUP'&&group.id!==row.groupId));
   const locationChanged=canLocate&&!!vmId&&vmId!==current?.vmId;
   async function run(location?:LocationChoice,manage?:ManageChoice){
     const item:EditItem={endpointId:row.endpointId!};
@@ -72,14 +74,15 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,onClo
   </div>;
   return <div className="pm-editor" role="group" aria-label={'Sửa proxy '+row.ip}>
     <div className="pm-editor-fields">
-      {canGroup&&<label className="pm-label">Từ nhóm<GroupChoiceSelect groups={groups} value={group} disabled={busy} onChange={v=>{setGroup(v);setRows(null);}}/></label>}
+      {canGroup&&genjy&&<div className="pm-label">Từ nhóm<div className="pm-muted text-xs font-normal mt-2">{groupLabel(row)} — cố định, không đổi nhóm</div></div>}
+      {canGroup&&!genjy&&<label className="pm-label">Từ nhóm<GroupChoiceSelect groups={groups} value={group} disabled={busy} onChange={v=>{setGroup(v);setRows(null);}}/></label>}
       {canLocate&&<><label className="pm-label">Server<select aria-label="Server" className="pm-input" disabled={busy} value={serverId} onChange={e=>{setServerId(e.target.value);setRows(null);}}><option value="">— Chọn server —</option>{servers.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
       <label className="pm-label">VM<select aria-label="VM" className="pm-input" disabled={busy||!serverId} value={vmId} onChange={e=>{setVmId(e.target.value);setRows(null);}}>{!vms.length&&<option value="">{serverId?'Server không còn VM trống':'Chọn server trước'}</option>}{vms.map(v=><option key={v.id} value={v.id}>{v.code}{row.locations.some(l=>l.vmId===v.id)?' (hiện tại)':''}</option>)}</select></label></>}
       <div className="pm-muted text-xs self-center">Hiện tại: {positionText(row)}</div>
     </div>
     <div className="flex gap-2 flex-wrap">
       <button className="pm-button pm-button-primary" disabled={busy||(!groupChanged&&!locationChanged)} onClick={()=>void run()}>{busy?<Loader2 size={16} className="animate-spin"/>:<Check size={16}/>}Lưu</button>
-      {canLocate&&row.locations.length>0&&<button className="pm-button" disabled={busy} title="Thả bản giao chưa cài; VM trống lại" onClick={()=>void run({kind:'UNASSIGN'})}>Bỏ gán</button>}
+      {canUnassign&&row.locations.length>0&&<button className="pm-button" disabled={busy} title="Thả bản giao chưa cài; VM trống lại" onClick={()=>void run({kind:'UNASSIGN'})}>Bỏ gán</button>}
       {canGroup&&!retiring&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>setRetiring(true)}><Ban size={16}/>Ngừng quản lý</button>}
       <button className="pm-button pm-button-quiet" disabled={busy} onClick={onClose}><X size={16}/>Huỷ</button>
     </div>

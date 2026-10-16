@@ -44,8 +44,11 @@ const holds=async(endpointId:string)=>(await db.vMProxyAllocation.findMany({wher
 it('retires rows (single and bulk, one reason) keeping IP/credentials/ownership/history, hides them from the current view, blocks re-import, restores and undoes',async()=>{
   const f=await fixture();try{
     const r=await apply(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RETIRE',reason:'Hết hạn không gia hạn'}},{endpointId:f.e5.id,manage:{kind:'RETIRE',reason:'Hết hạn không gia hạn'}},{endpointId:f.g.id,manage:{kind:'RETIRE',reason:'x'}}],idempotencyKey:key()});
-    expect(r.preview.rows.map(x=>[x.field,x.outcome,x.before,x.after])).toEqual([['STATE','READY','NEW','Ngừng quản lý'],['STATE','READY','BLOCKED','Ngừng quản lý'],['STATE','ERROR','genjy','Ngừng quản lý']]);
-    expect(r.result).toMatchObject({applied:2,errors:1});
+    expect(r.preview.rows.map(x=>[x.field,x.outcome,x.before,x.after])).toEqual([['STATE','READY','NEW','Ngừng quản lý'],['STATE','READY','BLOCKED','Ngừng quản lý'],['STATE','READY','genjy','Ngừng quản lý']]);
+    expect(r.preview.rows[2].message).toContain('vẫn thuộc genjy');expect(r.result).toMatchObject({applied:3,errors:0});
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'GENJY'});
+    const gBack=await apply(f.scope,{items:[{endpointId:f.g.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});expect(gBack.result?.applied).toBe(1);
+    expect(await db.proxyIP.findUniqueOrThrow({where:{id:f.g.id},include:{identity:true}})).toMatchObject({inventoryState:'NEW',identity:{owner:'GENJY'}});
     const e2=await db.proxyIP.findUniqueOrThrow({where:{id:f.e2.id},include:{identity:true}});
     expect(e2).toMatchObject({inventoryState:'RETIRED',credentialCipher:expect.any(String),packageCode:'231243'});expect(e2.retiredAt).toBeTruthy();expect(e2.identity!.owner).toBe('SELF');
     expect(await ips(f.scope,'CURRENT')).toEqual([f.net+'1',f.net+'3',f.net+'9']);expect(await ips(f.scope,'HISTORY')).toEqual([f.net+'2',f.net+'5']);

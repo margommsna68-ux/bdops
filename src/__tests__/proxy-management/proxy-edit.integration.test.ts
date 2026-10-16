@@ -7,6 +7,7 @@ import {createProxyEditService,listVmTargets,parsePasteMapping} from '@/server/p
 import {createProxyBatchService} from '@/server/proxy-management/batches';
 import {getEligibleInventory} from '@/server/proxy-management/repository';
 import {undoOperation} from '@/server/operation-history/undo';
+import {listOperations} from '@/server/operation-history/journal';
 import {GROUP_TUT,type ActorScope} from '@/server/proxy-management/types';
 import {appRouter} from '@/server/routers/_app';
 import {testClient} from './db-fixture';
@@ -96,6 +97,7 @@ it('changes the group of a row with journal and undo; held, installed and genjy 
 it('moves a pending plan to a free VM, refuses installed/uncertain/occupied/foreign targets, and undo restores both VMs',async()=>{
   const f=await fixture();try{
     const targets=await listVmTargets(f.scope,db);expect(targets.map(t=>t.serverCode+'/'+t.code+'='+(t.occupant||'free'))).toEqual(['moon1/VM_001='+f.net+'1','moon1/VM_002=free','moon1/VM_003='+f.net+'4','moon2/VM_001='+f.net+'3']);
+    await db.vMConfiguration.updateMany({where:{endpointId:f.e4.id},data:{startedAt:new Date()}}); // a hold kept because a real install had started
     const bad=await apply(f.scope,{items:[{endpointId:f.e3.id,location:{kind:'VM',vmId:f.vms.m1_2.id}},{endpointId:f.e4.id,location:{kind:'UNASSIGN'}},{endpointId:f.e1.id,location:{kind:'VM',vmId:f.vms.m2_1.id}},{endpointId:f.g.id,location:{kind:'VM',vmId:f.vms.m1_2.id}},{endpointId:f.e2.id,location:{kind:'VM',vmId:f.vms.m1_2.id}},{endpointId:f.e5.id,location:{kind:'VM',vmId:f.vms.m1_2.id}}],idempotencyKey:key()});
     expect(bad.preview.rows.map(r=>r.outcome)).toEqual(['ERROR','ERROR','ERROR','ERROR','ERROR','ERROR']);
     expect(bad.preview.rows[0].message).toMatch(/đã cài/i);expect(bad.preview.rows[1].message).toMatch(/kiểm tra/i);expect(bad.preview.rows[2].message).toMatch(/đang/i);expect(bad.preview.rows[3].code).toBe('GENJY_RESERVED');expect(bad.preview.rows[4].message).toMatch(/trùng|nhiều proxy/i);expect(bad.preview.rows[5].message).toMatch(/trùng|nhiều proxy/i);
@@ -128,6 +130,29 @@ it('unassigns a pending plan explicitly, refuses a plan whose install has starte
     const started=await apply({...f.scope,role:'ADMIN'},{items:[{endpointId:f.e1.id,location:{kind:'VM',vmId:f.vms.m1_2.id}}],idempotencyKey:key()});expect(started.preview.rows[0]).toMatchObject({outcome:'ERROR'});expect(started.preview.rows[0].message).toMatch(/bắt đầu/i);
   }finally{await f.cleanup();}
 });
+it('genjy rows: unassign from a review hold nobody started, retire and restore; group stays genjy and they are never placed on a VM',async()=>{
+  const f=await fixture();try{
+    // The Sheet import put the genjy proxy on moon1/VM_002 as "Giữ để kiểm tra" with a FAILED, never-started configuration.
+    const config=await db.vMConfiguration.create({data:{projectId:f.projectId,vmId:f.vms.m1_2.id,version:1,endpointId:f.g.id,snapshotCipher:encrypt('{}'),configurationHash:'h-'+randomUUID(),createdById:f.userId,status:'FAILED',failureNote:'Giữ chủ sở hữu genjy'}});
+    await db.vMProxyAllocation.create({data:{projectId:f.projectId,vmId:f.vms.m1_2.id,endpointId:f.g.id,configurationId:config.id,allocationKey:f.g.inventoryKey!,role:'UNCERTAIN',createdById:f.userId}});
+    await db.virtualMachine.update({where:{id:f.vms.m1_2.id},data:{desiredConfigurationId:config.id,configurationSequence:1,proxySlotState:'FULL'}});
+    const refused=await apply(f.scope,{items:[{endpointId:f.g.id,group:{kind:'TUT'}},{endpointId:f.g.id,location:{kind:'VM',vmId:f.vms.m1_3.id}}],idempotencyKey:key()});
+    expect(refused.preview.rows.map(r=>r.code)).toEqual(['DUPLICATE_INPUT','DUPLICATE_INPUT']);
+    const group=await apply(f.scope,{items:[{endpointId:f.g.id,group:{kind:'TUT'}}],idempotencyKey:key()});expect(group.preview.rows[0]).toMatchObject({outcome:'ERROR',code:'GENJY_RESERVED'});
+    const assign=await apply(f.scope,{items:[{endpointId:f.g.id,location:{kind:'VM',vmId:f.vms.m1_3.id}}],idempotencyKey:key()});expect(assign.preview.rows[0]).toMatchObject({outcome:'ERROR',code:'GENJY_RESERVED'});
+    const off=await apply(f.scope,{items:[{endpointId:f.g.id,location:{kind:'UNASSIGN'}}],idempotencyKey:key()});
+    expect(off.preview.rows[0]).toMatchObject({outcome:'READY',before:'moon1/VM_002 · Giữ để kiểm tra',after:'Bỏ gán'});expect(off.preview.rows[0].message).toContain('chưa gỡ ngoài máy');
+    expect(off.result?.applied).toBe(1);expect(await location(f.g.id)).toEqual([]);
+    expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms.m1_2.id}})).toMatchObject({desiredConfigurationId:null,proxySlotState:'BLANK'});
+    expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CANCELLED');
+    expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'GENJY'});
+    // the freed VM takes a TUT proxy through the same flow
+    const move=await apply(f.scope,{items:[{endpointId:f.e1.id,location:{kind:'VM',vmId:f.vms.m1_2.id}}],idempotencyKey:key()});expect(move.result?.applied).toBe(1);expect(await location(f.e1.id)).toEqual(['moon1/VM_002:DESIRED']);
+    // undo puts the review hold back
+    const op=(await listOperations(f.scope,db)).find(o=>o.batchId===off.result!.batchId)!;
+    await expect(undoOperation(f.scope,op.id,'thử',db)).rejects.toMatchObject({code:'STALE_PREVIEW'}); // VM changed since (new plan) → refused
+  }finally{await f.cleanup();}
+});
 it('bulk server move picks free VMs in natural order and reports when the server runs out',async()=>{
   const f=await fixture();try{
     await db.virtualMachine.create({data:{serverId:f.vms.m1_1.serverId,code:'VM_010',managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});
@@ -140,6 +165,7 @@ it('bulk server move picks free VMs in natural order and reports when the server
 it('parses a pasted Proxy | Server | VM table and matches by proxy identity and VM code, never by row order',async()=>{
   expect(parsePasteMapping('ip | moon1 | VM_002\n\n ip2\tmoon1\tvm_003 \nip3 | | \nip4 | - |\nip5 | moon1 | ')).toEqual([{row:1,proxy:'ip',server:'moon1',vm:'VM_002'},{row:3,proxy:'ip2',server:'moon1',vm:'vm_003'},{row:4,proxy:'ip3',server:'',vm:''},{row:5,proxy:'ip4',server:'-',vm:''},{row:6,proxy:'ip5',server:'moon1',vm:''}]);
   const f=await fixture();try{
+    await db.vMConfiguration.updateMany({where:{endpointId:f.e4.id},data:{startedAt:new Date()}}); // e4: install had started → stays with Server/VM
     const text=[f.net+'2 | moon1 | VM_002',f.net+'5:80:u5:secret-5\tMOON1\tvm_003',f.net+'1 | | ',f.net+'4 | - | ','198.18.0.1 | moon1 | VM_002',f.net+'3 | moon1 | ',f.net+'2 | moon2 | VM_001'].join('\n');
     const r=await apply(f.scope,{paste:text,idempotencyKey:key()});
     expect(r.preview.rows.map(x=>[x.row,x.outcome])).toEqual([[1,'ERROR'],[2,'ERROR'],[3,'SKIP'],[4,'ERROR'],[5,'ERROR'],[6,'ERROR'],[7,'ERROR']]);
