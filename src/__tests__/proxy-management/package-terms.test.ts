@@ -24,26 +24,33 @@ describe('compareCodes',()=>{
     expect(['VM_10','VM_2','vm_1','M-010','M-002'].sort(compareCodes)).toEqual(['M-002','M-010','vm_1','VM_2','VM_10']);
   });
 });
-const row=(o:Partial<RegistryRow>):RegistryRow=>({identityId:o.ip||'i',endpointId:o.endpointId===undefined?'e-'+(o.ip||'i'):o.endpointId,ip:'10.0.0.1',port:80,owner:'SELF',subgroup:null,packageCode:null,state:'LIVE',revision:1,sourceRefs:[],vmRefs:[],statusAt:null,...o});
+const row=(o:Partial<RegistryRow>):RegistryRow=>({identityId:o.ip||'i',endpointId:o.endpointId===undefined?'e-'+(o.ip||'i'):o.endpointId,ip:'10.0.0.1',port:80,owner:'SELF',subgroup:null,packageCode:null,state:'LIVE',revision:1,sourceRefs:[],locations:[],statusAt:null,...o});
+const at=(server:string,vm:string,role:RegistryRow['locations'][number]['role']='INSTALLED')=>({serverId:'s-'+server,serverCode:server,vmId:'v-'+server+vm,vmCode:vm,role});
 describe('sortRegistryRows',()=>{
   const rows=[
-    row({ip:'10.0.0.9',packageCode:'240292',vmRefs:['moon1/M-010 · Đã cài'],statusAt:'2026-10-01T00:00:00.000Z'}),
-    row({ip:'10.0.0.2',packageCode:null,vmRefs:['An-01/VM_002 · Đã cài'],statusAt:'2026-10-05T00:00:00.000Z'}),
-    row({ip:'10.0.0.3',packageCode:'231243',vmRefs:['moon1/M-002 · Đã cài'],statusAt:null}),
-    row({ip:'10.0.0.1',packageCode:'231243',vmRefs:[],statusAt:'2026-10-09T00:00:00.000Z'}),
-    row({ip:'10.0.0.4',packageCode:'VietPhe account',vmRefs:['vt-03/VM_001 · Đã cài'],statusAt:'2026-10-03T00:00:00.000Z'}),
+    row({ip:'10.0.0.9',packageCode:'240292',locations:[at('moon1','M-010')],statusAt:'2026-10-01T00:00:00.000Z'}),
+    row({ip:'10.0.0.2',packageCode:null,locations:[at('An-01','VM_002')],statusAt:'2026-10-05T00:00:00.000Z'}),
+    row({ip:'10.0.0.3',packageCode:'231243',locations:[at('moon1','M-002')],statusAt:null}),
+    row({ip:'10.0.0.1',packageCode:'231243',locations:[],statusAt:'2026-10-09T00:00:00.000Z'}),
+    row({ip:'10.0.0.4',packageCode:'VietPhe account',locations:[at('vt-03','VM_001')],statusAt:'2026-10-03T00:00:00.000Z'}),
   ];
   const ips=(mode:Parameters<typeof sortRegistryRows>[1])=>sortRegistryRows([...rows],mode).map(r=>r.ip);
   it('PACKAGE: numeric packages first, then names, unknown last; inside a package server/VM then IP, unassigned last',()=>{
     expect(ips('PACKAGE')).toEqual(['10.0.0.3','10.0.0.1','10.0.0.9','10.0.0.4','10.0.0.2']);
   });
-  it('SERVER: server then VM naturally, unassigned last',()=>{
+  it('SERVER: server then VM naturally, then package and IP; unassigned last',()=>{
     expect(ips('SERVER')).toEqual(['10.0.0.2','10.0.0.3','10.0.0.9','10.0.0.4','10.0.0.1']);
+    const natural=[row({ip:'10.0.1.1',packageCode:'2',locations:[at('moon10','VM_002')]}),row({ip:'10.0.1.2',packageCode:'1',locations:[at('moon2','VM_010')]}),row({ip:'10.0.1.3',packageCode:'1',locations:[at('moon2','VM_002')]}),row({ip:'10.0.1.4',packageCode:'9',locations:[at('moon2','VM_002')]}),row({ip:'10.0.1.0',packageCode:'1',locations:[at('moon2','VM_002')]})];
+    expect(sortRegistryRows(natural,'SERVER').map(r=>r.ip)).toEqual(['10.0.1.0','10.0.1.3','10.0.1.4','10.0.1.2','10.0.1.1']); // moon2 before moon10, VM_002 before VM_010, then package 1 before 9, then IP
   });
   it('STATUS: newest recorded status first, unknown dates last',()=>{
     expect(ips('STATUS')).toEqual(['10.0.0.1','10.0.0.2','10.0.0.4','10.0.0.9','10.0.0.3']);
   });
   it('IP: numeric address order',()=>{
     expect(ips('IP')).toEqual(['10.0.0.1','10.0.0.2','10.0.0.3','10.0.0.4','10.0.0.9']);
+  });
+  it('rows with several positions sort by their first position after natural ordering of the positions',()=>{
+    const multi=row({ip:'10.0.2.1',packageCode:'1',locations:[at('moon10','VM_001'),at('moon2','VM_005')]}),single=row({ip:'10.0.2.2',packageCode:'1',locations:[at('moon2','VM_009')]});
+    expect(sortRegistryRows([single,multi],'SERVER').map(r=>r.ip)).toEqual(['10.0.2.1','10.0.2.2']);
   });
 });

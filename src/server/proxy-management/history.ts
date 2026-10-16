@@ -3,33 +3,48 @@ import {prisma} from '@/lib/prisma';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
-import {dueState,sortRegistryRows} from './package-terms';
-import {ProxyDomainError,type ActorScope,type ProxyTimeline,type RegistryFilter,type RegistryPage,type RegistryRow} from './types';
+import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-terms';
+import {ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
+type VMRef={id:string;code:string;serverId:string;server:{code:string}};
+// Every valid position of an endpoint: active holds (with their role) plus the VM link recorded from the Sheet (role null) when it is not already held.
+function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VMRef}[]}):RegistryLocation[]{
+  const out:RegistryLocation[]=e.allocations.map(a=>({serverId:a.vm.serverId,serverCode:a.vm.server.code,vmId:a.vmId,vmCode:a.vm.code,role:a.role as RegistryLocation['role']}));
+  if(e.vm&&!out.some(l=>l.vmId===e.vm!.id)) out.push({serverId:e.vm.serverId,serverCode:e.vm.server.code,vmId:e.vm.id,vmCode:e.vm.code,role:null});
+  return sortLocations(out);
+}
+type RowsFilter=Omit<RegistryFilter,'cursor'|'limit'>;
+// Whole registry of the project, filtered and sorted; callers paginate or copy from it.
+async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClient){
+  const [endpoints,reserved]=await Promise.all([
+    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
+    db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
+  ]);
+  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),locations:locationsOf(e),statusAt:e.statusAt?.toISOString()||null}]:[]);
+  const linked=new Set(endpoints.map(e=>e.identityId));
+  for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),locations:[],statusAt:null});
+  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
+  const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
+  const search=filter.search?.trim().toLowerCase(),serverSet=filter.servers?.length?new Set(filter.servers):null;
+  const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
+  const filtered=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
+    (filter.view==='ALL'||(filter.view==='HISTORY'?['REPLACED','VOID'].includes(r.state):!['REPLACED','VOID'].includes(r.state)))&&
+    (!filter.owner||r.owner===filter.owner)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
+    (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
+    (!search||[r.ip,r.packageCode||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search))));
+  sortRegistryRows(filtered,filter.sort);
+  return {rows:filtered,counts,servers};
+}
 async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
 }
 export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:PrismaClient=prisma):Promise<RegistryPage>{
   await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
-  const [endpoints,reserved]=await Promise.all([
-    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
-    db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
-  ]);
-  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),vmRefs:e.allocations.length?e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code+' · '+(a.role==='DESIRED'?'Chờ cài':a.role==='INSTALLED'?'Đã cài':'Giữ để kiểm tra')):e.vm?[e.vm.server.code+'/'+e.vm.code]:[],statusAt:e.statusAt?.toISOString()||null}]:[]);
-  const linked=new Set(endpoints.map(e=>e.identityId));
-  for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),vmRefs:[],statusAt:null});
-  const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['REPLACED','VOID','QUARANTINED'].includes(r.state)).length,historical:rows.filter(r=>['REPLACED','VOID'].includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY').map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
-  const search=filter.search?.trim().toLowerCase();
-  const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
-  const filtered=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
-    (filter.view==='ALL'||(filter.view==='HISTORY'?['REPLACED','VOID'].includes(r.state):!['REPLACED','VOID'].includes(r.state)))&&
-    (!filter.owner||r.owner===filter.owner)&&(!filter.state||r.state===filter.state)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
-    (!search||[r.ip,r.packageCode||'',...r.vmRefs].some(v=>v.toLowerCase().includes(search))));
-  sortRegistryRows(filtered,filter.sort);
+  const {rows:filtered,counts,servers}=await loadRegistryRows(scope,filter,db);
   let start=0;
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
-  return {rows:page,counts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
+  return {rows:page,counts,total:filtered.length,servers,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
 }
 export async function getProxyTimeline(scope:ActorScope,identityId:string,db:PrismaClient=prisma):Promise<ProxyTimeline>{
   await authorize(scope,false,db);
@@ -54,11 +69,31 @@ export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
   return result;
 }
 export async function copyProxyEndpoint(scope:ActorScope,endpointId:string,db:PrismaClient=prisma){
+  const result=await copyProxyRows(scope,{endpointIds:[endpointId]},db);
+  if(!result.proxies.length) throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ thông tin');
+  return {proxy:result.proxies[0]};
+}
+export type CopySelection={endpointIds:string[]}|{filter:RowsFilter};
+export const MAX_COPY_ROWS=2000;
+// Full proxies for selected rows (display order) or for a whole filtered result. Copying from the registry never changes
+// allocation or install state; it only logs how many credentials left the server, never the credentials themselves.
+export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma):Promise<CopyResult>{
   await authorize(scope,true,db);
-  if(await db.vMProxyAllocation.findFirst({where:{projectId:scope.projectId,endpointId,releasedAt:null},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Proxy đang giữ cho VM. Copy cấu hình tại Việc cài hoặc Server/VM để giữ đúng phiên bản và lịch sử.');
-  const endpoint=await db.proxyIP.findFirst({where:{id:endpointId,projectId:scope.projectId,identityId:{not:null}}});
-  if(!endpoint) throw new ProxyDomainError('NOT_FOUND');
-  const p=decodeEndpoint(endpoint);if(!p||p.format!=='FULL') throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ thông tin');
-  await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:endpointId,changes:{count:1}}});
-  return {proxy:fullProxy(p)};
+  let ordered:{endpointId:string|null}[];
+  if('endpointIds' in selection){
+    const ids=Array.from(new Set(selection.endpointIds));if(!ids.length||ids.length>MAX_COPY_ROWS) throw new ProxyDomainError('INVALID_INPUT');
+    const found=new Set((await db.proxyIP.findMany({where:{id:{in:ids},projectId:scope.projectId,identityId:{not:null}},select:{id:true}})).map(e=>e.id));
+    if(found.size!==ids.length) throw new ProxyDomainError('NOT_FOUND','Có dòng không thuộc dự án này');
+    ordered=ids.map(id=>({endpointId:id}));
+  } else ordered=(await loadRegistryRows(scope,selection.filter,db)).rows;
+  const ids=ordered.flatMap(r=>r.endpointId?[r.endpointId]:[]);
+  const endpoints=new Map((await db.proxyIP.findMany({where:{id:{in:ids},projectId:scope.projectId}})).map(e=>[e.id,e]));
+  const proxies:string[]=[],skipped:Record<CopySkipReason,number>={NO_CREDENTIALS:0,NO_ENDPOINT:0};
+  for(const r of ordered){
+    const e=r.endpointId?endpoints.get(r.endpointId):undefined;if(!e){skipped.NO_ENDPOINT++;continue;}
+    const p=decodeEndpoint(e);if(p?.format==='FULL') proxies.push(fullProxy(p));else skipped.NO_CREDENTIALS++;
+  }
+  const result:CopyResult={proxies,copied:proxies.length,total:ordered.length,skipped:(Object.keys(skipped) as CopySkipReason[]).filter(k=>skipped[k]>0).map(reason=>({reason,count:skipped[reason]}))};
+  if(proxies.length) await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'endpointIds' in selection&&ids.length===1?ids[0]:'bulk-copy',changes:{count:proxies.length,total:ordered.length,skipped:result.skipped}}});
+  return result;
 }

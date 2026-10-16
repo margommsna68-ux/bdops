@@ -7,6 +7,7 @@ import { SessionProvider } from "next-auth/react";
 import superjson from "superjson";
 import { trpc } from "@/lib/trpc";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "react-hot-toast";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -25,7 +26,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider>{children}<Toaster position="bottom-right" toastOptions={{ duration: 3000, style: { fontSize: "13px", maxWidth: "520px" } }} /></ThemeProvider>
         </QueryClientProvider>
       </trpc.Provider>
     </SessionProvider>

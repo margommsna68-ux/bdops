@@ -128,11 +128,13 @@ it('changing project mode cannot destroy managed infrastructure or its journal',
     await expect(assertProjectCanBeDestroyed(db,projectId)).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
   }finally{await db.server.deleteMany({where:{projectId}});await db.project.delete({where:{id:projectId}});await db.user.delete({where:{id:userId}});}
 });
-it('generic registry copy cannot bypass exact configuration start and undo protection',async()=>{
+it('registry copy of a held proxy neither starts the install nor blocks undo; only the configuration copy does',async()=>{
   const f=await fixture(['203.0.113.184']);try{
     await f.allocate();const endpoint=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId}});
     const safe=await readVMWorkspace(f.scope,db);expect(safe.vms[0].desired).toMatchObject({endpointId:endpoint.id,port:80});expect(JSON.stringify(safe)).not.toMatch(/credentialCipher|snapshotCipher|vm-test-secret/);
-    await expect(copyProxyEndpoint(f.scope,endpoint.id,db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    await db.projectMember.update({where:{userId_projectId:{userId:f.scope.userId,projectId:f.scope.projectId}},data:{capabilities:['COPY_CREDENTIALS']}});
+    expect(await copyProxyEndpoint(f.scope,endpoint.id,db)).toEqual({proxy:'203.0.113.184:80:u:vm-test-secret'});
+    expect(await db.proxyStatusEvent.count({where:{projectId:f.scope.projectId,kind:'INSTALL_STARTED'}})).toBe(0);expect((await db.vMConfiguration.findFirstOrThrow({where:{projectId:f.scope.projectId}})).startedAt).toBeNull();
     const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});await copyConfiguration(f.scope,vm.desiredConfigurationId!,db);
     const op=(await listOperations(f.scope,db)).find(o=>o.kind==='VM_PLAN')!;await expect(undoOperation(f.scope,op.id,'Copied',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
   }finally{await f.cleanup();}

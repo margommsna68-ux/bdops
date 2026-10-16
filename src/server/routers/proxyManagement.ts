@@ -4,7 +4,7 @@ import {Prisma} from '@prisma/client';
 import {router,protectedProcedure} from '../trpc';
 import {assertInfrastructureAction,loadInfrastructureScope,type InfrastructureAction} from '../permissions/infrastructure';
 import {createProxyBatchService} from '../proxy-management/batches';
-import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint} from '../proxy-management/history';
+import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint,copyProxyRows,MAX_COPY_ROWS} from '../proxy-management/history';
 import {refreshGenjy} from '../proxy-management/sources';
 import {ProxyDomainError} from '../proxy-management/types';
 import {saveProviderAccount,listPackages} from '../proxy-management/catalog-management';
@@ -16,6 +16,7 @@ const project=z.object({projectId:z.string().min(1)});
 const text=z.string().max(300000).optional();
 const owner=z.enum(['SELF','GENJY','UNKNOWN']);
 const state=z.enum(['NEW','LIVE','BLOCKED','REPLACED','DIE','QUARANTINED','VOID']);
+const registryFilter=project.extend({owner:owner.optional(),packageCode:z.string().max(80).optional(),state:state.optional(),view:z.enum(['CURRENT','HISTORY','ALL']).default('CURRENT'),search:z.string().max(100).optional(),sort:z.enum(['PACKAGE','SERVER','STATUS','IP']).optional(),due:z.boolean().optional(),servers:z.array(z.string().min(1).max(80)).max(100).optional()});
 async function domain<T>(fn:()=>Promise<T>):Promise<T>{try{return await fn();}catch(e){
   if(e instanceof ProxyDomainError){const code=e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'||e.code==='COUNT_MISMATCH'||e.code==='DUPLICATE_INPUT'?'BAD_REQUEST':e.code==='SOURCE_UNAVAILABLE'?'PRECONDITION_FAILED':'CONFLICT';throw new TRPCError({code,message:e.message});}
   if(e instanceof Prisma.PrismaClientKnownRequestError&&['P2002','P2034'].includes(e.code)) throw new TRPCError({code:'CONFLICT',message:'IP hoặc đợt này vừa được ghi; kiểm tra lại'});
@@ -35,7 +36,9 @@ export const proxyManagementRouter=router({
     let sourceMode:string|null=null;try{sourceMode=JSON.parse(process.env.GENJY_SOURCE_JSON||'{}').mode||null;}catch{}
     return {businessMode:scope.businessMode||null,role:scope.role,canBlock:can('BLOCK'),canImport:can('IMPORT'),canReplace:can('REPLACE'),canCopy:can('COPY_CREDENTIALS'),canManage:can('MANAGE'),canGrant:scope.role==='ADMIN',canBackup:!!process.env.SYSTEM_OWNER_USER_ID&&ctx.user.id===process.env.SYSTEM_OWNER_USER_ID,source:{connected:source?.scanSucceeded||false,lastScan:source?.fetchedAt.toISOString()||null,mode:sourceMode},trial:['trial','staging'].includes(process.env.APP_ENV||'')};
   })),
-  list:protectedProcedure.input(project.extend({owner:owner.optional(),packageCode:z.string().max(80).optional(),state:state.optional(),view:z.enum(['CURRENT','HISTORY','ALL']).default('CURRENT'),search:z.string().max(100).optional(),cursor:z.string().max(200).optional(),limit:z.number().int().min(1).max(100).default(50),sort:z.enum(['PACKAGE','SERVER','STATUS','IP']).optional(),due:z.boolean().optional()})).query(({ctx,input})=>domain(async()=>queryRegistry(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  list:protectedProcedure.input(registryFilter.extend({cursor:z.string().max(200).optional(),limit:z.number().int().min(1).max(100).default(50)})).query(({ctx,input})=>domain(async()=>queryRegistry(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  copyEndpoints:protectedProcedure.input(project.extend({endpointIds:z.array(z.string().min(1).max(64)).min(1).max(MAX_COPY_ROWS)})).mutation(({ctx,input})=>domain(async()=>copyProxyRows(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),{endpointIds:input.endpointIds},ctx.prisma))),
+  copyFiltered:protectedProcedure.input(registryFilter).mutation(({ctx,input})=>domain(async()=>copyProxyRows(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),{filter:input},ctx.prisma))),
   preview:protectedProcedure.input(project.extend({kind:z.enum(['NEW','BLOCKED','REPLACE','SHEET']),text,removedText:text,addedText:text,owner:owner.optional(),subgroup:z.literal('PC_CHUNG').nullable().optional(),receivedDate:z.string().nullable().optional(),snapshotIds:z.array(z.string()).max(10).optional(),packageCode:z.string().max(80).nullable().optional(),newPackage:z.object({code:z.string().min(1).max(80),site:z.string().max(120).nullable().optional()}).nullable().optional(),idempotencyKey:z.string().min(8).max(100)})).mutation(({ctx,input})=>domain(async()=>createProxyBatchService(ctx.prisma).preview(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input))),
   commit:protectedProcedure.input(project.extend({token:z.string().max(100),idempotencyKey:z.string().min(8).max(100)})).mutation(({ctx,input})=>domain(async()=>createProxyBatchService(ctx.prisma).commit(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.token,input.idempotencyKey))),
   timeline:protectedProcedure.input(project.extend({identityId:z.string()})).query(({ctx,input})=>domain(async()=>getProxyTimeline(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.identityId,ctx.prisma))),

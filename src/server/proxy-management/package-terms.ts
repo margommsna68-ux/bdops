@@ -1,4 +1,4 @@
-import type {RegistryRow} from './types';
+import type {RegistryLocation,RegistryRow} from './types';
 export type DueState='NONE'|'OVERDUE'|'DUE_SOON'|'OK';
 export type RegistrySort='PACKAGE'|'SERVER'|'STATUS'|'IP';
 export const DUE_SOON_DAYS=7;
@@ -22,8 +22,11 @@ export function nextDueAfterPayment(current:Date|null|undefined,paidOn:Date,cycl
 export const compareCodes=(a:string,b:string)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
 const numericIP=(ip:string)=>ip.split('.').reduce((n,part)=>n*256+Number(part),0);
 const packageRank=(code:string|null)=>code===null?2:/^\d+$/.test(code)?0:1;
-function vmKey(row:RegistryRow){const ref=row.vmRefs[0];if(!ref) return null;const [server='',rest='']=ref.split('/');return {server,vm:rest.split(' · ')[0]};}
-function compareVM(a:RegistryRow,b:RegistryRow){const ka=vmKey(a),kb=vmKey(b);if(!ka&&!kb) return 0;if(!ka) return 1;if(!kb) return -1;return compareCodes(ka.server,kb.server)||compareCodes(ka.vm,kb.vm);}
+export const compareLocations=(a:Pick<RegistryLocation,'serverCode'|'vmCode'>,b:Pick<RegistryLocation,'serverCode'|'vmCode'>)=>compareCodes(a.serverCode,b.serverCode)||compareCodes(a.vmCode,b.vmCode);
+export function sortLocations<T extends Pick<RegistryLocation,'serverCode'|'vmCode'>>(locations:T[]){return locations.sort(compareLocations);}
+// Rows sort by their first (naturally smallest) position; rows without a position go last.
+const firstLocation=(r:RegistryRow)=>r.locations.reduce<RegistryLocation|null>((best,l)=>!best||compareLocations(l,best)<0?l:best,null);
+function compareVM(a:RegistryRow,b:RegistryRow){const ka=firstLocation(a),kb=firstLocation(b);if(!ka&&!kb) return 0;if(!ka) return 1;if(!kb) return -1;return compareLocations(ka,kb);}
 function comparePackage(a:RegistryRow,b:RegistryRow){return packageRank(a.packageCode)-packageRank(b.packageCode)||compareCodes(a.packageCode||'',b.packageCode||'');}
 function compareIP(a:RegistryRow,b:RegistryRow){return numericIP(a.ip)-numericIP(b.ip)||(a.port||0)-(b.port||0)||(a.endpointId||a.identityId).localeCompare(b.endpointId||b.identityId);}
 function compareStatus(a:RegistryRow,b:RegistryRow){if(!a.statusAt&&!b.statusAt) return 0;if(!a.statusAt) return 1;if(!b.statusAt) return -1;return b.statusAt.localeCompare(a.statusAt);}

@@ -31,6 +31,8 @@ Tên gói mới trùng gói cũ bị từ chối ngay. Nhận replace giữ gói
 
 ## Sắp xếp và lọc
 
+Từ 16/10 (mốc bảng proxy) có thêm ô **Lọc server** nhiều lựa chọn, cột Server/VM tách riêng và copy một bấm / hàng loạt: xem `proxy-registry.md`.
+
 **Quản lý proxy**: ô **Gói proxy** (tất cả / sắp đến hạn / từng gói) và **Sắp xếp**: *Theo gói (như Sheet)* → gói (số trước, chữ sau, chưa rõ gói cuối) → server → VM → IP; *Theo server / VM* (chưa gán VM xếp cuối); *Ghi nhận mới nhất*; *Theo IP*. Lựa chọn giữ trên URL (`?sort=`, `?package=`), dòng tiêu đề nhóm gói chỉ hiện khi sắp theo gói. Mã server/VM so sánh theo số tự nhiên (`VM_2` trước `VM_10`).
 
 **Server / VM**: ô **Sắp xếp** (`?sort=`): theo server / mã VM; chưa có SDK trước; thiếu proxy trước. SDK chỉ quản lý ở trang này, không ở trang proxy.
