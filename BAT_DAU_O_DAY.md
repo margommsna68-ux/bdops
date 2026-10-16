@@ -28,6 +28,8 @@ Ngày cập nhật: **15/10/2026**. Source chính: **C:\Users\TUNTUN\Desktop\pro
 
 12. **16/10 — Bảng proxy như bảng tính:** lọc nhiều server (+ *Chưa gán server*) kết hợp gói/sở hữu/trạng thái, lọc và sort trên toàn bộ kết quả rồi mới phân trang, giữ trên URL; cột **Server / VM / Ghi chú vận hành** tách riêng và hiện đủ mọi vị trí; biểu tượng Copy copy ngay proxy đầy đủ một bấm; tick nhiều dòng → **Copy proxy**; **Copy toàn bộ kết quả lọc**; dòng thiếu user/pass hoặc chỉ có IP genjy được báo bỏ qua kèm lý do. Gắn `<Toaster/>` nên các thông báo ngắn giờ hiện thật. Xem `docs/runbooks/proxy-registry.md`.
 
+13. **16/10 — Logo C + slogan:** biểu tượng M xanh (phương án C đã duyệt, `public/brand/moneytohome-mark.png`, nền trong suốt, không kéo méo) thay ô chữ B ở trang đăng nhập (căn giữa trên tên) và đầu sidebar (thu gọn chỉ còn biểu tượng); slogan chữ thật **Forward, Together.** dưới tên; icon tab `src/app/icon.png`; middleware cho phép `/brand/*` không cần đăng nhập. Thành phần `src/components/BrandMark.tsx`.
+
 ## Dữ liệu thật đã nhập
 
 Snapshot Sheet/Genjy ngày 15/10/2026: **10 server, 574 dòng VM, 1.362 endpoint, 101 liên kết replace, 1.172 IP khác nhau trong final**. Đã giữ **724 danh tính Genjy**, trong đó 33 có bằng chứng PC chung (bao gồm lịch sử).

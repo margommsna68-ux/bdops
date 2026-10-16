@@ -10,6 +10,7 @@ import { useT } from "@/lib/i18n";
 import { isCollectorOnly } from "@/lib/collector-utils";
 import type { AppModule } from "@/server/trpc";
 import {trpc} from '@/lib/trpc';
+import { BrandMark, BRAND_NAME, BRAND_SLOGAN } from "@/components/BrandMark";
 
 type NavItem =
   | { href: string; labelKey: string; icon: string; module?: AppModule | null; adminOnly?: boolean; infraOnly?: boolean }
@@ -131,19 +132,17 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
       {/* ─── Header ─── */}
       <div className="p-4 border-b border-gray-700/30 flex items-center justify-between">
         {!collapsed && (
-          <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-xl ${isGolden ? "bg-gradient-to-br from-amber-400 to-amber-600" : "bg-gradient-to-br from-blue-500 to-blue-700"} flex items-center justify-center text-sm font-bold shadow-lg`}>
-              B
-            </div>
-            <div>
-              <h1 className="text-base font-bold tracking-tight">MoneyToHome</h1>
-              <p className="text-[10px] text-gray-400/70 leading-none">Proxy · VM · EarnApp · business</p>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <BrandMark size={30} className="shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-base font-bold tracking-tight leading-tight text-white">{BRAND_NAME}</h1>
+              <p className="text-[10px] text-gray-400/80 leading-none mt-0.5 tracking-wide">{BRAND_SLOGAN}</p>
             </div>
           </div>
         )}
         {collapsed && (
-          <div className={`w-9 h-9 rounded-xl ${isGolden ? "bg-gradient-to-br from-amber-400 to-amber-600" : "bg-gradient-to-br from-blue-500 to-blue-700"} flex items-center justify-center text-sm font-bold mx-auto shadow-lg`}>
-            B
+          <div className="mx-auto flex items-center justify-center h-9" title={BRAND_NAME + " — " + BRAND_SLOGAN}>
+            <BrandMark size={28} />
           </div>
         )}
         {onToggleCollapse && !collapsed && (

@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { useT } from "@/lib/i18n";
+import { BrandMark, BRAND_NAME, BRAND_SLOGAN } from "@/components/BrandMark";
 
 // Only allow same-origin relative paths to prevent open redirect
 function sanitizeCallbackUrl(raw: string | null): string {
@@ -112,11 +113,9 @@ function LoginPageInner() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
       <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-2xl shadow-2xl border border-gray-100 animate-fade-in">
         <div className="text-center">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xl font-bold mx-auto mb-3 shadow-lg shadow-blue-500/30">B</div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">MoneyToHome</h1>
-          <p className="mt-2 text-gray-600">
-            Quản lý proxy · VM · EarnApp · business
-          </p>
+          <div className="flex justify-center mb-4"><BrandMark size={56} /></div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">{BRAND_NAME}</h1>
+          <p className="mt-1.5 text-sm text-gray-500 tracking-wide">{BRAND_SLOGAN}</p>
         </div>
 
         <Suspense fallback={<div className="text-center text-gray-400">{t("loading_dots")}</div>}>
