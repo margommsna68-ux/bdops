@@ -4,12 +4,12 @@ import type {BusinessResource,BusinessRow,BusinessImage} from './types';
 import {assertPeriodOpen,assertCollectorSourceOpen} from './period-lock';
 import {dayText} from './money';
 const fields:Record<BusinessResource,string[]>={
- GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision'],
- PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision'],
+ GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision','loginType','batchId'],
+ PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision','batchId','firstEarnAppId'],
  PAYPAL_EMAIL:['email','password','twoFa','hotmailToken','isPrimary','notes','paypalId','businessManaged','archivedAt','revision'],
  VM_BINDING:['gmailId','revision'],
  VM_SDK:['sdkId','sdkRecordedAt','sdkRecordedById','revision'],
- WORK:['title','notes','status','serverId','vmId','assigneeId','createdById','completedById','completedAt','dueDate','archivedAt','revision'],
+ WORK:['title','notes','status','serverId','vmId','assigneeId','createdById','completedById','completedAt','dueDate','archivedAt','revision','kind'],
  COST:['date','category','amount','total','isPrepaid','note','serverId','proxyAccountId','currency','businessManaged','voidedAt','revision','usdtRate','usdtAmount','fxAppliedAt','fxSource','fxNote','profitTreatment','sourceReceiptId','sourceCollectorExpenseId'],
  TEAM_RECEIPT:['receivedAt','amountUsdt','referenceId','referenceKey','status','collectorId','sourceCollectorExpenseId','collectorUsdAmount','createdById','notes','revision','voidedAt'],
  COLLECTOR_EXPENSE:['date','type','amount','referenceId','note','collectorId','businessManaged','revision','voidedAt'],
@@ -18,6 +18,8 @@ const fields:Record<BusinessResource,string[]>={
  PROFIT:['periodStart','periodEnd','totalWithdrawal','totalCost','netProfit','netProfitUsdt','settled','notes','currency','basis','sourceHash','sourceSnapshotCipher','businessManaged','voidedAt','revision'],
  SPLIT_PAYMENT:['splitId','partnerName','percentage','amount','amountUsdt','paid','note','revision'],
  PACKAGE:['code','nextDueDate','lastPaidAt','revision'],
+ EARNAPP:['loginId','vmId','paypalId','registeredAt','registeredById','revision'],
+ ACCOUNT_BATCH:['kind','loginType','code','source','purchasedAt','priceMode','unitPrice','totalPaid','currency','lineCount','costRecordId','notes','archivedAt','revision'],
 };
 export const isBusinessResource=(type:string):type is BusinessResource=>type in fields;
 function capture(type:BusinessResource,row:object):BusinessRow{const data=row as Record<string,unknown>,image:BusinessRow={};for(const key of fields[type]){const value=data[key];image[key]=value instanceof Date?value.toISOString():value instanceof Prisma.Decimal?value.toString():value as BusinessRow[string];}return image;}
@@ -36,6 +38,8 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
  if(type==='PROFIT')row=await db.profitSplit.findFirst({where:{id,projectId}});
  if(type==='SPLIT_PAYMENT')row=await db.splitAllocation.findFirst({where:{id,split:{projectId}}});
  if(type==='PACKAGE')row=await db.proxyProviderAccount.findFirst({where:{id,projectId}});
+ if(type==='EARNAPP')row=await db.earnAppAccount.findFirst({where:{id,projectId}});
+ if(type==='ACCOUNT_BATCH')row=await db.accountPurchaseBatch.findFirst({where:{id,projectId}});
  return row?capture(type,row):null;
 }
 export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId:string,image:BusinessImage,actorId?:string){
@@ -46,8 +50,9 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='PROFIT'&&image.after.settled)throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt; không hoàn tác thông thường');
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
- if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt'].includes(key)?new Date(String(value)):value;}}
- else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK'].includes(image.resource))data.archivedAt=new Date();
+ if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt'].includes(key)?new Date(String(value)):value;}}
+ else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK','ACCOUNT_BATCH'].includes(image.resource))data.archivedAt=new Date();
+ else if(image.resource==='EARNAPP'){await tx.earnAppAccount.delete({where:{id:image.id}});return;} // created by the undone operation
  else if(['COST','FUND','WITHDRAWAL','PROFIT','TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))data.voidedAt=new Date();
  else throw new ProxyDomainError('INVALID_INPUT');
  data.revision={increment:1};
@@ -65,6 +70,8 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  }
  if(image.resource==='WORK')await tx.businessWorkItem.update({where:{id:image.id},data:data as Prisma.BusinessWorkItemUncheckedUpdateInput});
  if(image.resource==='COST')await tx.costRecord.update({where:{id:image.id},data:data as Prisma.CostRecordUncheckedUpdateInput});
+ if(image.resource==='EARNAPP')await tx.earnAppAccount.update({where:{id:image.id},data:data as Prisma.EarnAppAccountUncheckedUpdateInput});
+ if(image.resource==='ACCOUNT_BATCH')await tx.accountPurchaseBatch.update({where:{id:image.id},data:data as Prisma.AccountPurchaseBatchUncheckedUpdateInput});
  if(image.resource==='PACKAGE')await tx.proxyProviderAccount.update({where:{id:image.id},data:data as Prisma.ProxyProviderAccountUncheckedUpdateInput});
  if(image.resource==='TEAM_RECEIPT')await tx.teamReceipt.update({where:{id:image.id},data:data as Prisma.TeamReceiptUncheckedUpdateInput});
  if(image.resource==='COLLECTOR_EXPENSE')await tx.collectorExpense.update({where:{id:image.id},data:data as Prisma.CollectorExpenseUncheckedUpdateInput});
@@ -79,7 +86,9 @@ export function describeBusinessImage(image:BusinessImage){
   if(!row)return 'Chưa có';if(row.voidedAt||row.archivedAt)return 'Đã thu hồi / ẩn';
   if(image.resource==='TEAM_RECEIPT')return `${row.amountUsdt??'Chưa xác minh'} USDT · ${row.status}`;
   if(image.resource==='COST'&&row.usdtAmount)return `${row.amount} ${row.currency} → ${row.usdtAmount} USDT · 1 USDT = ${row.usdtRate} ${row.currency}`;
-  if(image.resource==='VM_BINDING')return row.gmailId?'Đã ghi tài khoản':'Chưa gán tài khoản';
+  if(image.resource==='VM_BINDING')return 'VM';
+  if(image.resource==='EARNAPP')return (row.vmId?'Đang trên VM':'Chưa gán VM')+' · '+(row.paypalId?'có PayPal':'chưa có PayPal')+(row.registeredAt?' · đã ghi đăng ký':'');
+  if(image.resource==='ACCOUNT_BATCH')return 'Lô '+row.code+(row.costRecordId?' · đã ghi chi phí':' · chưa ghi chi phí');
   if(image.resource==='VM_SDK')return row.sdkId?String(row.sdkId):'Chưa có SDK';
   if(image.resource==='PROFIT')return `Lợi nhuận ${row.netProfit} ${row.currency} · ${row.settled?'Đã chốt':'Bản tính'}`;
   if(row.amount){const status=image.resource==='FUND'?row.failed?'Không về':row.confirmed?'Đã nhận':'Chờ nhận':image.resource==='WITHDRAWAL'?row.type==='MIXING'?'Chuyển nội bộ':row.paidToTeam?'Đã về':'Chờ về':image.resource==='SPLIT_PAYMENT'?row.paid?'Đã ghi trả':'Chưa ghi trả':'Chi phí';return `${row.amount} ${row.currency||''} · ${status}`;}
@@ -87,5 +96,5 @@ export function describeBusinessImage(image:BusinessImage){
   return [row.status,row.notes].filter(Boolean).join(' · ')||'Đã lưu';
  };
  const secrets=['password','twoFaCurrent','twoFa','token','hotmailToken'],secretChanged=b&&secrets.some(k=>s[k]!==b[k]);
- return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy'}[image.resource],label,before:format(b),after:format(s)+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
+ return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:format(s)+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
 }

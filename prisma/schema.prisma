@@ -86,6 +86,8 @@ model Project {
   vmAllocations VMProxyAllocation[]
   vmSdkHistory VMSdkHistory[]
   businessWorkItems BusinessWorkItem[]
+  accountBatches   AccountPurchaseBatch[]
+  earnAppAccounts  EarnAppAccount[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -197,7 +199,8 @@ model VirtualMachine {
   proxy         ProxyIP?    @relation(fields: [proxyId], references: [id], onDelete: SetNull)
   proxyId       String?     @unique
   gmail         GmailAccount? @relation(fields: [gmailId], references: [id], onDelete: SetNull)
-  gmailId       String?
+  gmailId       String? // legacy link (before 17 Oct 2026); the current account is EarnAppAccount.vmId
+  earnApp       EarnAppAccount?
   proxyHistory  ProxyAssignmentHistory[]
   tasks         VMTask[]
   fundTransactions FundTransaction[]
@@ -530,6 +533,10 @@ model GmailAccount {
   paypal        PayPalAccount? @relation(fields: [paypalId], references: [id], onDelete: SetNull)
   paypalId      String?
   earnWithdrawals EarnWithdrawal[]
+  loginType     AccountLoginType? // chosen explicitly on import; never inferred from the email domain
+  batchId       String?
+  batch         AccountPurchaseBatch? @relation(fields:[batchId],references:[id],onDelete:Restrict)
+  earnApp       EarnAppAccount?
   project       Project     @relation(fields: [projectId], references: [id])
   projectId     String
   createdAt     DateTime    @default(now())
@@ -589,6 +596,10 @@ model PayPalAccount {
   withdrawalsTo   Withdrawal[] @relation("WithdrawalDest")
   mergeTargets    HolderMergeTarget[]
   earnWithdrawals EarnWithdrawal[] @relation("EarnWithdrawalPaypal")
+  batchId         String?
+  batch           AccountPurchaseBatch? @relation(fields:[batchId],references:[id],onDelete:Restrict)
+  firstEarnAppId  String?      // the EarnApp account this PayPal first received for; a PayPal never receives for a second one
+  earnApp         EarnAppAccount?
   createdById     String?      // user who created this PP
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -764,6 +775,7 @@ model CostRecord {
   server Server? @relation(fields:[serverId],references:[id],onDelete:Restrict)
   proxyAccountId String?
   proxyAccount ProxyProviderAccount? @relation(fields:[proxyAccountId],references:[id],onDelete:Restrict)
+  accountBatch AccountPurchaseBatch?
   id            String    @id @default(cuid())
   code          String?
   date          DateTime
@@ -1165,7 +1177,63 @@ model BusinessWorkItem {
   dueDate DateTime?
   archivedAt DateTime?
   revision Int @default(0)
+  kind String @default("TASK") // TASK = work given to staff; SHEET_REVIEW = reconciliation rows from the old Sheet import
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([projectId,status])
+}
+
+// ═══════════════════════════════════════
+// ACCOUNT INVENTORY (17 Oct 2026): Gmail / Apple ID login stock, PayPal stock, purchase batches, EarnApp links
+// ═══════════════════════════════════════
+enum AccountLoginType {
+  GMAIL
+  APPLE_ID
+}
+// One receiving batch (lô nhập). The actual paid amount is recorded once in the cost ledger (costRecordId); the per-account price
+// shown in the stock is only an allocation of that payment and never counts again in profit.
+model AccountPurchaseBatch {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  kind String // LOGIN | PAYPAL
+  loginType AccountLoginType?
+  code String
+  source String?
+  purchasedAt DateTime
+  priceMode String @default("NONE") // NONE | UNIT | TOTAL
+  unitPrice Decimal? @db.Decimal(24,8)
+  totalPaid Decimal? @db.Decimal(24,8)
+  currency String?
+  lineCount Int @default(0) // lines declared as bought in the first import (fixes the paid total)
+  costRecordId String? @unique
+  costRecord CostRecord? @relation(fields:[costRecordId],references:[id],onDelete:Restrict)
+  notes String?
+  createdById String
+  revision Int @default(0)
+  archivedAt DateTime?
+  logins GmailAccount[]
+  paypals PayPalAccount[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([projectId,kind,code])
+}
+// The EarnApp account: registered with one login (Gmail or Apple ID), runs on at most one VM and pays out to one PayPal.
+// Assignment is not registration: registeredAt is only set by an explicit operator record.
+model EarnAppAccount {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields:[projectId],references:[id],onDelete:Restrict)
+  loginId String @unique
+  login GmailAccount @relation(fields:[loginId],references:[id],onDelete:Restrict)
+  vmId String? @unique
+  vm VirtualMachine? @relation(fields:[vmId],references:[id],onDelete:Restrict)
+  paypalId String? @unique
+  paypal PayPalAccount? @relation(fields:[paypalId],references:[id],onDelete:Restrict)
+  registeredAt DateTime?
+  registeredById String?
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([projectId])
 }

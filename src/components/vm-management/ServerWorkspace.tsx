@@ -17,17 +17,19 @@ import {vmView,summarizeVMs} from './workflow';
 import {VmGrid,type CopyWhich,type GridRights} from './vm-grid/VmGrid';
 import type {StatusActionKind} from './vm-grid/status-actions';
 import {VmSidePanel} from './vm-grid/VmSidePanel';
-import {PasteTablePanel,AssignProxyPanel,GmailPanel,NotesPanel} from './vm-grid/BulkPanels';
+import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels';
+import {AccountBulkPanel} from './vm-grid/AccountPanels';
+import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
 import {DEFAULT_PREFS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type PanelTab} from './vm-grid/grid-model';
 type Blocked={id:string;code:string;reason:string;cause?:string};
-type BulkPanel='paste'|'assign'|'gmail'|'note'|'copy'|null;
+type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|null;
 const CAUSE_TAB:Record<string,PanelTab>={HOLD:'install',TASK:'install',INSTALLED:'overview',SDK:'overview',SERVER:'overview'};
 const STATUS_ORDER={REVIEW:0,PENDING:1,MISSING:2,INSTALLED:3,ARCHIVED:4} as const;
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
 // action columns; side panel instead of stacked dialogs; everything the user picked lives in the URL. See docs/runbooks/server-vm-table.md.
 export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?:string}){
-  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.businessManagement.accounts.useQuery({projectId},{retry:false});
+  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false});
   const refresh=useVMRefresh(),params=useSearchParams(),router=useRouter(),pathname=usePathname(),session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
   const url=readGridUrl(params);
   // Two quick changes (sort, then page size) must both survive: build on the last URL we asked for until the router catches up.
@@ -47,12 +49,14 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),inScope=useMemo(()=>allVMs.filter(v=>!serverId||v.serverId===serverId),[allVMs,serverId]);
   const active=useMemo(()=>inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),[inScope,servers]),deleted=useMemo(()=>inScope.filter(v=>v.archivedAt),[inScope]),deletedView=url.view==='DELETED';
   const counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdk).length;
-  const gmailById=useMemo(()=>new Map((accounts.data?.gmails||[]).map(g=>[g.id,g.email])),[accounts.data]),gmailOfVm=useMemo(()=>new Map((accounts.data?.vms||[]).map(v=>[v.id,v.gmailId?gmailById.get(v.gmailId)||null:null])),[accounts.data,gmailById]);
+  // EarnApp account (login + PayPal) of each VM; the search also finds VMs by login email or PayPal code.
+  const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.legacyGmail].filter(Boolean).join(' '):'';};
   const needle=url.q.trim().toLowerCase();
   // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(deletedView?deleted:active).filter(v=>(deletedView||!url.view||(url.view==='SDK_MISSING'?!v.sdk:vmView(v)===url.view))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${gmailOfVm.get(v.id)||''}`.toLowerCase().includes(needle)))
+  const filtered=useMemo(()=>(deletedView?deleted:active).filter(v=>(deletedView||!url.view||(url.view==='SDK_MISSING'?!v.sdk:vmView(v)===url.view))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
     .sort((a,b)=>(url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
-    [deletedView,deleted,active,url.view,url.sort,needle,gmailOfVm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletedView,deleted,active,url.view,url.sort,needle,accountOfVm]);
   // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Chờ cài) stays selected and stays in
   // the open bulk panel. Bulk actions take the selected rows in table order.
   const selectedRows=useMemo(()=>[...(deletedView?deleted:active)].filter(v=>selected.has(v.id)).sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),[deletedView,deleted,active,selected]);
@@ -133,7 +137,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const togglePage=(on:boolean)=>setSelected(prev=>{const n=new Set(prev);paged.rows.forEach(v=>{if(on)n.add(v.id);else n.delete(v.id);});return n;});
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
   const openBulk=(panel:BulkPanel,toggle=false)=>{if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
-  useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='gmail'||b==='note'?null:b);},[selected.size]);
+  useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
   const chip=(view:GridView,label:string,n:number)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','PENDING','REVIEW','SDK_MISSING'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n}</strong></button>;
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
@@ -157,7 +161,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('PENDING','Chờ cài',counts.pending)}{chip('INSTALLED','Đã cài',counts.installed)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('DELETED','Đã xoá',deleted.length)}</div>
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
-        <div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, Gmail hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, Gmail, ghi chú…':'Tìm server, VM, IP, SDK, Gmail…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
+        <div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
           <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="STATUS">Cần xử lý trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
@@ -166,24 +170,24 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
           <span className="vm-bulkbar-actions">{deletedView?(rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void restore(selectedRows.map(v=>v.id))}><RotateCcw size={15}/>Khôi phục</button>):<>
             {rights.copy&&<DropdownMenu><DropdownMenuTrigger asChild><button className="pm-button"><Copy size={15}/>Copy proxy</button></DropdownMenuTrigger><DropdownMenuContent className="vm-menu"><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'DESIRED')}>Copy proxy được giao</DropdownMenuItem><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
             {rights.assign&&<button className={'pm-button'+(bulk==='assign'?' pm-button-primary':'')} onClick={()=>openBulk('assign')}>Gán proxy</button>}
-            {rights.assign&&<button className={'pm-button'+(bulk==='gmail'?' pm-button-primary':'')} onClick={()=>openBulk('gmail')}>Gán Gmail</button>}
+            {rights.assign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
             {rights.manage&&<button className={'pm-button'+(bulk==='note'?' pm-button-primary':'')} onClick={()=>openBulk('note')}>Sửa ghi chú</button>}
             {rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void remove(selectedRows.map(v=>v.id))}><Trash2 size={15}/>Xoá</button>}</>}
             <button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}><X size={15}/>Bỏ chọn</button></span></div>}
         {blocked.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{blocked.length} VM chưa xử lý được</strong><button className="pm-icon-button" aria-label="Đóng danh sách bị chặn" onClick={()=>setBlocked([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{blocked.map(b=><li key={b.id}><strong className="pm-code">{b.code}</strong> — {b.reason} · <button className="pm-link" onClick={()=>openVm(b.id,CAUSE_TAB[b.cause||'']||'overview',b.cause||null)}>Mở VM</button></li>)}</ul></div>}
         {pager('top')}
-        <div ref={gridHost}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} gmailOf={id=>gmailOfVm.get(id)||null} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading}
+        <div ref={gridHost}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading}
           emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}/></div>
         {pager('bottom')}
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>
-        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='gmail'?`Gán Gmail · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
+        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
           {bulk==='paste'&&<PasteTablePanel projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} onSaved={()=>void refresh()}/>}
           {bulk==='assign'&&<AssignProxyPanel projectId={projectId} vms={selectedRows} sourceConnected={rights.sourceConnected} onSaved={()=>void refresh()}/>}
-          {bulk==='gmail'&&<GmailPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}
+          {bulk==='account'&&<AccountBulkPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}
           {bulk==='note'&&<NotesPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}
           {bulk==='copy'&&manualCopy&&<label className="pm-label">Chọn và copy (Ctrl+C)<textarea className="pm-input font-mono" rows={8} readOnly value={manualCopy} onFocus={e=>e.target.select()}/></label>}
-        </div></aside>:panelVm&&<VmSidePanel key={panelVm.id} projectId={projectId} vm={panelVm} tab={url.tab} cause={url.cause} rights={rights} gmailEmail={gmailOfVm.get(panelVm.id)||null} onTab={t=>go({tab:t},'replace')} onClose={closePanel} onSaved={()=>void refresh()} onCopy={(vm,which)=>void copyList([vm],which)}/>}
+        </div></aside>:panelVm&&<VmSidePanel key={panelVm.id} projectId={projectId} vm={panelVm} tab={url.tab} cause={url.cause} rights={rights} account={accountOfVm.get(panelVm.id)} onTab={t=>go({tab:t},'replace')} onClose={closePanel} onSaved={()=>void refresh()} onCopy={(vm,which)=>void copyList([vm],which)}/>}
       </div>}
     </div>
     {form==='ADD'&&<AddVmDialog projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} known={allVMs.map(v=>({serverId:v.serverId,code:v.code,archivedAt:v.archivedAt}))} onClose={()=>setForm(null)} onSaved={()=>void refresh()}/>}

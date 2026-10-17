@@ -7,6 +7,7 @@ import {withProxyTransaction} from '../proxy-management/transaction';
 import {runBusinessCommand} from './idempotency';
 import {authorizeBusiness} from './scope';
 import {verifyBusinessPin} from './pin';
+import {applyLinks} from '../account-store/links';
 export interface AccountInput {kind:'GMAIL'|'PAYPAL';id?:string;email:string;code?:string;holder?:string;password?:string;twoFa?:string;token?:string;recoveryEmail?:string;paypalId?:string|null;status?:string;notes?:string;expectedRevision?:number;key:string}
 const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Thông tin tài khoản chưa hợp lệ');};
 const manager=(scope:ActorScope)=>{if(!['ADMIN','MODERATOR'].includes(scope.role))throw new ProxyDomainError('FORBIDDEN','Quản lý mới được thêm/sửa tài khoản');};
@@ -18,9 +19,10 @@ export async function saveOperatingAccount(scope:ActorScope,input:AccountInput,d
   if(input.kind==='GMAIL'){
    const old=input.id?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}}):null;if(input.id&&!old)throw new ProxyDomainError('NOT_FOUND');if(old&&old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
    const duplicate=await tx.gmailAccount.findFirst({where:{email:{equals:email,mode:'insensitive'},...(old?{id:{not:old.id}}:{})},select:{id:true}});if(duplicate)throw new ProxyDomainError('INVALID_INPUT','Email đã có trong hệ thống; kiểm tra tài khoản hiện có');
-   if(input.paypalId){const pp=await tx.payPalAccount.findFirst({where:{id:input.paypalId,projectId:scope.projectId,archivedAt:null}});if(!pp)throw new ProxyDomainError('NOT_FOUND');}
+   // Gmail is not PayPal: the payout PayPal belongs to the EarnApp account (Server/VM). Old Gmail→PayPal links are kept, never added.
+   if(input.paypalId&&input.paypalId!==(old?.paypalId??null))throw new ProxyDomainError('INVALID_INPUT','PayPal nhận tiền gán theo tài khoản EarnApp ở Server/VM, không gắn vào Gmail');
    for(const id of Array.from(new Set([old?.paypalId,input.paypalId].filter((s):s is string=>!!s)))){await images.remember('PAYPAL',id);await tx.payPalAccount.update({where:{id},data:{revision:{increment:1}}});}
-   const data={email,status:(input.status||old?.status||'ACTIVE') as GmailStatus,notes:input.notes,paypalId:input.paypalId,recoveryEmail:input.recoveryEmail,businessManaged:true,...(input.password?{password:encrypt(input.password)}:{}),...(input.twoFa?{twoFaCurrent:encrypt(input.twoFa)}:{}),...(input.token?{token:encrypt(input.token)}:{})};
+   const data={email,status:(input.status||old?.status||'ACTIVE') as GmailStatus,notes:input.notes,paypalId:input.paypalId===undefined?old?.paypalId:input.paypalId||null,recoveryEmail:input.recoveryEmail,businessManaged:true,...(input.password?{password:encrypt(input.password)}:{}),...(input.twoFa?{twoFaCurrent:encrypt(input.twoFa)}:{}),...(input.token?{token:encrypt(input.token)}:{})};
    if(old)await images.remember('GMAIL',old.id);const row=old?await tx.gmailAccount.update({where:{id:old.id},data:{...data,revision:{increment:1}}}):await tx.gmailAccount.create({data:{...data,projectId:scope.projectId}});if(!old)await images.remember('GMAIL',row.id,true);return {id:row.id};
   }
   const old=input.id?await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}}):null;if(input.id&&!old)throw new ProxyDomainError('NOT_FOUND');if(old&&old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
@@ -31,18 +33,17 @@ export async function saveOperatingAccount(scope:ActorScope,input:AccountInput,d
   if(primary)await images.remember('PAYPAL_EMAIL',primary.id);const child=primary?await tx.payPalEmail.update({where:{id:primary.id},data:{...credentials,revision:{increment:1}}}):await tx.payPalEmail.create({data:{...credentials,paypalId:row.id,projectId:scope.projectId}});if(!primary)await images.remember('PAYPAL_EMAIL',child.id,true);return {id:row.id};
  },db);
 }
+// Old "Gmail của VM" API: now records the VM's EarnApp account through the same checks as the cell and Dán bảng (one login per
+// VM, never taken from another VM). The legacy VirtualMachine.gmailId column is no longer written.
 export async function bindVMAccount(scope:ActorScope,input:{vmId:string;gmailId:string|null;expectedRevision:number;key:string},db:PrismaClient=prisma){
- return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_VM_ACCOUNT',module:'INFRASTRUCTURE'},async(tx,images)=>{
-  const vm=await tx.virtualMachine.findFirst({where:{id:input.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');if(vm.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
-  if(input.gmailId&&!await tx.gmailAccount.findFirst({where:{id:input.gmailId,projectId:scope.projectId,archivedAt:null}}))throw new ProxyDomainError('NOT_FOUND');
-  await images.remember('VM_BINDING',vm.id);for(const id of Array.from(new Set([vm.gmailId,input.gmailId].filter((s):s is string=>!!s)))){await images.remember('GMAIL',id);await tx.gmailAccount.update({where:{id},data:{revision:{increment:1}}});}
-  await tx.virtualMachine.update({where:{id:vm.id},data:{gmailId:input.gmailId,revision:{increment:1}}});return {id:vm.id};
- },db);
+ const result=await applyLinks(scope,{key:input.key,items:[{line:1,vmId:input.vmId,expectedRevision:input.expectedRevision,login:input.gmailId}]},db),row=result.rows[0];
+ if(row?.outcome==='ERROR')throw new ProxyDomainError(/không còn|không thuộc/.test(row.message)?'NOT_FOUND':/vừa được/.test(row.message)?'STALE_PREVIEW':'INVALID_INPUT',row.message);
+ return {id:input.vmId,replay:result.replay,undone:result.undone};
 }
 export async function archiveOperatingAccount(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;expectedRevision:number;key:string},db:PrismaClient=prisma){
  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT_ARCHIVE',module:input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE'},async(tx,images,current)=>{
   manager(current);const old=input.kind==='GMAIL'?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId}}):await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!old)throw new ProxyDomainError('NOT_FOUND');if(old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
-  const held=input.kind==='GMAIL'?await tx.virtualMachine.count({where:{gmailId:old.id}}):await tx.gmailAccount.count({where:{paypalId:old.id,archivedAt:null}});if(held)throw new ProxyDomainError('INVALID_INPUT','Tài khoản đang được ghi trên VM hoặc liên kết Gmail. Bỏ liên kết trước khi ẩn.');await images.remember(input.kind,old.id);
+  const held=input.kind==='GMAIL'?await tx.virtualMachine.count({where:{gmailId:old.id}})+await tx.earnAppAccount.count({where:{loginId:old.id,vmId:{not:null}}}):await tx.gmailAccount.count({where:{paypalId:old.id,archivedAt:null}})+await tx.earnAppAccount.count({where:{paypalId:old.id}});if(held)throw new ProxyDomainError('INVALID_INPUT','Tài khoản đang được ghi trên VM hoặc liên kết Gmail. Bỏ liên kết trước khi ẩn.');await images.remember(input.kind,old.id);
   if(input.kind==='GMAIL')await tx.gmailAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});else await tx.payPalAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});return {id:old.id};
  },db);
 }

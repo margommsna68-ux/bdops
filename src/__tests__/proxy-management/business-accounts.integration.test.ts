@@ -11,9 +11,11 @@ afterAll(()=>db.$disconnect());
 it('canonical accounts are masked and VM binding keeps proxy state and has safe history',async()=>{
  const f=await businessFixture();try{
   const pp=await saveOperatingAccount(f.scope,{kind:'PAYPAL',email:randomUUID()+'@fixture.invalid',code:'PP-1',password:'private-fixture-secret',key:randomUUID()},db);
-  const gmail=await saveOperatingAccount(f.scope,{kind:'GMAIL',email:randomUUID()+'@fixture.invalid',paypalId:pp.id,password:'private-fixture-secret',key:randomUUID()},db),create=(await listOperations(f.scope,db)).find(o=>o.kind==='BUSINESS_ACCOUNT')!;
+  // Gmail is not PayPal: a new Gmail→PayPal link is refused (the payout PayPal belongs to the EarnApp account).
+  await expect(saveOperatingAccount(f.scope,{kind:'GMAIL',email:randomUUID()+'@fixture.invalid',paypalId:pp.id,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+  const gmail=await saveOperatingAccount(f.scope,{kind:'GMAIL',email:randomUUID()+'@fixture.invalid',password:'private-fixture-secret',key:randomUUID()},db),create=(await listOperations(f.scope,db)).find(o=>o.kind==='BUSINESS_ACCOUNT')!;
   await bindVMAccount(f.worker,{vmId:f.vm.id,gmailId:gmail.id,expectedRevision:0,key:randomUUID()},db);
-  const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(vm.gmailId).toBe(gmail.id);expect(vm.proxyId).toBeNull();expect(vm.desiredConfigurationId).toBeNull();
+  const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(vm.gmailId).toBeNull();expect((await db.earnAppAccount.findUniqueOrThrow({where:{vmId:f.vm.id}})).loginId).toBe(gmail.id);expect(vm.proxyId).toBeNull();expect(vm.desiredConfigurationId).toBeNull();
   const dto=JSON.stringify(await readOperatingWorkspace(f.worker,db));expect(dto).not.toMatch(/password|twoFa|credentialCipher|private-fixture-secret/);
   await expect(undoOperation(f.scope,create.id,'Account is linked',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
   await expect(archiveOperatingAccount(f.scope,{kind:'GMAIL',id:gmail.id,expectedRevision:(await db.gmailAccount.findUniqueOrThrow({where:{id:gmail.id}})).revision,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});

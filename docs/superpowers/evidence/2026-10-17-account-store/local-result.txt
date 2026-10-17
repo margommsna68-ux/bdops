@@ -1,0 +1,18 @@
+since 2026-10-17T08:51:03.105Z server ac-5pwe9
+team cash: true
+PASS Xem trước Gmail — "3 hợp lệ · 0 đã có · 3 lỗi · Chi phí ghi một lần: 125000 VND ≈ 5 USDT." · giữ từng dòng lỗi, không hiện mật khẩu
+PASS Nhập Gmail — còn 3 dòng lỗi trong ô; chi phí 11 → 12
+PASS Sửa dòng lỗi & nhập lại — lô cũ: "Lô nhập Nguồn mua Ngày mua Ghi chú lô 1 hợp lệ · 0 đã có · 0 lỗi · Lô GM-5pwe9 đã có: nhập tiếp, chi phí đã ghi, không ghi thêm." · nhập lại 4 dòng: 0 hợp lệ, 4 đã có · chi phí vẫn 12
+PASS Nhập PayPal — "5 hợp lệ · 0 đã có · 2 lỗi"; chỉ cần Mã PP | Email
+PP options: 28 · tut-5pwe9-2 · pp2-5pwe9@example.invalid | tut-5pwe9-3 · pp3-5pwe9@example.invalid | tut-5pwe9-4 · pp4-5pwe9@example.invalid | tut-5pwe9-5 · pp5-5pwe9@example.invalid | tut-5pwe9-6 · pp6-5pwe9@example.invalid
+PASS Gán tại ô — VM_001: " VM_001 — Chưa có SDK tk1-5pwe9@example.invalid Gmail tut-5pwe9-2 Thiếu proxy — "
+PASS Cùng liên kết — nút Lưu khoá khi không đổi; API: "Không thay đổi"; thao tác mới nhất trong lịch sử không đổi
+PASS Gán nhiều VM — ap2-5d81n@example.invalid + tut-5bsbb-5 · ap3-5d81n@example.invalid + tut-5bsbb-6 · ap4-5d81n@example.invalid + tut-5d81n-2 (NEW cũ nhất trước, không mở từng máy)
+PASS Dán bảng & chặn dùng chung — VM_005 lặp 2 dòng → cả 2 lỗi; VM_009 không có; VM_006 lưu; tk2 vẫn NEW (không lưu nửa dòng)
+PASS Giữ cho VM khác — "Tài khoản tk1-5pwe9@example.invalid đang giữ cho ac-5pwe9 / VM_001; bỏ gán ở đó trước, web không tự chuyển" · "PayPal tut-5pwe9-2 đang nhận cho tk1-5pwe9@example.invalid (ac-5pwe9 / VM_001); một PayPal chỉ nhận cho một EarnApp"
+PASS Hai người cùng gán — APPLIED: Gán tài khoản (tạo liên kết EarnApp mới; chưa ghi đã đăng ký) | ERROR: VM vừa được người khác thay đổi; xem lại dòng này
+PASS Kho = Server/VM — kho: " tk1-5pwe9@example.invalid Gmail Đã gán ac-5pwe9 / VM_001 tut-5pwe9-2 Dùng được Bị khoá tạm Cần khôi phục Cần " → mở /infrastructure/servers/cmvc5q4f20002e3v7q55cnqjs?vm=cmvc5q4f30004e3v7s6jlqqr2&tab=account
+PASS Bỏ gán & chi phí — tk1 → USED (không về NEW), tut-5pwe9-2 → USED; chi phí sau gán/bỏ gán: 12 (= 12)
+PASS Lô nhập & bộ lọc — GM: "GM-5pwe9 Gmail Shop thử · 2026-10-17 6 / 4 125000 VND ≈ 5 USDT Đã ghi chi phí Nhập tiếp và" · AP: "AP-5pwe9 Apple ID — · 2026-10-17 3 / 4 — Chưa ghi chi phí Nhập tiếp và" · URL giữ bộ lọc sau tải lại
+PASS Mục Công việc — 0 việc, không việc nào sinh từ lần nhập/gán này
+SUMMARY Xem trước Gmail:đạt · Nhập Gmail:đạt · Sửa dòng lỗi & nhập lại:đạt · Nhập PayPal:đạt · Gán tại ô:đạt · Cùng liên kết:đạt · Gán nhiều VM:đạt · Dán bảng & chặn dùng chung:đạt · Giữ cho VM khác:đạt · Hai người cùng gán:đạt · Kho = Server/VM:đạt · Bỏ gán & chi phí:đạt · Lô nhập & bộ lọc:đạt · Mục Công việc:đạt

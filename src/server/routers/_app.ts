@@ -23,6 +23,7 @@ import { editHistoryRouter } from "./editHistory";
 import { proxyManagementRouter } from './proxyManagement';
 import {vmManagementRouter} from './vmManagement';
 import {businessManagementRouter} from './businessManagement';
+import {accountStoreRouter} from './accountStore';
 
 export const appRouter = router({
   project: projectRouter,
@@ -38,6 +39,7 @@ export const appRouter = router({
   proxyManagement: proxyManagementRouter,
   vmManagement: vmManagementRouter,
   businessManagement:businessManagementRouter,
+  accountStore:accountStoreRouter,
   gmail: gmailRouter,
   vmTask: vmTaskRouter,
   auditLog: auditLogRouter,

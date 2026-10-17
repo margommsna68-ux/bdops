@@ -16,6 +16,8 @@ export interface BulkRow {line:number;server:string|null;vm:string;vmId:string|n
 export interface BulkPreview {kind:BulkKind;rows:BulkRow[];ready:number;skipped:number;errors:number}
 export interface BulkApplyRow {line:number;vmId:string;server:string;vm:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string}
 export const CLEAR_TOKEN='-';
+// Gmail per VM became the EarnApp account (login + PayPal) with its own checks: Dán bảng → Tài khoản / accountStore.linkApply.
+function refuseGmail(kind:BulkKind){if(kind==='GMAIL') throw new ProxyDomainError('INVALID_INPUT','Gán tài khoản dùng Dán bảng → Tài khoản (Server | VM | Tài khoản | Mã PP)');}
 const MAX_ROWS=1000,NOTE_MAX=1000;
 const RIGHT:Record<BulkKind,'ASSIGN'|'MANAGE'>={SDK:'ASSIGN',PROXY:'ASSIGN',GMAIL:'ASSIGN',NOTE:'MANAGE'};
 type Line={line:number;server:string|null;vm:string;value:string;extra:boolean};
@@ -69,6 +71,7 @@ function proxyIssue(e:EndpointRow,vm:VMRow):{skip?:string;error?:string}|null{
 }
 export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]},db:PrismaClient=prisma):Promise<BulkPreview>{
   const kind=input.kind;if(!RIGHT[kind]||(input.text===undefined)===(input.items===undefined)) throw new ProxyDomainError('INVALID_INPUT');
+  refuseGmail(kind);
   await authorizeVM(scope,RIGHT[kind],db);
   const vms=await activeVMs(scope.projectId,db),server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true,archivedAt:null}}):null;
   if(input.serverId&&!server) throw new ProxyDomainError('NOT_FOUND','Server không thuộc dự án này hoặc đã xoá');
@@ -125,6 +128,7 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
   return {kind,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
 export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;value:string|null}[]},db:PrismaClient=prisma){
+  refuseGmail(input.kind);
   const kind=input.kind;if(!RIGHT[kind]||!input.items.length||input.items.length>MAX_ROWS||new Set(input.items.map(i=>i.vmId)).size!==input.items.length) throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM mỗi đợt');
   for(const i of input.items){
     if(kind==='SDK'&&i.value!==null&&normalizeSdk(i.value)!==i.value) throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ');

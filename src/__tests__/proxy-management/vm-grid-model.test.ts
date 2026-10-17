@@ -3,11 +3,11 @@ import {DEFAULT_PREFS,editableFields,moveColumn,nextCell,normalizePrefs,pageOf,r
 const params=(s:string)=>new URLSearchParams(s);
 describe('Server/VM grid model',()=>{
   it('default columns follow the brief and optional columns start hidden',()=>{
-    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['proxy','sdk','gmail','status','notes']);
+    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['proxy','sdk','account','paypal','status','notes']);
   });
   it('stored preferences are cleaned: unknown keys dropped, new columns appended, widths bounded',()=>{
-    const p=normalizePrefs({order:['notes','bogus','proxy','notes'],hidden:['gmail'],widths:{sdk:20,notes:300}});
-    expect(p.order.slice(0,2)).toEqual(['notes','proxy']);expect(p.order).toHaveLength(8);expect(p.hidden).toContain('gmail');expect(p.hidden).toContain('version');
+    const p=normalizePrefs({order:['notes','bogus','proxy','notes'],hidden:['paypal','gmail'],widths:{sdk:20,notes:300}});
+    expect(p.order.slice(0,2)).toEqual(['notes','proxy']);expect(p.order).toHaveLength(9);expect(p.hidden).toContain('paypal');expect(p.hidden).not.toContain('gmail');expect(p.hidden).toContain('version');
     expect(p.widths).toEqual({notes:300});expect(normalizePrefs(null)).toEqual(DEFAULT_PREFS);
   });
   it('moves, toggles and resizes columns within limits',()=>{

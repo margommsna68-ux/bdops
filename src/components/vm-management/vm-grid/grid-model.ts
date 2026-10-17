@@ -1,13 +1,14 @@
 // Pure model of the Server/VM grid: columns and per-user preferences, URL state, the next editable cell for Tab, pagination.
 // No React here, so it is unit-tested directly.
-export type ColumnKey='proxy'|'sdk'|'gmail'|'status'|'notes'|'version'|'sdkMeta'|'progress';
+export type ColumnKey='proxy'|'sdk'|'account'|'paypal'|'status'|'notes'|'version'|'sdkMeta'|'progress';
 export type EditField='code'|'sdk'|'notes';
 export interface ColumnDef {key:ColumnKey;label:string;width:number;min:number;optional?:boolean;edit?:EditField}
 // Fixed columns (not movable/hideable): [select] [server, only for all servers] [VM] … [⋯]. These are the movable ones.
 export const COLUMNS:ColumnDef[]=[
   {key:'proxy',label:'Proxy',width:230,min:150},
   {key:'sdk',label:'SDK',width:170,min:110,edit:'sdk'},
-  {key:'gmail',label:'Gmail của VM',width:190,min:120},
+  {key:'account',label:'Tài khoản EarnApp',width:230,min:140},
+  {key:'paypal',label:'PayPal nhận',width:130,min:90},
   {key:'status',label:'Tình trạng',width:130,min:100},
   {key:'notes',label:'Ghi chú',width:220,min:120,edit:'notes'},
   {key:'version',label:'Cấu hình',width:120,min:90,optional:true},

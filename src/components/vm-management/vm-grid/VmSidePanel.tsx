@@ -5,7 +5,6 @@ import {Copy,X} from 'lucide-react';
 import toast from 'react-hot-toast';
 import {trpc} from '@/lib/trpc';
 import {localDate} from '@/components/proxy-management/HistoryPanel';
-import {useBusinessKey} from '@/components/business-management/shared';
 import {workLabels} from '@/components/business-management/workflow';
 import {displayNote} from '@/server/vm-management/vm-codes';
 import {AllocationForm} from '../AllocationDialog';
@@ -16,28 +15,29 @@ import {vmView,viewLabels,proxyAddress} from '../workflow';
 import {errorMessage,type ManagedVM} from '../shared';
 import {reviewReason,type CopyWhich,type GridRights} from './VmGrid';
 import type {PanelTab} from './grid-model';
-const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Việc cài'},{key:'work',label:'Công việc'},{key:'account',label:'Gmail'},{key:'history',label:'Lịch sử'}];
+import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
+const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Việc cài'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Chưa bắt đầu',IN_PROGRESS:'Đang cài',FAILED:'Cài chưa xong',CONFIRMED:'Đã xác nhận',CANCELLED:'Đã huỷ'};
 const TASK_STATUS:Record<string,string>={PENDING:'Chưa bắt đầu',IN_PROGRESS:'Đang làm',COMPLETED:'Xong',CANCELLED:'Đã huỷ'};
 const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy (chờ cài, đã cài hoặc giữ để kiểm tra). Bỏ gán ở bảng proxy hoặc hoàn tất ở Việc cài trước khi xoá.',TASK:'VM còn việc cài proxy chưa xong. Hoàn tất hoặc huỷ ở tab Việc cài.',INSTALLED:'VM còn liên kết proxy đã cài. Đổi hoặc gỡ proxy rồi xác nhận trước khi xoá.',SDK:'SDK của máy đang thuộc VM khác; web không giành lại. Xoá SDK ở máy kia hoặc giữ máy này ở trạng thái đã xoá.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
-export function VmSidePanel({projectId,vm,tab,cause,rights,gmailEmail,onTab,onClose,onSaved,onCopy}:{projectId:string;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;gmailEmail:string|null;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
+export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose,onSaved,onCopy}:{projectId:string;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const deleted=!!vm.archivedAt,status=vmView(vm);
   return <aside className="vm-panel" aria-label={'Chi tiết '+vm.server+' / '+vm.code}>
     <div className="vm-panel-head"><div className="min-w-0"><p className="pm-muted text-xs">{vm.server}</p><h2 className="pm-code vm-ellipsis">{vm.code}</h2><span className={`pm-badge ${deleted?'pm-badge-muted':status==='REVIEW'?'pm-badge-red':status==='PENDING'?'vm-badge-pending':status==='INSTALLED'?'pm-badge-green':'pm-badge-muted'}`}>{deleted?'Đã xoá':viewLabels[status]}</span></div><button className="pm-icon-button" aria-label="Đóng chi tiết" title="Đóng (Esc)" onClick={onClose}><X size={16}/></button></div>
     <div className="vm-panel-tabs" role="tablist">{TABS.map(t=><button key={t.key} type="button" role="tab" aria-selected={tab===t.key} className={tab===t.key?'active':''} onClick={()=>onTab(t.key)}>{t.label}</button>)}</div>
     <div className="vm-panel-body">
       {cause&&CAUSE[cause]&&<p className="pm-review text-sm" role="note"><strong>Lý do bị chặn:</strong> {CAUSE[cause]}</p>}
-      {tab==='overview'&&<Overview projectId={projectId} vm={vm} rights={rights} gmailEmail={gmailEmail} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
+      {tab==='overview'&&<Overview projectId={projectId} vm={vm} rights={rights} account={account} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
       {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:!rights.assign?<p className="pm-muted text-sm">Chưa có quyền giao proxy.</p>:!rights.sourceConnected?<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy.</p>:<><p className="pm-muted text-sm">{vm.installed?'Giao cấu hình mới. Proxy đã cài vẫn được giữ đến khi xác nhận thay xong.':'Chọn proxy NEW chưa dùng: TUT hoặc Chung mooon–Genjy.'}</p><AllocationForm key={vm.id+(vm.desired?.id||'')} projectId={projectId} vm={vm} onClose={()=>onTab('overview')} onSaved={onSaved}/></>)}
       {tab==='install'&&<InstallTab projectId={projectId} vm={vm} rights={rights} onSaved={onSaved}/>}
       {tab==='work'&&<WorkTab projectId={projectId} vm={vm}/>}
-      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} canEdit={rights.assign&&!deleted} onSaved={onSaved}/>}
+      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} onSaved={onSaved}/>}
       {tab==='history'&&<HistoryTab projectId={projectId} vm={vm}/>}
     </div>
   </aside>;
 }
-function Overview({projectId,vm,rights,gmailEmail,onTab,onSaved,onCopy}:{projectId:string;vm:ManagedVM;rights:GridRights;gmailEmail:string|null;onTab:(t:PanelTab)=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
+function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:string;vm:ManagedVM;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),updateVM=trpc.vmManagement.updateVM.useMutation(),sdk=trpc.vmManagement.sdkApply.useMutation(),[confirmClear,setConfirmClear]=useState(false);
   const deleted=!!vm.archivedAt,cfg=(id?:string)=>detail.data?.configurations.find(c=>c.id===id),d=cfg(vm.desired?.id),i=cfg(vm.installed?.id),status=vmView(vm);
   const saveNotes=async(value:string)=>{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,notes:value||null,expectedRevision:vm.revision});if(r.saved){toast.success('Đã lưu');onSaved();}};
@@ -54,7 +54,7 @@ function Overview({projectId,vm,rights,gmailEmail,onTab,onSaved,onCopy}:{project
     <section className="vm-panel-card"><h3>SDK EarnApp</h3>{vm.sdk?<><code className="vm-sdk vm-sdk-full">{vm.sdk.id}</code><p className="pm-muted text-xs mt-1">{vm.sdk.recordedBy||'—'} · {localDate(vm.sdk.recordedAt)}</p></>:<p className="vm-sdk-missing">Chưa có SDK</p>}
       <div className="flex gap-2 flex-wrap mt-2">{vm.sdk&&<button className="pm-button pm-button-quiet" onClick={()=>void navigator.clipboard?.writeText(vm.sdk!.id).then(()=>toast.success('Đã copy SDK'))}><Copy size={14}/>Copy SDK</button>}{vm.sdk&&rights.assign&&!deleted&&(confirmClear?<span className="flex gap-2 items-center"><span>Xoá SDK của {vm.code}?</span><button className="pm-button" disabled={sdk.isLoading} onClick={()=>void clearSdk()}>Xoá</button><button className="pm-button pm-button-quiet" onClick={()=>setConfirmClear(false)}>Huỷ</button></span>:<button className="pm-button pm-button-quiet" onClick={()=>setConfirmClear(true)}>Xoá SDK</button>)}</div>
       <p className="pm-muted text-xs mt-1">Sửa SDK ngay tại ô SDK trong bảng (Enter/F2). Ghi SDK không chứng minh app đang chạy.</p></section>
-    <section className="vm-panel-card"><h3>Gmail của VM</h3><p>{gmailEmail||<span className="pm-muted">Chưa liên kết</span>}</p>{!deleted&&rights.assign&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi Gmail</button>}</section>
+    <section className="vm-panel-card"><h3>Tài khoản EarnApp</h3><p>{account?.earnApp?<>{account.earnApp.login.email} <span className="pm-muted">({TYPE_LABEL[account.earnApp.login.type||'']||'chưa chọn loại'})</span> · PayPal {account.earnApp.paypal?.code||'chưa có'}</>:account?.legacyGmail?<span className="pm-muted">Gmail cũ: {account.legacyGmail} (chưa có tài khoản EarnApp)</span>:<span className="pm-muted">Chưa gán</span>}</p><p className="pm-muted text-xs">{account?.earnApp?.registeredAt?'Đã ghi đăng ký EarnApp':'Chưa ghi đăng ký EarnApp'}. Sửa ngay tại ô Tài khoản EarnApp trong bảng.</p>{!deleted&&rights.assign&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi tài khoản / PayPal</button>}</section>
     <section className="vm-panel-card"><h3>Ghi chú</h3><InlineText value={displayNote(vm.notes)} label={'ghi chú '+vm.code} placeholder="thêm ghi chú" canEdit={rights.manage&&!deleted} multiline className="vm-panel-note" onSave={saveNotes}/></section>
   </div>;
 }
@@ -74,18 +74,10 @@ function WorkTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
     {rows.length?<ul className="space-y-2">{rows.map(w=><li key={w.id} className="vm-panel-card text-sm"><strong>{w.title}</strong><p className="pm-muted text-xs">{workLabels[w.status as keyof typeof workLabels]||w.status}{w.assignee?' · '+w.assignee:''}{w.dueDate?' · hạn '+w.dueDate:''}</p>{w.notes&&<p className="text-xs mt-1">{w.notes}</p>}</li>)}</ul>:<p className="pm-muted text-sm">{work.isLoading?'Đang tải…':'Chưa có công việc cho VM này.'}</p>}
     <Link className="pm-button pm-button-quiet" href={`/work?vm=${vm.id}`}>Thêm / sửa ở trang Công việc</Link></div>;
 }
-function AccountTab({projectId,vm,canEdit,onSaved}:{projectId:string;vm:ManagedVM;canEdit:boolean;onSaved:()=>void}){
-  const accounts=trpc.businessManagement.accounts.useQuery({projectId}),keyFor=useBusinessKey(),row=accounts.data?.vms.find(v=>v.id===vm.id),[pick,setPick]=useState<string|null>(null),value=pick??row?.gmailId??'',[search,setSearch]=useState('');
-  const bind=trpc.businessManagement.bindAccount.useMutation({onSuccess:r=>{if(r.undone){toast.error('Thao tác đã hoàn tác; tải lại.');return;}toast.success('Đã lưu Gmail cho VM');setPick(null);onSaved();},onError:e=>toast.error(e.message)});
-  const options=(accounts.data?.gmails||[]).filter(g=>!g.archivedAt&&(g.id===value||g.email.toLowerCase().includes(search.toLowerCase())));
-  if(vm.archivedAt) return <p className="pm-muted text-sm">Máy đã xoá; Gmail được giữ trong dữ liệu.</p>;
-  return <form className="space-y-3" onSubmit={e=>{e.preventDefault();if(row){const p={projectId,vmId:vm.id,gmailId:value||null,expectedRevision:row.revision};bind.mutate({...p,key:keyFor(p)});}}}>
-    <p className="text-sm">Gmail đang liên kết với VM (không phải tài khoản EarnApp). Một Gmail có thể dùng cho nhiều VM; đổi ở đây không tháo Gmail khỏi VM khác.</p>
-    <input className="pm-input" aria-label="Tìm Gmail" placeholder="Tìm Gmail…" value={search} onChange={e=>setSearch(e.target.value)}/>
-    <select className="pm-input" aria-label="Gmail của VM" disabled={!canEdit||bind.isLoading} value={value} onChange={e=>setPick(e.target.value)}><option value="">Chưa liên kết</option>{options.map(g=><option key={g.id} value={g.id}>{g.email}{g.vmRefs.length?` · ${g.vmRefs.length} VM`:''}</option>)}</select>
-    {accounts.error&&<p role="alert" className="pm-error">{accounts.error.message}</p>}
-    {canEdit&&<div className="flex justify-end gap-2"><Link className="pm-button pm-button-quiet" href="/gmails">Thêm Gmail</Link><button className="pm-button pm-button-primary" disabled={!row||bind.isLoading||value===(row?.gmailId||'')}>{bind.isLoading?'Đang lưu…':'Lưu'}</button></div>}
-  </form>;
+// EarnApp account of the VM: same picker as the cell (login + PayPal saved together), plus a link to the stock.
+function AccountTab({projectId,vm,account,canEdit,onSaved}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;onSaved:()=>void}){
+  if(vm.archivedAt) return <p className="pm-muted text-sm">Máy đã xoá; tài khoản và lịch sử được giữ trong dữ liệu.</p>;
+  return <div className="space-y-3"><AccountPicker projectId={projectId} vm={vm} link={account} canAssign={canEdit} onDone={onSaved}/><Link className="pm-button pm-button-quiet" href="/gmails">Mở Kho tài khoản</Link></div>;
 }
 function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id});

@@ -28,7 +28,8 @@ export async function readImage(tx:Prisma.TransactionClient|PrismaClient,project
 export async function assertImagesUnchanged(tx:Prisma.TransactionClient|PrismaClient,projectId:string,snapshot:OperationSnapshot){
   for(const image of snapshot.resources){
     const actual=await readImage(tx,projectId,image.resource,image.id);
-    const projected=actual&&snapshot.version<4?Object.fromEntries(Object.keys(image.after).map(key=>[key,(actual as Record<string,unknown>)[key]])):actual;
+    // Business images gained fields over time (account inventory, work kind): compare the fields the image recorded.
+    const projected=actual&&(snapshot.version<4||isBusinessResource(image.resource))?Object.fromEntries(Object.keys(image.after).map(key=>[key,(actual as Record<string,unknown>)[key]])):actual;
     if(!actual||JSON.stringify(projected)!==JSON.stringify(image.after))throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã được sửa tiếp hoặc gán VM. Không thể hoàn tác đè lên thay đổi mới.');
     if('endpointGuard' in image&&image.endpointGuard){const endpoints=await tx.proxyIP.findMany({where:{projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});if(JSON.stringify(endpoints)!==JSON.stringify(image.endpointGuard))throw new ProxyDomainError('STALE_PREVIEW','Kho đã thay đổi sau khi sửa gói. Không thể hoàn tác gói cũ.');}
     if('accountGuard' in image&&image.accountGuard){const accounts=await tx.proxyProviderAccount.findMany({where:{projectId},select:{id:true,revision:true},orderBy:{id:'asc'}});if(JSON.stringify(accounts)!==JSON.stringify(image.accountGuard))throw new ProxyDomainError('STALE_PREVIEW','Các gói đã thay đổi; không thể hoàn tác làm trùng thông tin đăng nhập.');}

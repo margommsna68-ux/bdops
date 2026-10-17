@@ -21,6 +21,10 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.agentPaypalEmail.deleteMany({where});
     await tx.payPalEmail.deleteMany({where});
     await tx.holderMergeTarget.deleteMany({where});
+    await tx.earnAppAccount.deleteMany({where});
+    await tx.gmailAccount.updateMany({where,data:{batchId:null}});
+    await tx.payPalAccount.updateMany({where,data:{batchId:null}});
+    await tx.accountPurchaseBatch.deleteMany({where});
     await tx.costRecord.deleteMany({where});
     await tx.teamReceipt.deleteMany({where});
     await tx.collectorExpense.deleteMany({where});

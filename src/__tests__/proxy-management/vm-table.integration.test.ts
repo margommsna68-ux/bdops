@@ -51,7 +51,7 @@ describe('Dán bảng (Server/VM paste table)',()=>{
       await applyVmBulk(f.scope,{kind:'SDK',key:randomUUID(),items:ready(clear.rows)},db);expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.b1.id}})).sdkId).toBeNull();
     }finally{await f.cleanup();}
   });
-  it('NOTE: long notes for selected VMs, same value writes nothing; GMAIL: one existing Gmail on many VMs, unknown Gmail is never created',async()=>{
+  it('NOTE: long notes for selected VMs, same value writes nothing; the old GMAIL kind is refused (accounts go through the EarnApp link rules)',async()=>{
     const f=await fixture();try{
       const long='Ghi chú dài '.repeat(40).trim();
       const p=await previewVmBulk(f.scope,{kind:'NOTE',items:[{vmId:f.v.VM_001.id,value:long},{vmId:f.v.VM_002.id,value:long}]},db);expect(p.ready).toBe(2);
@@ -59,10 +59,9 @@ describe('Dán bảng (Server/VM paste table)',()=>{
       expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v.VM_002.id}})).notes).toBe(long);
       expect((await previewVmBulk(f.scope,{kind:'NOTE',items:[{vmId:f.v.VM_001.id,value:long}]},db)).rows[0].outcome).toBe('SKIP');
       await db.virtualMachine.update({where:{id:f.v.VM_004.id},data:{gmailId:f.g1.id}});
-      const g=await previewVmBulk(f.scope,{kind:'GMAIL',serverId:f.a.id,text:`VM_001 | ${f.g1.email}\nVM_002 | ${f.g1.email.toUpperCase()}\nVM_003 | nobody@fixture.invalid`},db);
-      expect(g.rows.map(x=>x.outcome)).toEqual(['READY','READY','ERROR']);
-      await applyVmBulk(f.scope,{kind:'GMAIL',key:randomUUID(),items:ready(g.rows)},db);
-      const bound=await db.virtualMachine.findMany({where:{gmailId:f.g1.id},select:{code:true}});expect(bound.map(x=>x.code).sort()).toEqual(['VM_001','VM_002','VM_004']);
+      await expect(previewVmBulk(f.scope,{kind:'GMAIL',serverId:f.a.id,text:`VM_001 | ${f.g1.email}`},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      await expect(applyVmBulk(f.scope,{kind:'GMAIL',key:randomUUID(),items:[{line:1,vmId:f.v.VM_001.id,expectedRevision:0,value:f.g1.id}]},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      const bound=await db.virtualMachine.findMany({where:{gmailId:f.g1.id},select:{code:true}});expect(bound.map(x=>x.code)).toEqual(['VM_004']); // the legacy link stays untouched
       expect(await db.gmailAccount.count({where:{projectId:f.projectId}})).toBe(2);
     }finally{await f.cleanup();}
   });
