@@ -10,6 +10,7 @@ import {createManagedServer,addManagedVMs,updateManagedServer,archiveManagedReso
 import {startInstall,copyConfiguration,copyVmConfigurations,reportInstallFailure,confirmInstalled} from '../vm-management/installation';
 import {previewVmBulk,applyVmBulk} from '../vm-management/bulk';
 import {readVMDetail} from '../vm-management/detail';
+import {readOrphanTasks,closeOrphanTask} from '../vm-management/orphan-tasks';
 import {previewSdkUpdate,applySdkUpdate,readSdkHistory} from '../vm-management/sdk';
 import {getManualInventory} from '../proxy-management/repository';
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),bulkKind=z.enum(['SDK','PROXY','GMAIL','NOTE']);
@@ -25,6 +26,8 @@ export const vmManagementRouter=router({
   })),
   workspace:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readVMWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
   eligible:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>{const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'ASSIGN');if(scope.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');return getManualInventory(input.projectId,ctx.prisma);})),
+  orphanTasks:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readOrphanTasks(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
+  closeTask:protectedProcedure.input(project.extend({taskId:id})).mutation(({ctx,input})=>domain(async()=>closeOrphanTask(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   detail:protectedProcedure.input(project.extend({vmId:id})).query(({ctx,input})=>domain(async()=>readVMDetail(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.vmId,ctx.prisma))),
   createServer:protectedProcedure.input(project.extend({code:z.string().min(1).max(80),vmCodes:z.array(z.string()).min(1).max(500),ipAddress:z.string().max(100).optional()})).mutation(({ctx,input})=>domain(async()=>createManagedServer(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   addVMs:protectedProcedure.input(project.extend({serverId:id,vmCodes:z.array(z.string()).min(1).max(500)})).mutation(({ctx,input})=>domain(async()=>addManagedVMs(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.serverId,input.vmCodes,ctx.prisma))),

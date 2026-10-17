@@ -1,0 +1,35 @@
+since 2026-10-17T13:09:12.144Z
+PASS Laptop: màn hình đầu thấy vận hành và việc cần xử lý — VM y=258, Cần xử lý y=258
+PASS Thẻ "Thiếu proxy" → Server/VM lọc MISSING, số khớp — dashboard 565 · danh sách 565
+PASS Thẻ "Chờ cài" → Server/VM lọc PENDING, số khớp — dashboard 387 · danh sách 387
+PASS Thẻ "Cần kiểm tra" → Server/VM lọc REVIEW, số khớp — dashboard 5 · danh sách 5
+PASS Thẻ "Đã xác nhận cài" → Server/VM lọc INSTALLED, số khớp — dashboard 2 · danh sách 2
+PASS Bấm đoạn biểu đồ VM → đúng server + bộ lọc — /infrastructure/servers/cmv84dp83000275ezxdepdes7?view=INSTALLED
+PASS Back từ danh sách về Tổng quan — /dashboard
+PASS Kho proxy TUT·NEW → Quản lý proxy lọc đúng, số khớp — dashboard 93 · danh sách 93
+PASS Cần xử lý "Proxy BLOCKED" → ?state=BLOCKED, số khớp — dashboard 3 · danh sách 3
+PASS Kho proxy: đổi trạng thái → URL; Back/Forward cập nhật bộ lọc — back=BLOCKED forward=NEW
+PASS Kho proxy: tab Lịch sử trong URL, tải lại giữ tab — /infrastructure/proxies?state=NEW&tab=history
+PASS Kho proxy: tìm kiếm ghi vào URL — /infrastructure/proxies?q=198.18&state=NEW
+PASS Chuông "proxy BLOCKED" khi đang ở Kho proxy → bộ lọc cập nhật tại chỗ — /infrastructure/proxies?state=BLOCKED
+PASS "Chưa có SDK" → Server/VM ?view=SDK_MISSING, số khớp — dashboard 602 · danh sách 602
+PASS "Chưa có tài khoản EarnApp" → Server/VM ?view=ACCOUNT_MISSING, số khớp — dashboard 940 · danh sách 940
+PASS "Chưa có PayPal nhận" → Server/VM ?view=PAYPAL_MISSING, số khớp — dashboard 943 · danh sách 943
+PASS "Việc cài bị bỏ lại" → mục riêng ở Việc cài, số khớp — dashboard 1 · danh sách 1
+PASS "Mở VM" → đúng server, VM, tab Việc cài; có nút Đóng việc — /infrastructure/servers/cmv84dp83000275ezxdepdes7?vm=cmv84dp88000a75ezogf90e9q&tab=install
+PASS Đóng khung VM giữ server + danh sách — /infrastructure/servers/cmv84dp83000275ezxdepdes7
+PASS Đóng việc cài bị bỏ lại tại Việc cài — đã đóng; hoàn tác được ở Lịch sử
+PASS Việc giao nhân viên và Đối chiếu Sheet cũ mở đúng tab riêng — /work?kind=SHEET_REVIEW
+PASS Đổi tháng chỉ tác động tài chính; tháng trống báo chưa có dữ liệu — thực nhận tháng này 105.12; tháng 9: chưa có dữ liệu
+PASS Tháng tài chính giữ khi tải lại; Back về tháng trước — tải lại 2026-09; back /dashboard tháng 2026-10
+PASS Thẻ Chi phí → trang Chi phí đúng tháng — /costs?month=2026-10
+PASS "Chi phí server" lọc thật, có chỉ báo và Bỏ lọc — Server: ac-5976b · 1 khoản Bỏ lọc · lọc 1 dòng, bỏ lọc 18 dòng
+PASS Khoản chi không còn: báo rõ + lối Bỏ chọn — thông báo hiện
+PASS VM không còn: báo rõ + lối về danh sách — đã đóng về danh sách
+PASS Menu tiền: Nhận USDT về team / Tiền vào PayPal / Rút–chuyển gốc mở đúng trang, đúng mục sáng — gốc=page team=null
+PASS Màn hẹp: không cuộn ngang, Cần xử lý lên trước biểu đồ — cần xử lý y=405 < VM y=1092
+PASS Dự án trống: trạng thái trống rõ, không biểu đồ giả, có lời mời bật thu chi cho ADMIN — ok
+PASS Nhân viên (Server/VM): thấy vận hành, không có tài chính; menu không có mục quản trị/tiền — D Tổng quan P Quản lý proxy S Server / VM V Việc cài proxy W Giao việc G Kho tài khoản TÀI CHÍNH H Lịch sử thao tác QUẢN TRỊ * Thiết lập
+PASS Kế toán (COSTS/PROFIT): chỉ phần tài chính, không thấy vận hành; menu không có Server/VM, Dự án — D Tổng quan TÀI CHÍNH T Nhận USDT về team R Rút / chuyển gốc C Chi phí % Lợi nhuận H Lịch sử thao tác QUẢN TRỊ U Nhân viên * Thiết lập
+PASS Thiếu quyền: báo rõ, không số 0 giả; menu không có liên kết bị từ chối — D Tổng quan TÀI CHÍNH H Lịch sử thao tác QUẢN TRỊ * Thiết lập
+RESULT 33/33

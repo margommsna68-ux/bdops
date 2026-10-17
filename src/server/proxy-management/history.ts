@@ -13,8 +13,12 @@ function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VM
   return sortLocations(out);
 }
 type RowsFilter=Omit<RegistryFilter,'cursor'|'limit'>;
+const MAIN_STATES=['NEW','LIVE','BLOCKED'];
+// "Từ nhóm" key of a row: the built-in groups map to owners; anything else is a ProxyGroup id.
+export const registryGroupKey=(r:Pick<RegistryRow,'owner'|'subgroup'|'groupId'>)=>r.owner==='SELF'?GROUP_TUT:isShared(r.owner,r.subgroup)?GROUP_SHARED:r.owner==='GENJY'?GROUP_GENJY:r.owner==='UNKNOWN'?GROUP_UNKNOWN:r.groupId||GROUP_UNKNOWN;
+export function stateMatches(state:string,filter:string){return filter==='OTHER'?!MAIN_STATES.includes(state):state===filter;}
 // Whole registry of the project, filtered and sorted; callers paginate or copy from it.
-async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClient){
+export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClient){
   const [endpoints,reserved,groups]=await Promise.all([
     db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},group:{select:{id:true,name:true}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
     db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
@@ -27,7 +31,7 @@ async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClie
   const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
   const search=filter.search?.trim().toLowerCase(),serverSet=filter.servers?.length?new Set(filter.servers):null;
   // Group filter: the built-in groups map to owners; anything else is a ProxyGroup id.
-  const groupKey=(r:RegistryRow)=>r.owner==='SELF'?GROUP_TUT:isShared(r.owner,r.subgroup)?GROUP_SHARED:r.owner==='GENJY'?GROUP_GENJY:r.owner==='UNKNOWN'?GROUP_UNKNOWN:r.groupId||GROUP_UNKNOWN;
+  const groupKey=registryGroupKey;
   const groupMatch=(r:RegistryRow)=>!filter.group||groupKey(r)===filter.group;
   const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
   const scoped=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
@@ -36,8 +40,8 @@ async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClie
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
     (!search||[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search))));
   // stateCounts: rows per state under every filter except the state itself; groupCounts: per group under every filter except the group.
-  const stateCounts:Record<string,number>={ALL:0};for(const r of scoped) if(groupMatch(r)){stateCounts.ALL++;stateCounts[r.state]=(stateCounts[r.state]||0)+1;}
-  const stateScoped=filter.state?scoped.filter(r=>r.state===filter.state):scoped;
+  const stateCounts:Record<string,number>={ALL:0,OTHER:0};for(const r of scoped) if(groupMatch(r)){stateCounts.ALL++;stateCounts[r.state]=(stateCounts[r.state]||0)+1;if(!MAIN_STATES.includes(r.state)) stateCounts.OTHER++;}
+  const stateScoped=filter.state?scoped.filter(r=>stateMatches(r.state,filter.state!)):scoped;
   const groupCounts:Record<string,number>={ALL:stateScoped.length,[GROUP_TUT]:0,[GROUP_SHARED]:0,[GROUP_GENJY]:0,[GROUP_UNKNOWN]:0};
   for(const r of stateScoped){const k=groupKey(r);groupCounts[k]=(groupCounts[k]||0)+1;}
   const filtered=stateScoped.filter(groupMatch);

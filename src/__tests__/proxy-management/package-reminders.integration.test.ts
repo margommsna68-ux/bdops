@@ -37,6 +37,8 @@ describe('due state and reminders (pure)',()=>{
     expect(at('2026-10-16')).toMatchObject({level:'TODAY',severity:'error',title:'Gói 240292 đến hạn hôm nay'});
     expect(at('2026-10-14')).toMatchObject({level:'OVERDUE',severity:'error',title:'Gói 240292 quá hạn 2 ngày'});
     expect(at('2026-10-14').link).toBe('/infrastructure/proxies?package=240292&pay=240292');
+    // Members without the money module only open the package; the payment form is not offered to them.
+    expect(packageReminders([pkg({nextDueDate:new Date('2026-10-14T00:00:00.000Z')})],today,false)[0].link).toBe('/infrastructure/proxies?package=240292');
     expect(at('2026-10-14').message).toContain('120 USD');expect(packageReminders([pkg({})],today,false)[0].message).not.toContain('120');
   });
   it('gives one alert per package, none without a due date or after renewal was stopped, and keeps alerting disabled packages',()=>{

@@ -1,4 +1,5 @@
 import {dueState} from './package-terms';
+import {links} from '@/lib/links';
 export type ReminderLevel='SOON'|'THREE_DAYS'|'ONE_DAY'|'TODAY'|'OVERDUE';
 export interface ReminderPackage {id:string;code:string;nextDueDate:Date|null;reminderDays:number;renewalStoppedAt:Date|null;price:string|null;priceCurrency:string|null;disabled:boolean}
 export interface PackageReminder {id:string;type:'PACKAGE_DUE';level:ReminderLevel;severity:'info'|'warning'|'error';title:string;message:string;link:string;createdAt:Date;packageId:string;code:string;daysLeft:number}
@@ -15,7 +16,7 @@ export function packageReminders(packages:ReminderPackage[],today:Date=new Date(
     const daysLeft=due.daysLeft!,level=reminderLevel(daysLeft);
     const title=level==='OVERDUE'?`Gói ${p.code} quá hạn ${-daysLeft} ngày`:level==='TODAY'?`Gói ${p.code} đến hạn hôm nay`:`Gói ${p.code} còn ${daysLeft} ngày`;
     const amount=showAmount&&p.price?` · ${p.price} ${p.priceCurrency||''}`.trimEnd():'';
-    out.push({id:'pkg-due-'+p.id,type:'PACKAGE_DUE',level,severity:reminderSeverity(level),title,message:`Đến hạn ${dayText(p.nextDueDate)}${amount}${p.disabled?' · gói đã tắt nhập mới':''}. Bấm để ghi thanh toán.`,link:`/infrastructure/proxies?package=${encodeURIComponent(p.code)}&pay=${encodeURIComponent(p.code)}`,createdAt:p.nextDueDate,packageId:p.id,code:p.code,daysLeft});
+    out.push({id:'pkg-due-'+p.id,type:'PACKAGE_DUE',level,severity:reminderSeverity(level),title,message:`Đến hạn ${dayText(p.nextDueDate)}${amount}${p.disabled?' · gói đã tắt nhập mới':''}.${showAmount?' Bấm để ghi thanh toán.':''}`,link:links.proxies({package:p.code,pay:showAmount?p.code:undefined}),createdAt:p.nextDueDate,packageId:p.id,code:p.code,daysLeft});
   }
   return out.sort((a,b)=>a.daysLeft-b.daysLeft);
 }

@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
+import {links} from '@/lib/links';
 import {Check,Copy,MoreHorizontal,X,Server} from 'lucide-react';
 import toast from 'react-hot-toast';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
@@ -115,7 +116,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
       <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=v.holds.some(h=>h.state==='BLOCKED');
         return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy?'pm-row-blocked ':status==='PENDING'&&!deletedView?'vm-row-pending ':'')}>
           <td className="vm-sticky vm-sticky-check" style={left(0)}><input type="checkbox" aria-label={'Chọn '+v.server+' / '+v.code} checked={isSel} onChange={e=>props.onToggle(v.id,e.target.checked)}/></td>
-          {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={`/infrastructure/servers/${v.serverId}`} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
+          {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={links.vms({serverId:v.serverId})} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
           <td className="vm-sticky vm-sticky-last vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>
           {columns.map(c=><td key={c.key} className={'vm-col-'+c.key}>{cell(v,c.key)}</td>)}
           <td className="vm-sticky-right"><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="vm-row-menu" aria-label={'Thao tác '+v.code} data-menu={v.id}><MoreHorizontal size={16}/></button></DropdownMenuTrigger>
@@ -130,7 +131,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'account')}>Tài khoản EarnApp</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'work')}>Công việc</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'history')}>Lịch sử</DropdownMenuItem>
-                {rights.costs&&<DropdownMenuItem asChild><Link href={`/costs?server=${v.serverId}`}>Chi phí server</Link></DropdownMenuItem>}
+                {rights.costs&&<DropdownMenuItem asChild><Link href={links.costs({server:v.serverId})}>Chi phí server</Link></DropdownMenuItem>}
                 {rights.manage&&<><DropdownMenuSeparator/><DropdownMenuItem className="text-red-600" onSelect={()=>props.onDelete(v)}>Xoá (khôi phục được)</DropdownMenuItem></>}
               </>}
             </DropdownMenuContent></DropdownMenu></td>

@@ -15,6 +15,7 @@ import {vmView,viewLabels,proxyAddress} from '../workflow';
 import {errorMessage,type ManagedVM} from '../shared';
 import {reviewReason,type CopyWhich,type GridRights} from './VmGrid';
 import type {PanelTab} from './grid-model';
+import {links} from '@/lib/links';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
 const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Việc cài'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
@@ -60,11 +61,13 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
 }
 function InstallTab({projectId,vm,rights,onSaved}:{projectId:string;vm:ManagedVM;rights:GridRights;onSaved:()=>void}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),pending=vm.desired&&vm.desired.id!==vm.installed?.id&&!vm.archivedAt;
-  const open=(detail.data?.tasks||[]).filter(t=>t.status==='PENDING'||t.status==='IN_PROGRESS');
+  // Open tasks whose configuration is no longer the pending one ("orphan"): closed here or on Việc cài, never left without a place.
+  const open=(detail.data?.tasks||[]).filter(t=>(t.status==='PENDING'||t.status==='IN_PROGRESS')&&!(pending&&t.configurationId===vm.desired?.id));
+  const close=trpc.vmManagement.closeTask.useMutation({onSuccess:r=>{toast.success(r.closed?'Đã đóng việc cài':'Việc đã đóng trước đó');void detail.refetch();onSaved();},onError:e=>toast.error(e.message)});
   return <div className="space-y-4">
     {pending?<InstallDialog key={vm.desired!.id} embedded projectId={projectId} vm={vm} canCopy={rights.copy} canConfirm={rights.confirm} sourceConnected={rights.sourceConnected} onClose={()=>{}} onChanged={onSaved}/>:<p className="pm-muted text-sm">Không có cấu hình chờ cài trên máy này.{vm.installed?' Proxy đã cài: '+proxyAddress(vm.installed)+'.':''}</p>}
     {vm.holds.some(h=>h.role==='UNCERTAIN')&&<p className="pm-review text-sm">Giữ để kiểm tra: {vm.holds.filter(h=>h.role==='UNCERTAIN').map(h=>h.ip).join(', ')}. Kiểm tra thực tế trên máy; khi xác nhận cấu hình mới, các proxy cũ được thả.</p>}
-    {!pending&&open.length>0&&<div><h3 className="text-sm font-semibold mb-2">Việc cài còn mở</h3><ul className="text-sm space-y-1">{open.map(t=><li key={t.id}>{t.title} · {t.status==='IN_PROGRESS'?'Đang làm':'Chưa bắt đầu'} · {localDate(t.scheduledAt)}</li>)}</ul><p className="pm-muted text-xs mt-1">Việc này không còn cấu hình chờ cài đi kèm; mở <Link className="pm-link" href="/vm-tasks">Việc cài</Link> để xử lý.</p></div>}
+    {open.length>0&&<div><h3 className="text-sm font-semibold mb-2">Việc cài còn mở, không còn cấu hình chờ cài</h3><ul className="text-sm space-y-1">{open.map(t=><li key={t.id} className="flex flex-wrap gap-2 items-center"><span>{t.title} · {t.status==='IN_PROGRESS'?'Đang làm':'Chưa bắt đầu'} · {localDate(t.scheduledAt)}</span>{rights.confirm&&!vm.archivedAt&&<button className="pm-button pm-button-quiet" disabled={close.isLoading} onClick={()=>close.mutate({projectId,taskId:t.id})}>Đóng việc</button>}</li>)}</ul><p className="pm-muted text-xs mt-1">Đóng việc không gỡ hay cài gì trên máy; hoàn tác được ở Lịch sử. Danh sách đầy đủ ở <Link className="pm-link" href={links.installs()+'#orphan'}>Việc cài proxy</Link>.</p></div>}
     {detail.data&&detail.data.tasks.length>0&&<details><summary className="text-sm cursor-pointer">Tất cả việc của máy ({detail.data.tasks.length})</summary><ul className="text-xs space-y-1 mt-2">{detail.data.tasks.map(t=><li key={t.id}>{localDate(t.scheduledAt)} · {t.title} · {TASK_STATUS[t.status]||t.status}</li>)}</ul></details>}
   </div>;
 }
@@ -72,12 +75,12 @@ function WorkTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   const work=trpc.businessManagement.work.useQuery({projectId}),rows=(work.data?.items||[]).filter(w=>w.vmId===vm.id);
   return <div className="space-y-3">{work.error&&<p role="alert" className="pm-error">{work.error.message}</p>}
     {rows.length?<ul className="space-y-2">{rows.map(w=><li key={w.id} className="vm-panel-card text-sm"><strong>{w.title}</strong><p className="pm-muted text-xs">{workLabels[w.status as keyof typeof workLabels]||w.status}{w.assignee?' · '+w.assignee:''}{w.dueDate?' · hạn '+w.dueDate:''}</p>{w.notes&&<p className="text-xs mt-1">{w.notes}</p>}</li>)}</ul>:<p className="pm-muted text-sm">{work.isLoading?'Đang tải…':'Chưa có công việc cho VM này.'}</p>}
-    <Link className="pm-button pm-button-quiet" href={`/work?vm=${vm.id}`}>Thêm / sửa ở trang Công việc</Link></div>;
+    <Link className="pm-button pm-button-quiet" href={links.work({vm:vm.id})}>Thêm / sửa ở trang Công việc</Link></div>;
 }
 // EarnApp account of the VM: same picker as the cell (login + PayPal saved together), plus a link to the stock.
 function AccountTab({projectId,vm,account,canEdit,onSaved}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;onSaved:()=>void}){
   if(vm.archivedAt) return <p className="pm-muted text-sm">Máy đã xoá; tài khoản và lịch sử được giữ trong dữ liệu.</p>;
-  return <div className="space-y-3"><AccountPicker projectId={projectId} vm={vm} link={account} canAssign={canEdit} onDone={onSaved}/><Link className="pm-button pm-button-quiet" href="/gmails">Mở Kho tài khoản</Link></div>;
+  return <div className="space-y-3"><AccountPicker projectId={projectId} vm={vm} link={account} canAssign={canEdit} onDone={onSaved}/><Link className="pm-button pm-button-quiet" href={links.accounts()}>Mở Kho tài khoản</Link></div>;
 }
 function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id});
@@ -85,6 +88,6 @@ function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
     <div><h3 className="text-sm font-semibold mb-2">Các phiên bản cấu hình proxy</h3>{detail.error&&<p role="alert" className="pm-error">{detail.error.message}</p>}
       <div className="vm-bulk-table"><table className="pm-table"><thead><tr><th>#</th><th>Proxy</th><th>Trạng thái</th><th>Người / ngày</th></tr></thead><tbody>{detail.data?.configurations.map(c=><tr key={c.id}><td>{c.version}{c.current&&<div className="text-xs pm-muted">{c.current==='DESIRED'?'đang giao':'đang cài'}</div>}</td><td><span className="pm-ip">{c.ip?c.ip+(c.port?':'+c.port:''):'—'}</span>{c.group&&<div className="text-xs pm-muted">{c.group}</div>}</td><td className="text-xs">{CONFIG_STATUS[c.status]||c.status}{c.failureNote&&<div className="pm-muted">{c.failureNote}</div>}</td><td className="text-xs">Giao: {c.createdBy||'—'} · {localDate(c.createdAt)}{c.startedAt&&<div>Bắt đầu: {localDate(c.startedAt)}</div>}{c.confirmedAt&&<div>Xác nhận: {c.confirmedBy||'—'} · {localDate(c.confirmedAt)}</div>}</td></tr>)}{detail.data&&!detail.data.configurations.length&&<tr><td colSpan={4} className="pm-empty">Chưa có cấu hình proxy.</td></tr>}</tbody></table></div></div>
     <div><h3 className="text-sm font-semibold mb-2">Lịch sử SDK</h3><SdkHistoryTable projectId={projectId} vmId={vm.id}/></div>
-    <p className="pm-muted text-xs">Mọi thao tác ghi đều có ở <Link className="pm-link" href="/history">Lịch sử thao tác</Link> và hoàn tác được ở đó.</p>
+    <p className="pm-muted text-xs">Mọi thao tác ghi đều có ở <Link className="pm-link" href={links.history()}>Lịch sử thao tác</Link> và hoàn tác được ở đó.</p>
   </div>;
 }

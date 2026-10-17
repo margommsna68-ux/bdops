@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Suspense } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { links } from "@/lib/links";
 import { useSession, signOut } from "next-auth/react";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useProjectStore } from "@/lib/store";
@@ -12,8 +14,9 @@ import type { AppModule } from "@/server/trpc";
 import {trpc} from '@/lib/trpc';
 import { BrandMark, BRAND_NAME, BRAND_SLOGAN } from "@/components/BrandMark";
 
+// role: who the target page actually serves. ADMIN = admin only (projects, audit log); MOD = admin or moderator (staff page).
 type NavItem =
-  | { href: string; labelKey: string; icon: string; module?: AppModule | null; adminOnly?: boolean; infraOnly?: boolean }
+  | { href: string; labelKey: string; label?: string; icon: string; module?: AppModule | null; role?: "ADMIN" | "MOD"; infraOnly?: boolean }
   | { type: "separator"; labelKey: string };
 
 const navItems: NavItem[] = [
@@ -37,12 +40,22 @@ const navItems: NavItem[] = [
   { href: "/profit", labelKey: "nav_profit", icon: "%", module: "PROFIT" },
   // ─── Quản Trị ───
   { type: "separator", labelKey: "nav_admin" },
-  { href: "/admin/projects", labelKey: "nav_projects", icon: "P", adminOnly: true },
-  { href: "/admin/users", labelKey: "nav_users", icon: "U", adminOnly: true },
-  { href: "/audit-log", labelKey: "nav_audit_log", icon: "A", adminOnly: true },
+  { href: "/admin/projects", labelKey: "nav_projects", icon: "P", role: "ADMIN" },
+  { href: "/admin/users", labelKey: "nav_users", icon: "U", role: "MOD" },
+  { href: "/audit-log", labelKey: "nav_audit_log", icon: "A", role: "ADMIN" },
   { href: "/settings", labelKey: "nav_settings", icon: "*" },
 ];
-const personalItems:NavItem[]=[
+// Money pages: /funds is money arriving in PayPal; /withdrawals is "Nhận USDT về team" when team cash is on (original withdrawals
+// under ?view=original), otherwise the original withdrawals/transfers page.
+const moneyItems=(cashMode:boolean):NavItem[]=>cashMode?[
+  {href:links.teamReceipts(),labelKey:'Nhận USDT về team',label:'Nhận USDT về team',icon:'T',module:'WITHDRAWALS'},
+  {href:links.paypalIn(),labelKey:'Tiền vào PayPal',label:'Tiền vào PayPal',icon:'$',module:'FUNDS'},
+  {href:links.originalWithdrawals(true),labelKey:'Rút / chuyển gốc',label:'Rút / chuyển gốc',icon:'R',module:'WITHDRAWALS'},
+]:[
+  {href:links.paypalIn(),labelKey:'Tiền vào PayPal',label:'Tiền vào PayPal',icon:'$',module:'FUNDS'},
+  {href:links.originalWithdrawals(false),labelKey:'Rút / chuyển gốc',label:'Rút / chuyển gốc',icon:'R',module:'WITHDRAWALS'},
+];
+const personalItems=(cashMode:boolean):NavItem[]=>[
   {href:'/dashboard',labelKey:'Tổng quan',icon:'D'},
   {href:'/infrastructure/proxies',labelKey:'Quản lý proxy',icon:'P',module:'INFRASTRUCTURE'},
   {href:'/infrastructure/servers',labelKey:'Server / VM',icon:'S',module:'INFRASTRUCTURE'},
@@ -51,14 +64,13 @@ const personalItems:NavItem[]=[
   {href:'/gmails',labelKey:'Kho tài khoản',icon:'G',module:'INFRASTRUCTURE'},
   {href:'/paypals',labelKey:'PayPal',icon:'P',module:'PAYPALS'},
   {type:'separator',labelKey:'Tài chính'},
-  {href:'/funds',labelKey:'Tiền nhận',icon:'$',module:'FUNDS'},
-  {href:'/withdrawals',labelKey:'Tiền rút / chuyển',icon:'R',module:'WITHDRAWALS'},
+  ...moneyItems(cashMode),
   {href:'/costs',labelKey:'Chi phí',icon:'C',module:'COSTS'},
   {href:'/profit',labelKey:'Lợi nhuận',icon:'%',module:'PROFIT'},
   {href:'/history',labelKey:'Lịch sử thao tác',icon:'H'},
   {type:'separator',labelKey:'Quản trị'},
-  {href:'/admin/users',labelKey:'Nhân viên',icon:'U',adminOnly:true},
-  {href:'/admin/projects',labelKey:'Dự án',icon:'P',adminOnly:true},
+  {href:'/admin/users',labelKey:'Nhân viên',icon:'U',role:'MOD'},
+  {href:'/admin/projects',labelKey:'Dự án',icon:'P',role:'ADMIN'},
   {href:'/settings',labelKey:'Thiết lập',icon:'*'},
 ];
 
@@ -98,15 +110,16 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   // When no project selected (all deleted), show dashboard + admin + settings
   const noProject = !currentRole;
 
-  const cashItems:NavItem[]=navItems.filter(item=>'type' in item||!item.infraOnly).concat([{href:'/history',labelKey:'Lịch sử thao tác',icon:'H'}]);
-  const filteredItems = (proxyMode?personalItems:cashMode?cashItems:navItems).filter((item) => {
+  const cashItems:NavItem[]=navItems.filter(item=>'type' in item||!item.infraOnly).flatMap(item=>!('type' in item)&&item.href==='/funds'?[]:!('type' in item)&&item.href==='/withdrawals'?moneyItems(true):[item]).concat([{href:'/history',labelKey:'Lịch sử thao tác',label:'Lịch sử thao tác',icon:'H'}]);
+  const filteredItems = (proxyMode?personalItems(cashMode):cashMode?cashItems:navItems).filter((item) => {
     if ("type" in item) return true;
     if (noProject) {
       // Only show dashboard, admin links, settings when no project
-      return item.href === "/dashboard" || item.href === "/settings" || item.adminOnly;
+      return item.href === "/dashboard" || item.href === "/settings" || item.role === "ADMIN";
     }
     if (item.infraOnly && isPaypalOnly) return false;
-    if (item.adminOnly) return isAdminOrMod;
+    if (item.role === "ADMIN") return isAdmin;
+    if (item.role === "MOD") return isAdminOrMod;
     return hasModuleAccess(item.module);
   });
 
@@ -196,31 +209,10 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
               </div>
             );
           }
-          const isActive =
-            pathname === item.href ||
-            pathname.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              title={collapsed ? proxyMode?item.labelKey:t(item.labelKey) : undefined}
-              className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${
-                isActive
-                  ? `${accentBg} text-white font-medium shadow-md shadow-blue-500/20`
-                  : "text-gray-300 hover:bg-white/[0.06] hover:text-white"
-              }`}
-            >
-              <span className={`w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${
-                isActive
-                  ? "bg-white/25"
-                  : "bg-white/[0.07]"
-              }`}>
-                {item.icon}
-              </span>
-              {!collapsed && <span>{proxyMode?item.labelKey:t(item.labelKey)}</span>}
-            </Link>
-          );
+          const label=item.label||(proxyMode?item.labelKey:t(item.labelKey));
+          return <Suspense key={item.href} fallback={<NavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} active={pathname===item.href.split('?')[0]&&!item.href.includes('?')} onNavigate={onNavigate}/>}>
+            <ActiveNavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} siblings={visibleItems.filter((x):x is Extract<NavItem,{href:string}>=>!('type' in x)).map(x=>x.href)} onNavigate={onNavigate}/>
+          </Suspense>;
         })}
       </nav>
 
@@ -293,4 +285,20 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
       </div>
     </aside>
   );
+}
+type NavLinkProps={href:string;icon:string;label:string;collapsed:boolean;accentBg:string;onNavigate?:()=>void};
+// Active when the path matches; links that share a path (Nhận USDT về team / Rút / chuyển gốc) also compare their query.
+function ActiveNavLink({siblings,...props}:NavLinkProps&{siblings:string[]}){
+  const pathname=usePathname(),search=useSearchParams(),[path,query='']=props.href.split('?');
+  const inSection=pathname===path||pathname.startsWith(path+'/');
+  const own=new URLSearchParams(query),matchesQuery=Array.from(own.entries()).every(([k,v])=>search.get(k)===v);
+  const moreSpecific=siblings.some(h=>h!==props.href&&h.startsWith(path+'?')&&Array.from(new URLSearchParams(h.split('?')[1]).entries()).every(([k,v])=>search.get(k)===v));
+  return <NavLink {...props} active={inSection&&matchesQuery&&(query?true:!moreSpecific)}/>;
+}
+function NavLink({href,icon,label,collapsed,accentBg,active,onNavigate}:NavLinkProps&{active:boolean}){
+  return <Link href={href} onClick={onNavigate} title={collapsed?label:undefined} aria-current={active?'page':undefined}
+    className={`flex items-center ${collapsed?"justify-center":"gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${active?`${accentBg} text-white font-medium shadow-md shadow-blue-500/20`:"text-gray-300 hover:bg-white/[0.06] hover:text-white"}`}>
+    <span className={`w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${active?"bg-white/25":"bg-white/[0.07]"}`}>{icon}</span>
+    {!collapsed&&<span>{label}</span>}
+  </Link>;
 }

@@ -46,11 +46,11 @@ export function nextCell(rowIds:string[],fields:EditField[],at:{vmId:string;fiel
   return {vmId:rowIds[Math.floor(i/fields.length)],field:fields[i%fields.length]};
 }
 // URL state: everything the user picked survives reload and Back/Forward. The server is in the path.
-export type GridView=''|'MISSING'|'PENDING'|'INSTALLED'|'REVIEW'|'SDK_MISSING'|'DELETED';
+export type GridView=''|'MISSING'|'PENDING'|'INSTALLED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED';
 export type GridSort='VM'|'SDK'|'PROXY'|'STATUS';
 export type PanelTab='overview'|'proxy'|'install'|'work'|'account'|'history';
 export interface GridUrl {q:string;view:GridView;sort:GridSort;page:number;size:50|100|200;vm:string|null;tab:PanelTab;cause:string|null}
-const VIEWS:GridView[]=['','MISSING','PENDING','INSTALLED','REVIEW','SDK_MISSING','DELETED'],SORTS:GridSort[]=['VM','SDK','PROXY','STATUS'],TABS:PanelTab[]=['overview','proxy','install','work','account','history'];
+const VIEWS:GridView[]=['','MISSING','PENDING','INSTALLED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED'],SORTS:GridSort[]=['VM','SDK','PROXY','STATUS'],TABS:PanelTab[]=['overview','proxy','install','work','account','history'];
 export function readGridUrl(p:{get(name:string):string|null}):GridUrl{
   const view=(p.get('view')||'') as GridView,sort=(p.get('sort')||'VM') as GridSort,size=Number(p.get('size')),tab=(p.get('tab')||'overview') as PanelTab;
   return {q:p.get('q')||'',view:VIEWS.includes(view)?view:'',sort:SORTS.includes(sort)?sort:'VM',page:Math.max(1,Math.floor(Number(p.get('page'))||1)),size:size===50||size===200?size:100,vm:p.get('vm')||null,tab:TABS.includes(tab)?tab:'overview',cause:p.get('cause')||null};

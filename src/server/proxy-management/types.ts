@@ -49,7 +49,8 @@ export type LocationRole='DESIRED'|'INSTALLED'|'UNCERTAIN'|null;
 // One VM position of a proxy: a hold (role from the allocation) or the VM link recorded from the Sheet (role null). Server and VM stay separate fields; never parse display strings.
 export interface RegistryLocation {serverId:string;serverCode:string;vmId:string;vmCode:string;role:LocationRole}
 // group: TUT | GENJY | UNKNOWN | <ProxyGroup id>
-export interface RegistryFilter {owner?:Owner;group?:string;packageCode?:string;state?:InventoryState;view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
+// state OTHER = every state except NEW / LIVE / BLOCKED (the dashboard's "Khác" bucket opens this).
+export interface RegistryFilter {owner?:Owner;group?:string;packageCode?:string;state?:InventoryState|'OTHER';view:'CURRENT'|'HISTORY'|'ALL';search?:string;cursor?:string;limit:number;sort?:'PACKAGE'|'SERVER'|'STATUS'|'IP';due?:boolean;servers?:string[]}
 export interface RegistryRow {identityId:string;endpointId:string|null;ip:string;port:number|null;owner:Owner;subgroup:Subgroup;groupId:string|null;groupName:string|null;packageCode:string|null;state:InventoryState;revision:number;sourceRefs:string[];locations:RegistryLocation[];statusAt?:string|null}
 // groupCounts: rows per "Từ nhóm" choice under every other active filter (view, state, package, server, search); keys ALL, TUT, SHARED, GENJY, UNKNOWN and group ids.
 export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;counts:{current:number;historical:number;reserved:number;shared:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[];groupCounts:Record<string,number>;stateCounts:Record<string,number>}

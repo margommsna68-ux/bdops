@@ -3,7 +3,7 @@ import {useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import {BusinessDialog,SaveBar,ErrorNotice,useBusinessKey,useBusinessRefresh,type BusinessOutputs} from './shared';
 import {today,monthRange} from './workflow';
-import {CashNav} from './TeamCashOverview';
+import {CashNav} from './CashNav';
 type Period=BusinessOutputs['cashPeriods'][number];
 type Action={kind:'RECALCULATE'|'SETTLE'|'REOPEN'|'PAID'|'CORRECT';period:Period;allocation?:Period['allocations'][number]};
 export function TeamCashProfitWorkspace({projectId}:{projectId:string}){
