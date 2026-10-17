@@ -1205,7 +1205,9 @@ model AccountPurchaseBatch {
   unitPrice Decimal? @db.Decimal(24,8)
   totalPaid Decimal? @db.Decimal(24,8)
   currency String?
-  lineCount Int @default(0) // lines declared as bought in the first import (fixes the paid total)
+  lineCount Int @default(0) // lines pasted in the first import (information only; never the paid quantity)
+  paidQuantity Int? // quantity actually bought, entered with a unit price (unit × quantity = paid total)
+  costRule Int @default(2) // 1 = created before 17/10 fix (unit × pasted lines, same code appended): listed for review
   costRecordId String? @unique
   costRecord CostRecord? @relation(fields:[costRecordId],references:[id],onDelete:Restrict)
   notes String?

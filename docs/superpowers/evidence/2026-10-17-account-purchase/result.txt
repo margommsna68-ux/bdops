@@ -1,0 +1,9 @@
+since 2026-10-17T10:05:06.303Z run 8d4sf
+PASS Mã lô tự sinh, không bắt nghĩ mã — 2 hợp lệ · 0 đã có · 0 lỗi · Lô mới TK-2026-10-17-2 · chi phí ghi một lần: 10 USDT ≈ 10 USDT.
+PASS Mất phản hồi rồi thử lại: một lô, một khoản chi — lô +1, 2 lần gửi cùng khóa=true · Đã nhập 2 · đã có 0 · lỗi 0 vào lô TK-2026-10-17-2 (chi phí đã ghi một lần).
+PASS Hiện ngay số lượng × đơn giá — 4 × 5 = 20 USDT ghi một lần vào Chi phí. 
+PASS Chi phí theo số lượng thực mua, không theo dòng dán — 2 hợp lệ · 0 đã có · 3 lỗi · Lô mới TK-2026-10-17-3 · chi phí ghi một lần: 20 USDT ≈ 20 USDT (4 × 5).
+PASS Nhập sửa vào lô vừa mua: không ghi chi phí lại — Nhập bổ sung vào lô TK-2026-10-17-3 · Đã nhập 1 · đã có 0 · lỗi 0 vào lô TK-2026-10-17-3 (nhập bổ sung, không ghi chi phí thêm).
+PASS Hai lần mua cùng ngày: hai lô, tổng chi 30 — TK-2026-10-17-2=10 · TK-2026-10-17-3=20 · lô 4 mua / 3 nhận
+PASS Tab Lô nhập: SL thực mua, Nhập bổ sung không có ô tiền — TK-2026-10-17-3 Gmail — · 2026-10-17 4 · 3 20 USDT (4 × 5) ≈ 20 USDT Đã ghi chi phí Nhập bổ sung Xem ở Chi phí · Nhập bổ sung vào lô TK-2026-10-17-3
+RESULT 7/7

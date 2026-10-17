@@ -19,7 +19,7 @@ const fields:Record<BusinessResource,string[]>={
  SPLIT_PAYMENT:['splitId','partnerName','percentage','amount','amountUsdt','paid','note','revision'],
  PACKAGE:['code','nextDueDate','lastPaidAt','revision'],
  EARNAPP:['loginId','vmId','paypalId','registeredAt','registeredById','revision'],
- ACCOUNT_BATCH:['kind','loginType','code','source','purchasedAt','priceMode','unitPrice','totalPaid','currency','lineCount','costRecordId','notes','archivedAt','revision'],
+ ACCOUNT_BATCH:['kind','loginType','code','source','purchasedAt','priceMode','unitPrice','totalPaid','currency','lineCount','paidQuantity','costRecordId','notes','archivedAt','revision'],
 };
 export const isBusinessResource=(type:string):type is BusinessResource=>type in fields;
 function capture(type:BusinessResource,row:object):BusinessRow{const data=row as Record<string,unknown>,image:BusinessRow={};for(const key of fields[type]){const value=data[key];image[key]=value instanceof Date?value.toISOString():value instanceof Prisma.Decimal?value.toString():value as BusinessRow[string];}return image;}

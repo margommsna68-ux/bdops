@@ -26,14 +26,15 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
   ]);
   const batchOf=new Map(batches.map(b=>[b.id,b]));
-  // Per-account price is an allocation of the batch payment for information only (unit price, else total / accounts received).
-  const allocated=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;if(!money||!b||!b.totalPaid)return null;const n=b.kind==='PAYPAL'?b._count.paypals:b._count.logins;const each=b.unitPrice??(n?new CashDecimal(b.totalPaid.toString()).div(n):null);return each?{amount:new CashDecimal(each.toString()).toDecimalPlaces(4).toString(),currency:b.currency}:null;};
+  // Per-account price is an allocation of the batch payment for information only (unit price, else total / quantity bought, else
+  // total / accounts received).
+  const allocated=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;if(!money||!b||!b.totalPaid)return null;const n=b.kind==='PAYPAL'?b._count.paypals:b._count.logins;const per=b.paidQuantity??n,each=b.unitPrice??(per?new CashDecimal(b.totalPaid.toString()).div(per):null);return each?{amount:new CashDecimal(each.toString()).toDecimalPlaces(4).toString(),currency:b.currency}:null;};
   const loginRows=gm.map(g=>{const vm=g.earnApp?.vm&&!g.earnApp.vm.archivedAt?g.earnApp.vm:null,state:StockState=g.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':g.earnApp?'USED':'NEW';
     return {id:g.id,email:g.email,type:g.loginType,status:g.status,state,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:g.batchId?batchOf.get(g.batchId)?.code??null:null,batchId:g.batchId,price:allocated(g.batchId),credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),
       earnApp:g.earnApp?{id:g.earnApp.id,revision:g.earnApp.revision,registeredAt:g.earnApp.registeredAt?.toISOString()??null,paypal:g.earnApp.paypal?.code??null}:null,place:place(vm),legacyVmCount:g._count.vms};});
   const paypalRows=pp.map(p=>{const vm=p.earnApp?.vm&&!p.earnApp.vm.archivedAt?p.earnApp.vm:null,state:StockState=p.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':p.earnApp||p.firstEarnAppId?'USED':'NEW';
     return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),earnAppLogin:p.earnApp?.login.email??null,place:place(vm),legacyLoginCount:p._count.gmails};});
-  const batchRows=batches.filter(b=>b.kind==='PAYPAL'?paypals:logins).map(b=>({id:b.id,kind:b.kind,type:b.loginType,code:b.code,source:b.source,purchasedAt:dayText(b.purchasedAt),lineCount:b.lineCount,received:b.kind==='PAYPAL'?b._count.paypals:b._count.logins,revision:b.revision,notes:b.notes,
+  const batchRows=batches.filter(b=>b.kind==='PAYPAL'?paypals:logins).map(b=>({id:b.id,kind:b.kind,type:b.loginType,code:b.code,source:b.source,purchasedAt:dayText(b.purchasedAt),lineCount:b.lineCount,paidQuantity:b.paidQuantity,received:b.kind==='PAYPAL'?b._count.paypals:b._count.logins,revision:b.revision,notes:b.notes,
     cost:b.costRecord&&!b.costRecord.voidedAt?'RECORDED' as const:b.costRecord?'VOIDED' as const:'NONE' as const,costId:money?b.costRecord?.id??null:null,
     money:money&&b.totalPaid?{priceMode:b.priceMode,unit:b.unitPrice?.toString()??null,total:b.totalPaid.toString(),currency:b.currency,usdt:b.costRecord&&!b.costRecord.voidedAt?b.costRecord.usdtAmount?.toString()??null:null}:null}));
   // Old data that conflicts with the new rules: listed for a person to check; never merged, moved or deleted automatically.
@@ -41,6 +42,19 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   for(const v of legacyVms)if(!v.earnApp)review.push({kind:'LEGACY_VM_LOGIN',message:'VM có Gmail cũ '+v.gmail?.email+' (trước quy tắc mới) nhưng chưa có tài khoản EarnApp; gán lại tại ô nếu đúng',place:v.archivedAt?null:place(v)});
   for(const g of loginRows)if(g.legacyVmCount>1)review.push({kind:'LEGACY_SHARED_LOGIN',message:'Gmail '+g.email+' từng ghi cho '+g.legacyVmCount+' VM (quy tắc cũ dùng chung); mỗi tài khoản giờ chỉ cho một VM',place:null});
   for(const p of paypalRows)if(p.legacyLoginCount>1)review.push({kind:'LEGACY_SHARED_PAYPAL',message:'PayPal '+p.code+' từng liên kết '+p.legacyLoginCount+' Gmail (quy tắc cũ); một PayPal chỉ nhận cho một EarnApp',place:null});
+  // Batches recorded before the 17/10 fix: unit price × pasted lines (errors and repeats included), and a same-day code reused by
+  // a later import fell into the first batch without its own cost. Listed for comparison with what was paid; never recomputed.
+  const legacy=batches.filter(b=>b.costRule===1&&(b.kind==='PAYPAL'?paypals:logins)),ids=legacy.map(b=>b.id);
+  if(ids.length){
+    const [gl,pl]=await Promise.all([db.gmailAccount.groupBy({by:['batchId'],where:{projectId,batchId:{in:ids}},_max:{createdAt:true}}),db.payPalAccount.groupBy({by:['batchId'],where:{projectId,batchId:{in:ids}},_max:{createdAt:true}})]);
+    const last=new Map([...gl,...pl].map(r=>[r.batchId,r._max.createdAt]));
+    for(const b of legacy){
+      const received=b.kind==='PAYPAL'?b._count.paypals:b._count.logins,late=last.get(b.id),why:string[]=[];
+      if(b.priceMode==='UNIT'&&received!==b.lineCount)why.push('tiền tính theo giá × '+b.lineCount+' dòng dán, '+received+' đã nhận');
+      if(late&&late.getTime()-b.createdAt.getTime()>120000)why.push('có tài khoản nhập thêm sau lần đầu cùng mã lô (có thể là lần mua khác chưa ghi chi phí riêng)');
+      if(why.length)review.push({kind:'LEGACY_BATCH_COST',message:'Lô '+b.code+' (ghi trước bản sửa 17/10): '+why.join('; ')+'. Đối chiếu với tiền thực trả; web không tự tính lại hay sửa chi phí.',place:null});
+    }
+  }
   for(const g of loginRows)if(!g.type)review.push({kind:'LOGIN_TYPE_MISSING',message:'Tài khoản '+g.email+' chưa chọn loại Gmail / Apple ID (dữ liệu cũ); web không tự đoán từ đuôi email',place:null});
   return {logins:logins?loginRows:[],paypals:paypalRows,batches:batchRows,review,
     rights:{logins,paypals,writeLogins:can(current,'INFRASTRUCTURE',true)&&['ADMIN','MODERATOR'].includes(current.role),writePaypals:can(current,'PAYPALS',true)&&['ADMIN','MODERATOR'].includes(current.role),money,writeCosts:!!current.teamCashEnabled&&(current.role==='ADMIN'||current.role==='MODERATOR'&&!!current.allowedModules?.includes('COSTS')),copy:current.role!=='VIEWER'&&(current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS'))}};

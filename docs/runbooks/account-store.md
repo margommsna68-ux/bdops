@@ -18,7 +18,7 @@ Owner brief 17/10/2026. Replaces the old "Tài khoản VM" page and the rule tha
 |---|---|
 | `GmailAccount.loginType` | `GMAIL` / `APPLE_ID`, chosen explicitly on import, never inferred from the email domain. Old rows stay empty and are listed under *Cần kiểm tra*. |
 | `GmailAccount.batchId`, `PayPalAccount.batchId` | Receiving batch. |
-| `AccountPurchaseBatch` | Lô nhập: code, kind, source, purchase date, price mode (NONE / UNIT / TOTAL), declared lines and `costRecordId` (unique). |
+| `AccountPurchaseBatch` | Lô nhập = one purchase: code, kind, source, purchase date, price mode (NONE / UNIT / TOTAL), `paidQuantity` (quantity actually bought), `lineCount` (lines pasted the first time, information only), `costRule` (1 = recorded before the 17/10 evening fix) and `costRecordId` (unique). |
 | `EarnAppAccount` | EarnApp account: `loginId` (unique), `vmId` (unique, nullable), `paypalId` (unique, nullable), `registeredAt`. |
 | `PayPalAccount.firstEarnAppId` | First EarnApp account this PayPal received for. |
 | `BusinessWorkItem.kind` | `TASK` (work for staff) or `SHEET_REVIEW` (old Sheet reconciliation rows). |
@@ -42,24 +42,39 @@ creates, merges and deletes nothing.
 - *Xem trước* shows every line as Hợp lệ, Đã có or Lỗi: bad format, repeats inside the list (reported on every line involved),
   existing accounts, another project, a PP code with a different email, an email that belongs to another PP. Then one button
   *Nhập N dòng hợp lệ*.
-- An existing account is never overwritten, credentials included. The same command key replays. A new batch code with no new
-  line is refused, so a repeat import cannot create a second batch or cost.
+- An existing account is never overwritten, credentials included. A new purchase with no new line is refused, so a repeat
+  import cannot create a second batch or cost.
+- **Lần mua mới vs Nhập bổ sung** (owner brief 17/10 evening):
+  - *Nhập Gmail / Apple ID* / *Nhập PayPal* is always a new purchase with its own batch. The code is generated as
+    `TK-<ngày mua>-<n>` / `PP-<ngày mua>-<n>` (next free number, withdrawn batches included) inside the command under the project
+    lock, so two people importing at once get different codes. A typed code that already exists is refused, never merged.
+  - *Lô nhập → Nhập bổ sung* continues that batch only (`append.batchId`), never with money, source or date. Sending money with
+    an append is refused, not ignored.
+  - After an import that left error lines, the panel switches to *Nhập bổ sung vào lô …* of the batch just created.
+- One command key per previewed request: the key is made at *Xem trước* and kept until the input changes or the import
+  succeeds. A double click or a retry after a lost response replays the same command (no second batch or cost).
 - Passwords and 2FA are encrypted at rest. They never appear in previews, results, the journal (the idempotency hash uses their
   sha256), the audit log or error messages.
-- After import, the box keeps only the error lines. Fixing them under the same batch code continues that batch without a new cost.
+- After import, the box keeps only the error lines; fixing them continues that batch without a new cost.
 
 ## Purchase cost
 
 - Recorded in the existing cost ledger (USDT team cash, category GMAIL or PAYPAL), once per batch, in the same import command:
-  - *Giá mỗi tài khoản* records unit price × lines declared in the first list.
-  - *Tổng tiền thực trả* records the total as entered.
+  - *Tổng tiền thực trả* (default field; empty = Chưa ghi chi phí) records the total as entered.
+  - *Tính theo giá mỗi tài khoản* asks for *Số lượng thực mua* and *Giá / tài khoản* and shows `số lượng × đơn giá = tổng` live.
+    The quantity is typed by the person; it is never the number of pasted or valid lines, because accounts that could not be
+    imported may still have been paid for.
   - Original amount, currency and USDT rate are kept, and the period lock applies.
 - Needs team cash and the right to write costs. Without them the batch is saved as *Chưa ghi chi phí*. A person with that right
   records the payment later in *Lô nhập → Ghi chi phí*. This is refused once a cost is recorded; it is allowed again only after
   the cost is voided in Chi phí.
-- The price shown per account (*Giá phân bổ*) is the unit price, otherwise the total divided by the accounts received. It is for
+- The price shown per account (*Giá phân bổ*) is the unit price, otherwise the total divided by the quantity bought (or by the
+  accounts received when no quantity was entered). It is for
   information only and is never added to profit. Only ADMIN or members with the COSTS module see amounts.
-- Assigning, unassigning, moving and re-importing never add a cost.
+- Assigning, unassigning, moving, re-importing and appending never add a cost or change the recorded total.
+- Batches recorded before this fix (`costRule = 1`) are listed under *Cần kiểm tra* when unit price × pasted lines differs from
+  the accounts received, or when accounts were added later under the same code (possibly another purchase without its own
+  cost). Their money is never recomputed or changed. Migration `20261017180000_account_batch_quantity` is additive.
 
 ## Assigning to VMs (Server / VM)
 
@@ -93,5 +108,7 @@ creates, merges and deletes nothing.
 ## Checks
 
 - `src/__tests__/proxy-management/account-store.integration.test.ts` and `account-parse.test.ts`.
+- Purchase money: `scratchpad/pw/purchase-accept.js` on PROXY_TRIAL (two purchases the same day, lost response + retry,
+  quantity × unit price with bad / repeated lines, append after errors, Lô nhập tab).
 - Local browser acceptance: `scratchpad/pw/accounts-accept.js` on PROXY_TRIAL. It creates a new `ac-xxxx` server and synthetic
   `@example.invalid` accounts on each run.
