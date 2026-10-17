@@ -15,6 +15,7 @@ import {AddVmDialog,CreateServerDialog} from './VmForms';
 import {useVMRefresh,errorMessage,type ManagedVM} from './shared';
 import {vmView,summarizeVMs} from './workflow';
 import {VmGrid,type CopyWhich,type GridRights} from './vm-grid/VmGrid';
+import type {StatusActionKind} from './vm-grid/status-actions';
 import {VmSidePanel} from './vm-grid/VmSidePanel';
 import {PasteTablePanel,AssignProxyPanel,GmailPanel,NotesPanel} from './vm-grid/BulkPanels';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
@@ -114,6 +115,20 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     else{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,...(field==='code'?{code:value}:{notes:value||null}),expectedRevision:vm.revision});if(!r.saved){await refresh();return;}}
     toast.success('Đã lưu '+vm.code,{duration:1500});await refresh();
   }
+  // Tình trạng cell actions. Each one is the existing checked command; errors propagate so the cell keeps the old state and shows why.
+  const startInstall=trpc.vmManagement.start.useMutation(),confirmInstall=trpc.vmManagement.confirm.useMutation(),reportFailure=trpc.vmManagement.reportFailure.useMutation(),autoPreview=trpc.vmManagement.preview.useMutation(),autoCommit=trpc.vmManagement.commit.useMutation();
+  async function statusAction(vm:ManagedVM,kind:StatusActionKind,note?:string):Promise<void>{
+    if(kind==='ASSIGN'||kind==='CHANGE_PROXY'){openVm(vm.id,'proxy');return;}
+    if(kind==='OPEN_INSTALL'){openVm(vm.id,'install');return;}
+    if(kind==='OPEN_REGISTRY'){const ip=vm.holds.find(h=>h.endpointId===vm.desired?.endpointId)?.ip||vm.holds[0]?.ip||vm.desired?.ip||'';router.push('/infrastructure/proxies'+(ip?'?q='+encodeURIComponent(ip):''));return;}
+    const d=vm.desired;let message='';
+    if(kind==='START'){const r=await startInstall.mutateAsync({projectId,configurationId:d!.id,expectedVmRevision:vm.revision});message=r.replay?vm.code+' đã ở trạng thái đang cài':'Đã bắt đầu cài '+vm.code;}
+    else if(kind==='COPY_INSTALL'){const out=await copyWhenReady(async()=>(await copyInstall.mutateAsync({projectId,configurationId:d!.id})).proxy);if(!out.ok){if(out.text){setManualCopy(out.text);setBulk('copy');}else throw new Error(out.error||'Chưa copy được');}message='Đã copy để cài '+vm.code+'; việc cài đã bắt đầu';}
+    else if(kind==='CONFIRM'){const r=await confirmInstall.mutateAsync({projectId,configurationId:d!.id,configurationHash:d!.hash,expectedVmRevision:vm.revision});message=r.replay?vm.code+' đã được xác nhận trước đó':'Đã xác nhận cài '+(d!.ip||'')+' trên '+vm.code;}
+    else if(kind==='FAIL'){const r=await reportFailure.mutateAsync({projectId,configurationId:d!.id,note:note||'',expectedVmRevision:vm.revision});message=r.saved?'Đã ghi vướng mắc '+vm.code:'Vướng mắc không đổi; không ghi thêm';}
+    else if(kind==='AUTOFILL'){const key=crypto.randomUUID(),p=await autoPreview.mutateAsync({projectId,mode:'AUTO',vmIds:[vm.id],idempotencyKey:key});const row=p.rows[0];if(!p.ready) throw new Error(row?.message||'Không giao được proxy cho VM này');await autoCommit.mutateAsync({projectId,token:p.token,idempotencyKey:key});message='Đã giao '+(row?.ip||'proxy')+' cho '+vm.code+'; chờ cài';}
+    toast.success(message,{duration:3000});await refresh();
+  }
   const toggle=(id:string,on:boolean)=>setSelected(prev=>{const n=new Set(prev);if(on)n.add(id);else n.delete(id);return n;});
   const togglePage=(on:boolean)=>setSelected(prev=>{const n=new Set(prev);paged.rows.forEach(v=>{if(on)n.add(v.id);else n.delete(v.id);});return n;});
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
@@ -158,7 +173,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         {blocked.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{blocked.length} VM chưa xử lý được</strong><button className="pm-icon-button" aria-label="Đóng danh sách bị chặn" onClick={()=>setBlocked([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{blocked.map(b=><li key={b.id}><strong className="pm-code">{b.code}</strong> — {b.reason} · <button className="pm-link" onClick={()=>openVm(b.id,CAUSE_TAB[b.cause||'']||'overview',b.cause||null)}>Mở VM</button></li>)}</ul></div>}
         {pager('top')}
         <div ref={gridHost}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} gmailOf={id=>gmailOfVm.get(id)||null} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading}
-          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell}/></div>
+          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}/></div>
         {pager('bottom')}
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>

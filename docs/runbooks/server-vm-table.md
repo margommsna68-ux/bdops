@@ -39,6 +39,38 @@ Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers
   - Đóng bằng ✕, Esc hoặc nút Back. Khi đóng, bảng giữ nguyên vị trí cuộn và focus trở về dòng đang làm.
 - **URL** giữ server (đường dẫn), ô tìm `q`, bộ lọc `view`, sắp xếp `sort`, trang `page`, số dòng `size`, VM đang mở `vm` và tab `tab`. Tải lại hoặc Back/Forward đều về đúng chỗ.
 
+## Tình trạng: thao tác ngay tại ô
+
+Nhãn Tình trạng là nút (có mũi tên ▾). Bấm vào sẽ mở một popover nhỏ ngay cạnh ô, không qua ⋯ hay khung chi tiết. Nhãn phản ánh cấu hình và tiến độ cài, không phải trường tự do.
+
+| Nhãn | Popover đưa ra |
+|---|---|
+| Thiếu proxy | *Tự điền 1 proxy TUT NEW chưa dùng* (lưu ngay) · *Chọn proxy (TUT hoặc nhóm chung)…* mở thẳng tab Proxy |
+| Chờ cài | **Bắt đầu cài** (lưu ngay) · *Copy proxy để cài (bắt đầu cài)* · *Đổi proxy…* |
+| Đang cài | **Xác nhận đã cài <IP>**: khung ghi đúng `server / VM`, IP:port và cấu hình #n, bấm một lần là xong · *Cài chưa xong…* (nhập vướng mắc ngay trong popover → *Lưu vướng mắc*) · *Đổi proxy…* |
+| Cài chưa xong | Vướng mắc đã ghi · Xác nhận đã cài · *Sửa vướng mắc* (nội dung không đổi thì nút Lưu khoá) · Đổi proxy |
+| Cần kiểm tra | Nguyên nhân (proxy chưa rõ sở hữu, BLOCKED, giữ để kiểm tra, ô cũ có công thức) và hành động phù hợp: *Xem proxy ở bảng proxy* (mở sẵn ô tìm IP), *Kiểm tra trên máy (Việc cài)*, *Đổi proxy…* hoặc *Chọn proxy…*. Không có Bắt đầu / Xác nhận khi proxy không cài được. |
+| Đã cài | IP, cấu hình đã xác nhận · *Đổi proxy…* |
+
+- Chỉ hiện hành động backend cho phép lúc đó và người dùng có quyền.
+  - Bắt đầu cài, xác nhận cài, ghi vướng mắc: cần quyền xác nhận (CONFIRM).
+  - Giao proxy: cần quyền giao (ASSIGN) và nguồn Genjy đã kết nối.
+  - Tài khoản chỉ xem thấy thông tin và dòng "Chỉ xem…".
+- Không viết đè nhãn, không tự tạo ngày bắt đầu cài, không tự thả proxy, không xoá cảnh báo. LIVE của proxy, xác nhận cài và SDK vẫn là việc riêng.
+- **Khi lưu**
+  - Đang lưu chỉ khoá dòng đó.
+  - Thành công: đóng popover, ô và dải đếm cập nhật.
+  - Lỗi (ví dụ VM vừa được người khác sửa): giữ trạng thái cũ, lý do hiện ngay trong popover.
+- **Escape** hoặc bấm ra ngoài chỉ đóng popover, không ghi gì. Lựa chọn, bộ lọc, URL và vị trí cuộn giữ nguyên.
+- Popover nằm ngoài vùng cuộn của bảng nên không bị cắt; ô ở cuối bảng thì popover mở lên trên.
+- **Backend**
+  - `start` và `reportFailure` nhận `expectedVmRevision`.
+  - Bắt đầu cài khi đã bắt đầu: không làm gì, không ghi lịch sử.
+  - Vướng mắc trùng nội dung cũ: không ghi.
+  - Xác nhận lặp: trả về như cũ, không ghi lịch sử.
+  - Bấm đúp chỉ gửi một lệnh.
+- Menu ⋯ chỉ còn hành động ít dùng; *Copy để cài* đã chuyển vào ô Tình trạng.
+
 ## Sửa ô bằng bàn phím
 
 - Ô sửa được: **mã VM**, **SDK**, **ghi chú**.

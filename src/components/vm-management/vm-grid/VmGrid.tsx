@@ -6,8 +6,10 @@ import toast from 'react-hot-toast';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
 import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {displayNote} from '@/server/vm-management/vm-codes';
-import {vmView,viewLabels,proxyAddress} from '../workflow';
+import {vmView,proxyAddress} from '../workflow';
 import type {ManagedVM} from '../shared';
+import {StatusCell} from './StatusCell';
+import type {StatusActionKind} from './status-actions';
 import {FIXED,editableFields,nextCell,resizeColumn,shortCode,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
 export interface GridRights {manage:boolean;assign:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean}
 export type CopyWhich='DESIRED'|'INSTALLED';
@@ -54,8 +56,10 @@ function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCan
   </div>;
 }
 export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;gmailOf:(vmId:string)=>string|null;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
-  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onCopyToInstall:(vm:ManagedVM)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>}){
+  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onCopyToInstall:(vm:ManagedVM)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;onStatus:(vm:ManagedVM,kind:StatusActionKind,note?:string)=>Promise<string|void>}){
   const {rows,single,deletedView,prefs,rights,selected}=props,columns=visibleColumns(prefs),drafts=useDrafts(props.projectId);
+  // A row whose status action is saving is locked (other cells and ⋯) until the answer comes back.
+  const [busyRows,setBusyRows]=useState<Set<string>>(new Set()),markBusy=(id:string,on:boolean)=>setBusyRows(p=>{const n=new Set(p);if(on)n.add(id);else n.delete(id);return n;});
   const [active,setActive]=useState<{vmId:string;field:EditField}|null>(null),[errors,setErrors]=useState<Record<string,string>>({}),[saving,setSaving]=useState<string|null>(null);
   const fields=deletedView?[]:editableFields(prefs,{manage:rights.manage,assign:rights.assign}),rowIds=rows.map(r=>r.id);
   const serverW=single?0:widthOf(prefs,'server'),vmW=widthOf(prefs,'vm'),selectW=FIXED.select;
@@ -88,11 +92,11 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
   }
   const left=(n:number)=>({position:'sticky' as const,left:n});
   const cell=(v:ManagedVM,key:ColumnKey)=>{
-    const status=vmView(v);
+
     if(key==='proxy') return <ProxyCell v={v} canCopy={rights.copy} onCopy={w=>props.onCopy(v,w)}/>;
     if(key==='sdk'){const view=v.sdk?<span className="vm-sdk-short"><code className="vm-sdk vm-ellipsis" title={v.sdk.id}>{shortCode(v.sdk.id)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+v.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();navigator.clipboard?.writeText(v.sdk!.id).then(()=>toast.success('Đã copy SDK '+v.code)).catch(()=>toast.error('Trình duyệt chặn copy; mở chi tiết để chọn mã'));}}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>;return deletedView?view:editable(v,'sdk','SDK '+v.code,view);}
     if(key==='gmail'){const email=props.gmailOf(v.id);return <button type="button" className="vm-link-cell vm-ellipsis" title={email||'Chưa liên kết Gmail'} onClick={()=>props.onOpen(v.id,'account')}>{email||<span className="pm-muted">—</span>}</button>;}
-    if(key==='status'){if(deletedView) return <span className="pm-badge pm-badge-muted">Đã xoá</span>;return <div className="vm-status"><span className={`pm-badge ${status==='REVIEW'?'pm-badge-red':status==='PENDING'?'vm-badge-pending':status==='INSTALLED'?'pm-badge-green':'pm-badge-muted'}`}>{viewLabels[status]}</span>{status==='REVIEW'&&<span className="pm-muted text-xs vm-ellipsis" title={reviewReason(v)}>{reviewReason(v)}</span>}{status==='PENDING'&&v.desired?.startedAt&&<span className="pm-muted text-xs">Đang cài</span>}</div>;}
+    if(key==='status') return <StatusCell vm={v} rights={rights} onAction={props.onStatus} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version') return <span className="text-xs">{v.desired?'Giao #'+v.desired.version:''}{v.desired&&v.installed&&v.desired.id!==v.installed.id?' · ':''}{v.installed&&v.installed.id!==v.desired?.id?'Cài #'+v.installed.version:v.installed?' (đã cài)':''}{!v.desired&&!v.installed&&<span className="pm-muted">—</span>}</span>;
     if(key==='sdkMeta') return v.sdk?<span className="text-xs vm-ellipsis" title={(v.sdk.recordedBy||'')+' · '+localDate(v.sdk.recordedAt)}>{v.sdk.recordedBy||'—'} · {v.sdk.recordedAt?localDate(v.sdk.recordedAt,true):'chưa rõ ngày'}</span>:<span className="pm-muted">—</span>;
@@ -108,7 +112,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
         <th className="vm-sticky-right" aria-label="Thao tác"></th>
       </tr></thead>
       <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=v.holds.some(h=>h.state==='BLOCKED');
-        return <tr key={v.id} data-row={v.id} className={(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy?'pm-row-blocked ':status==='PENDING'&&!deletedView?'vm-row-pending ':'')}>
+        return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy?'pm-row-blocked ':status==='PENDING'&&!deletedView?'vm-row-pending ':'')}>
           <td className="vm-sticky vm-sticky-check" style={left(0)}><input type="checkbox" aria-label={'Chọn '+v.server+' / '+v.code} checked={isSel} onChange={e=>props.onToggle(v.id,e.target.checked)}/></td>
           {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={`/infrastructure/servers/${v.serverId}`} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
           <td className="vm-sticky vm-sticky-last vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>
@@ -120,7 +124,6 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
                 {rights.assign&&<DropdownMenuItem disabled={!rights.sourceConnected} onSelect={()=>props.onOpen(v.id,'proxy')}>{status==='MISSING'?'Gán proxy':'Đổi proxy'}</DropdownMenuItem>}
                 {rights.copy&&v.desired&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'DESIRED')}>Copy proxy được giao</DropdownMenuItem>}
                 {rights.copy&&v.installed&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem>}
-                {rights.copy&&rights.confirm&&v.desired&&v.desired.id!==v.installed?.id&&<DropdownMenuItem onSelect={()=>props.onCopyToInstall(v)}>Copy để cài (bắt đầu cài)</DropdownMenuItem>}
                 <DropdownMenuSeparator/>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'install')}>Việc cài</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'account')}>Gmail của VM</DropdownMenuItem>

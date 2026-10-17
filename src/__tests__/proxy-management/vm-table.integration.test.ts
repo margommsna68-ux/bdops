@@ -2,7 +2,7 @@ import {afterAll,describe,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {encrypt} from '@/lib/encryption';
 import {previewVmBulk,applyVmBulk} from '@/server/vm-management/bulk';
-import {copyVmConfigurations,startInstall} from '@/server/vm-management/installation';
+import {copyVmConfigurations,startInstall,reportInstallFailure,confirmInstalled} from '@/server/vm-management/installation';
 import {archiveManagedResource,updateManagedVM} from '@/server/vm-management/metadata';
 import {createVMService} from '@/server/vm-management/allocation';
 import type {ActorScope} from '@/server/proxy-management/types';
@@ -120,6 +120,27 @@ describe('Copy and delete',()=>{
       await expect(archiveManagedResource(f.scope,'VM',f.v.VM_001.id,db)).rejects.toThrow(/Còn proxy/);
       await archiveManagedResource(f.scope,'VM',f.v.VM_002.id,db);expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v.VM_002.id}})).archivedAt).not.toBeNull();
       await expect(archiveManagedResource(f.scope,'SERVER',f.a.id,db)).rejects.toThrow(/VM_001/);
+    }finally{await f.cleanup();}
+  });
+});
+describe('Tình trạng actions at the cell',()=>{
+  it('start is a no-op when already started, refuses a stale VM revision, failure note unchanged writes nothing, confirm replays without history',async()=>{
+    const f=await fixture();try{
+      const p=await previewVmBulk(f.scope,{kind:'PROXY',serverId:f.a.id,text:`VM_001 | ${f.net}1`},db);await applyVmBulk(f.scope,{kind:'PROXY',key:randomUUID(),items:ready(p.rows)},db);
+      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v.VM_001.id}}),config=vm.desiredConfigurationId!;
+      await expect(startInstall(f.scope,config,db,{expectedVmRevision:vm.revision-1})).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      await startInstall(f.scope,config,db,{expectedVmRevision:vm.revision});
+      const ops=()=>db.operationJournal.count({where:{projectId:f.projectId}}),afterStart=await ops();
+      const again=await startInstall(f.scope,config,db,{expectedVmRevision:vm.revision});expect(again.replay).toBe(true);expect(await ops()).toBe(afterStart);
+      const v2=await db.virtualMachine.findUniqueOrThrow({where:{id:vm.id}});
+      expect((await reportInstallFailure(f.scope,config,'Chưa vào được máy',db,{expectedVmRevision:v2.revision})).saved).toBe(true);const afterFail=await ops();
+      const v3=await db.virtualMachine.findUniqueOrThrow({where:{id:vm.id}});
+      expect((await reportInstallFailure(f.scope,config,' Chưa vào được máy ',db,{expectedVmRevision:v3.revision})).saved).toBe(false);expect(await ops()).toBe(afterFail);
+      await expect(reportInstallFailure(f.scope,config,'khác',db,{expectedVmRevision:v3.revision-1})).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      const c=await db.vMConfiguration.findUniqueOrThrow({where:{id:config}}),refreshSource=async()=>({id:'s',sourceKey:'GENJY',hash:'vm-table',fetchedAt:new Date().toISOString(),scanSucceeded:true});
+      await confirmInstalled(f.scope,{configurationId:config,configurationHash:c.configurationHash,expectedVmRevision:v3.revision},db,{refreshSource});const afterConfirm=await ops();
+      expect((await confirmInstalled(f.scope,{configurationId:config,configurationHash:c.configurationHash,expectedVmRevision:v3.revision},db,{refreshSource})).replay).toBe(true);expect(await ops()).toBe(afterConfirm);
+      expect((await db.virtualMachine.findUniqueOrThrow({where:{id:vm.id}})).installedConfigurationId).toBe(config);
     }finally{await f.cleanup();}
   });
 });

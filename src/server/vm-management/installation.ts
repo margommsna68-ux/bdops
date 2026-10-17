@@ -26,7 +26,13 @@ async function begin(tx:Prisma.TransactionClient,scope:ActorScope,id:string){
   if(!config.startedAt)await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:config.endpoint.identityId!,endpointId:config.endpoint.id,ip:config.endpoint.host!,kind:'INSTALL_STARTED',occurredAt:new Date(),actorId:scope.userId,sourceRef:config.vm.server.code+'/'+config.vm.code}});
   await recordOperation(tx,{scope,kind:'INSTALL_START',summary:{vm:config.vm.code,version:config.version},snapshot:await images.finish(),reversible:false});return config;
 }
-export async function startInstall(scope:ActorScope,id:string,db:PrismaClient=prisma){return withProxyTransaction(async tx=>{const current=await authorizeVM(scope,'CONFIRM',tx),config=await begin(tx,current,id);return {configurationId:config.id,version:config.version};},db);}
+// Start from the Tình trạng cell: already started = no-op (no history, works for a repeated click); otherwise the VM must still be at
+// the revision the operator saw, so a change by someone else is reported instead of acted on.
+export async function startInstall(scope:ActorScope,id:string,db:PrismaClient=prisma,opts:{expectedVmRevision?:number}={}){return withProxyTransaction(async tx=>{
+  const current=await authorizeVM(scope,'CONFIRM',tx),seen=await currentConfiguration(tx,current,id);
+  if(seen.status==='IN_PROGRESS'&&seen.startedAt&&seen.vm.desiredConfigurationId===id)return {configurationId:seen.id,version:seen.version,replay:true};
+  if(opts.expectedVmRevision!==undefined&&seen.vm.revision!==opts.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW','VM vừa được thay đổi; tải lại để xem trạng thái mới');
+  const config=await begin(tx,current,id);return {configurationId:config.id,version:config.version,replay:false};},db);}
 export async function copyConfiguration(scope:ActorScope,id:string,db:PrismaClient=prisma){
   return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'COPY_CREDENTIALS',tx);await authorizeVM(scope,'CONFIRM',tx);
@@ -53,9 +59,11 @@ export async function copyVmConfigurations(scope:ActorScope,input:{vmIds:string[
   await db.auditLog.create({data:{userId:current.userId,projectId:scope.projectId,action:'COPY_VM_PROXY',entity:'VirtualMachine',entityId:'bulk',changes:{which:input.which,copied:items.length,skipped:skipped.length}}});
   return {items,skipped};
 }
-export async function reportInstallFailure(scope:ActorScope,id:string,note:string,db:PrismaClient=prisma){
+export async function reportInstallFailure(scope:ActorScope,id:string,note:string,db:PrismaClient=prisma,opts:{expectedVmRevision?:number}={}){
   if(!note.trim()||note.length>1000)throw new ProxyDomainError('INVALID_INPUT');return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'CONFIRM',tx),config=await currentConfiguration(tx,current,id);if(config.vm.desiredConfigurationId!==id||!config.startedAt||['CONFIRMED','CANCELLED'].includes(config.status))throw new ProxyDomainError('STALE_PREVIEW');
+    if(config.status==='FAILED'&&config.failureNote===note.trim())return {saved:false}; // same note again: nothing written
+    if(opts.expectedVmRevision!==undefined&&config.vm.revision!==opts.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW','VM vừa được thay đổi; tải lại để xem trạng thái mới');
     const images=await snapshotCollector(tx,current);await images.remember('VM_CONFIG',id);await images.remember('VM',config.vmId);await tx.vMConfiguration.update({where:{id},data:{status:'FAILED',failureNote:note.trim(),revision:{increment:1}}});await tx.virtualMachine.update({where:{id:config.vmId},data:{revision:{increment:1}}});await recordOperation(tx,{scope:current,kind:'INSTALL_FAILURE',summary:{vm:config.vm.code,version:config.version},snapshot:await images.finish(),reversible:false});return {saved:true};
   },db);
 }

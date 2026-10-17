@@ -73,6 +73,39 @@ Các lỗi tìm ra khi tự chạy các ca, đều đã sửa trước khi đón
 - Đóng chi tiết thì focus kéo bảng cuộn đi. Giờ focus không cuộn.
 - Trang dài theo menu thanh bên nên cả trang cuộn, che mất đầu trang. Giờ thanh bên cuộn riêng.
 
+## Tình trạng tại ô (17/10, brief bổ sung)
+
+- Thêm `vm-grid/status-actions.ts`: quy tắc thuần, có 7 unit test.
+- Thêm `vm-grid/StatusCell.tsx`: popover dựng qua portal.
+- `startInstall` / `reportInstallFailure`:
+  - Nhận `expectedVmRevision`.
+  - Bắt đầu cài khi đã bắt đầu: không làm gì.
+  - Vướng mắc trùng nội dung cũ: không ghi.
+  - Có 1 integration test cho các điểm trên và cho việc xác nhận lặp không tạo lịch sử.
+- Bảng proxy nhận `?q=` để mở sẵn ô tìm IP.
+- Theo yêu cầu của anh, lần này không quay video; chỉ có ảnh `s1`–`s9`.
+
+Nghiệm thu trên trình duyệt (dự án mẫu local, server thử `st-eoiq`), 11/11 đạt:
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Thiếu proxy | Bấm ô → *Tự điền 1 proxy TUT NEW* → Chờ cài; đếm Thiếu proxy 8 → 7 |
+| Chọn proxy | Mở thẳng tab Proxy (`tab=proxy`) |
+| Chờ cài → Bắt đầu cài | 2 bấm; startedAt có sau khi bấm (trước đó null) |
+| Đang cài → Xác nhận | Popover ghi `st-eoiq / VM_001`, 198.18.8.132:8000, cấu hình #1; 1 bấm → Đã cài |
+| Cài chưa xong | Nhập vướng mắc trong popover → nhãn + lý do ở ô; nội dung không đổi thì nút Lưu khoá; API gửi cùng nội dung → `saved=false` |
+| Cần kiểm tra | Proxy BLOCKED: nêu nguyên nhân; chỉ có *Xem proxy ở bảng proxy* và *Đổi proxy…*; bảng proxy mở sẵn tìm IP |
+| Dữ liệu vừa bị sửa | Lỗi tại chỗ "VM vừa được thay đổi…", nhãn giữ Chờ cài, không có startedAt |
+| Bấm lặp | 2 cú bấm liên tiếp → 1 lệnh gửi lên |
+| Đóng popover | Escape và bấm ra ngoài: 0 lệnh ghi; ô cuối vùng cuộn thì popover mở lên trên, vẫn trong cửa sổ; giữ lựa chọn 2 VM, URL và vị trí cuộn |
+| Quyền chỉ xem | Popover chỉ có thông tin và "Chỉ xem…" |
+| Không qua ⋯ | Menu ⋯ không còn Copy để cài / Bắt đầu / Xác nhận |
+
+Nhật ký thao tác của lần chạy:
+- INSTALL_START 3: VM_001, VM_003, VM_005; VM_005 bị bấm đúp vẫn chỉ 1 lần.
+- INSTALL_FAILURE 1 (lần gửi cùng nội dung không ghi).
+- INSTALL_CONFIRM 1.
+
 ## Railway
 
 - **Lần 1**: commit `d3a3337`, backup host `bb7fcfa9-9ee4-4f47-9fd2-4b3c0e64a4be` trước, deploy `6e866758-4df3-4540-9ff1-88a0f9f412c0` SUCCESS.
