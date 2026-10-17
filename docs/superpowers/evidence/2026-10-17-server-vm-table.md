@@ -73,6 +73,23 @@ Các lỗi tìm ra khi tự chạy các ca, đều đã sửa trước khi đón
 - Đóng chi tiết thì focus kéo bảng cuộn đi. Giờ focus không cuộn.
 - Trang dài theo menu thanh bên nên cả trang cuộn, che mất đầu trang. Giờ thanh bên cuộn riêng.
 
+## Railway
+
+- **Lần 1**: commit `d3a3337`, backup host `bb7fcfa9-9ee4-4f47-9fd2-4b3c0e64a4be` trước, deploy `6e866758-4df3-4540-9ff1-88a0f9f412c0` SUCCESS.
+- **Lần 2**: sửa nhãn nhóm "UNKNOWN" → "Chưa xác định" và trạng thái việc trong tab Lịch sử. Commit `d7d6bef`, backup `20f0229a-ba53-41af-bc07-aacfd08dd0cc`, deploy `de2a70bc-00f8-4f6b-83d8-776d9b23a571` SUCCESS.
+- Sau mỗi lần deploy, kiểm tra host vẫn 10 server / 576 VM. Không có migration.
+- **Kiểm tra trên host mooon**, chỉ đọc và xem trước:
+  - 0 request ghi; không bấm Áp dụng, Lưu hay Xoá.
+  - Ảnh `h1`–`h8`.
+- **Kết quả trên host**:
+  - Tất cả server: 576 VM; dải đếm *Chờ cài 553 · Cần kiểm tra 23 · Chưa SDK 576*.
+  - Ô chọn server gõ `moon05` → Enter chuyển thẳng tới moon05: 80 VM, mỗi dòng chỉ `VM_001`.
+  - Tìm `VM_071` ra 1 dòng. ⋯ → *Công việc* hiện việc Proxiware; *Lịch sử* hiện cấu hình #1 122.8.67.87:11000, nhóm *Chưa xác định*, *Cài chưa xong*.
+  - Đóng ✕ và Back đều về đúng `?q=VM_071`.
+  - Dán bảng SDK chỉ xem trước: "0 hợp lệ · 2 giữ nguyên · 1 lỗi" (VM_999 không có).
+  - 1366×768: trang vừa màn hình (768/768), cột VM dính trái, hàng 46 px. 1920×1080: 1080/1080.
+- **Lượt ghi**: các ca có ghi chỉ chạy trên dữ liệu thử local. Host không có server thử nên không ghi gì lên dữ liệu thật.
+
 ## Giới hạn
 
 Xem mục *Giới hạn* trong runbook.
