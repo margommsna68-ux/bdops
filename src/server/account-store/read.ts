@@ -22,21 +22,34 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   const [gm,pp,batches,legacyVms]=await Promise.all([
     logins?db.gmailAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,email:true,loginType:true,status:true,notes:true,recoveryEmail:true,revision:true,createdAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
     paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,firstEarnAppId:true,_count:{select:{gmails:true}},earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
-    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{code:'asc'}]}),
+    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{code:'asc'}]}),
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
   ]);
   const batchOf=new Map(batches.map(b=>[b.id,b]));
-  // Per-account price is an allocation of the batch payment for information only (unit price, else total / quantity bought, else
-  // total / accounts received).
-  const allocated=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;if(!money||!b||!b.totalPaid)return null;const n=b.kind==='PAYPAL'?b._count.paypals:b._count.logins;const per=b.paidQuantity??n,each=b.unitPrice??(per?new CashDecimal(b.totalPaid.toString()).div(per):null);return each?{amount:new CashDecimal(each.toString()).toDecimalPlaces(4).toString(),currency:b.currency}:null;};
+  // The current cost record in Chi phí is what was actually paid: amount, currency, rate, USDT and state come from it, never from
+  // the batch's first price (kept as history only, shown when the cost was adjusted or voided). Nothing is recomputed or written.
+  type BatchRow=typeof batches[number];
+  const paidOf=(b:BatchRow)=>{
+    const c=b.costRecord&&!b.costRecord.voidedAt?b.costRecord:null,same=!!c&&!!b.totalPaid&&c.currency===b.currency&&new CashDecimal(c.amount.toString()).eq(b.totalPaid.toString());
+    const n=b.kind==='PAYPAL'?b._count.paypals:b._count.logins,per=b.paidQuantity??n;
+    // The unit × quantity formula is only shown while the ledger still holds that exact total.
+    const unit=same&&b.unitPrice?b.unitPrice.toString():null;
+    const each=c?unit??(per?new CashDecimal(c.amount.toString()).div(per).toDecimalPlaces(4).toString():null):null;
+    return {c,same,unit,each};
+  };
+  const allocated=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;if(!money||!b)return null;const p=paidOf(b);return p.c&&p.each?{amount:new CashDecimal(p.each).toDecimalPlaces(4).toString(),currency:p.c.currency}:null;};
+  const priceState=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;return !b?.costRecord?'NONE' as const:b.costRecord.voidedAt?'VOIDED' as const:'RECORDED' as const;};
   const loginRows=gm.map(g=>{const vm=g.earnApp?.vm&&!g.earnApp.vm.archivedAt?g.earnApp.vm:null,state:StockState=g.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':g.earnApp?'USED':'NEW';
-    return {id:g.id,email:g.email,type:g.loginType,status:g.status,state,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:g.batchId?batchOf.get(g.batchId)?.code??null:null,batchId:g.batchId,price:allocated(g.batchId),credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),
+    return {id:g.id,email:g.email,type:g.loginType,status:g.status,state,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:g.batchId?batchOf.get(g.batchId)?.code??null:null,batchId:g.batchId,price:allocated(g.batchId),priceState:priceState(g.batchId),credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),
       earnApp:g.earnApp?{id:g.earnApp.id,revision:g.earnApp.revision,registeredAt:g.earnApp.registeredAt?.toISOString()??null,paypal:g.earnApp.paypal?.code??null}:null,place:place(vm),legacyVmCount:g._count.vms};});
   const paypalRows=pp.map(p=>{const vm=p.earnApp?.vm&&!p.earnApp.vm.archivedAt?p.earnApp.vm:null,state:StockState=p.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':p.earnApp||p.firstEarnAppId?'USED':'NEW';
-    return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),earnAppLogin:p.earnApp?.login.email??null,place:place(vm),legacyLoginCount:p._count.gmails};});
+    return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),priceState:priceState(p.batchId),earnAppLogin:p.earnApp?.login.email??null,place:place(vm),legacyLoginCount:p._count.gmails};});
   const batchRows=batches.filter(b=>b.kind==='PAYPAL'?paypals:logins).map(b=>({id:b.id,kind:b.kind,type:b.loginType,code:b.code,source:b.source,purchasedAt:dayText(b.purchasedAt),lineCount:b.lineCount,paidQuantity:b.paidQuantity,received:b.kind==='PAYPAL'?b._count.paypals:b._count.logins,revision:b.revision,notes:b.notes,
     cost:b.costRecord&&!b.costRecord.voidedAt?'RECORDED' as const:b.costRecord?'VOIDED' as const:'NONE' as const,costId:money?b.costRecord?.id??null:null,
-    money:money&&b.totalPaid?{priceMode:b.priceMode,unit:b.unitPrice?.toString()??null,total:b.totalPaid.toString(),currency:b.currency,usdt:b.costRecord&&!b.costRecord.voidedAt?b.costRecord.usdtAmount?.toString()??null:null}:null}));
+    costLink:money&&b.costRecord&&!b.costRecord.voidedAt?{id:b.costRecord.id,month:dayText(b.costRecord.date).slice(0,7)}:null,
+    money:money?(()=>{const p=paidOf(b),original=b.totalPaid?{total:b.totalPaid.toString(),currency:b.currency,unit:b.unitPrice?.toString()??null,quantity:b.paidQuantity}:null;
+      if(p.c)return {priceMode:b.priceMode,total:p.c.amount.toString(),currency:p.c.currency,rate:p.c.usdtRate?.toString()??null,usdt:p.c.usdtAmount?.toString()??null,unit:p.unit,adjusted:!p.same,original:p.same?null:original};
+      return original?{priceMode:b.priceMode,total:null,currency:null,rate:null,usdt:null,unit:null,adjusted:false,original}:null;})():null}));
   // Old data that conflicts with the new rules: listed for a person to check; never merged, moved or deleted automatically.
   const review:{kind:string;message:string;place:ReturnType<typeof place>}[]=[];
   for(const v of legacyVms)if(!v.earnApp)review.push({kind:'LEGACY_VM_LOGIN',message:'VM có Gmail cũ '+v.gmail?.email+' (trước quy tắc mới) nhưng chưa có tài khoản EarnApp; gán lại tại ô nếu đúng',place:v.archivedAt?null:place(v)});

@@ -17,6 +17,7 @@ const STATE_LABEL:Record<string,string>={NEW:'NEW · chưa gán',ASSIGNED:'Đã 
 const LOGIN_STATUS:Record<string,string>={ACTIVE:'Dùng được',SUSPENDED:'Bị khoá tạm',NEEDS_RECOVERY:'Cần khôi phục',NEEDS_2FA_UPDATE:'Cần cập nhật 2FA',BLOCKED:'Bị chặn',DISABLED:'Ngừng dùng'};
 const PP_STATUS:Record<string,string>={ACTIVE:'Dùng được',LIMITED:'Bị limit',SUSPENDED:'Bị suspend',CLOSED:'Đã đóng',PENDING_VERIFY:'Chờ xác minh'};
 const TYPE:Record<string,string>={GMAIL:'Gmail',APPLE_ID:'Apple ID'};
+const PRICE_EMPTY={NONE:'Chưa ghi chi phí',VOIDED:'Khoản chi đã thu hồi',RECORDED:'—'} as const;
 const money=(v:string|null|undefined)=>v?v.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,''):'';
 const vmHref=(p:{serverId:string;vmId:string})=>`/infrastructure/servers/${p.serverId}?vm=${p.vmId}&tab=account`;
 // Kho tài khoản: Gmail / Apple ID login stock, PayPal stock (the same PayPal records as before), purchase batches and a review list
@@ -82,7 +83,7 @@ function LoginTable({projectId,rows,store,selected,setSelected,onCopy,onBatch,on
         <td>{l.earnApp?.paypal||<span className="pm-muted">—</span>}</td>
         <td>{write?<select className="pm-input acc-status-select" aria-label={'Tình trạng '+l.email} value={l.status} disabled={status.busy} onChange={e=>void status.save([l],e.target.value)}>{Object.entries(LOGIN_STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>:LOGIN_STATUS[l.status]}</td>
         <td className="whitespace-nowrap">{l.batch?<button className="underline text-xs" onClick={()=>onBatch(l.batch!)}>{l.batch}</button>:<span className="pm-muted">—</span>}</td>
-        {store?.rights.money&&<td className="text-xs">{l.price?`${money(l.price.amount)} ${l.price.currency}`:<span className="pm-muted">Chưa ghi chi phí</span>}</td>}
+        {store?.rights.money&&<td className="text-xs">{l.price?`${money(l.price.amount)} ${l.price.currency}`:<span className="pm-muted">{PRICE_EMPTY[l.priceState]}</span>}</td>}
         <td className="max-w-xs text-xs whitespace-pre-wrap">{l.notes||''}</td></tr>)}
         {!rows.length&&<tr><td colSpan={9} className="pm-empty">{store?'Chưa có tài khoản trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div>
     {rows.length>shown.length&&<p className="pm-muted text-xs p-3">Hiện 500 / {rows.length} dòng; dùng ô tìm hoặc bộ lọc để thu hẹp.</p>}
@@ -97,7 +98,7 @@ function PaypalTable({projectId,rows,store,selected,setSelected,onBatch,onSaved}
         <td><StateCell state={p.state} place={p.place} extra={p.earnAppLogin?'EarnApp: '+p.earnAppLogin:null}/></td>
         <td>{write?<select className="pm-input acc-status-select" aria-label={'Tình trạng '+p.code} value={p.status} disabled={status.busy} onChange={e=>void status.save([p],e.target.value)}>{Object.entries(PP_STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>:PP_STATUS[p.status]}</td>
         <td className="whitespace-nowrap">{p.batch?<button className="underline text-xs" onClick={()=>onBatch(p.batch!)}>{p.batch}</button>:<span className="pm-muted">—</span>}</td>
-        {store?.rights.money&&<td className="text-xs">{p.price?`${money(p.price.amount)} ${p.price.currency}`:<span className="pm-muted">Chưa ghi chi phí</span>}</td>}
+        {store?.rights.money&&<td className="text-xs">{p.price?`${money(p.price.amount)} ${p.price.currency}`:<span className="pm-muted">{PRICE_EMPTY[p.priceState]}</span>}</td>}
         <td className="max-w-xs text-xs whitespace-pre-wrap">{p.notes||''}</td></tr>)}
         {!rows.length&&<tr><td colSpan={8} className="pm-empty">{store?'Chưa có PayPal trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div></>;
 }
@@ -105,11 +106,20 @@ function BatchTable({projectId,rows,store,onContinue,onOpen,onSaved}:{projectId:
   const [costFor,setCostFor]=useState<Batch|null>(null);
   return <div className="pm-surface"><div className="pm-table-scroll"><table className="pm-table"><thead><tr><th>Lô</th><th>Loại</th><th>Nguồn · ngày mua</th><th>SL thực mua · đã nhận</th>{store?.rights.money&&<th>Tiền thực trả</th>}<th>Chi phí</th><th></th></tr></thead>
     <tbody>{rows.map(b=><tr key={b.id}><td><button className="underline pm-code" onClick={()=>onOpen(b)}>{b.code}</button></td><td>{b.kind==='PAYPAL'?'PayPal':TYPE[b.type||'']||'Tài khoản'}</td><td>{b.source||'—'} · {b.purchasedAt}</td><td className="whitespace-nowrap" title={b.lineCount+' dòng dán lần đầu'}>{b.paidQuantity??'—'} · {b.received}</td>
-      {store?.rights.money&&<td className="text-xs">{b.money?<>{money(b.money.total)} {b.money.currency}{b.money.unit&&b.paidQuantity?` (${b.paidQuantity} × ${money(b.money.unit)})`:''}{b.money.usdt?<div className="pm-muted">≈ {money(b.money.usdt)} USDT</div>:null}</>:'—'}</td>}
+      {store?.rights.money&&<td className="text-xs"><BatchMoney b={b}/></td>}
       <td>{b.cost==='RECORDED'?<span className="acc-state NEW">Đã ghi chi phí</span>:b.cost==='VOIDED'?<span className="acc-state BLOCKED">Khoản chi đã thu hồi</span>:<span className="acc-state USED">Chưa ghi chi phí</span>}</td>
-      <td><div className="flex gap-1 flex-wrap">{(b.kind==='PAYPAL'?store?.rights.writePaypals:store?.rights.writeLogins)&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}{b.cost==='RECORDED'&&store?.rights.money&&<Link className="pm-button pm-button-quiet" href="/costs">Xem ở Chi phí</Link>}</div></td></tr>)}
+      <td><div className="flex gap-1 flex-wrap">{(b.kind==='PAYPAL'?store?.rights.writePaypals:store?.rights.writeLogins)&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}{b.costLink&&<Link className="pm-button pm-button-quiet" href={`/costs?cost=${b.costLink.id}&month=${b.costLink.month}`}>Xem ở Chi phí</Link>}</div></td></tr>)}
       {!rows.length&&<tr><td colSpan={7} className="pm-empty">Chưa có lô nhập.</td></tr>}</tbody></table></div>
     {costFor&&<BatchCostForm projectId={projectId} batch={costFor} onClose={()=>setCostFor(null)} onSaved={()=>{setCostFor(null);onSaved();}}/>}</div>;
+}
+// Money of a batch as the cost ledger holds it now (total, currency, rate, USDT). The unit × quantity formula shows only while it
+// still equals the ledger total; after an adjustment or void the first price stays visible as history.
+function BatchMoney({b}:{b:Batch}){
+  const m=b.money;if(!m)return <>—</>;
+  const first=m.original?`${money(m.original.total)} ${m.original.currency||''}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${money(m.original.unit)})`:''}`:'';
+  return <>{m.total?<>{money(m.total)} {m.currency}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${money(m.unit)})`:''}
+    {m.currency!=='USDT'&&m.rate?<div className="pm-muted">1 USDT = {money(m.rate)} {m.currency}</div>:null}{m.usdt&&m.currency!=='USDT'?<div className="pm-muted">≈ {money(m.usdt)} USDT</div>:null}</>:null}
+    {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':'Giá ban đầu '}{first}</div>}</>;
 }
 // Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought).
 function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){

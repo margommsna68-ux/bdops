@@ -8,6 +8,7 @@ import {bindVMAccount} from '@/server/business-management/accounts';
 import {saveWork,readWorkWorkspace} from '@/server/business-management/work';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
+import {saveUsdtCost,voidUsdtCost} from '@/server/business-management/usdt-costs';
 afterAll(()=>db.$disconnect());
 // Test data only: synthetic emails on example.invalid, never real accounts.
 const u=()=>randomUUID().slice(0,8);
@@ -156,6 +157,39 @@ it('batches recorded before the fix that look merged are listed for review; thei
     const r=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`n-${u()}@example.invalid|pw`,batch:{purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
     expect(r.batch.code).toBe('TK-2026-10-17-2');
     expect((await db.costRecord.findUniqueOrThrow({where:{id:cost.id}})).amount.toString()).toBe('10');
+  }finally{await f.cleanup();}
+});
+// The current cost record is the paid amount: after an adjustment in Chi phí the store shows exactly what the ledger holds
+// (amount, currency, rate, USDT, state); the batch keeps the original price as history and nothing is recomputed or added.
+it('Kho tài khoản follows the cost ledger after adjust, currency change, undo, void and re-record; append adds nothing',async()=>{
+  const f=await setup();try{
+    const r=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:[`s1-${u()}@example.invalid|pw`,`s2-${u()}@example.invalid|pw`].join('\n'),batch:{purchasedAt:'2026-10-17',priceMode:'UNIT',amount:'5',quantity:2,currency:'USDT'},key:randomUUID()},db);
+    const batchOf=async()=>{const s=await readAccountStore(f.scope,db);return {b:s.batches.find(x=>x.id===r.batch.id)!,login:s.logins.find(l=>l.batchId===r.batch.id)!};};
+    const ledger=async()=>db.costRecord.findFirstOrThrow({where:{id:(await db.accountPurchaseBatch.findUniqueOrThrow({where:{id:r.batch.id}})).costRecordId!}});
+    const agree=async()=>{const {b,login}=await batchOf(),c=await ledger();
+      if(c.voidedAt){expect(b.cost).toBe('VOIDED');expect(b.money?.total??null).toBeNull();expect(login.price).toBeNull();expect(login.priceState).toBe('VOIDED');return {b,login,c};}
+      expect(b.cost).toBe('RECORDED');expect(b.money).toMatchObject({total:c.amount.toString(),currency:c.currency,usdt:c.usdtAmount?.toString()??null,rate:c.usdtRate?.toString()??null});
+      if(b.money!.unit)expect(Number(b.money!.unit)*b.paidQuantity!).toBe(Number(c.amount));
+      expect(Number(login.price!.amount)).toBeCloseTo(Number(c.amount)/2,4);expect(login.price!.currency).toBe(c.currency);return {b,login,c};};
+    let s=await agree();expect(s.b.money).toMatchObject({total:'10',unit:'5',adjusted:false});expect(s.b.costLink).toEqual({id:s.c.id,month:'2026-10'});
+    const costs0=await db.costRecord.count({where:{projectId:f.scope.projectId}});
+    const edit=async(amount:string,currency:string,rate?:string)=>{const c=await ledger();await saveUsdtCost(f.scope,{id:c.id,expectedRevision:c.revision,key:randomUUID(),reason:'Điều chỉnh theo hoá đơn',date:'2026-10-17',amount,currency,rate,category:'GMAIL',treatment:'CASH_COST'},db);};
+    // Total corrected to 20 USDT: the store shows 20, no unit × quantity formula, allocation 10; the original 2 × 5 stays as history.
+    await edit('20','USDT');s=await agree();expect(s.b.money).toMatchObject({total:'20',unit:null,adjusted:true,original:{total:'10',currency:'USDT',unit:'5',quantity:2}});expect(s.login.price!.amount).toBe('10');
+    // Currency and rate changed: 500000 VND at 25000 VND/USDT = 20 USDT.
+    await edit('500000','VND','25000');s=await agree();expect(s.b.money).toMatchObject({currency:'VND',usdt:'20',adjusted:true});
+    // Undo that adjustment: back to 20 USDT, still matching.
+    const op=(await listOperations(f.scope,db)).find(o=>o.kind.includes('COST'))!;await undoOperation(f.scope,op.id,'',db);s=await agree();expect(s.c.currency).toBe('USDT');
+    // Append adds no cost and changes nothing in the money.
+    await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`s3-${u()}@example.invalid|pw`,append:{batchId:r.batch.id},key:randomUUID()},db);
+    expect(await db.costRecord.count({where:{projectId:f.scope.projectId}})).toBe(costs0);s=await agree();
+    // Void in Chi phí: the batch shows the void, no paid amount; record again once with the batch's quantity.
+    const c=await ledger();await voidUsdtCost(f.scope,{id:c.id,expectedRevision:c.revision,key:randomUUID(),reason:'Sai hoá đơn'},db);s=await agree();
+    expect(s.b.money).toMatchObject({original:{total:'10'}});
+    const b=(await batchOf()).b;await recordBatchCost(f.scope,{batchId:b.id,expectedRevision:b.revision,priceMode:'UNIT',amount:'6',quantity:2,currency:'USDT',key:randomUUID()},db);
+    s=await agree();expect(s.b.money).toMatchObject({total:'12',unit:'6',adjusted:false});
+    expect(await db.costRecord.count({where:{projectId:f.scope.projectId}})).toBe(costs0+1);
+    expect((await db.costRecord.findUniqueOrThrow({where:{id:c.id}})).voidedAt).not.toBeNull();
   }finally{await f.cleanup();}
 });
 async function stock(f:Awaited<ReturnType<typeof setup>>){

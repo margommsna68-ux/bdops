@@ -1,0 +1,5 @@
+since 2026-10-17T10:42:15.998Z run 9ox8e
+batch TK-2026-10-17-5
+PASS Xem ở Chi phí mở đúng khoản chi của lô — 2026-10-17 GMAIL 10 USDT 10.000000 1 USDT = 1 USDT Nhập tay · 17:42:27 17/10/2026 Mua lô TK-2026-10-17-5 · 2 Gmail Sửa T
+PASS Kho khớp sổ sau điều chỉnh — sổ: 2026-10-17 GMAIL 20 USDT 20.000000 1 USDT = 1 USDT Nhập tay  · kho: TK-2026-10-17-5 Gmail — · 2026-10-17 2 · 2 20 USDT Đã điều chỉnh ở Chi phí · ban đầu 10 USDT (2 × 5) Đã ghi chi phí Nhập bổ sung Xem ở Chi phí · phân bổ 10 USDT
+RESULT 2/2

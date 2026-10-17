@@ -72,6 +72,12 @@ creates, merges and deletes nothing.
   accounts received when no quantity was entered). It is for
   information only and is never added to profit. Only ADMIN or members with the COSTS module see amounts.
 - Assigning, unassigning, moving, re-importing and appending never add a cost or change the recorded total.
+- The current cost record in Chi phí is the paid amount. *Lô nhập* and *Giá phân bổ* read total, currency, rate, USDT and state
+  from it. After an edit there the batch shows the new total, with *Đã điều chỉnh ở Chi phí · ban đầu …* (the first price is kept
+  as history and never rewritten). The `số lượng × đơn giá` formula is shown only while it still equals the ledger total.
+  Allocation = ledger total / quantity bought. A voided cost shows *Khoản chi đã thu hồi*; *Ghi chi phí* records it again once.
+  Undo of an edit is followed automatically.
+- *Xem ở Chi phí* opens `/costs?cost=<id>&month=<YYYY-MM>`: the right month, with that row highlighted and scrolled into view.
 - Batches recorded before this fix (`costRule = 1`) are listed under *Cần kiểm tra* when unit price × pasted lines differs from
   the accounts received, or when accounts were added later under the same code (possibly another purchase without its own
   cost). Their money is never recomputed or changed. Migration `20261017180000_account_batch_quantity` is additive.
