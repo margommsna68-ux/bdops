@@ -106,3 +106,16 @@ Kiểm thử dùng `.env.test` trỏ database thử riêng: `npm test`, `npx tsc
 24. **17/10 — Bảng vận hành Server / VM:** ô chọn server tìm theo tên trên mọi trang Server/VM; dải đếm bấm để lọc; bảng có vùng cuộn riêng vừa màn hình (tiêu đề dính, cột chọn + Server/VM dính trái, ⋯ dính phải), 50/100/200 dòng, mục *Cột* (bật/tắt, kéo độ rộng, đổi thứ tự, lưu theo người dùng); ô Proxy gọn tách *Giao* / *Cài* khi khác nhau, SDK rút gọn có copy, Gmail của VM, ghi chú 2 dòng; khung chi tiết bên phải (Tổng quan, Proxy, Việc cài, Công việc, Gmail, Lịch sử) thay cho dãy nút từng dòng; sửa mã VM/SDK/ghi chú bằng Enter/F2, Tab sang ô kế, nháp còn sau tải lại; **Dán bảng** SDK / Proxy / Gmail / Ghi chú (`VM | giá trị` hoặc `Server | VM | giá trị`, xem trước, Áp dụng lưu phần hợp lệ, kiểm tra lại từng dòng); chọn nhiều theo ID qua các trang; Copy proxy được giao/đã cài không bắt đầu cài; tự điền chỉ đúng các VM đã chọn (TUT NEW), chọn tay nhận cả nhóm chung. Cả 9 ca nghiệm thu đạt trên trình duyệt với dữ liệu thử riêng. Xem [bảng vận hành](docs/runbooks/server-vm-table.md) và [bằng chứng](docs/superpowers/evidence/2026-10-17-server-vm-table.md).
 
 25. **17/10 — Tình trạng thao tác tại ô:** bấm nhãn Tình trạng mở popover cạnh ô với đúng hành động backend cho phép: Thiếu proxy → tự điền 1 proxy / chọn proxy (mở thẳng tab Proxy); Chờ cài → Bắt đầu cài (lưu ngay) / Copy để cài; Đang cài → Xác nhận đã cài (ghi rõ VM, IP, cấu hình #n) / Cài chưa xong (nhập vướng mắc tại chỗ); Cần kiểm tra → nguyên nhân + Xem ở bảng proxy / Việc cài / Đổi proxy. Lỗi giữ trạng thái cũ và hiện tại chỗ; Escape chỉ đóng; bấm lặp chỉ một lệnh; không đổi thì không ghi lịch sử. Xem mục *Tình trạng* trong [bảng vận hành](docs/runbooks/server-vm-table.md).
+
+26. **17/10 — Kho tài khoản:** mục *Kho tài khoản* (trước là Tài khoản VM) có Gmail / Apple ID, PayPal, Lô nhập, Cần kiểm tra.
+    - Nhập hàng loạt hoặc một tài khoản; chọn rõ loại Gmail / Apple ID.
+    - Xem trước từng dòng (hợp lệ / đã có / lỗi), rồi một nút *Nhập N dòng hợp lệ*.
+    - Không ghi đè tài khoản cũ. Mật khẩu / 2FA được mã hoá, không lộ trong log.
+    - Tiền mua của lô ghi một lần vào Chi phí USDT; lô chưa có giá thì là *Chưa ghi chi phí*.
+    - Ở Server / VM: cột *Tài khoản EarnApp* và *PayPal nhận*, bấm tại ô để chọn (lưu cả hai một lần); gán nhiều VM đã chọn;
+      Dán bảng *Server | VM | Tài khoản | Mã PP*.
+    - Tài khoản / PayPal đang giữ cho VM khác bị chặn và nêu vị trí. Bỏ gán không trả về NEW. Đăng ký EarnApp là thông tin
+      riêng.
+    - *Giao việc* tách việc nhân viên với 24 dòng đối chiếu Sheet cũ.
+    - Commit 57f4bae, backup 5034ed1d, deploy f2298e2c, migration 20261017120000_account_inventory.
+    - Xem `docs/runbooks/account-store.md`.
