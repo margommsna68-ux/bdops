@@ -32,12 +32,12 @@ export function parsePasteMapping(text:string){
   });
   return out;
 }
-const vmInclude={server:true,allocations:{where:{releasedAt:null},include:{endpoint:{select:{id:true,host:true}},configuration:true}},desiredConfiguration:{include:{endpoint:{select:{id:true,host:true}},task:true}},installedConfiguration:{include:{endpoint:{select:{id:true,host:true}}}},proxy:{select:{id:true,host:true}}} as const;
-type VMRow=Prisma.VirtualMachineGetPayload<{include:typeof vmInclude}>;
-const endpointInclude={identity:{include:{sourceRefs:{select:{owner:true}}}},group:{select:{id:true,name:true}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}},configuration:true}}} as const;
-type EndpointRow=Prisma.ProxyIPGetPayload<{include:typeof endpointInclude}>;
+export const vmInclude={server:true,allocations:{where:{releasedAt:null},include:{endpoint:{select:{id:true,host:true}},configuration:true}},desiredConfiguration:{include:{endpoint:{select:{id:true,host:true}},task:true}},installedConfiguration:{include:{endpoint:{select:{id:true,host:true}}}},proxy:{select:{id:true,host:true}}} as const;
+export type VMRow=Prisma.VirtualMachineGetPayload<{include:typeof vmInclude}>;
+export const endpointInclude={identity:{include:{sourceRefs:{select:{owner:true}}}},group:{select:{id:true,name:true}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}},configuration:true}}} as const;
+export type EndpointRow=Prisma.ProxyIPGetPayload<{include:typeof endpointInclude}>;
 // Any proxy that currently sits on the VM (hold of any role, pending or installed configuration, or the VM link recorded from the Sheet).
-function occupantOf(vm:VMRow,except?:string){
+export function occupantOf(vm:VMRow,except?:string){
   const hold=vm.allocations.find(a=>a.endpointId!==except);if(hold) return hold.endpoint.host||hold.endpointId;
   for(const c of [vm.desiredConfiguration,vm.installedConfiguration]) if(c?.endpointId&&c.endpointId!==except) return c.endpoint?.host||c.endpointId;
   if(vm.proxyId&&vm.proxyId!==except) return vm.proxy?.host||vm.proxyId;
@@ -57,7 +57,7 @@ function immovableReason(e:EndpointRow):string|null{
   return null;
 }
 const reviewHolds=(e:EndpointRow)=>e.allocations.filter(a=>a.role==='UNCERTAIN').map(a=>a.vm.server.code+'/'+a.vm.code);
-function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|null{
+export function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|null{
   // TUT and Chung mooon–Genjy may be placed by hand; Genjy riêng never sits on the user's VMs.
   const shared=isShared(e.identity?.owner,e.identity?.subgroup);
   if(!shared&&(e.identity?.owner==='GENJY'||(!e.identity?.ownerDecidedAt&&e.identity?.sourceRefs.some(s=>s.owner==='GENJY')))) return {code:'GENJY_RESERVED',message:'Proxy Genjy riêng không gán vào VM'};
@@ -302,6 +302,15 @@ async function releasePlans(tx:Prisma.TransactionClient,images:Awaited<ReturnTyp
   }
   if(endpoint.vm&&!endpoint.allocations.some(a=>a.vmId===endpoint.vm!.id)){await images.remember('VM',endpoint.vm.id);const vm=await tx.virtualMachine.findUniqueOrThrow({where:{id:endpoint.vm.id},include:{allocations:{where:{releasedAt:null}}}});await tx.virtualMachine.update({where:{id:vm.id},data:{proxyId:null,...(!vm.installedConfigurationId&&!vm.desiredConfigurationId&&!vm.allocations.length?{proxySlotState:'BLANK' as const}:{}),revision:{increment:1}}});}
 }
+// New "Chờ cài" plan of an endpoint on an empty VM: configuration snapshot, DESIRED hold, install task, VM pointer. The caller has checked
+// eligibility (assignableReason), that the VM is free (occupantOf) and syncs NEW/LIVE afterwards.
+export async function placeOnVm(tx:Prisma.TransactionClient,images:{remember:(resource:'VM'|'VM_CONFIG'|'VM_ALLOCATION'|'VM_TASK',id:string,created?:boolean)=>Promise<void>},scope:ActorScope,endpoint:EndpointRow,vm:VMRow,now:Date){
+  await images.remember('VM',vm.id);
+  const proxy=decodeEndpoint(endpoint)!,snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId!,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
+  const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
+  const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey!,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);
+  const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version}`,scheduledAt:now}});await images.remember('VM_TASK',task.id,true);
+  await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});}
 // previewRows is the row array, or {rows, notListed} for a shared-list preview.
 const dto=(batch:{token:string;previewRows:Prisma.JsonValue;expiresAt:Date}):EditPreview=>{const stored=batch.previewRows as unknown as EditRow[]|{rows:EditRow[];notListed:NotListedRef[]};const rows=Array.isArray(stored)?stored:stored.rows,notListed=Array.isArray(stored)?[]:stored.notListed;return {token:batch.token,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,expiresAt:batch.expiresAt.toISOString(),notListed};};
 // Registry edits (group / server / VM) for one or many rows. Preview stores the plan; commit re-plans inside the transaction and
@@ -363,12 +372,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
           if(item.location.kind==='VM'){
             const vm=await tx.virtualMachine.findFirstOrThrow({where:{id:item.location.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:vmInclude});
             if(occupantOf(vm,endpoint.id)||assignableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');
-            await images.remember('VM',vm.id);
-            const proxy=decodeEndpoint(endpoint)!,snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId!,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
-            const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
-            const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey!,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);
-            const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version}`,scheduledAt:now}});await images.remember('VM_TASK',task.id,true);
-            await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});moved++;
+            await placeOnVm(tx,images,scope,endpoint,vm,now);moved++;
           }else unassigned++;
           await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
           await syncAssignmentState(tx,endpoint.id,{released:item.location.kind==='UNASSIGN'}); // NEW ↔ LIVE in the same transaction as the hold

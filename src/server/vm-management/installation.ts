@@ -34,6 +34,25 @@ export async function copyConfiguration(scope:ActorScope,id:string,db:PrismaClie
     await begin(tx,current,id);await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_VM_CONFIGURATION',entity:'VMConfiguration',entityId:id,changes:{version:config.version}}});return {proxy:fullProxy(snapshot.proxy),version:config.version,configurationHash:config.configurationHash};
   },db);
 }
+// Plain copy (Server/VM table, bulk bar): reads the assigned (DESIRED) or installed snapshot in the order given. It never starts the
+// install, never changes status/startedAt/task and keeps undo possible; "Copy để cài" (copyConfiguration) keeps that meaning.
+// Audit logs carry counts only.
+export async function copyVmConfigurations(scope:ActorScope,input:{vmIds:string[];which:'DESIRED'|'INSTALLED'},db:PrismaClient=prisma){
+  if(!input.vmIds.length||input.vmIds.length>2000||!['DESIRED','INSTALLED'].includes(input.which))throw new ProxyDomainError('INVALID_INPUT');
+  const current=await authorizeVM(scope,'COPY_CREDENTIALS',db);
+  const vms=await db.virtualMachine.findMany({where:{id:{in:input.vmIds},managed:true,server:{projectId:scope.projectId,managed:true}},include:{server:{select:{code:true}},desiredConfiguration:true,installedConfiguration:true}});
+  if(vms.length!==new Set(input.vmIds).size)throw new ProxyDomainError('NOT_FOUND','Có VM không thuộc dự án này');
+  const byId=new Map(vms.map(v=>[v.id,v])),items:{vmId:string;server:string;vm:string;version:number;proxy:string}[]=[],skipped:{vmId:string;server:string;vm:string;reason:string}[]=[];
+  for(const id of input.vmIds){
+    const vm=byId.get(id)!,config=input.which==='DESIRED'?vm.desiredConfiguration:vm.installedConfiguration,where={vmId:vm.id,server:vm.server.code,vm:vm.code};
+    if(!config||config.status==='CANCELLED'){skipped.push({...where,reason:input.which==='DESIRED'?'Chưa có proxy được giao':'Chưa có cấu hình đã cài'});continue;}
+    const snapshot=JSON.parse(decrypt(config.snapshotCipher)) as ConfigurationSnapshot;
+    if(vmHash(snapshot)!==config.configurationHash||snapshot.proxy?.format!=='FULL'){skipped.push({...where,reason:'Cấu hình thiếu user/pass hoặc không khớp bản ghi'});continue;}
+    items.push({...where,version:config.version,proxy:fullProxy(snapshot.proxy)});
+  }
+  await db.auditLog.create({data:{userId:current.userId,projectId:scope.projectId,action:'COPY_VM_PROXY',entity:'VirtualMachine',entityId:'bulk',changes:{which:input.which,copied:items.length,skipped:skipped.length}}});
+  return {items,skipped};
+}
 export async function reportInstallFailure(scope:ActorScope,id:string,note:string,db:PrismaClient=prisma){
   if(!note.trim()||note.length>1000)throw new ProxyDomainError('INVALID_INPUT');return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'CONFIRM',tx),config=await currentConfiguration(tx,current,id);if(config.vm.desiredConfigurationId!==id||!config.startedAt||['CONFIRMED','CANCELLED'].includes(config.status))throw new ProxyDomainError('STALE_PREVIEW');

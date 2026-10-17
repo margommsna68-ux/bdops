@@ -1,4 +1,5 @@
 "use client";
+import Link from 'next/link';
 import {Fragment,useEffect,useRef,useState} from 'react';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
 import type {RegistrySort} from '@/server/proxy-management/package-terms';
@@ -19,7 +20,6 @@ import {copyWhenReady} from './clipboard';
 import {MemberRightsDialog} from './MemberRightsDialog';
 import {OperationHistoryDialog} from './OperationHistoryDialog';
 import {SystemBackupDialog} from './SystemBackupDialog';
-import {AllocationDialog} from '@/components/vm-management/AllocationDialog';
 import {useVMRefresh} from '@/components/vm-management/shared';
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from '@/components/ui/dropdown-menu';
 
@@ -41,7 +41,7 @@ export function RegistryTable({projectId}:{projectId:string}){
   const [selected,setSelected]=useState<Set<string>>(new Set()),[fallback,setFallback]=useState<string|null>(null),[copying,setCopying]=useState(false);
   const [rightsOpen,setRightsOpen]=useState(false);
   const [operationsOpen,setOperationsOpen]=useState(false),[backupsOpen,setBackupsOpen]=useState(false);
-  const [allocationOpen,setAllocationOpen]=useState(false),refreshVM=useVMRefresh();
+  const refreshVM=useVMRefresh();
   const [editing,setEditing]=useState<string|null>(null),[bulkMode,setBulkMode]=useState<BulkMode|null>(null),[groupsOpen,setGroupsOpen]=useState(false),[sharedOpen,setSharedOpen]=useState(false),[syncOpen,setSyncOpen]=useState(false);
   const payParam=params.get('pay'),tableTop=useRef<HTMLDivElement>(null);
   const exportMutation=trpc.proxyManagement.exportBlocked.useMutation(),copyOne=trpc.proxyManagement.copyEndpoint.useMutation(),copySelected=trpc.proxyManagement.copyEndpoints.useMutation(),copyAll=trpc.proxyManagement.copyFiltered.useMutation();
@@ -112,8 +112,7 @@ export function RegistryTable({projectId}:{projectId:string}){
         {data.isLoading&&<tr><td colSpan={columns} className="pm-empty">Đang tải kho proxy…</td></tr>}{!data.isLoading&&!rows.length&&!data.error&&<tr><td colSpan={columns} className="pm-empty"><Network size={30} className="mx-auto mb-3 text-blue-400"/><strong>Chưa có proxy trong danh sách này</strong><p className="pm-muted mt-1">{search||state||group||pkg||servers.length?'Đổi bộ lọc để tìm proxy.':'Nhập proxy mới hoặc đối chiếu dữ liệu Sheet để bắt đầu.'}</p></td></tr>}
       </tbody></table></div>{pager('bottom')}
     </div>
-    <div className="pm-next"><div><strong className="text-sm">Gán proxy cho VM</strong><p className="pm-muted text-sm mt-1">Chỉ dùng NEW của TUT. Sau khi gán, người vận hành cài trên máy rồi xác nhận.</p></div>{vmAccess.data?.canAssign&&<button className="pm-button" disabled={!vmAccess.data.sourceConnected} onClick={()=>setAllocationOpen(true)}>Điền VM thiếu <ArrowUpRight size={16}/></button>}</div>
-    {allocationOpen&&<AllocationDialog projectId={projectId} onClose={()=>setAllocationOpen(false)} onSaved={refresh}/>}
+    <div className="pm-next"><div><strong className="text-sm">Gán proxy cho VM</strong><p className="pm-muted text-sm mt-1">Chọn VM thiếu proxy ở Server/VM rồi điền NEW của TUT cho đúng các VM đã chọn. Sau khi gán, người vận hành cài trên máy rồi xác nhận.</p></div>{vmAccess.data?.canAssign&&<Link className="pm-button" href="/infrastructure/servers?view=MISSING">Mở VM thiếu proxy <ArrowUpRight size={16}/></Link>}</div>
     {operationsOpen&&<OperationHistoryDialog projectId={projectId} onClose={()=>setOperationsOpen(false)} onChanged={refresh}/>} {backupsOpen&&<SystemBackupDialog onClose={()=>setBackupsOpen(false)}/>} {rightsOpen&&<MemberRightsDialog projectId={projectId} onClose={()=>setRightsOpen(false)}/>} {fallback&&<ProxyCopy data={{proxy:fallback}} isLoading={false} error={null} onClose={()=>setFallback(null)}/>} {kind&&<BatchDialog projectId={projectId} kind={kind} onClose={()=>setKind(null)} onSaved={refresh}/>} {history&&<HistoryPanel projectId={projectId} identityId={history} onClose={()=>setHistory(null)}/>} {copy&&<BlockedExport data={exportMutation.data} isLoading={exportMutation.isLoading} error={exportMutation.error} onClose={()=>setCopy(false)}/>} {catalogOpen&&<PackageDialog projectId={projectId} packages={catalog.data||[]} loading={catalog.isLoading} canManage={!!rights?.canManage} initialPayCode={payParam||undefined} onClose={()=>{setCatalogOpen(false);if(payParam) remember({pay:''});}} onSaved={()=>{void catalog.refetch();refresh();}}/>} {syncOpen&&<StateSyncDialog projectId={projectId} onClose={()=>setSyncOpen(false)} onSaved={()=>{refresh();void data.refetch();}}/>} {sharedOpen&&<SharedListDialog projectId={projectId} onClose={()=>setSharedOpen(false)} onSaved={()=>{refresh();void data.refetch();}}/>} {groupsOpen&&<GroupDialog projectId={projectId} canManage={!!rights?.canManage} onClose={()=>setGroupsOpen(false)} onChanged={refresh}/>}
   </div>;
 }

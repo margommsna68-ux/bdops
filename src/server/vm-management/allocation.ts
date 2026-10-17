@@ -2,8 +2,8 @@ import {randomBytes} from 'node:crypto';
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
-import {ProxyDomainError,type ActorScope,type SourceSnapshotRef} from '../proxy-management/types';
-import {getEligibleInventory,decodeEndpoint} from '../proxy-management/repository';
+import {ProxyDomainError,isShared,type ActorScope,type SourceSnapshotRef} from '../proxy-management/types';
+import {getEligibleInventory,getManualInventory,decodeEndpoint} from '../proxy-management/repository';
 import {refreshGenjy} from '../proxy-management/sources';
 import {withProxyTransaction} from '../proxy-management/transaction';
 import {recordOperation} from '../operation-history/journal';
@@ -13,9 +13,11 @@ import {syncAssignmentState} from '../proxy-management/assignment-state';
 import {vmHash,type AllocationInput,type AllocationPreview,type AllocationRow,type ConfigurationSnapshot} from './types';
 async function planAllocation(projectId:string,input:AllocationInput,db:VMReader){
   if(!['AUTO','MANUAL'].includes(input.mode)||input.vmIds&&(!input.vmIds.length||input.vmIds.length>1000||new Set(input.vmIds).size!==input.vmIds.length)||input.mode==='MANUAL'&&(!input.endpointId||input.vmIds?.length!==1))throw new ProxyDomainError('INVALID_INPUT');
+  // Autofill works on exactly the VMs the operator selected; it never widens to a whole server or project.
+  if(input.mode==='AUTO'&&!input.vmIds?.length)throw new ProxyDomainError('INVALID_INPUT','Chọn VM cần điền proxy trước');
   const all=await readManagedVMs(projectId,db),vms=all.filter(v=>(!input.serverId||v.serverId===input.serverId)&&(!input.vmIds||input.vmIds.includes(v.id)));
   if(input.vmIds&&vms.length!==input.vmIds.length||input.serverId&&!await db.server.findFirst({where:{id:input.serverId,projectId,managed:true}}))throw new ProxyDomainError('NOT_FOUND');
-  const pool=(await getEligibleInventory(projectId,db)).sort((a,b)=>a.ip.localeCompare(b.ip,undefined,{numeric:true}));
+  const pool=(input.mode==='MANUAL'?await getManualInventory(projectId,db):await getEligibleInventory(projectId,db)).sort((a,b)=>a.ip.localeCompare(b.ip,undefined,{numeric:true}));
   const rows:AllocationRow[]=[],items:{vmId:string;endpointId:string;reuseInstalled:boolean}[]=[];
   for(const vm of vms){
     const row:AllocationRow={vmId:vm.id,server:vm.server.code,vm:vm.code,outcome:'SKIP',message:'VM chưa đủ điều kiện'};
@@ -32,7 +34,7 @@ async function planAllocation(projectId:string,input:AllocationInput,db:VMReader
     rows.push({...row,outcome:'READY',message:reuseInstalled?'Giao lại cấu hình đã cài; cần xác nhận mới':'Giao proxy; chờ cài thực tế',ip:endpoint.ip,endpointId:endpoint.endpointId});items.push({vmId:vm.id,endpointId:endpoint.endpointId,reuseInstalled});
     const index=pool.findIndex(e=>e.endpointId===endpoint!.endpointId);if(index>=0)pool.splice(index,1);
   }
-  return {rows,items,facts:{vms:vms.map(v=>[v.id,v.revision,v.server.revision,v.desiredConfiguration?.revision??null,v.installedConfiguration?.revision??null,v.allocations.map(a=>[a.id,a.revision])]),pool:await getEligibleInventory(projectId,db)}};
+  return {rows,items,facts:{vms:vms.map(v=>[v.id,v.revision,v.server.revision,v.desiredConfiguration?.revision??null,v.installedConfiguration?.revision??null,v.allocations.map(a=>[a.id,a.revision])]),pool:input.mode==='MANUAL'?await getManualInventory(projectId,db):await getEligibleInventory(projectId,db)}};
 }
 export async function snapshotCollector(tx:Prisma.TransactionClient,scope:ActorScope){
   const images=new Map<string,{resource:ResourceImage['resource'];id:string;before:unknown}>();
@@ -70,7 +72,7 @@ export function createVMService(db:PrismaClient=prisma,deps:{refreshSource?:(pro
           for(const hold of holds){await images.remember('VM_ALLOCATION',hold.id);await images.remember('ENDPOINT',hold.endpointId);await tx.vMProxyAllocation.update({where:{id:hold.id},data:old.startedAt?{role:'UNCERTAIN',revision:{increment:1}}:{releasedAt:new Date(),releaseReason:'Thay kế hoạch chưa bắt đầu',revision:{increment:1}}});await tx.proxyIP.update({where:{id:hold.endpointId},data:{revision:{increment:1}}});await syncAssignmentState(tx,hold.endpointId,{released:!old.startedAt});}
         }
         const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:item.endpointId,projectId:scope.projectId},include:{identity:true}}),proxy=decodeEndpoint(endpoint);
-        if(!proxy||proxy.format!=='FULL'||!endpoint.identity||endpoint.identity.owner!=='SELF'||!endpoint.inventoryKey)throw new ProxyDomainError('OWNER_CONFLICT');
+        if(!proxy||proxy.format!=='FULL'||!endpoint.identity||(endpoint.identity.owner!=='SELF'&&!(saved.input.mode==='MANUAL'&&isShared(endpoint.identity.owner,endpoint.identity.subgroup)))||!endpoint.inventoryKey)throw new ProxyDomainError('OWNER_CONFLICT');
         const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identity.id,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
         const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
         if(!item.reuseInstalled){const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);}

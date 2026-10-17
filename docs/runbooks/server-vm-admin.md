@@ -1,6 +1,6 @@
 # Quản trị Server / VM
 
-Trang: `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Triển khai 16/10/2026. Bằng chứng và ảnh trước/sau: `../superpowers/evidence/2026-10-16-server-vm-admin.md`.
+Trang: `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Triển khai 16/10/2026. Bố cục bảng, sửa ô bằng bàn phím, Dán bảng, chọn nhiều và khung chi tiết từ 17/10/2026: xem [Bảng vận hành Server / VM](server-vm-table.md); nút Xoá VM nằm trong menu ⋯ của dòng, Xoá server trong menu ⋯ đầu trang. Bằng chứng và ảnh trước/sau: `../superpowers/evidence/2026-10-16-server-vm-admin.md`.
 
 ## Cách dùng
 
@@ -48,7 +48,7 @@ Backend luôn kiểm tra lại khi lưu: quyền MANAGE, dự án, revision (VM 
 
 ## Giới hạn và việc tiếp theo
 
-- Bảng nhiều cột nên phần nút thao tác ở màn hình hẹp phải cuộn ngang.
+- (Đã xử lý 17/10) Bảng có cột định danh và menu ⋯ cố định; xem server-vm-table.md.
 - Chưa có thao tác chuyển VM sang server khác; đây là chủ ý, đổi mã không tự di chuyển VM.
 - Xoá server không xoá cứng; tên server và mã VM đã xoá vẫn giữ chỗ, muốn dùng lại thì khôi phục.
 - Chỗ còn lặp ở trang khác, chưa sửa trong mốc này:

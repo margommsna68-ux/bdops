@@ -46,14 +46,17 @@ export async function loadProxyContext(scope:ActorScope,input:BatchInput,db:Read
     source:source?{id:source.id,sourceKey:source.sourceKey,hash:source.hash,fetchedAt:source.fetchedAt.toISOString(),scanSucceeded:source.scanSucceeded}:{id:'',sourceKey:'GENJY',hash:'UNAVAILABLE',fetchedAt:new Date(0).toISOString(),scanSucceeded:false},
   };
 }
-export async function getEligibleInventory(projectId:string,db:Reader=prisma):Promise<EligibleProxy[]>{
+// Autofill pool: unused TUT NEW only. Chung mooon–Genjy never enters it; getManualInventory adds shared proxies for a hand-picked VM.
+export async function getEligibleInventory(projectId:string,db:Reader=prisma):Promise<EligibleProxy[]>{return eligibleRows(projectId,db,false);}
+export async function getManualInventory(projectId:string,db:Reader=prisma):Promise<EligibleProxy[]>{return eligibleRows(projectId,db,true);}
+async function eligibleRows(projectId:string,db:Reader,withShared:boolean):Promise<EligibleProxy[]>{
   const held=new Set((await db.vMProxyAllocation.findMany({where:{releasedAt:null},select:{allocationKey:true}})).map(a=>a.allocationKey));
-  const rows=await db.proxyIP.findMany({where:{projectId,inventoryState:'NEW',retiredAt:null,credentialCipher:{not:null},packageCode:{not:null},vm:null,identity:{owner:'SELF'}},include:{identity:{include:{events:true,endpoints:true,sourceRefs:true}}}});
+  const rows=await db.proxyIP.findMany({where:{projectId,inventoryState:'NEW',retiredAt:null,credentialCipher:{not:null},packageCode:{not:null},vm:null,identity:withShared?{OR:[{owner:'SELF'},{owner:'GENJY',subgroup:'PC_CHUNG'}]}:{owner:'SELF'}},include:{identity:{include:{events:true,endpoints:true,sourceRefs:true}}}});
   return rows.flatMap(r=>{
-    const i=r.identity;if(!i||!r.port||!r.inventoryKey||held.has(r.inventoryKey)||(!i.ownerDecidedAt&&i.sourceRefs.some(s=>s.owner==='GENJY'))||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID','INSTALL_STARTED','INSTALLED'].includes(e.kind))) return [];
+    const i=r.identity,shared=i?.owner==='GENJY'&&i.subgroup==='PC_CHUNG';if(!i||!r.port||!r.inventoryKey||held.has(r.inventoryKey)||(!shared&&!i.ownerDecidedAt&&i.sourceRefs.some(s=>s.owner==='GENJY'))||i.events.some(e=>!e.reversedAt&&['BLOCKED','DIE','REPLACED','VOID','INSTALL_STARTED','INSTALLED'].includes(e.kind))) return [];
     if(i.allocationMode==='SINGLE_IP'&&i.endpoints.filter(e=>!e.retiredAt).length!==1) return [];
     if(i.allocationMode==='APPROVED_PORT_STREAM'&&!i.policyEvidenceCipher) return [];
-    return [{identityId:i.id,endpointId:r.id,ip:i.ip,port:r.port,revision:r.revision,allocationKey:r.inventoryKey}];
+    return [{identityId:i.id,endpointId:r.id,ip:i.ip,port:r.port,revision:r.revision,allocationKey:r.inventoryKey,shared}];
   });
 }
 export async function backfillLegacyProject(projectId:string,db:PrismaClient=prisma){

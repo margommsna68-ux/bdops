@@ -3,9 +3,10 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {it,expect,vi} from 'vitest';
 const state=vi.hoisted(()=>({preview:null as null|object,vms:[] as object[],servers:[] as object[]}));
 vi.mock('next/navigation',()=>({useSearchParams:()=>({get:()=>null,toString:()=>''}),useRouter:()=>({replace:()=>{}}),usePathname:()=>'/infrastructure/servers'}));
+vi.mock('next-auth/react',()=>({useSession:()=>({data:{user:{id:'u1'}}})}));
 vi.mock('@/lib/trpc',()=>{
   const q=(data:unknown)=>({useQuery:()=>({data,isLoading:false,error:null})}),m=()=>({useMutation:()=>({mutateAsync:async()=>state.preview,mutate:()=>{},isLoading:false,reset:()=>{},data:undefined,error:null})});
-  return {trpc:{useUtils:()=>({}),vmManagement:{workspace:{useQuery:()=>({data:{servers:state.servers,vms:state.vms},isLoading:false,error:null})},access:q({canManage:true,canAssign:true,canConfirm:true,canCopy:false,sourceConnected:true,trial:false,businessMode:'PROXY_VM'}),eligible:q([]),sdkPreview:m(),sdkApply:m(),sdkHistory:q([]),copy:m(),updateServer:m(),updateVM:m(),deleteVMs:m(),restoreVMs:m(),deleteServer:m(),restoreServer:m(),addVMs:m(),createServer:m()},businessManagement:{access:q({costs:false}),accounts:q({gmails:[],vms:[]})},proxyManagement:{undo:m(),list:q({rows:[]})}}};
+  return {trpc:{useUtils:()=>({}),vmManagement:{workspace:{useQuery:()=>({data:{servers:state.servers,vms:state.vms},isLoading:false,error:null})},access:q({canManage:true,canAssign:true,canConfirm:true,canCopy:false,sourceConnected:true,trial:false,businessMode:'PROXY_VM'}),eligible:q([]),detail:q(null),copyProxies:m(),bulkPreview:m(),bulkApply:m(),sdkPreview:m(),sdkApply:m(),sdkHistory:q([]),copy:m(),updateServer:m(),updateVM:m(),deleteVMs:m(),restoreVMs:m(),deleteServer:m(),restoreServer:m(),addVMs:m(),createServer:m()},businessManagement:{access:q({costs:false}),accounts:q({gmails:[],vms:[]}),work:q({items:[]})},proxyManagement:{undo:m(),list:q({rows:[]})}}};
 });
 import {SdkPasteForm,SdkPreviewTable} from '@/components/vm-management/SdkPasteDialog';
 import {SdkCell} from '@/components/vm-management/SdkCell';
@@ -30,15 +31,18 @@ it('server workspace separates reload from paste entry and can filter VMs withou
   vi.stubGlobal('React',React);try{
     state.servers=[{id:'s1',code:'vt-01',ipAddress:null,notes:null,archivedAt:null,revision:1}];state.vms=[vm('VM_001',null),vm('VM_002',{id:'sdk-fixture-aaaa-000000000001',recordedAt:null,recordedBy:null})];
     const html=renderToStaticMarkup(<ServerWorkspace projectId="p"/>);
-    expect(html).toContain('Tải lại');expect(html).toContain('Dán SDK');expect(html).toContain('Chưa có SDK');expect(html).toContain('SDK_MISSING');expect(html).not.toContain('>Cập nhật<');
+    expect(html).toContain('Tải lại');expect(html).toContain('Dán bảng');expect(html).toContain('Chưa có SDK');expect(html).toContain('Chưa SDK');expect(html).not.toContain('>Cập nhật<');
+    // No row-level button strip any more: rarely used actions live in the ⋯ menu.
+    expect(html).not.toContain('>Công việc</a>');expect(html).not.toContain('>Tài khoản</button>');expect(html).toContain('Thao tác VM_001');
   }finally{vi.unstubAllGlobals();}
 });
 it('one server view shows the server name only in the title, separate notes, selection and the deleted filter; all servers keep a Server column',()=>{
   vi.stubGlobal('React',React);try{
     state.servers=[{id:'s1',code:'moon05',ipAddress:null,notes:null,archivedAt:null,revision:1}];state.vms=[{...vm('VM_001',null),server:'moon05',notes:'máy test'},{...vm('VM_002',null),server:'moon05',archivedAt:'2026-10-16T00:00:00.000Z'}];
     const one=renderToStaticMarkup(<ServerWorkspace projectId="p" serverId="s1"/>);
-    const text=one.replace(/<[^>]*>/g,' ');expect((text.match(/moon05/g)||[]).length).toBe(1); // visible text: only the titleexpect(one).toContain('Ghi chú');expect(one).toContain('máy test');expect(one).toContain('Đã xoá (1)');expect(one).toContain('Chọn tất cả 1 VM đang lọc');expect(one).not.toContain('>Server<');
-    expect(one).toContain('Xoá server');expect(one).toContain('Thêm VM');
+    const body=one.slice(one.indexOf('<tbody>'),one.indexOf('</tbody>')).replace(/<[^>]*>/g,' ');expect(body).not.toContain('moon05'); // rows show VM_001, not the server again
+    expect(one).toContain('Ghi chú');expect(one).toContain('máy test');expect(one).toMatch(/Đã xoá <strong>1<\/strong>/);expect(one).toContain('Chọn 1 VM trên trang này');expect(one).not.toContain('>Server<');
+    expect(one).toContain('Quản lý server');expect(one).toContain('Thêm VM');expect(one).toContain('Chọn server');expect(one).toContain('vm-pager-top');expect(one).toContain('vm-pager-bottom');
     const all=renderToStaticMarkup(<ServerWorkspace projectId="p"/>);expect(all).toContain('>Server<');expect(all).toContain('moon05');
   }finally{vi.unstubAllGlobals();}
 });

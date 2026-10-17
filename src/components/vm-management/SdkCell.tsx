@@ -28,6 +28,10 @@ export function SdkCell({projectId,vm,canEdit,onSaved}:{projectId:string;vm:Mana
     {history&&<SdkHistoryDialog projectId={projectId} vm={vm} onClose={()=>setHistory(false)}/>}
   </div>;
 }
+export function SdkHistoryTable({projectId,vmId}:{projectId:string;vmId:string}){
+  const rows=trpc.vmManagement.sdkHistory.useQuery({projectId,vmId});
+  return <>{rows.error&&<p role="alert" className="pm-error">{rows.error.message}</p>}<div className="pm-table-scroll"><table className="pm-table"><thead><tr><th>Thời gian</th><th>Người ghi</th><th>SDK cũ</th><th>SDK mới</th></tr></thead><tbody>{rows.data?.map(r=><tr key={r.id}><td>{localDate(r.recordedAt)}{r.note&&<div className="pm-muted text-xs mt-1">{r.note}</div>}</td><td>{r.actor}</td><td><code className="vm-sdk">{r.previousSdk||'—'}</code></td><td><code className="vm-sdk">{r.newSdk||'—'}</code></td></tr>)}{rows.data&&!rows.data.length&&<tr><td colSpan={4} className="pm-empty">Chưa có lịch sử SDK.</td></tr>}</tbody></table></div></>;
+}
 function SdkHistoryDialog({projectId,vm,onClose}:{projectId:string;vm:ManagedVM;onClose:()=>void}){
   const rows=trpc.vmManagement.sdkHistory.useQuery({projectId,vmId:vm.id});
   return <Dialog open onOpenChange={open=>{if(!open)onClose();}}><DialogContent className="pm-dialog max-w-2xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Lịch sử SDK · {vm.server} / {vm.code}</DialogTitle><DialogDescription>Mỗi lần ghi/đổi/xóa SDK: mã cũ, mã mới, người và thời gian.</DialogDescription></DialogHeader>

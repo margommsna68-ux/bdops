@@ -56,26 +56,20 @@ export async function updateManagedServer(scope:ActorScope,serverId:string,input
     const images=await snapshotCollector(tx,current);await images.remember('SERVER',server.id);await tx.server.update({where:{id:server.id},data:{...next,revision:{increment:1}}});await recordOperation(tx,{scope:current,kind:'SERVER_METADATA',summary:{server:next.code},snapshot:await images.finish()});return {saved:true};
   },db);
 }
+// Old archive endpoint: same checks and journal as the new delete (VM: holds, open install tasks, installed link; server: together with its VMs).
 export async function archiveManagedResource(scope:ActorScope,type:'SERVER'|'VM',id:string,db:PrismaClient=prisma){
-  return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),images=await snapshotCollector(tx,current);
-    if(type==='SERVER'){
-      const server=await tx.server.findFirst({where:{id,projectId:scope.projectId,managed:true}});if(!server)throw new ProxyDomainError('NOT_FOUND');
-      if(await tx.vMProxyAllocation.count({where:{releasedAt:null,vm:{serverId:id}}}))throw new ProxyDomainError('INVALID_INPUT','Máy còn proxy đang giữ/đã cài. Xác nhận ngừng dùng trước khi ẩn.');await images.remember('SERVER',id);await tx.server.update({where:{id},data:{archivedAt:new Date(),revision:{increment:1}}});
-    }else{
-      const vm=await tx.virtualMachine.findFirst({where:{id,managed:true,server:{projectId:scope.projectId,managed:true}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');if(await tx.vMProxyAllocation.count({where:{vmId:id,releasedAt:null}}))throw new ProxyDomainError('INVALID_INPUT','VM còn proxy đang giữ/đã cài; chưa thể ẩn.');await images.remember('VM',id);await tx.virtualMachine.update({where:{id},data:{archivedAt:new Date(),revision:{increment:1}}});
-    }
-    await recordOperation(tx,{scope:current,kind:'INFRA_ARCHIVE',summary:{type},snapshot:await images.finish()});return {saved:true};
-  },db);
+  if(type==='SERVER'){await archiveServer(scope,id,db);return {archived:true};}
+  const r=await archiveVMs(scope,[id],db);if(r.blocked.length)throw new ProxyDomainError('INVALID_INPUT',r.blocked[0].reason);return {archived:true};
 }
 
 // ---- Delete (= archive, restorable) and restore. Data, links and history stay; deleted machines leave every picker,
 // autofill and active count. Nothing is released to make a delete possible.
-type Blocked={id:string;code:string;reason:string};
+export type BlockCause='HOLD'|'TASK'|'INSTALLED'|'SERVER'|'SDK';
+type Blocked={id:string;code:string;reason:string;cause:BlockCause};
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 async function deleteBlockers(tx:Prisma.TransactionClient,vmIds:string[]){
   const vms=await tx.virtualMachine.findMany({where:{id:{in:vmIds}},include:{allocations:{where:{releasedAt:null},include:{endpoint:{select:{host:true}}}},tasks:{where:{status:{in:['PENDING','IN_PROGRESS']}},select:{id:true}}}});
-  return new Map(vms.map(v=>[v.id,v.allocations.length?'Còn proxy '+v.allocations.map(a=>(a.endpoint.host||'')+' · '+ROLE[a.role]).join(', ')+'; bỏ gán hoặc xử lý ở Việc cài trước':v.tasks.length?'Còn việc cài proxy chưa xong; hoàn tất hoặc huỷ ở Việc cài trước':v.proxyId?'Còn liên kết proxy đã cài; xử lý ở Server/VM trước':null]));
+  return new Map(vms.map(v=>[v.id,v.allocations.length?{cause:'HOLD' as const,reason:'Còn proxy '+v.allocations.map(a=>(a.endpoint.host||'')+' · '+ROLE[a.role]).join(', ')+'; bỏ gán hoặc xử lý ở Việc cài trước'}:v.tasks.length?{cause:'TASK' as const,reason:'Còn việc cài proxy chưa xong; hoàn tất hoặc huỷ ở Việc cài trước'}:v.proxyId?{cause:'INSTALLED' as const,reason:'Còn liên kết proxy đã cài; xử lý ở Server/VM trước'}:null]));
 }
 const byCode=(a:{code:string},b:{code:string})=>a.code.localeCompare(b.code,undefined,{numeric:true});
 export async function archiveVMs(scope:ActorScope,vmIds:string[],db:PrismaClient=prisma){
@@ -85,7 +79,7 @@ export async function archiveVMs(scope:ActorScope,vmIds:string[],db:PrismaClient
     if(vms.length!==ids.length)throw new ProxyDomainError('NOT_FOUND','Có VM không thuộc dự án này');
     const why=await deleteBlockers(tx,ids),blocked:Blocked[]=[],images=await snapshotCollector(tx,current),now=new Date();let archived=0;
     for(const vm of vms.sort(byCode)){
-      if(vm.archivedAt) continue;const reason=why.get(vm.id);if(reason){blocked.push({id:vm.id,code:vm.code,reason});continue;}
+      if(vm.archivedAt) continue;const why1=why.get(vm.id);if(why1){blocked.push({id:vm.id,code:vm.code,...why1});continue;}
       await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:now,revision:{increment:1}}});archived++;
     }
     const op=archived?await recordOperation(tx,{scope:current,kind:'VM_DELETE',summary:{count:archived},snapshot:await images.finish()}):null;
@@ -100,8 +94,8 @@ export async function restoreVMs(scope:ActorScope,vmIds:string[],db:PrismaClient
     const blocked:Blocked[]=[],images=await snapshotCollector(tx,current);let restored=0;
     for(const vm of vms.sort(byCode)){
       if(!vm.archivedAt) continue;
-      if(vm.server.archivedAt){blocked.push({id:vm.id,code:vm.code,reason:'Server '+vm.server.code+' đã xoá; khôi phục server trước'});continue;}
-      if(vm.sdkId){const other=await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},include:{server:{select:{code:true}}}});if(other){blocked.push({id:vm.id,code:vm.code,reason:'SDK '+vm.sdkId+' đang thuộc '+other.server.code+'/'+other.code+'; không giành lại'});continue;}}
+      if(vm.server.archivedAt){blocked.push({id:vm.id,code:vm.code,cause:'SERVER',reason:'Server '+vm.server.code+' đã xoá; khôi phục server trước'});continue;}
+      if(vm.sdkId){const other=await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},include:{server:{select:{code:true}}}});if(other){blocked.push({id:vm.id,code:vm.code,cause:'SDK',reason:'SDK '+vm.sdkId+' đang thuộc '+other.server.code+'/'+other.code+'; không giành lại'});continue;}}
       await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:null,revision:{increment:1}}});restored++;
     }
     const op=restored?await recordOperation(tx,{scope:current,kind:'VM_RESTORE',summary:{count:restored},snapshot:await images.finish()}):null;
@@ -128,7 +122,7 @@ export async function restoreServer(scope:ActorScope,serverId:string,db:PrismaCl
     const vms=await tx.virtualMachine.findMany({where:{serverId,archivedAt:server.archivedAt}}),images=await snapshotCollector(tx,current),skipped:Blocked[]=[];let restoredVMs=0;
     await images.remember('SERVER',server.id);await tx.server.update({where:{id:server.id},data:{archivedAt:null,revision:{increment:1}}});
     for(const vm of vms){
-      if(vm.sdkId&&await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},select:{id:true}})){skipped.push({id:vm.id,code:vm.code,reason:'SDK '+vm.sdkId+' đang thuộc VM khác'});continue;}
+      if(vm.sdkId&&await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},select:{id:true}})){skipped.push({id:vm.id,code:vm.code,cause:'SDK',reason:'SDK '+vm.sdkId+' đang thuộc VM khác'});continue;}
       await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:null,revision:{increment:1}}});restoredVMs++;
     }
     const op=await recordOperation(tx,{scope:current,kind:'SERVER_RESTORE',summary:{server:server.code,count:restoredVMs},snapshot:await images.finish()});

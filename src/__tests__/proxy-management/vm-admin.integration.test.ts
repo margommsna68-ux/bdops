@@ -76,7 +76,7 @@ it('deletes VMs that hold nothing (single and bulk), reports blocked rows, undoe
     expect(await db.vMProxyAllocation.count({where:{vmId:f.v2.id,releasedAt:null}})).toBe(1); // nothing released to make room
     // a deleted VM is never autofilled
     const vm=createVMService(db,{refreshSource:async()=>({id:f.snapshot.id,sourceKey:'GENJY',hash:'vm-admin',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
-    const p=await vm.preview(f.scope,{mode:'AUTO',serverId:f.s7.id,idempotencyKey:randomUUID()});expect(p.rows.find(r=>r.vm==='VM_001')?.message).toMatch(/ẩn|xoá/i);
+    const p=await vm.preview(f.scope,{mode:'AUTO',vmIds:[f.v1.id,f.v2.id,f.v3.id],idempotencyKey:randomUUID()});expect(p.rows.find(r=>r.vm==='VM_001')?.message).toMatch(/ẩn|xoá/i);
     // restore: VM_001 fine; VM_004 refused because its SDK now belongs to an active VM
     await db.virtualMachine.update({where:{id:f.v3.id},data:{sdkId:'sdk-old-'+f.projectId.slice(0,8)}});
     const back=await restoreVMs(f.scope,[f.v1.id,f.v4.id],db);expect(back.restored).toBe(1);expect(back.blocked.map(b=>b.code)).toEqual(['VM_004']);expect(back.blocked[0].reason).toMatch(/SDK/);

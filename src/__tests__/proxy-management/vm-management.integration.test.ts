@@ -39,7 +39,7 @@ async function fixture(ips:string[]){
 it('autofill only literal blank; reservation excludes stock and invalidates stock undo',async()=>{
   const f=await fixture(['203.0.113.171','203.0.113.172']);try{
     for(const state of ['FORMULA','PLACEHOLDER','UNRESOLVED'] as const)await db.virtualMachine.create({data:{serverId:f.server.id,code:state,managed:true,proxySlotState:state}});
-    const key=randomUUID(),p=await f.service.preview(f.scope,{mode:'AUTO',serverId:f.server.id,idempotencyKey:key});expect(p.ready).toBe(1);await f.service.commit(f.scope,p.token,key);
+    const key=randomUUID(),p=await f.service.preview(f.scope,{mode:'AUTO',vmIds:[f.vm.id],idempotencyKey:key});expect(p.ready).toBe(1);await f.service.commit(f.scope,p.token,key);
     expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(1);expect(await getEligibleInventory(f.scope.projectId,db)).toHaveLength(1);
     const stockOp=(await listOperations(f.scope,db)).find(o=>o.batchId===f.imported.batchId)!;await expect(undoOperation(f.scope,stockOp.id,'Reserved',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
     const current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(current.proxyId).toBeNull();expect(current.installedConfigurationId).toBeNull();expect(current.desiredConfigurationId).not.toBeNull();
@@ -68,7 +68,7 @@ it('competing plans create one hold, and source error/write fault never partiall
     const p1=await f.service.preview(f.scope,{mode:'AUTO',vmIds:[f.vm.id],idempotencyKey:randomUUID()}),key=randomUUID(),p2=await f.service.preview(f.scope,{mode:'AUTO',vmIds:[f.vm.id],idempotencyKey:key});
     f.setFault(true);await expect(f.service.commit(f.scope,p2.token,key)).rejects.toThrow('VM write fault');expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId}})).toBe(0);f.setFault(false);
     const firstBatch=await db.proxyBatch.findUniqueOrThrow({where:{token:p1.token}}),results=await Promise.allSettled([f.service.commit(f.scope,p1.token,firstBatch.idempotencyKey),f.service.commit(f.scope,p2.token,key)]);expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(1);
-    f.setSource(false);await expect(f.service.preview(f.scope,{mode:'AUTO',serverId:f.server.id,idempotencyKey:randomUUID()})).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});
+    f.setSource(false);await expect(f.service.preview(f.scope,{mode:'AUTO',vmIds:[f.vm.id],idempotencyKey:randomUUID()})).rejects.toMatchObject({code:'SOURCE_UNAVAILABLE'});
   }finally{await f.cleanup();}
 });
 it('fresh full-project operator scope works; viewer, copy permission, foreign IDs and old hashes fail',async()=>{

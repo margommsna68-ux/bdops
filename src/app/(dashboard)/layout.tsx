@@ -73,7 +73,7 @@ export default function DashboardLayout({
 
         {/* Sidebar - hidden on mobile, collapsible on desktop */}
         <div
-          className={`fixed inset-y-0 left-0 z-50 transform transition-all duration-200 lg:relative lg:translate-x-0 max-w-[85vw] ${
+          className={`fixed inset-y-0 left-0 z-50 transform transition-all duration-200 overflow-y-auto lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 max-w-[85vw] ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
