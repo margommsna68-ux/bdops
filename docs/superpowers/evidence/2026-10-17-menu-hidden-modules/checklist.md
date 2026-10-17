@@ -61,3 +61,16 @@ Kiểm trên dữ liệu thử cục bộ: dự án PROXY_TRIAL (959 VM, 1.211 d
   - theme sáng và golden.
 - **Bảng proxy:** chưa bấm trực tiếp từng đoạn biểu đồ kho proxy; chỉ kiểm qua bảng số ở đợt trước.
 - **Bộ test:** một lần chạy toàn bộ có 1 test lỗi không lặp lại; hai lần chạy sau đó đạt 352/352. Chưa xác định test nào.
+
+## Phát hành
+
+- **Commit:** `960d1ea`, không có migration.
+- **Backup host trước deploy:** `f4fe658d`.
+- **Deploy:** `2b354a04`, SUCCESS.
+- **Host verify:** 10 server / 576 VM.
+- **Host xem chỉ đọc trên mooon** (`host-result.txt`, `h1-host-mooon-dashboard.png`):
+  - Menu mới đúng; không còn khối Giao việc.
+  - Chờ cài 553 = 553; Cần kiểm tra 23 = 23.
+  - `/vm-tasks` chuyển tới Server / VM lọc Chờ cài; `/work` báo tạm ẩn; `/paypals` mở tab PayPal.
+  - "NEW đủ điều kiện giao VM" là 0 / 0. Kho có 9 TUT NEW (cổng port-stream chưa đủ điều kiện) và 30 Chung đang LIVE.
+- **Ghi dữ liệu trên host:** chỉ xác thực PIN và heartbeat phiên.

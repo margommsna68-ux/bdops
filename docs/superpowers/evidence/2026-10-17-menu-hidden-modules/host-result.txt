@@ -1,0 +1,10 @@
+menu: Tổng quan | Kho proxy | Server / VM | Kho tài khoản | Nhận USDT về team | Tiền vào PayPal | Rút / chuyển gốc | Chi phí | Lợi nhuận | Lịch sử thao tác | Nhân viên | Dự án | Thiết lập
+Không còn Giao việc/Việc cài/PayPal riêng: true
+Dashboard không có khối Giao việc: true
+NEW đủ điều kiện: NEW đủ điều kiện giao VM: TUT 0 (tự điền được) · Chung mooon–Genjy 0 (chỉ giao tay)
+Chờ cài: dashboard 553 · Server/VM 553 KHỚP
+Cần kiểm tra: dashboard 23 · Server/VM 23 KHỚP
+/vm-tasks → /infrastructure/servers?view=PENDING
+/work → báo tạm ẩn
+/paypals → tab PayPal (0)
+tRPC writes: user.verifyPin,user.heartbeat
