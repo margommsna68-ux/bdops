@@ -4,7 +4,7 @@ Ngày kiểm tra: 14/10/2026. Nền BDOps, branch `feat/proxy-inventory`. Bản 
 
 ## Thao tác hằng ngày
 
-1. **Quản lý proxy:** nhập mới, báo BLOCKED hoặc nhận replace. Nhập replace theo hai ô cũ/mới; dòng N ghép dòng N. IP mới viết tắt lấy port/user/pass của cặp cũ. Kiểm tra IP hiện hành/lịch sử và nguồn Genjy trước khi lưu.
+1. **Kho proxy:** nhập mới, báo BLOCKED hoặc nhận replace. Nhập replace theo hai ô cũ/mới; dòng N ghép dòng N. IP mới viết tắt lấy port/user/pass của cặp cũ. Kiểm tra IP hiện hành/lịch sử và nguồn Genjy trước khi lưu.
 2. **Server / VM:** thêm server cùng mã VM rõ ràng. Bấm **Điền VM thiếu** để giao NEW chưa dùng của anh vào ô trống thật sự; Genjy, công thức, placeholder và dữ liệu chưa rõ được giữ nguyên. Nếu thiếu proxy, xem danh sách rồi bấm lưu phần đủ điều kiện; những VM còn thiếu vẫn được báo.
 3. **Việc cài proxy:** mở VM, bấm **Copy để cài**, cài trên máy thật rồi đánh dấu đã cài đúng proxy và bấm **Xác nhận đã cài**. Nếu vướng mắc, bấm **Cài chưa xong** và ghi lỗi. Proxy vẫn được giữ cho VM.
 4. **Đổi proxy:** tại dòng VM, chọn NEW chưa dùng. Web giữ proxy đã cài và proxy mới được giao cùng lúc, đến khi xác nhận đã thay xong. Khi cần quay lại cấu hình đang cài, giao lại cấu hình ấy thành phiên bản mới và xác nhận mới.

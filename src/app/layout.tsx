@@ -16,7 +16,7 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: "MoneyToHome",
-  description: "Quản lý proxy, VM, EarnApp và business",
+  description: "Kho proxy, Server / VM, EarnApp và thu chi",
 };
 
 export default function RootLayout({

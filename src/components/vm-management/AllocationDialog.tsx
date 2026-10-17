@@ -1,6 +1,8 @@
 "use client";
 import {useEffect,useState} from 'react';
 import Link from 'next/link';
+import {moduleOn} from '@/lib/features';
+import {links} from '@/lib/links';
 import {trpc} from '@/lib/trpc';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import type {AllocationPreview} from '@/server/vm-management/types';
@@ -21,7 +23,7 @@ export function AllocationForm({projectId,vmIds,vm,onClose,onSaved,onBusy}:{proj
   const failed=(e:unknown)=>{setError(errorMessage(e));if((e as {data?:{code?:string}})?.data?.code==='CONFLICT'){setPreview(null);setKey(crypto.randomUUID());}};
   const check=async()=>{setError('');try{const r=await submitAllocation(input,i=>inspect.mutateAsync({...i,projectId}),i=>commit.mutateAsync({...i,projectId}),setPreview);if(r.phase==='SAVED')done(r.result);}catch(e){failed(e);}};
   return <div className="space-y-4">
-    {saved?<><p role="status" className="pm-success">{saved}</p><div className="flex justify-end gap-2"><button className="pm-button" onClick={onClose}>Đóng</button><Link className="pm-button pm-button-primary" href="/vm-tasks">Xem việc cài</Link></div></>:<>
+    {saved?<><p role="status" className="pm-success">{saved}</p><div className="flex justify-end gap-2"><button className="pm-button" onClick={onClose}>Đóng</button>{moduleOn('INSTALL_TASKS')&&<Link className="pm-button pm-button-primary" href={links.installs()}>Xem việc cài</Link>}</div></>:<>
       {vm&&<label className="pm-label">Proxy giao cho VM<select className="pm-input" aria-label="Proxy giao cho VM" disabled={busy} value={endpointId} onChange={e=>{setEndpointId(e.target.value);setPreview(null);setKey(crypto.randomUUID());setError('');}}><option value="">Chọn proxy NEW chưa dùng (TUT hoặc nhóm chung)</option>{eligible.data?.map(p=><option key={p.endpointId} value={p.endpointId}>{p.ip} · port {p.port} · {p.shared?'Chung mooon–Genjy':'TUT'}</option>)}{installed&&!eligible.data?.some(p=>p.endpointId===installed.endpointId)&&<option value={installed.endpointId}>{installed.ip} · đang cài trên VM này</option>}</select></label>}
       {eligible.error&&vm&&<p role="alert" className="pm-error">{eligible.error.message}</p>}
       {!vm&&<p className="pm-review text-sm">Phạm vi: đúng {vmIds?.length||0} VM đã chọn. Chỉ NEW TUT chưa dùng vào ô trống; VM không đủ điều kiện được giữ nguyên và nêu lý do.</p>}

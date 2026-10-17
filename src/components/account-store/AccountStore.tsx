@@ -7,6 +7,7 @@ import {Copy,Search} from 'lucide-react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
+import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy} from '@/components/business-management/AccountsWorkspace';
 import {ImportPanel,type AppendTarget,type StockKind} from './ImportPanel';
@@ -19,13 +20,15 @@ const PP_STATUS:Record<string,string>={ACTIVE:'Dùng được',LIMITED:'Bị lim
 const TYPE:Record<string,string>={GMAIL:'Gmail',APPLE_ID:'Apple ID'};
 const PRICE_EMPTY={NONE:'Chưa ghi chi phí',VOIDED:'Khoản chi đã thu hồi',RECORDED:'—'} as const;
 const money=(v:string|null|undefined)=>v?v.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,''):'';
-const vmHref=(p:{serverId:string;vmId:string})=>`/infrastructure/servers/${p.serverId}?vm=${p.vmId}&tab=account`;
+const vmHref=(p:{serverId:string;vmId:string})=>links.vms({serverId:p.serverId,vm:p.vmId,tab:'account'});
 // Kho tài khoản: Gmail / Apple ID login stock, PayPal stock (the same PayPal records as before), purchase batches and a review list
 // of old data that conflicts with the new rules. Stock state (NEW / Đã gán / Đã dùng / Lỗi) is computed from the current EarnApp
 // links. Assigning to VMs happens in Server/VM (cell, bulk, Dán bảng); this page receives, checks and maintains the stock.
 export function AccountStore({projectId,initialTab}:{projectId:string;initialTab?:Tab}){
   const params=useSearchParams(),router=useRouter(),path=usePathname(),store=trpc.accountStore.store.useQuery({projectId}),utils=trpc.useUtils();
-  const tab=(['login','paypal','batch','review'].includes(params.get('tab')||'')?params.get('tab'):initialTab||'login') as Tab;
+  const asked=(['login','paypal','batch','review'].includes(params.get('tab')||'')?params.get('tab'):initialTab||'login') as Tab;
+  // A member with only the PayPal right (no Server / VM module) works on the PayPal tab of the same store; the backend decides.
+  const tab:Tab=asked==='login'&&store.data&&!store.data.rights.logins?'paypal':asked;
   const q=params.get('q')||'',type=params.get('type')||'',state=params.get('state')||'',batch=params.get('batch')||'';
   const [importing,setImporting]=useState<{kind:StockKind;append?:AppendTarget}|null>(params.get('import')?{kind:tab==='paypal'?'PAYPAL':'LOGIN'}:null),[selected,setSelected]=useState<Set<string>>(new Set()),[copy,setCopy]=useState<Login|null>(null);
   const go=(patch:Record<string,string>)=>{const next=new URLSearchParams(params.toString());for(const [k,v] of Object.entries(patch)){if(v)next.set(k,v);else next.delete(k);}next.delete('import');router.replace(path+(next.toString()?'?'+next:''),{scroll:false});setSelected(new Set());};
@@ -37,7 +40,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   const base=tab==='paypal'?data?.paypals||[]:(data?.logins||[]).filter(l=>!type||l.type===type),stateCounts=counts(base);
   if(store.error)return <p role="alert" className="pm-error">{store.error.message}</p>;
   return <div className="proxy-workspace space-y-4">
-    <div className="pm-heading"><div><h1>Kho tài khoản</h1><p className="pm-muted">Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng <Link className="underline" href="/infrastructure/servers">Server / VM</Link>; một VM một tài khoản EarnApp, một PayPal riêng.</p></div>
+    <div className="pm-heading"><div><h1>Kho tài khoản</h1><p className="pm-muted">Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng <Link className="underline" href={links.vms()}>Server / VM</Link>; một VM một tài khoản EarnApp, một PayPal riêng.</p></div>
       <div className="flex gap-2 flex-wrap">{tab!=='paypal'&&rights?.writeLogins&&<button className="pm-button pm-button-primary" onClick={()=>setImporting({kind:'LOGIN'})}>Nhập Gmail / Apple ID</button>}{(tab==='paypal'||tab==='batch')&&rights?.writePaypals&&<button className="pm-button pm-button-primary" onClick={()=>setImporting({kind:'PAYPAL'})}>Nhập PayPal</button>}</div></div>
     <div className="vm-kind-tabs" role="tablist" aria-label="Nhóm tài khoản">{([['login','Gmail / Apple ID',data?.logins.length],['paypal','PayPal',data?.paypals.length],['batch','Lô nhập',data?.batches.length],['review','Cần kiểm tra',data?.review.length]] as [Tab,string,number|undefined][]).filter(([k])=>k!=='login'||rights?.logins!==false).map(([k,label,n])=><button key={k} type="button" role="tab" aria-selected={tab===k} className={tab===k?'active':''} onClick={()=>go({tab:k,state:'',type:'',batch:''})}>{label}{n!==undefined?` (${n})`:''}</button>)}</div>
     {importing&&<ImportPanel key={importing.kind+(importing.append?.id||'')} projectId={projectId} kind={importing.kind} append={importing.append} canCost={!!rights?.writeCosts} onDone={()=>void refresh()} onClose={()=>setImporting(null)}/>}

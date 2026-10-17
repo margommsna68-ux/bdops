@@ -41,7 +41,7 @@ export function VmByServerChart({ops}:{ops:Ops}){
 }
 export function StockChart({ops}:{ops:Ops}){
   const router=useRouter(),rows=ops.stock.rows.map(r=>({...r,name:`${r.label} · ${fmt(r.total)}`})),totals=Object.fromEntries(STOCK_SERIES.map(s=>[s.key,rows.reduce((a,r)=>a+r[s.key],0)]));
-  if(!ops.stock.total)return <p className="ov-empty">Chưa có proxy trong kho đang quản lý. <Link className="pm-link" href={links.proxies()}>Mở Quản lý proxy</Link></p>;
+  if(!ops.stock.total)return <p className="ov-empty">Chưa có proxy trong kho đang quản lý. <Link className="pm-link" href={links.proxies()}>Mở Kho proxy</Link></p>;
   return <div>
     <Legend items={STOCK_SERIES} totals={totals} href={k=>links.proxies({state:k})}/>
     <div style={{height:rows.length*34+34}} role="img" aria-label={`Kho proxy: ${rows.map(r=>`${r.label} ${r.total}`).join(', ')}`}>

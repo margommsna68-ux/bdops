@@ -1,0 +1,62 @@
+import {links} from '@/lib/links';
+import {moduleOn,type OptionalModule} from '@/lib/features';
+import type {AppModule} from '@/server/trpc';
+// role: who the target page actually serves. ADMIN = admin only (projects, audit log); MOD = admin, or a moderator granted user
+// management (the staff page and its backend refuse other moderators).
+// anyModule: the item shows when the member has one of these modules (the page itself serves each part by its own right).
+// also: other paths that belong to the item (old URLs kept for compatibility light it up too).
+export type NavItem =
+  | { href: string; labelKey: string; label?: string; icon: string; module?: AppModule | null; anyModule?: AppModule[]; also?: string[]; role?: "ADMIN" | "MOD"; infraOnly?: boolean; optional?: OptionalModule }
+  | { type: "separator"; labelKey: string };
+export type NavLinkItem=Extract<NavItem,{href:string}>;
+// Money pages: /funds is money arriving in PayPal; /withdrawals is "Nhận USDT về team" when team cash is on (original withdrawals
+// under ?view=original), otherwise the original withdrawals/transfers page.
+export const moneyItems=(cashMode:boolean):NavItem[]=>cashMode?[
+  {href:links.teamReceipts(),labelKey:'Nhận USDT về team',label:'Nhận USDT về team',icon:'T',module:'WITHDRAWALS'},
+  {href:links.paypalIn(),labelKey:'Tiền vào PayPal',label:'Tiền vào PayPal',icon:'$',module:'FUNDS'},
+  {href:links.originalWithdrawals(true),labelKey:'Rút / chuyển gốc',label:'Rút / chuyển gốc',icon:'R',module:'WITHDRAWALS'},
+]:[
+  {href:links.paypalIn(),labelKey:'Tiền vào PayPal',label:'Tiền vào PayPal',icon:'$',module:'FUNDS'},
+  {href:links.originalWithdrawals(false),labelKey:'Rút / chuyển gốc',label:'Rút / chuyển gốc',icon:'R',module:'WITHDRAWALS'},
+];
+// MoneyToHome (Proxy / VM) menu. Kho tài khoản is one item for Gmail / Apple ID, PayPal, Lô nhập and Cần kiểm tra; /paypals stays
+// as its PayPal tab. Việc cài proxy and Giao việc show only when switched on in src/lib/features.ts.
+export const personalItems=(cashMode:boolean):NavItem[]=>[
+  {href:'/dashboard',labelKey:'Tổng quan',icon:'D'},
+  {href:links.proxies(),labelKey:'Kho proxy',icon:'P',module:'INFRASTRUCTURE'},
+  {href:links.vms(),labelKey:'Server / VM',icon:'S',module:'INFRASTRUCTURE'},
+  {href:'/vm-tasks',labelKey:'Việc cài proxy',icon:'V',module:'INFRASTRUCTURE',optional:'INSTALL_TASKS'},
+  {href:'/work',labelKey:'Giao việc',icon:'W',module:'INFRASTRUCTURE',optional:'WORK'},
+  {href:'/gmails',labelKey:'Kho tài khoản',icon:'G',anyModule:['INFRASTRUCTURE','PAYPALS'],also:['/paypals']},
+  {type:'separator',labelKey:'Tài chính'},
+  ...moneyItems(cashMode),
+  {href:'/costs',labelKey:'Chi phí',icon:'C',module:'COSTS'},
+  {href:'/profit',labelKey:'Lợi nhuận',icon:'%',module:'PROFIT'},
+  {href:'/history',labelKey:'Lịch sử thao tác',icon:'H'},
+  {type:'separator',labelKey:'Quản trị'},
+  {href:'/admin/users',labelKey:'Nhân viên',icon:'U',role:'MOD'},
+  {href:'/admin/projects',labelKey:'Dự án',icon:'P',role:'ADMIN'},
+  {href:'/settings',labelKey:'Thiết lập',icon:'*'},
+];
+export interface NavAccess {role:string|null;modules:string[];paypalOnlyProject?:boolean;canManageUsers?:boolean}
+// Same rule for every menu: no project → dashboard, settings and admin-only links; otherwise role and module checks.
+export function canSee(item:NavLinkItem,a:NavAccess,modules?:Set<OptionalModule>):boolean{
+  if(item.optional&&!moduleOn(item.optional,modules))return false;
+  if(!a.role)return item.href==='/dashboard'||item.href==='/settings'||item.role==='ADMIN';
+  if(item.infraOnly&&a.paypalOnlyProject)return false;
+  if(item.role==='ADMIN')return a.role==='ADMIN';
+  if(item.role==='MOD')return a.role==='ADMIN'||a.role==='MODERATOR'&&!!a.canManageUsers;
+  if(a.role==='ADMIN')return true;
+  if(item.anyModule)return item.anyModule.some(m=>a.modules.includes(m));
+  return !item.module||a.modules.includes(item.module);
+}
+// A member with only the PayPal right opens Kho tài khoản on its PayPal tab (the login tab is not theirs).
+export function personalizeHref(item:NavLinkItem,a:NavAccess):NavLinkItem{
+  if(item.href==='/gmails'&&a.role!=='ADMIN'&&!a.modules.includes('INFRASTRUCTURE')&&a.modules.includes('PAYPALS'))return {...item,href:'/paypals',also:['/gmails']};
+  return item;
+}
+// Drop separators that head no visible item.
+export function visibleMenu(items:NavItem[],a:NavAccess,modules?:Set<OptionalModule>):NavItem[]{
+  const kept=items.flatMap((i):NavItem[]=>'type' in i?[i]:canSee(i,a,modules)?[personalizeHref(i,a)]:[]);
+  return kept.filter((i,n)=>!('type' in i)||(!!kept[n+1]&&!('type' in kept[n+1])));
+}

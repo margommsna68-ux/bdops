@@ -53,5 +53,5 @@ Backend luôn kiểm tra lại khi lưu: quyền MANAGE, dự án, revision (VM 
 - Xoá server không xoá cứng; tên server và mã VM đã xoá vẫn giữ chỗ, muốn dùng lại thì khôi phục.
 - Chỗ còn lặp ở trang khác, chưa sửa trong mốc này:
   - *Việc cài proxy*: mỗi thẻ ghi lại "server / VM" kể cả khi đang lọc một server.
-  - *Quản lý proxy*: hai dải thông báo bản thử / nguồn Genjy ở đầu trang, và số đếm vừa ở thẻ tổng vừa ở nút lọc nhanh.
+  - *Kho proxy*: hai dải thông báo bản thử / nguồn Genjy ở đầu trang, và số đếm vừa ở thẻ tổng vừa ở nút lọc nhanh.
   - *Công việc* và *Chi phí*: cột server và VM lặp khi lọc theo một server.

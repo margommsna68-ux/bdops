@@ -12,7 +12,7 @@ Genjy đọc **trực tiếp, chỉ đọc**, toàn bộ workbook Google `1_PQ7Z
 
 ## Anh test theo 5 việc
 
-1. **Quản lý proxy**: tìm IP anh biết; xem gói, sở hữu, server/VM và lịch sử. Genjy/PC chung phải hiện riêng.
+1. **Kho proxy**: tìm IP anh biết; xem gói, sở hữu, server/VM và lịch sử. Genjy/PC chung phải hiện riêng.
 2. **Báo BLOCKED**: dán IP hoặc full proxy → xem trước → lưu. Copy danh sách gửi nhà cung cấp có gói, full proxy, BLOCKED.
 3. **Nhận replace**: Removed ô trên, Added ô dưới, cùng thứ tự. IP viết tắt lấy port/user/pass từ IP cũ cùng cặp; full proxy giữ đầy đủ. Xem trước phát hiện hàng có trong kho/lịch sử/Genjy trước khi lưu.
 4. **Server/VM**: giao NEW đủ điều kiện vào chỗ trống thật sự. Cài thật rồi mới xác nhận. Hiện snapshot không có ô trống/NEW đủ điều kiện; không lấy các dòng chưa rõ để lấp.

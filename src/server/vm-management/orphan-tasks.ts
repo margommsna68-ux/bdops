@@ -23,7 +23,7 @@ export async function closeOrphanTask(scope:ActorScope,input:{taskId:string},db:
     const task=await tx.vMTask.findFirst({where:{id:input.taskId,vm:{managed:true,server:{projectId:scope.projectId,managed:true}}},select:{id:true,title:true,status:true,configurationId:true,vm:{select:{code:true,desiredConfigurationId:true,installedConfigurationId:true,server:{select:{code:true}}}}}});
     if(!task)throw new ProxyDomainError('NOT_FOUND','Việc cài không còn trong dự án');
     if(!OPEN.includes(task.status))return {closed:false,operationId:null as string|null};
-    if(!isOrphanTask(task))throw new ProxyDomainError('INVALID_INPUT','Việc này đang gắn với cấu hình chờ cài; xử lý ở Việc cài proxy');
+    if(!isOrphanTask(task))throw new ProxyDomainError('INVALID_INPUT','Việc này đang gắn với cấu hình chờ cài; cài và xác nhận ở tab Cài proxy của VM');
     const images=await snapshotCollector(tx,current);await images.remember('VM_TASK',task.id);
     await tx.vMTask.update({where:{id:task.id},data:{status:'CANCELLED'}});
     const op=await recordOperation(tx,{scope:current,kind:'VM_TASK_CLOSE',summary:{server:task.vm.server.code,vm:task.vm.code,title:task.title},snapshot:await images.finish()});

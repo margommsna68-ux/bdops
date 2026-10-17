@@ -262,3 +262,15 @@ it('work items: staff tasks and Sheet reconciliation rows are separate kinds; no
     expect((await readWorkWorkspace(f.scope,db)).items.map(i=>i.kind).sort()).toEqual(['SHEET_REVIEW','TASK']);
   }finally{await f.cleanup();}
 });
+it('Kho tài khoản serves a PayPal-only member its PayPal part (no logins, no login batches) and refuses a member with neither right',async()=>{
+  const f=await setup();const pp=randomUUID(),none=randomUUID();try{
+    const x=u();await commitStockImport(f.scope,{kind:'PAYPAL',text:`PP-${x}|pp-${x}@example.invalid`,batch:{code:'PP-'+x,purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
+    await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`g-${x}@example.invalid|pw`,batch:{code:'TK-'+x,purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
+    await db.user.createMany({data:[pp,none].map(id=>({id,email:id+'@fixture.invalid'}))});
+    await db.projectMember.createMany({data:[{projectId:f.scope.projectId,userId:pp,role:'MODERATOR',allowedModules:['PAYPALS']},{projectId:f.scope.projectId,userId:none,role:'USER',allowedModules:['COSTS']}]});
+    const store=await readAccountStore({...f.scope,userId:pp,role:'MODERATOR'},db);
+    expect(store.rights).toMatchObject({logins:false,paypals:true,writeLogins:false,writePaypals:true});
+    expect(store.logins).toEqual([]);expect(store.paypals.map(p=>p.code)).toContain('PP-'+x);expect(store.batches.map(b=>b.kind)).toEqual(['PAYPAL']);
+    await expect(readAccountStore({...f.scope,userId:none,role:'USER'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  }finally{await db.projectMember.deleteMany({where:{userId:{in:[pp,none]}}});await db.user.deleteMany({where:{id:{in:[pp,none]}}});await f.cleanup();}
+});

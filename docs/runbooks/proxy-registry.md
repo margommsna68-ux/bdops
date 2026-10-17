@@ -4,7 +4,7 @@ Triển khai 16/10/2026 (commit `8a2d009`, deploy Railway `3ed8ac87`, backup tr�
 
 ## Cột vị trí
 
-Trang **Quản lý proxy** tách vị trí thành ba cột:
+Trang **Kho proxy** tách vị trí thành ba cột:
 
 | Cột | Nội dung |
 |---|---|

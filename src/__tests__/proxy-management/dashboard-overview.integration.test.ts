@@ -57,21 +57,27 @@ describe('Tổng quan (dashboard read model)',()=>{
       }
       expect(rows[0]).toMatchObject({NEW:3,BLOCKED:1,OTHER:0,total:4});// REPLACED is history, not in the current view
       expect(o.operations!.stock.total).toBe((await queryRegistry(f.admin,{view:'CURRENT',limit:1},db)).total);
+      // NEW is a state, not proof it can be given: a NEW proxy without a package stays NEW but leaves the allocation pool.
+      expect(o.operations!.stock.ready).toEqual({autofill:3,sharedManual:1});
+      await db.proxyIP.update({where:{id:f.tut.id},data:{packageCode:null}});
+      const after=(await readOverview(f.admin,{month:'2026-10'},db)).operations!.stock;
+      expect(after.rows[0].NEW).toBe(3);expect(after.ready).toEqual({autofill:2,sharedManual:1});
     }finally{await f.cleanup();}
   });
-  it('staff work excludes old-Sheet reconciliation; orphan install tasks are listed, closed once and reopened by undo',async()=>{
+  it('no Giao việc block (old-Sheet rows never count as open work); orphan install tasks open the VM, close once, undo reopens',async()=>{
     const f=await fixture();try{
       await db.businessWorkItem.createMany({data:[{projectId:f.projectId,title:'Kiểm tra máy',createdById:f.admin.userId,kind:'TASK',dueDate:new Date('2026-01-01')},{projectId:f.projectId,title:'Dòng Sheet cũ',createdById:f.admin.userId,kind:'SHEET_REVIEW'},{projectId:f.projectId,title:'Đã xong',createdById:f.admin.userId,status:'COMPLETED'}]});
       const task=await db.vMTask.create({data:{vmId:f.b1.id,type:'PROXY_INSTALL',title:'Cài proxy cũ',scheduledAt:new Date('2026-01-01')}});
       let o=await readOverview(f.admin,{month:'2026-10'},db);
-      expect(o.operations!.work).toMatchObject({open:1,overdue:1,sheetOpen:1});expect(o.operations!.work!.items.map(i=>i.title)).toEqual(['Kiểm tra máy']);
-      expect(o.operations!.orphanTasks).toBe(1);expect((await readOrphanTasks(f.operator,db)).map(t=>t.id)).toEqual([task.id]);
+      expect(o.operations).not.toHaveProperty('work');expect(JSON.stringify(o)).not.toContain('Dòng Sheet cũ');
+      // One orphan task: the link opens that VM on its install tab (Server / VM), not the hidden Việc cài proxy page.
+      expect(o.operations!.orphanTasks).toEqual({count:1,link:`/infrastructure/servers/${f.s10.id}?vm=${f.b1.id}&tab=install`});expect((await readOrphanTasks(f.operator,db)).map(t=>t.id)).toEqual([task.id]);
       const member={projectId:f.projectId,userId:f.operator.userId};await db.projectMember.updateMany({where:member,data:{role:'VIEWER'}});
       await expect(closeOrphanTask(f.operator,{taskId:task.id},db)).rejects.toMatchObject({code:'FORBIDDEN'});// a viewer only reads
       await db.projectMember.updateMany({where:member,data:{role:'USER'}});
       expect(await closeOrphanTask(f.admin,{taskId:task.id},db)).toMatchObject({closed:true});
       expect(await closeOrphanTask(f.admin,{taskId:task.id},db)).toMatchObject({closed:false});// retry writes nothing
-      o=await readOverview(f.admin,{month:'2026-10'},db);expect(o.operations!.orphanTasks).toBe(0);
+      o=await readOverview(f.admin,{month:'2026-10'},db);expect(o.operations!.orphanTasks.count).toBe(0);
       const op=(await listOperations(f.admin,db)).find(x=>x.kind==='VM_TASK_CLOSE')!;await undoOperation(f.admin,op.id,'',db);
       expect((await db.vMTask.findUniqueOrThrow({where:{id:task.id}})).status).toBe('PENDING');
       // A task that belongs to the VM's pending configuration is handled on Việc cài, never closed here.

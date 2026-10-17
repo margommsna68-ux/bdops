@@ -1,0 +1,47 @@
+since 2026-10-17T15:54:23.675Z mode=off
+menu ADMIN: Tổng quan | Kho proxy | Server / VM | Kho tài khoản | Nhận USDT về team | Tiền vào PayPal | Rút / chuyển gốc | Chi phí | Lợi nhuận | Lịch sử thao tác | Nhân viên | Dự án | Thiết lập
+PASS Menu gọn: Kho proxy, một Kho tài khoản; không còn Việc cài proxy / Giao việc / PayPal riêng / Quản lý proxy — Tổng quan | Kho proxy | Server / VM | Kho tài khoản | Nhận USDT về team | Tiền vào PayPal | Rút / chuyển gốc | Chi phí | Lợi nhuận | Lịch sử thao tác | Nhân viên | Dự án | Thiết lập
+PASS Dashboard không có khối Giao việc / Đối chiếu Sheet / Việc cài proxy — 
+PASS Laptop: màn đầu thấy biểu đồ VM và Cần xử lý, không cuộn ngang — VM y=258 · Cần xử lý y=258
+PASS Kho proxy: có dòng NEW đủ điều kiện giao — NEW đủ điều kiện giao VM: TUT 89 (tự điền được) · Chung mooon–Genjy 5 (chỉ giao tay)
+PASS Thẻ Chờ cài → Server/VM view=PENDING, số khớp — 387 = 387
+PASS Thẻ Cần kiểm tra → Server/VM view=REVIEW, số khớp — 5 = 5
+PASS Thẻ Thiếu proxy → Server/VM view=MISSING, số khớp — 565 = 565
+PASS Proxy BLOCKED → Kho proxy lọc BLOCKED, số khớp — 3 = 3
+PASS Gói cần thanh toán → danh sách gói, lọc hạn gần nhất — lọc DUE · 3 / 7 gói · dashboard 1
+PASS Đóng danh sách gói → URL bỏ packages, ở lại Kho proxy — /infrastructure/proxies
+PASS Dòng gói → mở thẳng form thanh toán đúng gói — Gói UITEST-mv9t8n8k còn 1 ngày · /infrastructure/proxies?package=UITEST-mv9t8n8k&pay=UITEST-mv9t8n8k
+PASS Ghi thanh toán gói (dữ liệu thử cục bộ) → form đóng — đã lưu
+PASS Việc cài bị bỏ lại → mở tại Server/VM (VM tab Cài proxy hoặc lọc TASK_ORPHAN) — 1 · /infrastructure/servers/cmv84dp83000275ezxdepdes7?vm=cmv84dp88000a75ezogf90e9q&tab=install
+PASS Đóng việc tại VM → số trên Tổng quan giảm 1 — 1 → 0
+PASS Chưa có SDK → Server/VM SDK_MISSING, số khớp, chip sáng — 602 = 602
+PASS Chưa có tài khoản EarnApp → Server/VM ACCOUNT_MISSING, số khớp, chip sáng — 940 = 940
+PASS Chưa có PayPal nhận → Server/VM PAYPAL_MISSING, số khớp, chip sáng — 943 = 943
+PASS Từ VM mở Kho tài khoản — /gmails
+PASS Back về đúng VM, bộ lọc, trang và tab — /infrastructure/servers?view=PAYPAL_MISSING&page=2&vm=cmvbs3hsd03l3134kjcw44rnn&tab=account
+PASS Esc đóng VM, giữ lọc/trang — /infrastructure/servers?view=PAYPAL_MISSING&page=2
+PASS /vm-tasks → Server/VM lọc Chờ cài — /infrastructure/servers?view=PENDING
+PASS Back sau chuyển hướng không vòng lại — /dashboard
+PASS /vm-tasks#orphan → lọc Việc cài bị bỏ lại — /infrastructure/servers?view=TASK_ORPHAN
+PASS /vm-tasks?vm= → đúng VM, tab Cài proxy — /infrastructure/servers?vm=cmv84dp87000875ez1nobhcyu&tab=install
+PASS /work → báo tạm ẩn, Về Tổng quan hoạt động — 
+PASS /paypals → Kho tài khoản, tab PayPal, menu sáng Kho tài khoản — tab PayPal (41) · menu G
+Kho tài khoản
+PASS Lô nhập → Xem ở Chi phí mở đúng khoản chi (đúng tháng, dòng đánh dấu) — /costs?cost=cmvc59jyv000jjwyl4kfj0kvd&month=2026-10 · dòng đánh dấu 1
+PASS Back về Lô nhập — /paypals?tab=batch
+PASS Kho proxy nhiều trang (dữ liệu thử) — 1211 dòng
+PASS Kho proxy sang trang 2 — Dòng 101–200 / 1211 
+PASS Kho proxy Back theo URL — 93 = 93
+PASS Tháng không có giao dịch: thông báo ngắn, không khối số 0 — 
+PASS Đổi sang dự án trống: một dòng hướng dẫn, không khối số 0, không biểu đồ — Tổng quan / Vận hành hiện tại · cập nhật 22:55 /  / Dự án chưa có server / VM và proxy. / Thêm server ở Server / VM / · / Nhập proxy ở Kho proxy /  / Tài chính / Thu chi USDT chư
+PASS Đổi về dự án có dữ liệu — 
+PASS 390px dashboard không cuộn ngang — 
+PASS 390px Kho tài khoản không cuộn ngang cả trang — 
+menu PayPal-only: Tổng quan | Kho tài khoản | Lịch sử thao tác | Thiết lập
+PASS Chỉ quyền PayPal (MODERATOR): menu có Kho tài khoản, không có Kho proxy / Server / Chi phí / Dự án — Tổng quan | Kho tài khoản | Lịch sử thao tác | Thiết lập
+PASS Chỉ quyền PayPal: mở thẳng tab PayPal, không có tab Gmail — /paypals · PayPal (41),Lô nhập (8),Cần kiểm tra (0)
+PASS Chỉ quyền PayPal: /gmails cũng về tab PayPal — 
+PASS Nhân viên Server/VM: có Kho proxy, Kho tài khoản; không mục tiền / quản trị / module ẩn — Tổng quan | Kho proxy | Server / VM | Kho tài khoản | Lịch sử thao tác | Thiết lập
+PASS Nhân viên: Tổng quan chỉ phần vận hành — 
+PASS Không có quyền: menu không quảng cáo trang sẽ bị từ chối — Tổng quan | Lịch sử thao tác | Thiết lập
+TOTAL 42 pass / 0 fail

@@ -1,0 +1,5 @@
+since 2026-10-17T15:56:33.939Z mode=on
+PASS Bật lại: menu có Việc cài proxy và Giao việc — Tổng quan | Kho proxy | Server / VM | Việc cài proxy | Giao việc | Kho tài khoản | Nhận USDT về team | Tiền vào PayPal | Rút / chuyển gốc | Chi phí | Lợi nhuận | Lịch sử thao tác | Nhân viên | Dự án | Thiết lập
+PASS Bật lại: /vm-tasks mở trang Việc cài, không chuyển hướng — /vm-tasks
+PASS Bật lại: /work mở Giao việc — /work
+TOTAL 3 pass / 0 fail

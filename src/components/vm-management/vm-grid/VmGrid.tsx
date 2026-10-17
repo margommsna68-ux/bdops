@@ -127,7 +127,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
                 {rights.copy&&v.desired&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'DESIRED')}>Copy proxy được giao</DropdownMenuItem>}
                 {rights.copy&&v.installed&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem>}
                 <DropdownMenuSeparator/>
-                <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'install')}>Việc cài</DropdownMenuItem>
+                <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'install')}>Cài proxy</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'account')}>Tài khoản EarnApp</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'work')}>Công việc</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'history')}>Lịch sử</DropdownMenuItem>

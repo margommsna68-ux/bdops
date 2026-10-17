@@ -11,6 +11,7 @@ import {displayNote} from '@/server/vm-management/vm-codes';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
 import {copyWhenReady} from '@/components/proxy-management/clipboard';
 import {links} from '@/lib/links';
+import {moduleOn} from '@/lib/features';
 import {InlineText} from './InlineText';
 import {AddVmDialog,CreateServerDialog} from './VmForms';
 import {useVMRefresh,errorMessage,type ManagedVM} from './shared';
@@ -30,7 +31,7 @@ const STATUS_ORDER={REVIEW:0,PENDING:1,MISSING:2,INSTALLED:3,ARCHIVED:4} as cons
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
 // action columns; side panel instead of stacked dialogs; everything the user picked lives in the URL. See docs/runbooks/server-vm-table.md.
 export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?:string}){
-  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false});
+  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false}),orphans=trpc.vmManagement.orphanTasks.useQuery({projectId});
   const refresh=useVMRefresh(),params=useSearchParams(),router=useRouter(),pathname=usePathname(),session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
   const url=readGridUrl(params);
   // Two quick changes (sort, then page size) must both survive: build on the last URL we asked for until the router catches up.
@@ -55,13 +56,15 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;
-  const inView=(v:ManagedVM)=>!url.view||(url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
+  // Open install tasks whose configuration is no longer pending: handled at the VM (tab Cài proxy → Đóng việc), never auto-closed.
+  const orphanVms=useMemo(()=>new Set((orphans.data||[]).map(t=>t.vmId)),[orphans.data]),orphanView=url.view==='TASK_ORPHAN',orphansReady=!!orphans.data,noOrphan=orphansReady?active.filter(v=>orphanVms.has(v.id)).length:null;
+  const inView=(v:ManagedVM)=>!url.view||(url.view==='TASK_ORPHAN'?orphanVms.has(v.id):url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
   const needle=url.q.trim().toLowerCase();
   // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
+  const filtered=useMemo(()=>(accountView&&!accountsReady||orphanView&&!orphansReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
     .sort((a,b)=>(url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletedView,deleted,active,url.view,url.sort,needle,accountOfVm,accountView,accountsReady]);
+    [deletedView,deleted,active,url.view,url.sort,needle,accountOfVm,accountView,accountsReady,orphanVms,orphanView,orphansReady]);
   // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Chờ cài) stays selected and stays in
   // the open bulk panel. Bulk actions take the selected rows in table order.
   const selectedRows=useMemo(()=>[...(deletedView?deleted:active)].filter(v=>selected.has(v.id)).sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),[deletedView,deleted,active,selected]);
@@ -143,7 +146,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
   const openBulk=(panel:BulkPanel,toggle=false)=>{if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
   useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
-  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','PENDING','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
+  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','PENDING','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','TASK_ORPHAN'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
   if(current?.archivedAt)return <div className="proxy-workspace space-y-4"><div className="pm-heading"><div><h1>{current.code}</h1><p className="pm-muted">Server đã xoá. Dữ liệu và lịch sử vẫn được giữ.</p></div>{rights.manage&&<button className="pm-button pm-button-primary" disabled={busy} onClick={()=>void bringBackServer(current.id)}><RotateCcw size={16}/>Khôi phục server</button>}</div><Link className="pm-button pm-button-quiet w-fit" href="/infrastructure/servers">Về danh sách server</Link></div>;
@@ -158,13 +161,13 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
       <div className="vm-head-actions">{rights.manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{(rights.assign||rights.manage)&&<button className={'pm-button'+(bulk==='paste'?' pm-button-primary':'')} onClick={()=>openBulk('paste',true)}><ClipboardPaste size={16}/>Dán bảng</button>}<button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" onClick={()=>void refresh()}><RefreshCw size={16}/></button>
         <DropdownMenu><DropdownMenuTrigger asChild><button className="pm-icon-button" aria-label="Quản lý server" title="Quản lý server"><MoreHorizontal size={16}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="vm-menu">
           {rights.manage&&<DropdownMenuItem onSelect={()=>setForm('CREATE')}>Thêm server</DropdownMenuItem>}
-          <DropdownMenuItem asChild><Link href={links.installs()}>Việc cài proxy</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href={links.proxies()}>Quản lý proxy</Link></DropdownMenuItem>
+          {moduleOn('INSTALL_TASKS')&&<DropdownMenuItem asChild><Link href={links.installs()}>Việc cài proxy</Link></DropdownMenuItem>}<DropdownMenuItem asChild><Link href={links.proxies()}>Kho proxy</Link></DropdownMenuItem>
           {rights.manage&&single&&<><DropdownMenuSeparator/><DropdownMenuItem className="text-red-600" disabled={busy} onSelect={()=>void removeServer()}>Xoá server {current!.code}</DropdownMenuItem></>}
         </DropdownMenuContent></DropdownMenu></div>
     </div>
-    {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Quản lý proxy → Cập nhật).</p>}
-    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('PENDING','Chờ cài',counts.pending)}{chip('INSTALLED','Đã cài',counts.installed)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{chip('DELETED','Đã xoá',deleted.length)}</div>
-    {accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
+    {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
+    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('PENDING','Chờ cài',counts.pending)}{chip('INSTALLED','Đã cài',counts.installed)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{(noOrphan||orphanView)?chip('TASK_ORPHAN','Việc cài bị bỏ lại',noOrphan):null}{chip('DELETED','Đã xoá',deleted.length)}</div>
+    {orphanView&&orphans.error&&<p role="alert" className="pm-error">Chưa đọc được việc cài: {orphans.error.message} <button className="pm-link" onClick={()=>void orphans.refetch()}>Thử lại</button></p>}{accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">

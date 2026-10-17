@@ -4,7 +4,7 @@ Triển khai 16/10/2026 theo thiết kế `../superpowers/specs/2026-10-15-proxy
 
 ## Gói proxy
 
-Mở **Quản lý proxy → Thiết lập → Gói proxy**. Bảng gói hiện tên gói, site, giá / chu kỳ, ngày đến hạn (kèm *còn N ngày* / *quá hạn N ngày*), số proxy đang quản lý, nút **Sửa** và **Đã thanh toán**.
+Mở **Kho proxy → Thiết lập → Gói proxy**. Bảng gói hiện tên gói, site, giá / chu kỳ, ngày đến hạn (kèm *còn N ngày* / *quá hạn N ngày*), số proxy đang quản lý, nút **Sửa** và **Đã thanh toán**.
 
 - **Thêm gói**: tên gói (ví dụ `240292`, `Account VietPhe`), site/nhà cung cấp, user/pass (bắt buộc khi tạo), giá mỗi chu kỳ, đồng tiền (USD/USDT/VND), chu kỳ tính theo tháng, ngày đến hạn tiếp, ghi chú.
 - **Sửa**: để trống user/pass là giữ nguyên. Tên gói không đổi được (là mã nhận diện).
@@ -26,14 +26,14 @@ Tên gói mới trùng gói cũ bị từ chối ngay. Nhận replace giữ gói
 
 - Bấm **Đã thanh toán** ở gói → mở đúng form Chi phí, điền sẵn loại *Proxy*, gói, số tiền = giá, đồng tiền, ngày hôm nay, và ô **Dời ngày đến hạn của gói … sang** (mặc định = ngày đến hạn hiện tại hoặc ngày chi, cộng một chu kỳ; sửa được). Lưu là một lệnh: ghi khoản chi quy về USDT và dời hạn, cùng một mục trong Lịch sử thao tác; hoàn tác trả lại ngày cũ và thu hồi khoản chi.
 - Form **Chi phí** thông thường cũng hiện ô này khi chọn loại Proxy và một gói.
-- Tổng quan có mục **Gói proxy sắp đến hạn** (quá hạn hoặc ≤ 7 ngày) → mở Quản lý proxy với bộ lọc *Sắp đến hạn / quá hạn*. Trang proxy có thẻ **Gói sắp đến hạn** và dòng tiêu đề mỗi gói hiện `site · giá / chu kỳ · đến hạn dd/mm/yyyy (còn N ngày)` với huy hiệu cam/đỏ. Không gửi email.
+- Tổng quan có mục **Gói proxy sắp đến hạn** (quá hạn hoặc ≤ 7 ngày) → mở Kho proxy với bộ lọc *Sắp đến hạn / quá hạn*. Trang proxy có thẻ **Gói sắp đến hạn** và dòng tiêu đề mỗi gói hiện `site · giá / chu kỳ · đến hạn dd/mm/yyyy (còn N ngày)` với huy hiệu cam/đỏ. Không gửi email.
 - "Hôm nay" tính theo lịch Việt Nam (Asia/Bangkok).
 
 ## Sắp xếp và lọc
 
 Từ 16/10 (mốc bảng proxy) có thêm ô **Lọc server** nhiều lựa chọn, cột Server/VM tách riêng và copy một bấm / hàng loạt: xem `proxy-registry.md`.
 
-**Quản lý proxy**: ô **Gói proxy** (tất cả / sắp đến hạn / từng gói) và **Sắp xếp**: *Theo gói (như Sheet)* → gói (số trước, chữ sau, chưa rõ gói cuối) → server → VM → IP; *Theo server / VM* (chưa gán VM xếp cuối); *Ghi nhận mới nhất*; *Theo IP*. Lựa chọn giữ trên URL (`?sort=`, `?package=`), dòng tiêu đề nhóm gói chỉ hiện khi sắp theo gói. Mã server/VM so sánh theo số tự nhiên (`VM_2` trước `VM_10`).
+**Kho proxy**: ô **Gói proxy** (tất cả / sắp đến hạn / từng gói) và **Sắp xếp**: *Theo gói (như Sheet)* → gói (số trước, chữ sau, chưa rõ gói cuối) → server → VM → IP; *Theo server / VM* (chưa gán VM xếp cuối); *Ghi nhận mới nhất*; *Theo IP*. Lựa chọn giữ trên URL (`?sort=`, `?package=`), dòng tiêu đề nhóm gói chỉ hiện khi sắp theo gói. Mã server/VM so sánh theo số tự nhiên (`VM_2` trước `VM_10`).
 
 **Server / VM**: ô **Sắp xếp** (`?sort=`): theo server / mã VM; chưa có SDK trước; thiếu proxy trước. SDK chỉ quản lý ở trang này, không ở trang proxy.
 

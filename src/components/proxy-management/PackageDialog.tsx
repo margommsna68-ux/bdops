@@ -47,8 +47,8 @@ export function PackageForm({projectId,row,onClose,onSaved}:{projectId:string;ro
     <div className="flex justify-end gap-2"><button type="button" className="pm-button" onClick={onClose}>Huỷ</button><button type="submit" className="pm-button pm-button-primary" disabled={save.isLoading||!code.trim()}>{save.isLoading?'Đang lưu…':'Lưu gói'}</button></div>
   </form>;
 }
-export function PackageDialog({projectId,packages,loading=false,canManage,initialPayCode,onClose,onSaved}:{projectId:string;packages:PackageRow[];loading?:boolean;canManage:boolean;initialPayCode?:string;onClose:()=>void;onSaved:()=>void}){
-  const [editing,setEditing]=useState<PackageRow|'NEW'|null>(null),[paying,setPaying]=useState<PackageRow|null>(null),[view,setView]=useState<PackageView>('ALL'),[stopping,setStopping]=useState<PackageRow|null>(null),[stopNote,setStopNote]=useState(''),[opened,setOpened]=useState(false);
+export function PackageDialog({projectId,packages,loading=false,canManage,initialPayCode,initialView='ALL',onClose,onSaved}:{projectId:string;packages:PackageRow[];loading?:boolean;canManage:boolean;initialPayCode?:string;initialView?:PackageView;onClose:()=>void;onSaved:()=>void}){
+  const [editing,setEditing]=useState<PackageRow|'NEW'|null>(null),[paying,setPaying]=useState<PackageRow|null>(null),[view,setView]=useState<PackageView>(initialView),[stopping,setStopping]=useState<PackageRow|null>(null),[stopNote,setStopNote]=useState(''),[opened,setOpened]=useState(false);
   const cash=trpc.businessManagement.cashAccess.useQuery({projectId}),canPay=!!cash.data?.writeCosts;
   const toggle=trpc.proxyManagement.saveCatalog.useMutation({onSuccess:()=>{toast.success('Đã cập nhật gói');onSaved();},onError:e=>toast.error(e.message)});
   const renewal=trpc.proxyManagement.setPackageRenewal.useMutation({onSuccess:(_r,v)=>{toast.success(v.stopped?'Đã ngừng nhắc gia hạn gói '+v.code:'Đã bật lại nhắc gia hạn gói '+v.code);setStopping(null);setStopNote('');onSaved();},onError:e=>toast.error(e.message)});

@@ -16,23 +16,25 @@ import {errorMessage,type ManagedVM} from '../shared';
 import {reviewReason,type CopyWhich,type GridRights} from './VmGrid';
 import type {PanelTab} from './grid-model';
 import {links} from '@/lib/links';
+import {moduleOn} from '@/lib/features';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
-const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Việc cài'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
+const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Cài proxy'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Chưa bắt đầu',IN_PROGRESS:'Đang cài',FAILED:'Cài chưa xong',CONFIRMED:'Đã xác nhận',CANCELLED:'Đã huỷ'};
 const TASK_STATUS:Record<string,string>={PENDING:'Chưa bắt đầu',IN_PROGRESS:'Đang làm',COMPLETED:'Xong',CANCELLED:'Đã huỷ'};
-const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy (chờ cài, đã cài hoặc giữ để kiểm tra). Bỏ gán ở bảng proxy hoặc hoàn tất ở Việc cài trước khi xoá.',TASK:'VM còn việc cài proxy chưa xong. Hoàn tất hoặc huỷ ở tab Việc cài.',INSTALLED:'VM còn liên kết proxy đã cài. Đổi hoặc gỡ proxy rồi xác nhận trước khi xoá.',SDK:'SDK của máy đang thuộc VM khác; web không giành lại. Xoá SDK ở máy kia hoặc giữ máy này ở trạng thái đã xoá.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
+const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy (chờ cài, đã cài hoặc giữ để kiểm tra). Bỏ gán ở Kho proxy hoặc hoàn tất ở tab Cài proxy trước khi xoá.',TASK:'VM còn việc cài proxy chưa xong. Hoàn tất hoặc đóng việc ở tab Cài proxy.',INSTALLED:'VM còn liên kết proxy đã cài. Đổi hoặc gỡ proxy rồi xác nhận trước khi xoá.',SDK:'SDK của máy đang thuộc VM khác; web không giành lại. Xoá SDK ở máy kia hoặc giữ máy này ở trạng thái đã xoá.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
 export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose,onSaved,onCopy}:{projectId:string;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const deleted=!!vm.archivedAt,status=vmView(vm);
   return <aside className="vm-panel" aria-label={'Chi tiết '+vm.server+' / '+vm.code}>
     <div className="vm-panel-head"><div className="min-w-0"><p className="pm-muted text-xs">{vm.server}</p><h2 className="pm-code vm-ellipsis">{vm.code}</h2><span className={`pm-badge ${deleted?'pm-badge-muted':status==='REVIEW'?'pm-badge-red':status==='PENDING'?'vm-badge-pending':status==='INSTALLED'?'pm-badge-green':'pm-badge-muted'}`}>{deleted?'Đã xoá':viewLabels[status]}</span></div><button className="pm-icon-button" aria-label="Đóng chi tiết" title="Đóng (Esc)" onClick={onClose}><X size={16}/></button></div>
-    <div className="vm-panel-tabs" role="tablist">{TABS.map(t=><button key={t.key} type="button" role="tab" aria-selected={tab===t.key} className={tab===t.key?'active':''} onClick={()=>onTab(t.key)}>{t.label}</button>)}</div>
+    <div className="vm-panel-tabs" role="tablist">{TABS.filter(t=>t.key!=='work'||moduleOn('WORK')).map(t=><button key={t.key} type="button" role="tab" aria-selected={tab===t.key} className={tab===t.key?'active':''} onClick={()=>onTab(t.key)}>{t.label}</button>)}</div>
     <div className="vm-panel-body">
       {cause&&CAUSE[cause]&&<p className="pm-review text-sm" role="note"><strong>Lý do bị chặn:</strong> {CAUSE[cause]}</p>}
       {tab==='overview'&&<Overview projectId={projectId} vm={vm} rights={rights} account={account} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
       {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:!rights.assign?<p className="pm-muted text-sm">Chưa có quyền giao proxy.</p>:!rights.sourceConnected?<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy.</p>:<><p className="pm-muted text-sm">{vm.installed?'Giao cấu hình mới. Proxy đã cài vẫn được giữ đến khi xác nhận thay xong.':'Chọn proxy NEW chưa dùng: TUT hoặc Chung mooon–Genjy.'}</p><AllocationForm key={vm.id+(vm.desired?.id||'')} projectId={projectId} vm={vm} onClose={()=>onTab('overview')} onSaved={onSaved}/></>)}
       {tab==='install'&&<InstallTab projectId={projectId} vm={vm} rights={rights} onSaved={onSaved}/>}
-      {tab==='work'&&<WorkTab projectId={projectId} vm={vm}/>}
+      {tab==='work'&&!moduleOn('WORK')&&<p className="pm-muted text-sm">Giao việc đang tạm ẩn. Dữ liệu việc cũ vẫn được giữ.</p>}
+      {tab==='work'&&moduleOn('WORK')&&<WorkTab projectId={projectId} vm={vm}/>}
       {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} onSaved={onSaved}/>}
       {tab==='history'&&<HistoryTab projectId={projectId} vm={vm}/>}
     </div>
@@ -61,13 +63,13 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
 }
 function InstallTab({projectId,vm,rights,onSaved}:{projectId:string;vm:ManagedVM;rights:GridRights;onSaved:()=>void}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),pending=vm.desired&&vm.desired.id!==vm.installed?.id&&!vm.archivedAt;
-  // Open tasks whose configuration is no longer the pending one ("orphan"): closed here or on Việc cài, never left without a place.
+  // Open tasks whose configuration is no longer the pending one ("orphan"): closed here (Server / VM filter Việc cài bị bỏ lại lists them), never left without a place.
   const open=(detail.data?.tasks||[]).filter(t=>(t.status==='PENDING'||t.status==='IN_PROGRESS')&&!(pending&&t.configurationId===vm.desired?.id));
   const close=trpc.vmManagement.closeTask.useMutation({onSuccess:r=>{toast.success(r.closed?'Đã đóng việc cài':'Việc đã đóng trước đó');void detail.refetch();onSaved();},onError:e=>toast.error(e.message)});
   return <div className="space-y-4">
     {pending?<InstallDialog key={vm.desired!.id} embedded projectId={projectId} vm={vm} canCopy={rights.copy} canConfirm={rights.confirm} sourceConnected={rights.sourceConnected} onClose={()=>{}} onChanged={onSaved}/>:<p className="pm-muted text-sm">Không có cấu hình chờ cài trên máy này.{vm.installed?' Proxy đã cài: '+proxyAddress(vm.installed)+'.':''}</p>}
     {vm.holds.some(h=>h.role==='UNCERTAIN')&&<p className="pm-review text-sm">Giữ để kiểm tra: {vm.holds.filter(h=>h.role==='UNCERTAIN').map(h=>h.ip).join(', ')}. Kiểm tra thực tế trên máy; khi xác nhận cấu hình mới, các proxy cũ được thả.</p>}
-    {open.length>0&&<div><h3 className="text-sm font-semibold mb-2">Việc cài còn mở, không còn cấu hình chờ cài</h3><ul className="text-sm space-y-1">{open.map(t=><li key={t.id} className="flex flex-wrap gap-2 items-center"><span>{t.title} · {t.status==='IN_PROGRESS'?'Đang làm':'Chưa bắt đầu'} · {localDate(t.scheduledAt)}</span>{rights.confirm&&!vm.archivedAt&&<button className="pm-button pm-button-quiet" disabled={close.isLoading} onClick={()=>close.mutate({projectId,taskId:t.id})}>Đóng việc</button>}</li>)}</ul><p className="pm-muted text-xs mt-1">Đóng việc không gỡ hay cài gì trên máy; hoàn tác được ở Lịch sử. Danh sách đầy đủ ở <Link className="pm-link" href={links.installs()+'#orphan'}>Việc cài proxy</Link>.</p></div>}
+    {open.length>0&&<div><h3 className="text-sm font-semibold mb-2">Việc cài còn mở, không còn cấu hình chờ cài</h3><ul className="text-sm space-y-1">{open.map(t=><li key={t.id} className="flex flex-wrap gap-2 items-center"><span>{t.title} · {t.status==='IN_PROGRESS'?'Đang làm':'Chưa bắt đầu'} · {localDate(t.scheduledAt)}</span>{rights.confirm&&!vm.archivedAt&&<button className="pm-button pm-button-quiet" disabled={close.isLoading} onClick={()=>close.mutate({projectId,taskId:t.id})}>Đóng việc</button>}</li>)}</ul><p className="pm-muted text-xs mt-1">Đóng việc không gỡ hay cài gì trên máy; hoàn tác được ở Lịch sử. Danh sách đầy đủ: <Link className="pm-link" href={links.vms({view:'TASK_ORPHAN'})}>Server / VM · Việc cài bị bỏ lại</Link>.</p></div>}
     {detail.data&&detail.data.tasks.length>0&&<details><summary className="text-sm cursor-pointer">Tất cả việc của máy ({detail.data.tasks.length})</summary><ul className="text-xs space-y-1 mt-2">{detail.data.tasks.map(t=><li key={t.id}>{localDate(t.scheduledAt)} · {t.title} · {TASK_STATUS[t.status]||t.status}</li>)}</ul></details>}
   </div>;
 }

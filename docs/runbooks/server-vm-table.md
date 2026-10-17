@@ -7,7 +7,7 @@ Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers
 - **Đầu trang**
   - *Ô chọn server*: có ở mọi trang Server/VM, kể cả `/servers/<id>`. Gõ tên hoặc IP để lọc, ↑↓ rồi Enter để chọn; chọn xong chuyển thẳng sang server đó.
   - Tên server sửa tại chỗ; IP và ghi chú server nằm ngay dưới tên.
-  - Các nút: **Thêm VM**, **Dán bảng**, Tải lại, menu **⋯** (Thêm server, Việc cài proxy, Quản lý proxy, **Xoá server**).
+  - Các nút: **Thêm VM**, **Dán bảng**, Tải lại, menu **⋯** (Thêm server, Việc cài proxy, Kho proxy, **Xoá server**).
 - **Dải đếm**: Tất cả · Thiếu proxy · Chờ cài · Đã cài · Cần kiểm tra · Chưa SDK · Đã xoá. Bấm vào số để lọc, bấm lần nữa để bỏ lọc.
 - **Thanh công cụ**: ô tìm (VM, IP, SDK, Gmail, ghi chú), sắp xếp (mã VM, cần xử lý trước, thiếu proxy trước, chưa SDK trước) và mục **Cột**.
 - **Bảng** có vùng cuộn riêng, cao vừa màn hình nên trang không phải cuộn.
@@ -164,7 +164,7 @@ Quy tắc:
 - **Quyền theo loại**: Dán bảng SDK/Proxy/Gmail cần quyền giao (ASSIGN), ghi chú cần quyền quản lý (MANAGE).
 - **Autofill**
   - `vmManagement.preview` chế độ AUTO **bắt buộc có `vmIds`**. Thiếu thì báo *Chọn VM cần điền proxy trước*, không ngầm chạy cho cả server.
-  - Trang Quản lý proxy không còn nút *Điền VM thiếu* cho cả dự án; thay bằng liên kết tới Server/VM đã lọc *Thiếu proxy*.
+  - Trang Kho proxy không còn nút *Điền VM thiếu* cho cả dự án; thay bằng liên kết tới Server/VM đã lọc *Thiếu proxy*.
 - **Chọn tay**: chế độ MANUAL nhận thêm proxy Chung mooon–Genjy NEW chưa dùng (cùng điều kiện như TUT). Autofill vẫn chỉ TUT.
 - **API cũ** `vmManagement.archive` dùng chung kiểm tra và nhật ký với Xoá mới.
 

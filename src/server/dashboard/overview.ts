@@ -9,11 +9,14 @@ import {packageReminders} from '../proxy-management/reminders';
 import {compareCodes} from '../proxy-management/package-terms';
 import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {readVmAccounts} from '../account-store/read';
-import {readWorkWorkspace} from '../business-management/work';
+import {getEligibleInventory,getManualInventory} from '../proxy-management/repository';
 import {teamCashSources} from '../business-management/team-cash-report';
 import {assertBusinessArea} from '../business-management/scope';
 import {dayText,period} from '../business-management/money';
 import {CashDecimal} from '../business-management/usdt-money';
+import {links} from '@/lib/links';
+// Dashboard read model (MoneyToHome Proxy / VM). Giao việc and Việc cài proxy are hidden modules (src/lib/features.ts): no work
+// block here, and install tasks left without a pending configuration are handled at the VM (Server / VM filter TASK_ORPHAN).
 // Dashboard read model. Every section reuses the checked read of the page it links to (same permission, same rule, whole result
 // before pagination), so the numbers here are the numbers the target list shows. A section the member may not read is null; other
 // failures propagate so the page shows an error instead of zeros.
@@ -29,18 +32,19 @@ export function monthBounds(month:string){
 export async function readOverview(scope:ActorScope,input:{month:string},db:PrismaClient=prisma,now:Date=new Date()){
   const range=monthBounds(input.month),current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   const can=(area:'INFRASTRUCTURE'|'COSTS'|'PROFIT'|'FUNDS'|'WITHDRAWALS'|'PAYPALS',write=false)=>{try{assertBusinessArea(current,area,write);return true;}catch{return false;}};
-  const rights={infra:current.businessMode==='PROXY_VM'&&can('INFRASTRUCTURE'),cashEnabled:!!current.teamCashEnabled,admin:current.role==='ADMIN',costs:can('COSTS'),profit:can('PROFIT'),funds:can('FUNDS'),withdrawals:can('WITHDRAWALS'),paypals:can('PAYPALS'),work:can('INFRASTRUCTURE',true)};
+  const rights={infra:current.businessMode==='PROXY_VM'&&can('INFRASTRUCTURE'),cashEnabled:!!current.teamCashEnabled,admin:current.role==='ADMIN',costs:can('COSTS'),profit:can('PROFIT'),funds:can('FUNDS'),withdrawals:can('WITHDRAWALS'),paypals:can('PAYPALS')};
   const [operations,finance]=await Promise.all([rights.infra?readOperations(scope,db,now,rights.costs):Promise.resolve(null),readFinance(scope,input.month,range,!!current.teamCashEnabled,db)]);
   return {generatedAt:now.toISOString(),month:input.month,rights,operations,finance};
 }
 async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:boolean){
   const workspace=await maybe(()=>readVMWorkspace(scope,db));if(!workspace)return null;
-  const [accounts,registry,work,orphans,packages]=await Promise.all([
+  const [accounts,registry,orphans,packages,autofill,manual]=await Promise.all([
     maybe(()=>readVmAccounts(scope,db)),
     loadRegistryRows(scope,{view:'CURRENT'},db),
-    maybe(()=>readWorkWorkspace(scope,db)),
     readOrphanTasks(scope,db),
     db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null},renewalStoppedAt:null}}),
+    // NEW is a state; "can be given to a VM" is the allocation pool itself (not held, no install/BLOCKED event, package, credentials).
+    getEligibleInventory(scope.projectId,db),getManualInventory(scope.projectId,db),
   ]);
   // Server / VM: deleted servers and VMs are not operating; buckets are the grid's own vmView rule.
   const servers=workspace.servers.filter(s=>!s.archivedAt).sort((a,b)=>compareCodes(a.code,b.code)),active=new Set(servers.map(s=>s.id));
@@ -58,15 +62,13 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   for(const k of [GROUP_TUT,GROUP_SHARED,GROUP_GENJY])rowOf(k);
   for(const r of registry.rows){const row=rowOf(registryGroupKey(r)),s=(MAIN.includes(r.state)?r.state:'OTHER') as StockBucket;row[s]++;row.total++;}
   const reminders=packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,costs);
-  const open=(work?.items||[]).filter(w=>w.status==='PENDING'||w.status==='IN_PROGRESS'),tasks=open.filter(w=>w.kind!=='SHEET_REVIEW'),today=dayText(now);
   return {
     servers:perServer,
     totals:{servers:servers.length,vms:vms.length,INSTALLED:sum('INSTALLED'),PENDING:sum('PENDING'),REVIEW:sum('REVIEW'),MISSING:sum('MISSING')},
     gaps,
-    stock:{rows:Array.from(stock.values()),total:registry.rows.length},
+    stock:{rows:Array.from(stock.values()),total:registry.rows.length,ready:{autofill:autofill.length,sharedManual:manual.filter(m=>m.shared).length}},
     packages:reminders.map(r=>({id:r.packageId,code:r.code,title:r.title,severity:r.severity,daysLeft:r.daysLeft,link:r.link})),
-    work:work?{open:tasks.length,overdue:tasks.filter(w=>!!w.dueDate&&w.dueDate<today).length,sheetOpen:open.length-tasks.length,items:tasks.slice(0,5).map(w=>({id:w.id,title:w.title,vmId:w.vmId,server:w.server,vm:w.vm,assignee:w.assignee,dueDate:w.dueDate,status:w.status}))}:null,
-    orphanTasks:orphans.length,
+    orphanTasks:{count:orphans.length,link:links.orphanTasks(orphans)},
   };
 }
 // Finance for one month: USDT confirmed as received by the team minus valid costs, each at its own recorded rate — the team cash

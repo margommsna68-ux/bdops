@@ -116,7 +116,8 @@ it('allocation tokens stay in the VM flow and pending locations appear in proxy 
     await f.service.commit(f.scope,p.token,key);const endpoint=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId}});
     expect((await getProxyTimeline(f.scope,endpoint.identityId!,db)).vmRefs).toContain('personal-fixture/VM_001 · Chờ cài');
     const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,memberships:[]},expires:'2099-01-01'}} as unknown as Context);
-    const alerts=await caller.notification.alerts({projectId:f.scope.projectId});expect(alerts.some(a=>a.link==='/vm-tasks')).toBe(true);expect(alerts.some(a=>a.link==='/infrastructure/vms')).toBe(false);
+    const alerts=await caller.notification.alerts({projectId:f.scope.projectId});// Việc cài proxy is hidden: the pending-install alert opens Server / VM filtered Chờ cài, never the hidden page.
+    expect(alerts.find(a=>a.id==='vm-install')?.link).toBe('/infrastructure/servers?view=PENDING');expect(alerts.some(a=>a.link?.startsWith('/vm-tasks')||a.link?.startsWith('/work')||a.link==='/infrastructure/vms')).toBe(false);
   }finally{await f.cleanup();}
 });
 it('changing project mode cannot destroy managed infrastructure or its journal',async()=>{

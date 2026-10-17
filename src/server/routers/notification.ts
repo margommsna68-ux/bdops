@@ -37,11 +37,11 @@ export const notificationRouter = router({
         const blocked=await ctx.prisma.proxyIP.count({where:{projectId,identityId:{not:null},inventoryState:'BLOCKED'}});
         if(blocked)alerts.push({id:'proxy-blocked',type:'PROXY_BLOCKED',severity:'error',title:`${blocked} proxy BLOCKED`,message:'Báo nhà cung cấp hoặc nhận replace',link:links.proxies({state:'BLOCKED'}),createdAt:now});
         if(counts.missing)alerts.push({id:'vm-missing',type:'VM_MISSING',severity:'warning',title:`${counts.missing} VM thiếu proxy`,message:'Điền NEW TUT chưa dùng',link:links.vms({view:'MISSING'}),createdAt:now});
-        if(counts.pending)alerts.push({id:'vm-install',type:'VM_INSTALL',severity:'info',title:`${counts.pending} VM chờ cài`,message:'Cài cấu hình được giao rồi xác nhận',link:links.installs(),createdAt:now});
+        if(counts.pending)alerts.push({id:'vm-install',type:'VM_INSTALL',severity:'info',title:`${counts.pending} VM chờ cài`,message:'Cài và xác nhận ngay tại VM (Server / VM)',link:links.installs(),createdAt:now});
         if(counts.review)alerts.push({id:'vm-review',type:'VM_REVIEW',severity:'warning',title:`${counts.review} VM cần kiểm tra`,message:'Kiểm tra proxy lỗi, sở hữu và dữ liệu cũ',link:links.vms({view:'REVIEW'}),createdAt:now});
         // Install tasks left open without a pending configuration (overdue tasks of this project type).
         const orphans=await readOrphanTasks({projectId,userId:ctx.user.id,role:ctx.role,capabilities:ctx.membership.capabilities},ctx.prisma);
-        if(orphans.length)alerts.push({id:'vm-task-orphan',type:'TASK_OVERDUE',severity:'warning',title:`${orphans.length} việc cài bị bỏ lại`,message:'Còn mở nhưng không còn cấu hình chờ cài',link:links.installs()+'#orphan',createdAt:now});
+        if(orphans.length)alerts.push({id:'vm-task-orphan',type:'TASK_OVERDUE',severity:'warning',title:`${orphans.length} việc cài bị bỏ lại`,message:'Còn mở nhưng không còn cấu hình chờ cài; đóng tại VM',link:links.orphanTasks(orphans),createdAt:now});
         // One live reminder per package (stable id), amounts only for members with the COSTS module.
         const packages=await ctx.prisma.proxyProviderAccount.findMany({where:{projectId,nextDueDate:{not:null},renewalStoppedAt:null}});
         for(const r of packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,hasModule('COSTS')))alerts.push({id:r.id,type:r.type,severity:r.severity,title:r.title,message:r.message,link:r.link,createdAt:r.createdAt});

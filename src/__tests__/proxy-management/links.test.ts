@@ -30,7 +30,14 @@ describe('shared link builder',()=>{
     expect(links.paypalIn()).toBe('/funds');
     expect(links.costs({month:'2026-10',server:'s1'})).toBe('/costs?month=2026-10&server=s1');expect(links.costs({month:'bad'})).toBe('/costs');
     expect(links.work({kind:'SHEET_REVIEW'})).toBe('/work?kind=SHEET_REVIEW');expect(links.work({kind:'TASK',vm:'v1'})).toBe('/work?vm=v1');
-    expect(links.installs({vm:'v1'})).toBe('/vm-tasks?vm=v1');
+    // Việc cài proxy is hidden by default: install links open the VM (or the pending filter) in Server / VM.
+    expect(links.installs({vm:'v1'})).toBe('/infrastructure/servers?vm=v1&tab=install');expect(links.installs()).toBe('/infrastructure/servers?view=PENDING');
     expect(links.accounts({tab:'paypal'})).toBe('/gmails?tab=paypal');expect(links.accounts({tab:'login'})).toBe('/gmails');
+  });
+  it('opens package payment in the package list, and orphan install tasks at the VM or the Server / VM filter',()=>{
+    expect(links.packages()).toBe('/infrastructure/proxies?packages=due');expect(links.packages({pay:'231243'})).toBe('/infrastructure/proxies?pay=231243');
+    expect(links.orphanTasks([{serverId:'s1',vmId:'v1'}])).toBe('/infrastructure/servers/s1?vm=v1&tab=install');
+    const many=links.orphanTasks([{serverId:'s1',vmId:'v1'},{serverId:'s2',vmId:'v2'}]);expect(many).toBe('/infrastructure/servers?view=TASK_ORPHAN');
+    expect(readGridUrl(params(many.split('?')[1])).view).toBe('TASK_ORPHAN');
   });
 });
