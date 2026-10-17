@@ -50,3 +50,8 @@ Kiểm tra trên dữ liệu thử cục bộ: PROXY_TRIAL, DASH_EMPTY và các 
 - Chưa kiểm VIEWER trên trình duyệt; quyền đóng việc của VIEWER chỉ có test tự động.
 - Chưa kiểm trang LegacyPage của dự án loại cũ trên trình duyệt; chỉ build.
 - Chưa kiểm theme sáng và golden.
+
+## Phát hành
+
+- Commit `7a8e920` + `8aa9bcf`; backup host `b35fc71a` (trước lần 1) và `7ed395df` (trước lần 2); deploy `7895cb62` và `9e949504` SUCCESS; không migration.
+- Host chỉ đọc: 10 server / 576 VM. Tổng quan mooon: Chờ cài 553 = Server/VM 553, Cần kiểm tra 23 = 23, TUT·LIVE 553 = Quản lý proxy 553. Không ghi dữ liệu (chỉ xác thực PIN và heartbeat phiên).
