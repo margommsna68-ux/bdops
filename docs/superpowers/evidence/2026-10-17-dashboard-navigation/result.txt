@@ -1,4 +1,4 @@
-since 2026-10-17T13:09:12.144Z
+since 2026-10-17T13:16:30.371Z
 PASS Laptop: màn hình đầu thấy vận hành và việc cần xử lý — VM y=258, Cần xử lý y=258
 PASS Thẻ "Thiếu proxy" → Server/VM lọc MISSING, số khớp — dashboard 565 · danh sách 565
 PASS Thẻ "Chờ cài" → Server/VM lọc PENDING, số khớp — dashboard 387 · danh sách 387

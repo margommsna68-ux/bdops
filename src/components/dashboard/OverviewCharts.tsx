@@ -18,21 +18,20 @@ function Legend({items,totals,href}:{items:readonly {key:string;label:string;col
   return <ul className="ov-legend">{items.map(i=><li key={i.key}><Link href={href(i.key)}><span className="ov-dot" style={{background:i.color}}/>{i.label} <strong>{fmt(totals[i.key]??0)}</strong></Link></li>)}</ul>;
 }
 export function VmByServerChart({ops}:{ops:Ops}){
-  const router=useRouter(),rows=ops.servers.map(s=>({...s,name:s.code})),axis=Math.min(150,Math.max(64,Math.max(0,...rows.map(r=>r.code.length))*7+14));
+  const router=useRouter(),rows=ops.servers.map(s=>({...s,name:`${s.code} · ${fmt(s.total)}`})),axis=Math.min(170,Math.max(72,Math.max(0,...rows.map(r=>r.name.length))*7+14));
   if(!rows.length)return <p className="ov-empty">Chưa có server đang vận hành. <Link className="pm-link" href={links.vms()}>Thêm server ở Server / VM</Link></p>;
   const open=(serverId:string,view?:VmView)=>router.push(links.vms({serverId,view}));
   return <div>
     <Legend items={VM_SERIES} totals={ops.totals} href={k=>links.vms({view:k as VmView})}/>
     <div style={{height:Math.max(140,rows.length*30+34)}} role="img" aria-label={`VM theo server: ${rows.map(r=>`${r.code} ${r.total} VM`).join(', ')}`}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} layout="vertical" margin={{top:4,right:44,bottom:4,left:4}} barCategoryGap={6}>
+        <BarChart data={rows} layout="vertical" margin={{top:4,right:12,bottom:4,left:4}} barCategoryGap={6}>
           <CartesianGrid horizontal={false} stroke="var(--ds-border)"/>
           <XAxis type="number" allowDecimals={false} tick={{fontSize:11,fill:'var(--ds-text-secondary)'}} axisLine={false} tickLine={false}/>
-          <YAxis type="category" dataKey="name" width={axis} interval={0} tick={{fontSize:12,fill:'var(--ds-text-primary)',cursor:'pointer'}} axisLine={false} tickLine={false} onClick={(t:{value?:string})=>{const s=rows.find(r=>r.code===t?.value);if(s)open(s.id);}}/>
+          <YAxis type="category" dataKey="name" width={axis} interval={0} tick={{fontSize:12,fill:'var(--ds-text-primary)',cursor:'pointer'}} axisLine={false} tickLine={false} onClick={(t:{value?:string})=>{const s=rows.find(r=>r.name===t?.value);if(s)open(s.id);}}/>
           <Tooltip {...tooltipStyle} formatter={(v,name)=>[fmt(Number(v)),VM_SERIES.find(s=>s.key===name)?.label||String(name)]}/>
-          {VM_SERIES.map((s,i)=><Bar key={s.key} dataKey={s.key} stackId="vm" fill={s.color} cursor="pointer" isAnimationActive={false} onClick={(d:{payload?:{id:string}})=>{if(d?.payload)open(d.payload.id,s.key);}}>
+          {VM_SERIES.map(s=><Bar key={s.key} dataKey={s.key} stackId="vm" fill={s.color} cursor="pointer" isAnimationActive={false} onClick={(d:{payload?:{id:string}})=>{if(d?.payload)open(d.payload.id,s.key);}}>
             <LabelList dataKey={s.key} content={segmentLabel(22)}/>
-            {i===VM_SERIES.length-1&&<LabelList dataKey="total" position="right" style={{fontSize:11,fill:'var(--ds-text-secondary)',fontWeight:600}}/>}
           </Bar>)}
         </BarChart>
       </ResponsiveContainer>
@@ -41,20 +40,19 @@ export function VmByServerChart({ops}:{ops:Ops}){
   </div>;
 }
 export function StockChart({ops}:{ops:Ops}){
-  const router=useRouter(),rows=ops.stock.rows,totals=Object.fromEntries(STOCK_SERIES.map(s=>[s.key,rows.reduce((a,r)=>a+r[s.key],0)]));
+  const router=useRouter(),rows=ops.stock.rows.map(r=>({...r,name:`${r.label} · ${fmt(r.total)}`})),totals=Object.fromEntries(STOCK_SERIES.map(s=>[s.key,rows.reduce((a,r)=>a+r[s.key],0)]));
   if(!ops.stock.total)return <p className="ov-empty">Chưa có proxy trong kho đang quản lý. <Link className="pm-link" href={links.proxies()}>Mở Quản lý proxy</Link></p>;
   return <div>
     <Legend items={STOCK_SERIES} totals={totals} href={k=>links.proxies({state:k})}/>
     <div style={{height:rows.length*34+34}} role="img" aria-label={`Kho proxy: ${rows.map(r=>`${r.label} ${r.total}`).join(', ')}`}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} layout="vertical" margin={{top:4,right:52,bottom:4,left:4}} barCategoryGap={7}>
+        <BarChart data={rows} layout="vertical" margin={{top:4,right:12,bottom:4,left:4}} barCategoryGap={7}>
           <CartesianGrid horizontal={false} stroke="var(--ds-border)"/>
           <XAxis type="number" allowDecimals={false} tick={{fontSize:11,fill:'var(--ds-text-secondary)'}} axisLine={false} tickLine={false}/>
-          <YAxis type="category" dataKey="label" width={128} interval={0} tick={{fontSize:12,fill:'var(--ds-text-primary)',cursor:'pointer'}} axisLine={false} tickLine={false} onClick={(t:{value?:string})=>{const r=rows.find(x=>x.label===t?.value);if(r)router.push(links.proxies({group:r.key}));}}/>
+          <YAxis type="category" dataKey="name" width={200} interval={0} tick={{fontSize:12,fill:'var(--ds-text-primary)',cursor:'pointer'}} axisLine={false} tickLine={false} onClick={(t:{value?:string})=>{const r=rows.find(x=>x.name===t?.value);if(r)router.push(links.proxies({group:r.key}));}}/>
           <Tooltip {...tooltipStyle} formatter={(v,name)=>[fmt(Number(v)),STOCK_SERIES.find(s=>s.key===name)?.label||String(name)]}/>
-          {STOCK_SERIES.map((s,i)=><Bar key={s.key} dataKey={s.key} stackId="stock" fill={s.color} cursor="pointer" isAnimationActive={false} onClick={(d:{payload?:{key:string}})=>{if(d?.payload)router.push(links.proxies({group:d.payload.key,state:s.key}));}}>
+          {STOCK_SERIES.map(s=><Bar key={s.key} dataKey={s.key} stackId="stock" fill={s.color} cursor="pointer" isAnimationActive={false} onClick={(d:{payload?:{key:string}})=>{if(d?.payload)router.push(links.proxies({group:d.payload.key,state:s.key}));}}>
             <LabelList dataKey={s.key} content={segmentLabel(26)}/>
-            {i===STOCK_SERIES.length-1&&<LabelList dataKey="total" position="right" style={{fontSize:11,fill:'var(--ds-text-secondary)',fontWeight:600}}/>}
           </Bar>)}
         </BarChart>
       </ResponsiveContainer>
