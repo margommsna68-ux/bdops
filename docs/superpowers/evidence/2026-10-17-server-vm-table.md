@@ -122,6 +122,10 @@ Nhật ký thao tác của lần chạy:
   - Dán bảng SDK chỉ xem trước: "0 hợp lệ · 2 giữ nguyên · 1 lỗi" (VM_999 không có).
   - 1366×768: trang vừa màn hình (768/768), cột VM dính trái, hàng 46 px. 1920×1080: 1080/1080.
 - **Lượt ghi**: các ca có ghi chỉ chạy trên dữ liệu thử local. Host không có server thử nên không ghi gì lên dữ liệu thật.
+- **Tình trạng tại ô**: commit `252b3cb`, backup `1753b436-2003-4492-840c-ad5dbd872d00`, deploy `b7d93e74-4096-43b5-b11f-e2472b5d2466` SUCCESS, host vẫn 10 server / 576 VM.
+- **Host moon05, chỉ mở popover rồi Escape**, 0 request ghi (ảnh `host-VM_001.png`, `host-VM_071.png`):
+  - VM_001 "Chờ cài 158.46.199.83:5432 (cấu hình #1)" với Bắt đầu cài / Copy để cài / Đổi proxy.
+  - VM_071 "Cần kiểm tra": ghi chú Proxiware + "proxy giao 122.8.67.87:11000 đang QUARANTINED; không cài được", với Kiểm tra trên máy / Xem proxy ở bảng proxy / Đổi proxy. Không có Bắt đầu / Xác nhận.
 
 ## Giới hạn
 
