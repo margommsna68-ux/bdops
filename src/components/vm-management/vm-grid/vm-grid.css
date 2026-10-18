@@ -165,3 +165,42 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
   .acc-pp-table>tbody>tr.acc-batch-detail>td{display:block;text-align:left;overflow-x:auto}
   .acc-pp-table>tbody>tr.acc-batch-detail>td::before{display:none}
 }
+/* VM operating status (owner brief 18/10/2026): restrained tints with the label always written out. */
+.vm-ops{display:inline-flex;align-items:center;gap:3px;max-width:100%;font-size:11.5px;font-weight:650;line-height:18px;padding:1px 7px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+.vm-ops-none{color:var(--ds-text-secondary);border-color:var(--ds-border);border-style:dashed;background:transparent;font-weight:500}
+.vm-ops-ok{background:rgba(22,163,74,.14);color:#15803d;border-color:rgba(22,163,74,.35)}
+.vm-ops-warn{background:rgba(234,179,8,.18);color:#854d0e;border-color:rgba(234,179,8,.45)}
+.vm-ops-muted{background:rgba(100,116,139,.14);color:#475569;border-color:rgba(100,116,139,.35)}
+.vm-ops-danger{background:rgba(220,38,38,.12);color:#b91c1c;border-color:rgba(220,38,38,.35)}
+.vm-ops-info{background:rgba(37,99,235,.12);color:#1d4ed8;border-color:rgba(37,99,235,.35)}
+.vm-ops-orange{background:rgba(234,88,12,.13);color:#c2410c;border-color:rgba(234,88,12,.38)}
+.vm-ops-severe{background:#991b1b;color:#fff;border-color:#7f1d1d}
+.vm-ops-fresh{background:rgba(14,165,233,.12);color:#0369a1;border-color:rgba(14,165,233,.35)}
+.vm-ops-violet{background:rgba(124,58,237,.12);color:#6d28d9;border-color:rgba(124,58,237,.35)}
+[data-theme="dark"] .vm-ops-ok,[data-theme="golden"] .vm-ops-ok{color:#4ade80}[data-theme="dark"] .vm-ops-warn,[data-theme="golden"] .vm-ops-warn{color:#fde047}
+[data-theme="dark"] .vm-ops-muted,[data-theme="golden"] .vm-ops-muted{color:#cbd5e1}[data-theme="dark"] .vm-ops-danger,[data-theme="golden"] .vm-ops-danger{color:#fca5a5}
+[data-theme="dark"] .vm-ops-info,[data-theme="golden"] .vm-ops-info{color:#93c5fd}[data-theme="dark"] .vm-ops-orange,[data-theme="golden"] .vm-ops-orange{color:#fdba74}
+[data-theme="dark"] .vm-ops-fresh,[data-theme="golden"] .vm-ops-fresh{color:#7dd3fc}[data-theme="dark"] .vm-ops-violet,[data-theme="golden"] .vm-ops-violet{color:#c4b5fd}
+.vm-ops-cell{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.vm-ops-pick{position:relative;cursor:pointer;padding-right:6px}.vm-ops-pick:hover{filter:brightness(1.06)}.vm-ops-pick:focus-within{outline:2px solid #3b82f6;outline-offset:2px}
+.vm-ops-pick select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;padding:0;margin:0;cursor:pointer;max-width:92px;text-overflow:ellipsis}
+.vm-ops-pick select:focus{outline:none}.vm-ops-pick select option{color:var(--ds-text-primary);background:var(--ds-card);font-weight:500}
+.vm-ops-pick select:disabled{cursor:progress}
+.vm-chip-ops.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff}.vm-chips-ops{align-items:center}
+.vm-bulk-ops{display:inline-flex;gap:4px;align-items:center}
+/* Rút tiền: money milestone of the current round. */
+.vm-payout{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;max-width:100%}
+.vm-payout-button,.vm-payout-face{display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;min-width:0;max-width:100%;background:none;border:0;padding:0}
+.vm-payout-button{cursor:pointer}.vm-payout-button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;border-radius:4px}
+.vm-money{font-size:11px;font-weight:650;padding:0 6px;border-radius:4px;line-height:17px;background:rgba(100,116,139,.12);color:var(--ds-text-secondary)}
+.vm-money-waiting{background:rgba(234,179,8,.18);color:#854d0e}.vm-money-recreate{background:rgba(22,163,74,.15);color:#15803d}
+.vm-money-money_review{background:rgba(234,88,12,.14);color:#c2410c}.vm-money-failed{background:rgba(220,38,38,.12);color:#b91c1c}
+[data-theme="dark"] .vm-money-waiting,[data-theme="golden"] .vm-money-waiting{color:#fde047}[data-theme="dark"] .vm-money-recreate,[data-theme="golden"] .vm-money-recreate{color:#4ade80}
+[data-theme="dark"] .vm-money-money_review,[data-theme="golden"] .vm-money-money_review{color:#fdba74}[data-theme="dark"] .vm-money-failed,[data-theme="golden"] .vm-money-failed{color:#fca5a5}
+.vm-money-line{color:var(--ds-text-secondary);max-width:100%}
+.vm-payout-pop{width:380px;max-height:calc(100vh - 16px);overflow-y:auto}
+.vm-pp-info{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 8px;border-radius:8px;background:var(--ds-hover);border:1px solid var(--ds-border)}
+.vm-gather{font-weight:650;color:#1d4ed8}[data-theme="dark"] .vm-gather{color:#93c5fd}
+.acc-gather{display:inline-block;font-size:11px;font-weight:650;padding:0 6px;border-radius:4px;line-height:17px;margin-top:2px}
+.acc-gather-gathering{background:rgba(100,116,139,.12);color:var(--ds-text-secondary)}.acc-gather-projected{background:rgba(37,99,235,.12);color:#1d4ed8}.acc-gather-reached{background:rgba(22,163,74,.15);color:#15803d}
+[data-theme="dark"] .acc-gather-projected{color:#93c5fd}[data-theme="dark"] .acc-gather-reached{color:#4ade80}

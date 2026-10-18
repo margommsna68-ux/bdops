@@ -23,7 +23,9 @@ import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels'
 import {AccountBulkPanel} from './vm-grid/AccountPanels';
 import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
-import {DEFAULT_PREFS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type PanelTab} from './vm-grid/grid-model';
+import {DEFAULT_PREFS,OPS_FILTERS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type MoneyFilter,type OpsFilter,type PanelTab} from './vm-grid/grid-model';
+import type {OpsRow} from './vm-grid/OpsCells';
+import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
 type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|null;
 const CAUSE_TAB:Record<string,PanelTab>={HOLD:'install',TASK:'install',INSTALLED:'overview',SDK:'overview',SERVER:'overview'};
@@ -31,7 +33,7 @@ const STATUS_ORDER={REVIEW:0,PENDING:1,MISSING:2,INSTALLED:3,ARCHIVED:4} as cons
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
 // action columns; side panel instead of stacked dialogs; everything the user picked lives in the URL. See docs/runbooks/server-vm-table.md.
 export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?:string}){
-  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false}),orphans=trpc.vmManagement.orphanTasks.useQuery({projectId});
+  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false}),orphans=trpc.vmManagement.orphanTasks.useQuery({projectId}),board=trpc.vmOps.board.useQuery({projectId},{retry:false}),setOps=trpc.vmOps.setStatus.useMutation();
   const refresh=useVMRefresh(),params=useSearchParams(),router=useRouter(),pathname=usePathname(),session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
   const url=readGridUrl(params);
   // Two quick changes (sort, then page size) must both survive: build on the last URL we asked for until the router catches up.
@@ -45,7 +47,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const savePrefs=(p:GridPrefs)=>{setPrefs(p);try{localStorage.setItem(prefsKey(userId),JSON.stringify(p));}catch{/* private mode */}};
   const [selected,setSelected]=useState<Set<string>>(new Set()),[blocked,setBlocked]=useState<Blocked[]>([]),[bulk,setBulk]=useState<BulkPanel>(null),[form,setForm]=useState<'CREATE'|'ADD'|null>(null),[manualCopy,setManualCopy]=useState<string|null>(null);
   // A selection never survives a change of project, server, filter or search; page and sort keep it (ids, not positions).
-  const scopeKey=projectId+'|'+(serverId||'')+'|'+url.view+'|'+url.q,firstScope=useRef(scopeKey);
+  const scopeKey=projectId+'|'+(serverId||'')+'|'+url.view+'|'+url.q+'|'+url.st.join(',')+'|'+url.money+'|'+url.warn,firstScope=useRef(scopeKey);
   useEffect(()=>{if(firstScope.current===scopeKey) return;firstScope.current=scopeKey;setSelected(new Set());setBlocked([]);setBulk(b=>b==='paste'?b:null);},[scopeKey]);
   const allServers=useMemo(()=>[...(workspace.data?.servers||[])].sort((a,b)=>compareCodes(a.code,b.code)),[workspace.data]),servers=allServers.filter(s=>!s.archivedAt),current=allServers.find(s=>s.id===serverId),single=!!current;
   const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),inScope=useMemo(()=>allVMs.filter(v=>!serverId||v.serverId===serverId),[allVMs,serverId]);
@@ -59,12 +61,19 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Open install tasks whose configuration is no longer pending: handled at the VM (tab Cài proxy → Đóng việc), never auto-closed.
   const orphanVms=useMemo(()=>new Set((orphans.data||[]).map(t=>t.vmId)),[orphans.data]),orphanView=url.view==='TASK_ORPHAN',orphansReady=!!orphans.data,noOrphan=orphansReady?active.filter(v=>orphanVms.has(v.id)).length:null;
   const inView=(v:ManagedVM)=>!url.view||(url.view==='TASK_ORPHAN'?orphanVms.has(v.id):url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
+  // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
+  const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
+  const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
+  const proxyBlocked=(v:ManagedVM)=>v.holds.some(h=>h.state==='BLOCKED');
+  const opsKey=(v:ManagedVM):OpsFilter=>opsStatus(v)??'NONE';
+  const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&(!url.money||(url.money==='NONE'?!milestone(v):milestone(v)===url.money))&&(!url.warn||proxyBlocked(v));
+  const priority=(v:ManagedVM)=>opsPriority({status:opsStatus(v),proxyBlocked:proxyBlocked(v),milestone:milestone(v)});
   const needle=url.q.trim().toLowerCase();
   // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(accountView&&!accountsReady||orphanView&&!orphansReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
-    .sort((a,b)=>(url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
+  const filtered=useMemo(()=>(accountView&&!accountsReady||orphanView&&!orphansReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
+    .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletedView,deleted,active,url.view,url.sort,needle,accountOfVm,accountView,accountsReady,orphanVms,orphanView,orphansReady]);
+    [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,orphanVms,orphanView,orphansReady,opsOfVm]);
   // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Chờ cài) stays selected and stays in
   // the open bulk panel. Bulk actions take the selected rows in table order.
   const selectedRows=useMemo(()=>[...(deletedView?deleted:active)].filter(v=>selected.has(v.id)).sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),[deletedView,deleted,active,selected]);
@@ -141,6 +150,21 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     else if(kind==='AUTOFILL'){const key=crypto.randomUUID(),p=await autoPreview.mutateAsync({projectId,mode:'AUTO',vmIds:[vm.id],idempotencyKey:key});const row=p.rows[0];if(!p.ready) throw new Error(row?.message||'Không giao được proxy cho VM này');await autoCommit.mutateAsync({projectId,token:p.token,idempotencyKey:key});message='Đã giao '+(row?.ip||'proxy')+' cho '+vm.code+'; chờ cài';}
     toast.success(message,{duration:3000});await refresh();
   }
+  // Tình trạng: one command for the cell and for bulk; same value = nothing written; old-round commands are refused by the server.
+  const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney};
+  async function setOpsStatus(vm:ManagedVM,status:VmOpsStatus,cycle:number){
+    const r=await setOps.mutateAsync({projectId,key:crypto.randomUUID(),items:[{vmId:vm.id,status,expectedCycle:cycle}]}),row=r.rows[0];
+    if(row?.outcome==='ERROR')throw new Error(row.message);
+    if(row?.outcome==='APPLIED')toast.success(vm.code+': '+row.message,{duration:1500});await board.refetch();
+  }
+  const [bulkOps,setBulkOps]=useState<VmOpsStatus|''>(''),[bulkOpsErrors,setBulkOpsErrors]=useState<{vm:string;message:string}[]>([]);
+  async function applyBulkOps(){
+    if(!bulkOps)return;
+    try{const r=await setOps.mutateAsync({projectId,key:crypto.randomUUID(),items:selectedRows.map(v=>({vmId:v.id,status:bulkOps,expectedCycle:opsOfVm.get(v.id)?.cycle??v.cycle}))});
+      setBulkOpsErrors(r.rows.filter(x=>x.outcome==='ERROR').map(x=>({vm:x.where,message:x.message})));
+      toast.success(`${VM_OPS[bulkOps].label}: ${r.applied} VM`+(r.skipped?` · ${r.skipped} giữ nguyên`:'')+(r.errors?` · ${r.errors} lỗi`:''),{duration:4000});await board.refetch();}
+    catch(e){toast.error(errorMessage(e));}
+  }
   const toggle=(id:string,on:boolean)=>setSelected(prev=>{const n=new Set(prev);if(on)n.add(id);else n.delete(id);return n;});
   const togglePage=(on:boolean)=>setSelected(prev=>{const n=new Set(prev);paged.rows.forEach(v=>{if(on)n.add(v.id);else n.delete(v.id);});return n;});
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
@@ -167,27 +191,38 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     </div>
     {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
     <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('PENDING','Chờ cài',counts.pending)}{chip('INSTALLED','Đã cài',counts.installed)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{(noOrphan||orphanView)?chip('TASK_ORPHAN','Việc cài bị bỏ lại',noOrphan):null}{chip('DELETED','Đã xoá',deleted.length)}</div>
+    <div className="vm-chips vm-chips-ops" role="group" aria-label="Lọc theo tình trạng vận hành"><span className="pm-muted text-xs">Tình trạng:</span>
+      {OPS_FILTERS.map(k=>{const n=active.filter(v=>opsKey(v)===k).length,on=url.st.includes(k);if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{n}</strong></button>;})}
+      <span className="pm-muted text-xs ml-2">Proxy / tiền:</span>
+      {(()=>{const n=active.filter(proxyBlocked).length;return (n||url.warn)?<button type="button" className={'vm-chip'+(url.warn?' active':'')+(n?' attention':'')} aria-pressed={url.warn} onClick={()=>go({warn:!url.warn,page:1})}>Proxy BLOCKED <strong>{n}</strong></button>:null;})()}
+      {(['WAITING','RECREATE','MONEY_REVIEW','FAILED'] as const).map(k=>{const n=board.data?active.filter(v=>milestone(v)===k).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='RECREATE'||k==='MONEY_REVIEW'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MILESTONE_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
+      {(url.st.length>0||url.money||url.warn)&&<button type="button" className="pm-link text-xs" onClick={()=>go({st:[],money:'',warn:false,page:1})}>Bỏ lọc tình trạng</button>}
+    </div>
+    {board.error&&<p role="alert" className="pm-error">Chưa đọc được tình trạng vận hành: {board.error.message} <button className="pm-link" onClick={()=>void board.refetch()}>Thử lại</button></p>}
     {orphanView&&orphans.error&&<p role="alert" className="pm-error">Chưa đọc được việc cài: {orphans.error.message} <button className="pm-link" onClick={()=>void orphans.refetch()}>Thử lại</button></p>}{accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
         <div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
-          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="STATUS">Cần xử lý trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
+          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Theo tiến độ cài</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
         {hasSelection&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}
           {paged.rows.length>0&&paged.rows.every(v=>selected.has(v.id))&&selectedInFilter<filtered.length&&<button className="pm-link text-sm" onClick={()=>setSelected(new Set(filtered.map(v=>v.id)))}>Chọn tất cả {filtered.length} kết quả đang lọc</button>}
           <span className="vm-bulkbar-actions">{deletedView?(rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void restore(selectedRows.map(v=>v.id))}><RotateCcw size={15}/>Khôi phục</button>):<>
             {rights.copy&&<DropdownMenu><DropdownMenuTrigger asChild><button className="pm-button"><Copy size={15}/>Copy proxy</button></DropdownMenuTrigger><DropdownMenuContent className="vm-menu"><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'DESIRED')}>Copy proxy được giao</DropdownMenuItem><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
+            {rights.assign&&<span className="vm-bulk-ops"><select aria-label="Tình trạng cho các VM đã chọn" className="pm-input w-auto" value={bulkOps} onChange={e=>setBulkOps(e.target.value as VmOpsStatus)}><option value="">Tình trạng…</option>{VM_OPS_STATUSES.map(st=><option key={st} value={st}>{VM_OPS[st].label}</option>)}</select><button className="pm-button" disabled={!bulkOps||setOps.isLoading} onClick={()=>void applyBulkOps()}>{setOps.isLoading?'Đang lưu…':'Áp dụng'}</button></span>}
             {rights.assign&&<button className={'pm-button'+(bulk==='assign'?' pm-button-primary':'')} onClick={()=>openBulk('assign')}>Gán proxy</button>}
             {rights.assign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
             {rights.manage&&<button className={'pm-button'+(bulk==='note'?' pm-button-primary':'')} onClick={()=>openBulk('note')}>Sửa ghi chú</button>}
             {rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void remove(selectedRows.map(v=>v.id))}><Trash2 size={15}/>Xoá</button>}</>}
             <button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}><X size={15}/>Bỏ chọn</button></span></div>}
+        {bulkOpsErrors.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{bulkOpsErrors.length} VM chưa đổi tình trạng</strong><button className="pm-icon-button" aria-label="Đóng danh sách lỗi tình trạng" onClick={()=>setBulkOpsErrors([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{bulkOpsErrors.map((b,i)=><li key={i}><strong className="pm-code">{b.vm}</strong> — {b.message}</li>)}</ul></div>}
         {blocked.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{blocked.length} VM chưa xử lý được</strong><button className="pm-icon-button" aria-label="Đóng danh sách bị chặn" onClick={()=>setBlocked([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{blocked.map(b=><li key={b.id}><strong className="pm-code">{b.code}</strong> — {b.reason} · <button className="pm-link" onClick={()=>openVm(b.id,CAUSE_TAB[b.cause||'']||'overview',b.cause||null)}>Mở VM</button></li>)}</ul></div>}
         {pager('top')}
         <div ref={gridHost}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
-          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}/></div>
+          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}
+          opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])}/></div>
         {pager('bottom')}
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>

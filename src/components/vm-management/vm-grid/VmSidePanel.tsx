@@ -18,6 +18,8 @@ import type {PanelTab} from './grid-model';
 import {links} from '@/lib/links';
 import {moduleOn} from '@/lib/features';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
+import {opsLabel,type VmOpsStatus} from '@/lib/vm-ops';
+import {viMoney} from '@/components/account-store/batch-format';
 const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Cài proxy'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Chưa bắt đầu',IN_PROGRESS:'Đang cài',FAILED:'Cài chưa xong',CONFIRMED:'Đã xác nhận',CANCELLED:'Đã huỷ'};
@@ -89,7 +91,24 @@ function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   return <div className="space-y-4">
     <div><h3 className="text-sm font-semibold mb-2">Các phiên bản cấu hình proxy</h3>{detail.error&&<p role="alert" className="pm-error">{detail.error.message}</p>}
       <div className="vm-bulk-table"><table className="pm-table"><thead><tr><th>#</th><th>Proxy</th><th>Trạng thái</th><th>Người / ngày</th></tr></thead><tbody>{detail.data?.configurations.map(c=><tr key={c.id}><td>{c.version}{c.current&&<div className="text-xs pm-muted">{c.current==='DESIRED'?'đang giao':'đang cài'}</div>}</td><td><span className="pm-ip">{c.ip?c.ip+(c.port?':'+c.port:''):'—'}</span>{c.group&&<div className="text-xs pm-muted">{c.group}</div>}</td><td className="text-xs">{CONFIG_STATUS[c.status]||c.status}{c.failureNote&&<div className="pm-muted">{c.failureNote}</div>}</td><td className="text-xs">Giao: {c.createdBy||'—'} · {localDate(c.createdAt)}{c.startedAt&&<div>Bắt đầu: {localDate(c.startedAt)}</div>}{c.confirmedAt&&<div>Xác nhận: {c.confirmedBy||'—'} · {localDate(c.confirmedAt)}</div>}</td></tr>)}{detail.data&&!detail.data.configurations.length&&<tr><td colSpan={4} className="pm-empty">Chưa có cấu hình proxy.</td></tr>}</tbody></table></div></div>
+    <OpsHistory projectId={projectId} vmId={vm.id}/>
     <div><h3 className="text-sm font-semibold mb-2">Lịch sử SDK</h3><SdkHistoryTable projectId={projectId} vmId={vm.id}/></div>
     <p className="pm-muted text-xs">Mọi thao tác ghi đều có ở <Link className="pm-link" href={links.history()}>Lịch sử thao tác</Link> và hoàn tác được ở đó.</p>
+  </div>;
+}
+
+const PHASE:Record<string,string>={WAITING:'Chờ tiền về',RECEIVED:'Đã nhận đủ',REVIEW:'Cần đối chiếu',FAILED:'Thất bại',CANCELLED:'Đã huỷ'};
+// Rounds of this VM position, recorded statuses and the payout request of every round (amounts only with the money rights).
+function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
+  const h=trpc.vmOps.history.useQuery({projectId,vmId});
+  if(h.error)return <p role="alert" className="pm-error">{h.error.message}</p>;
+  if(!h.data)return <p className="pm-muted text-xs">Đang tải lịch sử vận hành…</p>;
+  const d=h.data;
+  return <div className="space-y-3">
+    <div><h3 className="text-sm font-semibold mb-2">Lượt vận hành đã đóng</h3>{d.cycles.length?<ul className="text-xs space-y-1">{d.cycles.map(c=><li key={c.number}><strong>Lượt {c.number}</strong> · {c.reason==='SUSPENDED'?'SUS':'tiền đã về đủ'} · {c.login||'không có EarnApp'}{c.sdk?' · SDK '+c.sdk:''} · tình trạng cuối {opsLabel(c.status as VmOpsStatus|null)}{c.proxyKept?' · giữ proxy':''} · {c.by} {localDate(c.closedAt)}{c.note?' · '+c.note:''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa tạo lại lần nào (lượt 1).</p>}</div>
+    <div><h3 className="text-sm font-semibold mb-2">Yêu cầu rút EarnApp</h3>{d.requests.length?<ul className="text-xs space-y-2">{d.requests.map(r=><li key={r.id}><div><strong>Lượt {r.cycle}</strong> · {r.login} · {r.paypal} · {r.email} · ngày {r.requestedAt.split('-').reverse().join('/')} · {PHASE[r.phase]||r.phase}{r.consumed?' · đã dùng để tạo lại VM':''}{r.reviewAfterRecreate?<span className="text-amber-600"> · cần đối chiếu (khoản nhận đổi sau khi tạo lại; VM giữ lượt mới)</span>:null}</div>
+      {r.money&&<div className="pm-muted">Yêu cầu {viMoney(r.money.amount)} {r.money.currency} · đã về {viMoney(r.money.received)}{r.money.remaining!=='0.00'?' · còn chờ '+viMoney(r.money.remaining):''}{r.money.receipts.length?' · '+r.money.receipts.map(x=>x.date.split('-').reverse().join('/')+' '+viMoney(x.amount)+' ('+x.status+')').join(', '):''}</div>}
+      <div className="pm-muted">{r.history.map((x,i)=><span key={i} className="block">{localDate(x.at)} · {x.by}: {x.what}</span>)}</div></li>)}</ul>:<p className="pm-muted text-xs">Chưa có yêu cầu rút.</p>}</div>
+    <div><h3 className="text-sm font-semibold mb-2">Tình trạng đã ghi</h3>{d.events.length?<ul className="text-xs space-y-1">{d.events.map(e=><li key={e.id}>{localDate(e.at)} · {e.by} · lượt {e.cycle} · {e.kind==='RECREATE'?'Ghi nhận tạo lại VM → ':e.kind==='UNDO'?'Hoàn tác trên web: ':''}{opsLabel(e.from as VmOpsStatus|null)} → {opsLabel(e.to as VmOpsStatus|null)}{e.note?' · '+e.note:''}{e.kind==='RECREATE'&&e.detail&&typeof e.detail==='object'&&'proxy' in (e.detail as object)?' · '+String((e.detail as {proxy:string}).proxy):''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa ghi tình trạng (Chưa ghi).</p>}</div>
   </div>;
 }

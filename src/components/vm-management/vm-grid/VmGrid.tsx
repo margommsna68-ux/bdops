@@ -11,6 +11,8 @@ import {vmView,proxyAddress} from '../workflow';
 import type {ManagedVM} from '../shared';
 import {AccountCell,type VmAccount} from './AccountCell';
 import {StatusCell} from './StatusCell';
+import {OpsStatusCell,PayoutCell,type OpsRow,type OpsRights} from './OpsCells';
+import type {VmOpsStatus} from '@/lib/vm-ops';
 import type {StatusActionKind} from './status-actions';
 import {FIXED,editableFields,nextCell,resizeColumn,shortCode,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
 export interface GridRights {manage:boolean;assign:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean}
@@ -58,14 +60,15 @@ function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCan
   </div>;
 }
 export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;accountOf:(vmId:string)=>VmAccount|undefined;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
-  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onCopyToInstall:(vm:ManagedVM)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;onStatus:(vm:ManagedVM,kind:StatusActionKind,note?:string)=>Promise<string|void>}){
+  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onCopyToInstall:(vm:ManagedVM)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;onStatus:(vm:ManagedVM,kind:StatusActionKind,note?:string)=>Promise<string|void>;
+  opsOf:(vmId:string)=>OpsRow|undefined;opsRights:OpsRights;onOpsStatus:(vm:ManagedVM,status:VmOpsStatus,cycle:number)=>Promise<void>;onOpsDone:()=>Promise<unknown>|void}){
   const {rows,single,deletedView,prefs,rights,selected}=props,columns=visibleColumns(prefs),drafts=useDrafts(props.projectId);
   // A row whose status action is saving is locked (other cells and ⋯) until the answer comes back.
   const [busyRows,setBusyRows]=useState<Set<string>>(new Set()),markBusy=(id:string,on:boolean)=>setBusyRows(p=>{const n=new Set(p);if(on)n.add(id);else n.delete(id);return n;});
   const [active,setActive]=useState<{vmId:string;field:EditField}|null>(null),[errors,setErrors]=useState<Record<string,string>>({}),[saving,setSaving]=useState<string|null>(null);
   const fields=deletedView?[]:editableFields(prefs,{manage:rights.manage,assign:rights.assign}),rowIds=rows.map(r=>r.id);
-  const serverW=single?0:widthOf(prefs,'server'),vmW=widthOf(prefs,'vm'),selectW=FIXED.select;
-  const total=selectW+serverW+vmW+columns.reduce((n,c)=>n+widthOf(prefs,c.key),0)+FIXED.menu;
+  const serverW=single?0:widthOf(prefs,'server'),vmW=widthOf(prefs,'vm'),selectW=FIXED.select,opsW=FIXED.ops;
+  const total=selectW+serverW+vmW+opsW+columns.reduce((n,c)=>n+widthOf(prefs,c.key),0)+FIXED.menu;
   const allOnPage=rows.length>0&&rows.every(v=>selected.has(v.id)),someOnPage=rows.some(v=>selected.has(v.id));
   const headCheck=useRef<HTMLInputElement>(null);useEffect(()=>{if(headCheck.current) headCheck.current.indeterminate=someOnPage&&!allOnPage;},[someOnPage,allOnPage]);
   const canEdit=(field:EditField)=>fields.includes(field);
@@ -98,6 +101,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
     if(key==='proxy') return <ProxyCell v={v} canCopy={rights.copy} onCopy={w=>props.onCopy(v,w)}/>;
     if(key==='sdk'){const view=v.sdk?<span className="vm-sdk-short"><code className="vm-sdk vm-ellipsis" title={v.sdk.id}>{shortCode(v.sdk.id)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+v.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();navigator.clipboard?.writeText(v.sdk!.id).then(()=>toast.success('Đã copy SDK '+v.code)).catch(()=>toast.error('Trình duyệt chặn copy; mở chi tiết để chọn mã'));}}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>;return deletedView?view:editable(v,'sdk','SDK '+v.code,view);}
     if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={rights.assign&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
+    if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone}/>;
     if(key==='status') return <StatusCell vm={v} rights={rights} onAction={props.onStatus} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version') return <span className="text-xs">{v.desired?'Giao #'+v.desired.version:''}{v.desired&&v.installed&&v.desired.id!==v.installed.id?' · ':''}{v.installed&&v.installed.id!==v.desired?.id?'Cài #'+v.installed.version:v.installed?' (đã cài)':''}{!v.desired&&!v.installed&&<span className="pm-muted">—</span>}</span>;
@@ -105,11 +109,12 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
     return v.desired&&v.desired.id!==v.installed?.id?<span className="text-xs">{v.desired.status==='FAILED'?'Cài chưa xong':v.desired.startedAt?'Đang cài':'Chưa bắt đầu'}</span>:<span className="pm-muted">—</span>;
   };
   return <div className="vm-grid-scroll" style={{maxHeight:props.maxHeight}} data-testid="vm-grid-scroll">
-    <table className="vm-grid" style={{width:total}}><colgroup><col style={{width:selectW}}/>{!single&&<col style={{width:serverW}}/>}<col style={{width:vmW}}/>{columns.map(c=><col key={c.key} style={{width:widthOf(prefs,c.key)}}/>)}<col style={{width:FIXED.menu}}/></colgroup>
+    <table className="vm-grid" style={{width:total}}><colgroup><col style={{width:selectW}}/>{!single&&<col style={{width:serverW}}/>}<col style={{width:vmW}}/><col style={{width:opsW}}/>{columns.map(c=><col key={c.key} style={{width:widthOf(prefs,c.key)}}/>)}<col style={{width:FIXED.menu}}/></colgroup>
       <thead><tr>
         <th className="vm-sticky vm-sticky-check" style={left(0)}><input ref={headCheck} type="checkbox" aria-label={`Chọn ${rows.length} VM trên trang này`} title={`Chọn ${rows.length} VM trên trang này`} checked={allOnPage} disabled={!rows.length} onChange={e=>props.onTogglePage(e.target.checked)}/></th>
         {!single&&<th className="vm-sticky" style={left(selectW)}>Server{resizer('server')}</th>}
-        <th className="vm-sticky vm-sticky-last" style={left(selectW+serverW)}>VM{resizer('vm')}</th>
+        <th className="vm-sticky" style={left(selectW+serverW)}>VM{resizer('vm')}</th>
+        <th className="vm-sticky vm-sticky-last" style={left(selectW+serverW+vmW)} title="Trạng thái vận hành do người / AI ghi nhận">Tình trạng</th>
         {columns.map(c=><th key={c.key}>{c.label}{resizer(c.key)}</th>)}
         <th className="vm-sticky-right" aria-label="Thao tác"></th>
       </tr></thead>
@@ -117,7 +122,8 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
         return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy?'pm-row-blocked ':status==='PENDING'&&!deletedView?'vm-row-pending ':'')}>
           <td className="vm-sticky vm-sticky-check" style={left(0)}><input type="checkbox" aria-label={'Chọn '+v.server+' / '+v.code} checked={isSel} onChange={e=>props.onToggle(v.id,e.target.checked)}/></td>
           {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={links.vms({serverId:v.serverId})} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
-          <td className="vm-sticky vm-sticky-last vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>
+          <td className="vm-sticky vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>
+          <td className="vm-sticky vm-sticky-last vm-col-ops" style={left(selectW+serverW+vmW)}><OpsStatusCell vm={v} ops={props.opsOf(v.id)??{status:(v.ops??null) as VmOpsStatus|null,cycle:v.cycle}} canEdit={rights.assign&&!deletedView} onSet={props.onOpsStatus}/></td>
           {columns.map(c=><td key={c.key} className={'vm-col-'+c.key}>{cell(v,c.key)}</td>)}
           <td className="vm-sticky-right"><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="vm-row-menu" aria-label={'Thao tác '+v.code} data-menu={v.id}><MoreHorizontal size={16}/></button></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="vm-menu">
@@ -136,7 +142,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
               </>}
             </DropdownMenuContent></DropdownMenu></td>
         </tr>;})}
-        {!rows.length&&<tr><td colSpan={3+columns.length+(single?0:1)} className="pm-empty"><Server size={28} className="mx-auto mb-3 pm-muted"/>{props.loading?'Đang tải máy…':props.emptyText}</td></tr>}
+        {!rows.length&&<tr><td colSpan={4+columns.length+(single?0:1)} className="pm-empty"><Server size={28} className="mx-auto mb-3 pm-muted"/>{props.loading?'Đang tải máy…':props.emptyText}</td></tr>}
       </tbody></table>
   </div>;
 }

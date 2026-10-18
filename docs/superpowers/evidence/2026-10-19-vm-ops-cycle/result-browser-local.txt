@@ -1,0 +1,51 @@
+PASS Dữ liệu cũ hiện “Chưa ghi”, kể cả VM_001 có SDK, tài khoản, PayPal và proxy đã cài (không suy ra LINKED/OK) — Chưa ghi, Chưa ghi, Chưa ghi
+PASS Cột Tình trạng nằm ngay sau mã VM; tiến độ cài là cột riêng “Cài proxy” — VM | TÌNH TRẠNG | PROXY | SDK | TÀI KHOẢN EARNAPP | PAYPAL NHẬN | RÚT TIỀN | CÀI PROXY | GHI CHÚ
+PASS Chọn LINKED tại ô: lưu ngay (không dialog), ghi người/giờ/cũ→mới; chọn lại giá trị cũ không ghi lịch sử — [{"vm":"VM_002","kind":"STATUS","from":null,"to":"LINKED","cycle":1}]
+PASS Màu theo trạng thái, kèm chữ (LINKED = xanh dương) — vm-ops vm-ops-info vm-ops-pick
+PASS Tải lại vẫn LINKED
+PASS Chọn 3 VM → OFF VM → Áp dụng một lần: 3 VM đổi, mỗi VM một dòng lịch sử
+PASS Lọc OFF VM (có số lượng 3) → đúng 3 VM, ghi vào URL — /infrastructure/servers/cmve38tnn0001t4omksqgdlg7?st=OFF
+PASS Lọc nhiều trạng thái: OFF VM + LINKED → 4 VM — /infrastructure/servers/cmve38tnn0001t4omksqgdlg7?st=OFF%2CLINKED
+PASS Tải lại giữ bộ lọc
+PASS Back về bộ lọc trước (chỉ OFF) — /infrastructure/servers/cmve38tnn0001t4omksqgdlg7?st=OFF
+PASS Forward lại 4 VM
+PASS Sort “Cần xử lý trước”: SUS (VM_006), proxy BLOCKED (VM_002), Earn/VM lỗi (VM_007), OFF (VM_003–005), rồi chưa ghi theo mã tự nhiên — VM_006 VM_002 VM_007 VM_003 VM_004 VM_005 VM_001 VM_008 VM_009 VM_010
+PASS Lọc riêng cảnh báo proxy BLOCKED — /infrastructure/servers/cmve38tnn0001t4omksqgdlg7?warn=proxy&sort=PRIORITY
+PASS VM có proxy BLOCKED vẫn giữ tình trạng chính riêng (LINKED), proxy hiện ở cột proxy
+PASS Đang xem một server: không lặp tên server ở từng dòng
+PASS Chọn PP hiện gọn: tình trạng, số dư USD, còn chờ, thiếu đến 100, sau khoản này, email chưa dùng — Tình trạng Dùng được Số dư USD 0,00 Còn chờ 0,00 Thiếu đến 100 100,00 Sau khoản này 24,00 Đang gom Email chưa dùng còn 1
+PASS Ô Rút tiền: “Chờ tiền về” + PP + số tiền — Chờ tiền về pp1338tnm · 24,00 USD
+PASS Ba EarnApp, ba email, cùng pp13: 3 yêu cầu, mỗi khoản tiền gắn đúng yêu cầu
+PASS Kho tài khoản: pp13 còn lại theo sổ 46,00 USD, nhãn “Đang gom · thiếu 54” — 46,00 USD Đang gom · thiếu 54,00
+PASS Trạng thái sức khoẻ PP giữ riêng (Dùng được), tách khỏi nhãn gom
+PASS Nhận đủ → mốc “Cần tạo lại VM” tại VM_001
+PASS PP 82: thiếu 18; sau khoản 18 dự kiến 100 — Tình trạng Dùng được Số dư USD 82,00 Còn chờ 0,00 Thiếu đến 100 18,00 Sau khoản này 100,00 Đang gom Email chưa dùng còn 1
+PASS Có 82, chờ 18: chỉ “Dự kiến đủ 100 USD”, chưa đạt — 82,00 USD Chờ về 18,00 USD Dự kiến đủ 100 USD · thiếu 18,00
+PASS Nhận đủ 18 → số dư thực 100,00 USD, “Đạt mức gom” — 100,00 USD Đạt mức gom
+PASS Dự kiến 24, nhận 10: vẫn “Chờ tiền về”, còn 14 — Chờ tiền về pp1338tnm · 24,00 USD · còn 14,00
+PASS Chưa nhận đủ: không có nút “Ghi nhận đã tạo lại VM” — opsx-38tnm / VM_008 · lượt 1 · opsl08-38tnm@example.invalid Yêu cầu ngày 19/10/2026 · pp1338tnm · ops13-5-38tnm@example.invalid Yêu cầu 24,00 USD · đã về PP 10,00 · còn chờ 14,00 Ghi tiền về PP Chốt n
+PASS Sổ pp13 chỉ tăng 10 (56,00), tiền chờ 14 (không cộng cả 24) — 56,00 USD Chờ về 14,00 USD Đang gom · thiếu 44,00
+PASS pp13 đã cấp hết 5 email (kể cả email đã bỏ gán): không đề xuất cho EarnApp mới — Chọn mã PP | pp8237csk · Dùng được · 82,00 USD · 1 email trống | pp82249p6 · Dùng được · 82,00 USD · 1 email trống | pp14blsms · Dùng được · 60,00 USD · 2 email trống | pp14tepgc · Dùng được · 60,00 USD · 2 email trống | pp142wcev · Dùng được · 60,00 USD · 2 email trống | pp14bjwrf · Dùng được · 30,00 USD · 2 email trống | pp14t3st7 · Dùng được · 30,00 USD · 2 email trống | pp1437c5a · Dùng được · 30,00 USD · 2 email trống | fix-add-mvd7bauj · Dùng được · 0,00 USD · 1 email trống | fix-add-mvd7hl2p · Dùng được · 0,00 USD · 1 email trống | fix-add-mvd9dkug · Dùng được · 0,00 USD · 1 email trống | fix-add-mvd75vsy · Dùng được · 0,00 USD · 1 email trống | fix-add-mvdbxjux · Dùng được · 0,00 USD · 1 email trống | fix-add-mvdg75au · Dùng được · 0,00 USD · 1 email trống | fix-add-mvdt5zzv · Dùng được · 0,00 USD · 1 email trống | fix-add-mve30g48 · Dùng được · 0,00 USD · 1 email trống | fix-new-mvd7bc8u · Dùng được · 0,00 USD · 1 email trống | fix-new-mvd7hmgy · Dùng được · 0,00 USD · 1 email trống | fix-new-mvd9dm8q · Dùng được · 0,00 USD · 1 email trống | fix-new-mvd75x81 · Dùng được · 0,00 USD · 1 email trống | fix-new-mvdbxln2 · Dùng được · 0,00 USD · 1 email trống | fix-new-mvdg776g · Dùng được · 0,00 USD · 1 email trống | fix-new-mvdt61q1 · Dùng được · 0,00 USD · 1 email trống | fix-new-mve30huk · Dùng được · 0,00 USD · 1 email trống | pp14bes1e · Dùng được · 0,00 USD · 2 email trống | pp1337csk · Dùng được · 0,00 USD · 1 email trống | tut-5d81n-3 · Dùng được · 0,00 USD · 1 email trống | tut-5d81n-4 · Dùng được · 0,00 USD · 1 email trống | tut-5d81n-5 · Dùng được · 0,00 USD · 1 email trống | tut-5d81n-6 · Dùng được · 0,00 USD · 1 email trống | tut-5en38-2 · Dùng được · 0,00 USD · 1 email trống | tut-5en38-3 · Dùng được · 0,00 USD · 1 email trống | tut-5en38-4 · Dùng được · 0,00 USD · 1 email trống | tut-5en38-5 · Dùng được · 0,00 USD · 1 email trống | tut-5en38-6 · Dùng được · 0,00 USD · 1 email trống | tut-5g0jk-3 · Dùng được · 0,00 USD · 1 email trống | tut-5g0jk-4 · Dùng được · 0,00 USD · 1 email trống | tut-5g0jk-5 · Dùng được · 0,00 USD · 1 email trống | tut-5g0jk-6 · Dùng được · 0,00 USD · 1 email trống | tut-5jplr-3 · Dùng được · 0,00 USD · 1 email trống | tut-5jplr-4 · Dùng được · 0,00 USD · 1 email trống | tut-5jplr-5 · Dùng được · 0,00 USD · 1 email trống | tut-5m5e9-3 · Dùng được · 0,00 USD · 1 email trống | tut-5m5e9-4 · Dùng được · 0,00 USD · 1 email trống | tut-5m5e9-5 · Dùng được · 0,00 USD · 1 email trống | tut-5pwe9-3 · Dùng được · 0,00 USD · 1 email trống | tut-5pwe9-4 · Dùng được · 0,00 USD · 1 email trống | tut-5pwe9-5 · Dùng được · 0,00 USD · 1 email trống | rft0898 · Dùng được · -31,00 USD · 1 email trống | rf2wd2l · Dùng được · -51,00 USD · 1 email trống | rft37dq · Dùng được · -51,00 USD · 1 email trống | pp822ffln · Dùng được · 100,00 USD · 1 email trống | pp822kw2a · Dùng được · 100,00 USD · 1 email trống | pp8238tnm · Dùng được · 100,00 USD · 1 email trống
+PASS Bỏ lọc vẫn không hiện pp13 vì không còn email nào cấp được
+PASS Cùng mã PP cũ (pp82) vẫn chọn được email mới; email đã dùng cho VM_004 không hiện — ops82-2-38tnm@example.invalid
+PASS Ghi nhận tạo lại: giữ id và mã VM_001, lượt 2, New VM; bấm hai lần chỉ một lượt mới — [{"vm":"VM_001","number":1,"reason":"PAYOUT_RECEIVED","proxyKept":true}]
+PASS SDK cũ vào lịch sử, SDK hiện hành trống
+PASS Proxy còn hợp lệ được giữ cho vị trí (cấu hình mới chờ cài, bản cài cũ thuộc lượt cũ)
+PASS EarnApp cũ đã đóng: VM chưa có tài khoản ở lượt mới; không phát sinh chi phí
+PASS Yêu cầu rút cũ đánh dấu đã dùng, không cấp lượt mới lần nữa
+PASS Dòng VM_001: New VM, Chưa có SDK, proxy Giao + Cài —  VM_001 OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail Giao 203.0.113.113:8080 Cài 203.0.113.113:8080 Chưa có SDK Chọn tài khoản — Chưa có EarnApp Chờ cài — 
+PASS Lịch sử VM: lượt 1 đã đóng, yêu cầu rút và tiền về, tình trạng đã ghi — opsx-38tnm VM_001 Chờ cài Tổng quan Proxy Cài proxy Tài khoản Lịch sử Các phiên bản cấu hình proxy # PROXY TRẠNG THÁI NGƯỜI / NGÀY 2 đang giao 203.0.113.113:8080 TUT Chưa bắt đầu Giao: Bản thử · 00:18 19/10/2026 1 đang cài 203.0.113.113:8080 TUT Đã xác nhận Giao: Bản thử · 00:17 19/10/2026 Bắt đầu: 
+PASS Tài khoản Gmail của lượt cũ không trở lại NEW (Đã dùng) — opsl01-38tnm@example.invalid Gmail Đã dùng 
+PASS Lệnh cũ (lượt 1) gửi sau khi tạo lại bị từ chối, không đổi lượt mới — {"result":{"data":{"json":{"rows":[{"vmId":"cmve38tnp0003t4omsi7usrf8","where":"opsx-38tnm / VM_001","outcome":"ERROR","message":"VM đã sang lượt 2; lệnh này dà
+PASS SUS: tạo lại cùng mã không cần tiền về; không đóng PP mẹ; yêu cầu và tiền chờ của lượt cũ còn nguyên
+PASS Tiền chờ của lượt SUS vẫn tính chờ ở pp13 (14 + 15 = 29) — 56,00 USD Chờ về 29,00 USD Đang gom · thiếu 44,00
+PASS Ghi tiền ở Kho tài khoản: số dư và nhãn gom tính lại ngay, không cần tải lại trang (56 + 15 = 71, chờ 14) — 71,00 USD Chờ về 14,00 USD Đang gom · thiếu 29,00
+PASS Tiền về muộn của lượt cũ gắn vào yêu cầu cũ
+PASS Lượt mới của VM_010 không chuyển sang “Cần tạo lại”
+PASS Hai người cùng gán một email: chỉ một yêu cầu thành công, người kia thấy lý do tại chỗ — VM_005 ops82-2-38tnm@example.invalid · Email pp8238tnm · ops82-2-38tnm@example.invalid đang nhận cho opsl05-38tnm@example.invalid (opsx-38tnm / VM_005); mỗi em
+PASS Nhân viên chỉ có Server / VM: thấy mốc tiền nhưng không thấy số tiền — Cần tạo lại VM pp8238tnm
+PASS Nhân viên đổi được Tình trạng tại ô (cùng endpoint)
+PASS Gọi thẳng endpoint tiền: không trả số tiền, ghi yêu cầu bị từ chối — {"result":{"data":{"json":{"rights":{"money":false,"balance":false},"paypals":[]}}}} · {"error":{"json":{"message":"Bạn chưa có quyền thao tác này","code":-32003,"data":{"code":"FORBIDDEN","httpStatus":403,"
+PASS Laptop 1280: trang không tràn ngang, bảng cuộn ngang trong khung, cột Tình trạng cố định khi cuộn — {"page":true,"inner":true}
+PASS Không có lỗi JavaScript trên trang
+TOTAL 50 pass / 0 fail

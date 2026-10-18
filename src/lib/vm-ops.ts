@@ -65,3 +65,5 @@ export function gatherOf(balanceUsd:string|null,pendingUsd:string|null,extra='0'
   const state:Gather=b>=GATHER_TARGET_CENTS?'REACHED':b+p>=GATHER_TARGET_CENTS?'PROJECTED':'GATHERING';
   return {state,label:GATHER_LABEL[state],missing:fromCents(Math.max(0,GATHER_TARGET_CENTS-b)),missingAfterPending:fromCents(Math.max(0,GATHER_TARGET_CENTS-b-p)),projected:fromCents(b+p),projectedWith:fromCents(b+p+x)};
 }
+// PayPal health states (kept as they are; changed at the cell / in bulk in Kho tài khoản).
+export const PP_STATUS_LABEL:Record<string,string>={ACTIVE:'Dùng được',PENDING_VERIFY:'Chờ xác minh',LIMITED:'Bị limit',SUSPENDED:'Bị suspend',CLOSED:'Đã đóng'};
