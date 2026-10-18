@@ -33,3 +33,14 @@
 - định dạng tiền / ngày kiểu Việt Nam;
 - thứ tự đợt cùng ngày;
 - số lượng mua không bị tự điền.
+
+## Phát hành
+
+- **Commit:** `319d73d`, không có migration.
+- **Backup host trước deploy:** `5bb8822b`.
+- **Deploy:** `fa755f77`, SUCCESS.
+- **Host verify:** 10 server / 576 VM.
+- **Host xem chỉ đọc** (`host-after.txt`, `host-after-1280.png`, `host-after-390.png`):
+  - TK-2026-10-18-1: dòng 57px · 18/10/2026 · Gmail · 1trieumail · Chưa ghi · 5 · 2,12 USDT · Đã ghi · Nhập bổ sung.
+  - Không kéo ngang ở 1280px; trang không tràn ngang ở 390px.
+  - Chỉ xác thực PIN và heartbeat; không ghi dữ liệu.
