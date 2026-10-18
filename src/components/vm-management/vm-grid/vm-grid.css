@@ -116,3 +116,35 @@ textarea.vm-cell-input{resize:none;min-height:36px;line-height:1.3}
 .acc-review-list{display:flex;flex-direction:column;gap:0;list-style:none;margin:0;padding:0}
 .acc-review-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--ds-border)}
 .acc-review-list li>div{min-width:0;overflow-wrap:anywhere}
+
+/* Lịch sử nhập kho: one compact row per purchase; labelled cards on phones. */
+.acc-batch-table td,.acc-batch-table th{vertical-align:middle;padding:8px 12px}
+.acc-batch-table th.num{white-space:normal;line-height:1.3}
+.acc-batch-table td:nth-child(2){min-width:8rem;max-width:16rem;overflow-wrap:anywhere}
+.acc-batch-actions .pm-button{min-height:28px;padding:3px 10px;font-size:13px}
+.acc-batch-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.acc-batch-code{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;white-space:nowrap}
+.acc-batch-sub{display:flex;gap:6px;align-items:center;justify-content:inherit;font-size:12px;color:var(--ds-text-secondary);white-space:nowrap}
+.acc-batch-table td.num .acc-batch-sub{justify-content:flex-end}
+.acc-batch-type{font-size:11px;padding:0 6px;border-radius:999px;border:1px solid var(--ds-border)}
+.acc-batch-money{display:block;font-weight:600;white-space:nowrap}
+.acc-batch-count{font-weight:600;font-size:14px}
+.acc-batch-more{font-size:12px}
+.acc-batch-actions{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.acc-batch-actions .pm-button{white-space:nowrap}
+.acc-batch-detail td{font-size:13px;background:var(--ds-hover);line-height:1.6}
+a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
+@media (max-width:640px){
+  .acc-batch-table thead{display:none}
+  .acc-batch-table,.acc-batch-table tbody,.acc-batch-table tr,.acc-batch-table td{display:block;width:100%}
+  .acc-batch-table tr{border-top:1px solid var(--ds-border);padding:8px 0}
+  .acc-batch-table td{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:4px 14px;border:0;text-align:right}
+  .acc-batch-table td::before{content:attr(data-label);font-size:12px;color:var(--ds-text-secondary);text-align:left;flex-shrink:0}
+  .acc-batch-table td>*{min-width:0}
+  .acc-batch-table td[data-label="Đợt nhập"]{flex-direction:column;align-items:flex-start;text-align:left}
+  .acc-batch-table td[data-label="Đợt nhập"]::before{display:none}
+  .acc-batch-code{white-space:normal;overflow-wrap:anywhere}
+  .acc-batch-table td.num{flex-wrap:wrap}
+  .acc-batch-actions{flex-direction:row;flex-wrap:wrap;justify-content:flex-end}
+  .acc-batch-detail td{display:block;text-align:left}
+}

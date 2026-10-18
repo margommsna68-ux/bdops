@@ -10,6 +10,7 @@ import {trpc} from '@/lib/trpc';
 import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy} from '@/components/business-management/AccountsWorkspace';
+import {viAmount,viDate} from './batch-format';
 import {ImportPanel,appendToBatch,discardDraft,importDraft,type StockKind} from './ImportPanel';
 import {openView,readAccountUrl,sameQuery,switchKind,writeAccountUrl,type AccountKind,type AccountUrl} from './account-url';
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
@@ -133,27 +134,40 @@ function PaypalTable({projectId,rows,store,selected,setSelected,onBatch,onSaved}
         <td className="max-w-xs text-xs whitespace-pre-wrap">{p.notes||''}</td></tr>)}
         {!rows.length&&<tr><td colSpan={8} className="pm-empty">{store?'Chưa có PayPal trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div></>;
 }
-// Lịch sử nhập kho of one kind: one row per purchase (source, date, quantity bought / received, money paid once). Nhập bổ sung continues
-// that purchase without money; a new purchase is a new row. ?batch= highlights one purchase (from a link or Cần đối chiếu).
+// Lịch sử nhập kho of one kind: one row per purchase. Columns: Đợt nhập (code, purchase date, login type) | Nơi mua | Số lượng mua
+// (as recorded, never filled from the import count) | Đã nhập kho (accounts of the purchase in the web stock, opens them) | Tổng tiền
+// mua (the current cost record, original currency) | Chi phí (Đã ghi opens the cost) | Thao tác. Rate, USDT, the first price after
+// an adjustment or void and notes open under the row. Nhập bổ sung continues that purchase without money; a new purchase is a new
+// row. ?batch= highlights one purchase (from a link or Cần đối chiếu). Order: purchase date, then the newest created first (server).
 function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSaved}:{projectId:string;kindLabel:string;rows:Batch[];focus:string;store:Store|undefined;onContinue:(b:Batch)=>void;onOpen:(b:Batch)=>void;onSaved:()=>void}){
-  const [costFor,setCostFor]=useState<Batch|null>(null),focusMissing=!!focus&&!!store&&!rows.some(b=>b.code===focus);
+  const [costFor,setCostFor]=useState<Batch|null>(null),[open,setOpen]=useState<Set<string>>(new Set()),focusMissing=!!focus&&!!store&&!rows.some(b=>b.code===focus);
   useEffect(()=>{if(focus&&store)document.querySelector(`[data-batch="${CSS.escape(focus)}"]`)?.scrollIntoView({block:'center'});},[focus,store]);
-  return <div className="pm-surface"><div className="px-4 pt-3"><h2 className="font-semibold">Lịch sử nhập kho · {kindLabel}</h2><p className="pm-muted text-xs">Mỗi dòng là một đợt mua / nhận hàng. Nhập bổ sung vào đợt không tạo đợt mới và không ghi tiền thêm.</p>{focusMissing&&<p className="pm-review text-xs mt-1">Không có đợt {focus} trong {kindLabel}.</p>}</div><div className="pm-table-scroll"><table className="pm-table"><thead><tr><th>Đợt nhập</th><th>Loại</th><th>Nguồn · ngày mua</th><th>SL thực mua · đã nhận</th>{store?.rights.money&&<th>Tiền thực trả</th>}<th>Chi phí</th><th></th></tr></thead>
-    <tbody>{rows.map(b=><tr key={b.id} data-batch={b.code} aria-current={b.code===focus||undefined} className={b.code===focus?'pm-row-focus':undefined}><td><button className="underline pm-code" title="Xem tài khoản của đợt này" onClick={()=>onOpen(b)}>{b.code}</button></td><td>{b.kind==='PAYPAL'?'PayPal':TYPE[b.type||'']||'Tài khoản'}</td><td>{b.source||'—'} · {b.purchasedAt}</td><td className="whitespace-nowrap" title={b.lineCount+' dòng dán lần đầu'}>{b.paidQuantity??'—'} · {b.received}</td>
-      {store?.rights.money&&<td className="text-xs"><BatchMoney b={b}/></td>}
-      <td>{b.cost==='RECORDED'?<span className="acc-state NEW">Đã ghi chi phí</span>:b.cost==='VOIDED'?<span className="acc-state BLOCKED">Khoản chi đã thu hồi</span>:<span className="acc-state USED">Chưa ghi chi phí</span>}</td>
-      <td><div className="flex gap-1 flex-wrap"><button className="pm-button pm-button-quiet" onClick={()=>onOpen(b)}>Xem tài khoản ({b.received})</button>{(b.kind==='PAYPAL'?store?.rights.writePaypals:store?.rights.writeLogins)&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}{b.costLink&&<Link className="pm-button pm-button-quiet" href={`/costs?cost=${b.costLink.id}&month=${b.costLink.month}`}>Xem ở Chi phí</Link>}</div></td></tr>)}
-      {!rows.length&&<tr><td colSpan={7} className="pm-empty">{store?'Chưa có đợt nhập '+kindLabel+'.':'Đang tải…'}</td></tr>}</tbody></table></div>
+  const money=!!store?.rights.money,cols=money?7:6;
+  const toggle=(id:string)=>setOpen(o=>{const n=new Set(o);if(n.has(id))n.delete(id);else n.add(id);return n;});
+  return <div className="pm-surface"><div className="px-4 pt-3"><h2 className="font-semibold">Lịch sử nhập kho · {kindLabel}</h2><p className="pm-muted text-xs">Mỗi dòng là một đợt mua. Ngày dưới mã đợt là ngày mua. <em>Đã nhập kho</em> là số tài khoản của đợt đang có trên web, không phải số NEW hay số đã gán VM. <em>Chưa ghi</em> chi phí không có nghĩa là chưa thanh toán. Nhập bổ sung không tạo đợt mới và không ghi tiền thêm.</p>{focusMissing&&<p className="pm-review text-xs mt-1">Không có đợt {focus} trong {kindLabel}.</p>}</div>
+    <div className="pm-table-scroll"><table className="pm-table acc-batch-table"><thead><tr><th>Đợt nhập</th><th>Nơi mua</th><th className="num">Số lượng mua</th><th className="num">Đã nhập kho</th>{money&&<th className="num">Tổng tiền mua</th>}<th>Chi phí</th><th>Thao tác</th></tr></thead>
+    <tbody>{rows.map(b=>{const m=money?b.money:null,detail=!!m&&(!!m.original||(!!m.currency&&m.currency!=='USDT')||!!b.notes),isOpen=open.has(b.id),canAppend=b.kind==='PAYPAL'?!!store?.rights.writePaypals:!!store?.rights.writeLogins;
+      return [<tr key={b.id} data-batch={b.code} aria-current={b.code===focus||undefined} className={b.code===focus?'pm-row-focus':undefined}>
+        <td data-label="Đợt nhập"><span className="acc-batch-code">{b.code}</span><span className="acc-batch-sub">{viDate(b.purchasedAt)}{b.kind!=='PAYPAL'&&b.type?<span className="acc-batch-type">{TYPE[b.type]}</span>:null}</span></td>
+        <td data-label="Nơi mua">{b.source||<span className="pm-muted">Chưa ghi</span>}</td>
+        <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?viAmount(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
+        <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}</button></td>
+        {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{viAmount(m.total)} {m.currency}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
+          {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<>≈ {viAmount(m.usdt)} USDT</>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
+        <td data-label="Chi phí">{b.cost==='RECORDED'?(b.costLink?<Link className="acc-state NEW" href={links.costs({cost:b.costLink.id,month:b.costLink.month})} title="Mở khoản chi ở Chi phí">Đã ghi</Link>:<span className="acc-state NEW">Đã ghi</span>):b.cost==='VOIDED'?<span className="acc-state BLOCKED" title="Khoản chi đã thu hồi ở Chi phí">Đã thu hồi</span>:<span className="acc-state USED" title="Chưa ghi khoản chi trên web; không có nghĩa là chưa thanh toán">Chưa ghi</span>}</td>
+        <td data-label="Thao tác"><div className="acc-batch-actions">{canAppend&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}</div></td></tr>,
+        isOpen&&m?<tr key={b.id+':d'} className="acc-batch-detail"><td colSpan={cols}><BatchMoney b={b}/>{b.notes?<div>Ghi chú: {b.notes}</div>:null}<div className="pm-muted">Dán lần đầu {b.lineCount} dòng.</div></td></tr>:null];})}
+      {!rows.length&&<tr><td colSpan={cols} className="pm-empty">{store?'Chưa có đợt nhập '+kindLabel+'.':'Đang tải…'}</td></tr>}</tbody></table></div>
     {costFor&&<BatchCostForm projectId={projectId} batch={costFor} onClose={()=>setCostFor(null)} onSaved={()=>{setCostFor(null);onSaved();}}/>}</div>;
 }
 // Money of a batch as the cost ledger holds it now (total, currency, rate, USDT). The unit × quantity formula shows only while it
 // still equals the ledger total; after an adjustment or void the first price stays visible as history.
 function BatchMoney({b}:{b:Batch}){
   const m=b.money;if(!m)return <>—</>;
-  const first=m.original?`${money(m.original.total)} ${m.original.currency||''}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${money(m.original.unit)})`:''}`:'';
-  return <>{m.total?<>{money(m.total)} {m.currency}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${money(m.unit)})`:''}
-    {m.currency!=='USDT'&&m.rate?<div className="pm-muted">1 USDT = {money(m.rate)} {m.currency}</div>:null}{m.usdt&&m.currency!=='USDT'?<div className="pm-muted">≈ {money(m.usdt)} USDT</div>:null}</>:null}
-    {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':'Giá ban đầu '}{first}</div>}</>;
+  const first=m.original?`${viAmount(m.original.total)} ${m.original.currency||''}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${viAmount(m.original.unit)})`:''}`:'';
+  return <>{m.total?<div>Khoản chi hiện hành: {viAmount(m.total)} {m.currency}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${viAmount(m.unit)})`:''}
+    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {viAmount(m.usdt)} USDT</>:null}</div>:null}
+    {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':b.cost==='VOIDED'?'Khoản chi đã thu hồi · giá ban đầu ':'Giá ban đầu '}{first}</div>}</>;
 }
 // Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought).
 function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){

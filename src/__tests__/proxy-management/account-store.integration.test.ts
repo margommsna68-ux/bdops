@@ -158,6 +158,11 @@ it('batches recorded before the fix that look merged are listed for review; thei
     // A new purchase on the same day gets its own code next to the old one.
     const r=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`n-${u()}@example.invalid|pw`,batch:{purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
     expect(r.batch.code).toBe('TK-2026-10-17-2');
+    // Lịch sử nhập kho: same purchase date → the purchase created last comes first (stable, not by code); no quantity is invented.
+    const later=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`n2-${u()}@example.invalid|pw`,batch:{purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
+    const order=(await readAccountStore(f.scope,db)).batches.filter(b=>b.purchasedAt==='2026-10-17').map(b=>b.code);
+    expect(order.slice(0,3)).toEqual([later.batch.code,'TK-2026-10-17-2','TK-2026-10-17']);
+    expect((await readAccountStore(f.scope,db)).batches.find(b=>b.code===later.batch.code)!.paidQuantity).toBeNull();
     expect((await db.costRecord.findUniqueOrThrow({where:{id:cost.id}})).amount.toString()).toBe('10');
   }finally{await f.cleanup();}
 });

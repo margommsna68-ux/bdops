@@ -22,9 +22,12 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   const [gm,pp,batches,legacyVms]=await Promise.all([
     logins?db.gmailAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,email:true,loginType:true,status:true,notes:true,recoveryEmail:true,revision:true,createdAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
     paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,firstEarnAppId:true,_count:{select:{gmails:true}},earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
-    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{code:'asc'}]}),
+    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),// newest purchase date first; same day: the purchase created last first
+   
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
   ]);
+  // Lịch sử nhập kho order: purchase day (as shown, Asia/Bangkok) newest first; same day: the purchase created last first; then id.
+  batches.sort((a,b)=>dayText(b.purchasedAt).localeCompare(dayText(a.purchasedAt))||b.createdAt.getTime()-a.createdAt.getTime()||(a.id<b.id?1:a.id>b.id?-1:0));
   const batchOf=new Map(batches.map(b=>[b.id,b]));
   // The current cost record in Chi phí is what was actually paid: amount, currency, rate, USDT and state come from it, never from
   // the batch's first price (kept as history only, shown when the cost was adjusted or voided). Nothing is recomputed or written.

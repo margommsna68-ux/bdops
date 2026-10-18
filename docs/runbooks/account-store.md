@@ -143,3 +143,20 @@ creates, merges and deletes nothing.
 - **Review data:** `readAccountStore().review[]` carries `group` (LOGIN / PAYPAL), `subject`, `reason` and `open`
   (`vm` / `account` / `batch`); `message` is kept for older readers. Items follow the member's rights (PayPal-only members never
   get login items).
+
+## Lịch sử nhập kho layout (18 October 2026, later)
+
+- **Columns:** Đợt nhập | Nơi mua | Số lượng mua | Đã nhập kho | Tổng tiền mua | Chi phí | Thao tác.
+  - **Đợt nhập:** the full code on one line; below it the purchase date (dd/MM/yyyy, the day bought, not the import day) and,
+    for logins, a small Gmail / Apple ID label.
+  - **Nơi mua and Số lượng mua:** shown as recorded, or *Chưa ghi*. The quantity is never filled from the import count.
+  - **Đã nhập kho:** the accounts of the purchase in the web stock (not delivered-confirmed, NEW or assigned). Clicking the
+    number opens them (same kind, `?batch=`).
+  - **Tổng tiền mua:** the current cost record in its own currency, right-aligned, Vietnamese format with every significant
+    decimal (`batch-format.ts`). Non-USDT amounts add ≈ USDT. *Chi tiết* opens under the row: rate, first price after an
+    adjustment or void, notes, lines pasted first. Hidden without the money right.
+  - **Chi phí:** *Đã ghi* (links to the cost when the member may see money), *Chưa ghi* (not recorded; does not mean unpaid) or
+    *Đã thu hồi*.
+  - **Thao tác:** *Nhập bổ sung*, and *Ghi chi phí* when no cost is recorded and the member may write costs; no ⋯ menu.
+- **Order:** purchase day (Asia/Bangkok) newest first; same day, the purchase created last first; then id (`readAccountStore`).
+- **Size:** rows 56–80px and no horizontal scroll at 1280px. Under 640px each purchase is a labelled card.
