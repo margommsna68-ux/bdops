@@ -35,15 +35,27 @@ export function checkTransfer(input:TransferCheckInput){
   if(typeof rfee==='string')errors.receiverFee=rfee;
   if(same&&rate!==null)errors.rate='Cùng đồng tiền '+cur+': không ghi tỷ giá';
   else if(!same&&typeof rate==='string')errors.rate=rate;
-  else if(!same&&rate===null&&(received!==null||input.type==='MIXING'))errors.rate='Khác đồng tiền: ghi tỷ giá thực dùng (1 '+cur+' = ? '+rc+')';
+  else if(!same&&rate===null&&(received!==null||rfee!==null||input.type==='MIXING'))errors.rate='Khác đồng tiền: ghi tỷ giá thực dùng (1 '+cur+' = ? '+rc+')';
   let expected:bigint|null=null;
   if(typeof debited==='bigint'&&typeof fee!=='string'&&!errors.fee&&(same||typeof rate==='bigint')&&typeof rfee!=='string'){
     const net=debited-(fee??BigInt(0)),gross=same?net:(net*(rate as bigint)+RATE_SCALE/BigInt(2))/RATE_SCALE;
     expected=gross-(rfee??BigInt(0));
     if(expected<=BigInt(0)){errors.receiverFee='Phí bên nhận phải nhỏ hơn '+viCents(gross)+' '+rc;expected=null;}
   }
-  if(received===null){if(input.type==='MIXING'&&!errors.received)errors.received='Chuyển nội bộ: ghi số bên nhận thực nhận'+(expected!==null?' ('+viCents(expected)+' '+rc+')':'');}
+  if(received===null){if((input.type==='MIXING'||rfee!==null)&&!errors.received)errors.received=(input.type==='MIXING'?'Chuyển nội bộ: ghi số bên nhận thực nhận':'Có phí bên nhận: ghi số bên nhận thực nhận')+(expected!==null?' ('+viCents(expected)+' '+rc+')':'');}
   else if(typeof received==='bigint'&&expected!==null&&received!==expected)
     errors.received='Bên nhận phải nhận '+viCents(expected)+' '+rc+' = ('+viCents(debited as bigint)+' − phí '+viCents((fee as bigint|null)??BigInt(0))+')'+(same?'':' × '+String(input.rate).trim())+(rfee?' − phí bên nhận '+viCents(rfee as bigint):'')+'. Sửa số nhận'+(same?' hoặc phí':', phí hoặc tỷ giá')+(rfee?'':'; nếu bên nhận bị trừ phí riêng, ghi ở Phí bên nhận');
   return {errors,expected:expected===null?null:centsText(expected),receivedCurrency:rc,same};
+}
+// TransferForm state (UI review 18/10/2026): while the received amount is untyped it is derived whenever it must be stated (internal
+// transfer, other currency, or a receiver fee typed); a typed amount is the user's and only checked. Every typed value is sent, so
+// the server refuses what does not add up instead of the form dropping it.
+export interface TransferDraftInput {type:'EXCHANGE'|'MIXING';currency:string;recvCur:string;debited:string;fee:string;rate:string;recvFee:string;received:string;auto:boolean}
+export function transferDraft(d:TransferDraftInput){
+  const rc=(d.recvCur||d.currency).toUpperCase(),same=rc===d.currency.toUpperCase(),hasFee=!!d.recvFee.trim();
+  const base={type:d.type,currency:d.currency,receivedCurrency:rc,debited:d.debited,fee:d.fee,rate:same?null:d.rate,receiverFee:d.recvFee};
+  const computed=checkTransfer({...base,received:null}).expected,autoOn=d.auto&&(d.type==='MIXING'||!same||hasFee),shown=autoOn?computed||'':d.received;
+  const sent=!!shown.trim(),errors=checkTransfer({...base,received:shown||null}).errors;
+  const payload={received:sent?shown.trim():null,receivedCurrency:sent||d.type==='MIXING'||hasFee?rc:null,rate:(sent||hasFee)&&!same?d.rate.trim()||null:null,receiverFee:d.recvFee.trim()||null};
+  return {rc,same,computed,autoOn,shown,sent,errors,payload};
 }

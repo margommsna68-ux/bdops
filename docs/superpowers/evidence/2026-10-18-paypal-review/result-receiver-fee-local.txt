@@ -1,0 +1,12 @@
+PASS Mặc định Rút / chuyển ra ngoài, USD → USD — 
+PASS Chưa nhập phí bên nhận: ô số nhận để trống như trước — 
+PASS Nhập phí bên nhận 2: số nhận tự tính 28.00 — 28.00
+PASS Không lỗi, Lưu bật — 
+PASS Bản ghi sau lưu: trừ 31, phí nguồn 1, phí bên nhận 2, nhận 28 USD — {"debited":"31","sourceFee":"1","receiverFee":"2","received":"28","receivedCurrency":"USD","rate":null}
+PASS Gõ tay 29: giữ 29, lỗi tại ô “phải nhận 28,00 USD”, Lưu khoá, không dialog — 
+PASS Đổi phí bên nhận khi đang gõ tay: không ghi đè 29, lỗi cập nhật 27,00 — 29
+PASS Phí bên nhận + khác đồng tiền chưa có tỷ giá: báo tại ô tỷ giá và số nhận, Lưu khoá — Khác đồng tiền: ghi tỷ giá thực dùng (1 USD = ? VND) Phí bên nhận (nếu có, VND) Bên nhận thực nhận (nếu biết) Có phí bên nhận: ghi số bên nhận thực nhận Mã giao dịch (nếu có) Ghi chú rft37dq bị trừ 31,00 USD (gồm phí 1,00)
+PASS Không có bản ghi nào được ghi ở ca 2 — 
+PASS Lưu bật, ô nhận trống — 
+PASS Bản ghi: trừ 20, phí 1, không phí bên nhận, chưa biết số nhận — {"debited":"20","sourceFee":"1","receiverFee":null,"received":null,"receivedCurrency":null,"rate":null}
+TỔNG: 11 PASS, 0 FAIL

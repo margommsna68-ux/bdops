@@ -9,7 +9,7 @@ import {trpc} from '@/lib/trpc';
 import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {viMoney as viAmount} from './batch-format';
-import {checkTransfer} from '@/lib/paypal-transfer';
+import {transferDraft} from '@/lib/paypal-transfer';
 import type {AccountUrl,PaypalShow} from './account-url';
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
 type Paypal=Store['paypals'][number];
@@ -146,12 +146,9 @@ function ReceiptForm({projectId,pp,onClose,onSaved}:{projectId:string;pp:Paypal;
 function TransferForm({projectId,pp,store,onClose,onSaved}:{projectId:string;pp:Paypal;store:Store|undefined;onClose:()=>void;onSaved:()=>void}){
   const [type,setType]=useState<'EXCHANGE'|'MIXING'>('EXCHANGE'),[date,setDate]=useState(today()),[currency,setCurrency]=useState('USD'),[debited,setDebited]=useState(''),[fee,setFee]=useState(''),[dest,setDest]=useState(''),[received,setReceived]=useState(''),[auto,setAuto]=useState(true),[recvCur,setRecvCur]=useState(''),[rate,setRate]=useState(''),[recvFee,setRecvFee]=useState(''),[txid,setTxid]=useState(''),[notes,setNotes]=useState(''),[distinct,setDistinct]=useState(false);
   const save=trpc.accountStore.transferRecord.useMutation(),[err,setErr]=useState(''),[keyFor,setKeyFor]=useState<{sig:string;key:string}|null>(null),[uncertain,setUncertain]=useState(false);
-  const rc=(recvCur||currency).toUpperCase(),same=rc===currency,destCode=store?.paypals.find(x=>x.id===dest)?.code;
-  const base={type,currency,receivedCurrency:rc,debited,fee,rate:same?null:rate,receiverFee:recvFee};
-  const computed=checkTransfer({...base,received:null}).expected,autoOn=auto&&(type==='MIXING'||!same),shown=autoOn?computed||'':received;
-  const c=checkTransfer({...base,received:shown||null}),e=c.errors,hasErr=Object.keys(e).length>0;
-  const sent=!!shown.trim();
-  const input={projectId,paypalId:pp.id,type,date,currency,debited:debited.trim(),fee:fee.trim()||null,destPaypalId:type==='MIXING'?dest||null:null,received:sent?shown.trim():null,receivedCurrency:sent||type==='MIXING'?rc:null,rate:sent&&!same?rate.trim()||null:null,receiverFee:sent?recvFee.trim()||null:null,transactionId:txid.trim()||null,notes:notes.trim()||null,distinct};const sig=JSON.stringify(input);
+  const destCode=store?.paypals.find(x=>x.id===dest)?.code;
+  const {rc,same,computed,autoOn,shown,sent,errors:e,payload}=transferDraft({type,currency,recvCur,debited,fee,rate,recvFee,received,auto}),hasErr=Object.keys(e).length>0;
+  const input={projectId,paypalId:pp.id,type,date,currency,debited:debited.trim(),fee:fee.trim()||null,destPaypalId:type==='MIXING'?dest||null:null,...payload,transactionId:txid.trim()||null,notes:notes.trim()||null,distinct};const sig=JSON.stringify(input);
   async function run(){
     if(hasErr)return;const key=keyFor?.sig===sig?keyFor.key:crypto.randomUUID();setKeyFor({sig,key});setErr('');
     try{await save.mutateAsync({...input,key});toast.success('Đã ghi '+(type==='MIXING'?'chuyển nội bộ':'rút / chuyển')+' từ '+pp.code);setUncertain(false);onSaved();onClose();}
@@ -168,12 +165,12 @@ function TransferForm({projectId,pp,store,onClose,onSaved}:{projectId:string;pp:
       <label className="pm-label text-xs">Phí nguồn (đã nằm trong tổng, {currency})<input className="pm-input" inputMode="decimal" placeholder="0" aria-invalid={!!e.fee} value={fee} disabled={lock} onChange={x=>setFee(x.target.value)}/>{fe('fee')}</label>
       {type==='MIXING'&&<label className="pm-label text-xs">PP nhận<select className="pm-input" value={dest} disabled={lock} onChange={x=>setDest(x.target.value)}><option value="">Chọn PP nhận</option>{(store?.paypals||[]).filter(x=>x.id!==pp.id).map(x=><option key={x.id} value={x.id}>{x.code}</option>)}</select></label>}
       <label className="pm-label text-xs">Đồng tiền bên nhận<input className="pm-input" list="pp-currencies" value={recvCur||currency} disabled={lock} onChange={x=>setRecvCur(x.target.value.toUpperCase().slice(0,5))}/></label>
-      {!same&&<label className="pm-label text-xs">Tỷ giá thực dùng: 1 {currency} = ? {rc}<input className="pm-input" inputMode="decimal" aria-invalid={!!e.rate} value={rate} disabled={lock} onChange={x=>setRate(x.target.value)}/>{fe('rate',!!rate||sent||type==='MIXING'&&!!debited&&!e.debited)}</label>}
+      {!same&&<label className="pm-label text-xs">Tỷ giá thực dùng: 1 {currency} = ? {rc}<input className="pm-input" inputMode="decimal" aria-invalid={!!e.rate} value={rate} disabled={lock} onChange={x=>setRate(x.target.value)}/>{fe('rate',!!rate||sent||(type==='MIXING'||!!recvFee.trim())&&!!debited&&!e.debited)}</label>}
       {same&&fe('rate')}
       <label className="pm-label text-xs">Phí bên nhận (nếu có, {rc})<input className="pm-input" inputMode="decimal" placeholder="0" aria-invalid={!!e.receiverFee} value={recvFee} disabled={lock} onChange={x=>setRecvFee(x.target.value)}/>{fe('receiverFee')}</label>
       <label className="pm-label text-xs">{type==='MIXING'?'Bên nhận thực nhận':'Bên nhận thực nhận (nếu biết)'}<input className="pm-input" inputMode="decimal" aria-label="Bên nhận thực nhận" aria-invalid={!!e.received&&(sent||!!debited)} value={shown} disabled={lock} onChange={x=>{setReceived(x.target.value);setAuto(!x.target.value.trim());}}/>
         {autoOn&&computed?<span className="text-xs pm-muted">Tự tính từ tổng − phí{same?'':' × tỷ giá'}{recvFee.trim()?' − phí bên nhận':''}; gõ số khác nếu thực nhận khác</span>:null}
-        {fe('received',sent||type==='MIXING'&&!!debited&&!e.debited)}
+        {fe('received',sent||(type==='MIXING'||!!recvFee.trim())&&!!debited&&!e.debited)}
         {typedReceived&&computed&&received.trim()!==computed&&e.received?<button type="button" className="pm-link text-xs self-start" disabled={lock} onClick={()=>{setReceived('');setAuto(true);}}>Dùng số tính được ({viAmount(computed)} {rc})</button>:null}</label>
       <label className="pm-label text-xs">Mã giao dịch (nếu có)<input className="pm-input" value={txid} disabled={lock} onChange={x=>setTxid(x.target.value)}/></label>
       <label className="pm-label text-xs">Ghi chú<input className="pm-input" value={notes} disabled={lock} onChange={x=>setNotes(x.target.value)}/></label>

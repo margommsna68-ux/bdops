@@ -219,6 +219,7 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
     - a fee taken on the receiving side is the explicit field "Phí bên nhận" (`receiverFeeAmount`, receiving currency).
     - A stated received amount that does not match is refused with the right number.
   - In the form, the received amount is computed live until the person types it. A typed value is kept and only checked, with "Dùng số tính được" next to the error.
+  - A receiver fee needs a received amount: on a withdrawal outside, typing "Phí bên nhận" makes the form compute the received amount too (31 − 1 − 2 = 28), and the fee is always sent, never dropped. When it cannot be computed (no rate for another currency) the field shows the error and Lưu stays off. A withdrawal with neither a receiver fee nor a known received amount saves as before. Form state: `transferDraft` in the same file.
   - Both sides are one row, so they never look like two events.
   - `paidToTeam` is not used as proof that the PayPal paid.
   - The old one-amount form refuses to edit v2 rows; void and record again instead.

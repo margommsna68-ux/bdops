@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {checkTransfer} from '@/lib/paypal-transfer';
+import {checkTransfer,transferDraft} from '@/lib/paypal-transfer';
 // One rule for TransferForm and recordTransfer (review 18/10/2026): the fee is in the source currency and inside the total debited;
 // received = round_half_up((debited − fee) × rate, 2) − receiver fee; same currency: rate 1.
 const base={type:'MIXING' as const,currency:'USD',receivedCurrency:'USD',debited:'31',fee:'1',received:null as string|null,rate:null as string|null,receiverFee:null as string|null};
@@ -32,5 +32,25 @@ describe('checkTransfer',()=>{
     expect(checkTransfer({...base,type:'EXCHANGE'}).errors).toEqual({});// out to outside: received only if known
     expect(checkTransfer({...base,type:'EXCHANGE',received:'31'}).errors.received).toBeTruthy();
     expect(checkTransfer({...base,rate:'2',received:'30'}).errors.rate).toBeTruthy();// same currency takes no rate
+  });
+});
+// UI review 18/10/2026: a withdrawal outside, USD → USD, debited 31, source fee 1, receiver fee 2, received left blank, saved
+// receiverFee=null / received=null. The form must derive 28 and send both, never drop a typed value.
+describe('transferDraft (TransferForm)',()=>{
+  const d={type:'EXCHANGE' as const,currency:'USD',recvCur:'',debited:'31',fee:'1',rate:'',recvFee:'2',received:'',auto:true};
+  it('a typed receiver fee derives the received amount and both are sent: 31 − 1 − 2 = 28',()=>{
+    const r=transferDraft(d);expect(r.shown).toBe('28.00');expect(r.errors).toEqual({});
+    expect(r.payload).toMatchObject({received:'28.00',receiverFee:'2',receivedCurrency:'USD',rate:null});
+  });
+  it('keeps a hand-typed received amount and reports the mismatch at the field',()=>{
+    const r=transferDraft({...d,received:'29',auto:false});expect(r.shown).toBe('29');expect(r.errors.received).toMatch(/28,00 USD/);
+  });
+  it('a receiver fee that cannot be computed blocks at a field and is never dropped',()=>{
+    const r=transferDraft({...d,recvCur:'VND'});expect(r.errors.rate).toBeTruthy();expect(r.payload.receiverFee).toBe('2');
+    expect(checkTransfer({type:'EXCHANGE',currency:'USD',debited:'31',fee:'1',receiverFee:'2'}).errors.received).toMatch(/28,00 USD/);
+  });
+  it('a withdrawal with no receiver fee and no known received amount still saves as before',()=>{
+    const r=transferDraft({...d,recvFee:''});expect(r.shown).toBe('');expect(r.errors).toEqual({});
+    expect(r.payload).toMatchObject({received:null,receiverFee:null,receivedCurrency:null});
   });
 });

@@ -66,3 +66,15 @@ Kịch bản người kiểm: `.runtime/paypal-independent-review-20261018.ts` (
 - Chưa giả lập mất mạng khi lưu trên trình duyệt; phát lại cùng khoá đã kiểm ở server.
 - Đổi đồng tiền nguồn (không phải USD) trên trình duyệt chưa bấm; quy tắc giống nhau và có test.
 - Host chưa có PayPal: các luồng tiền chỉ kiểm trên dữ liệu thử cục bộ.
+
+## Lỗi còn lại: phí bên nhận bị bỏ khi rút ra ngoài (18/10/2026, kiểm độc lập UI)
+
+- **Trước:** Rút ra ngoài USD → USD, trừ 31, phí nguồn 1, phí bên nhận 2, để trống số nhận → lưu thành công với `receiverFee=null, received=null`. Form chỉ tự tính số nhận khi chuyển nội bộ hoặc khác đồng tiền, và chỉ gửi phí bên nhận khi có số nhận.
+- **Sửa:** logic form chuyển vào `transferDraft` trong `src/lib/paypal-transfer.ts` (test được). Có phí bên nhận thì số nhận tự tính như chuyển nội bộ; phí bên nhận luôn được gửi. Quy tắc chung báo "Có phí bên nhận: ghi số bên nhận thực nhận" và đòi tỷ giá khi khác đồng tiền, nên không tính được thì lỗi tại ô và Lưu khoá. Backend không nới.
+- **Test:** 4 test mới trong `paypal-transfer-rule.test.ts`, đỏ trước sửa; toàn bộ 383/383, typecheck, lint, build.
+- **Trình duyệt, dữ liệu thử cục bộ** (`result-receiver-fee-local.txt`, 11/11, đọc bản ghi sau lưu):
+  - 31 / 1 / 2 → ô nhận tự hiện 28.00; bản ghi `debited 31, sourceFee 1, receiverFee 2, received 28 USD` (`rf1-derived-28.png`).
+  - Gõ tay 29 → giữ 29, lỗi "phải nhận 28,00 USD", Lưu khoá; đổi phí bên nhận thành 3 vẫn giữ 29, lỗi thành 27,00 (`rf2-typed-mismatch.png`).
+  - Phí bên nhận + đồng tiền nhận VND chưa có tỷ giá → lỗi tại ô tỷ giá và ô số nhận, Lưu khoá, không ghi gì (`rf3-fee-no-rate.png`).
+  - Không phí bên nhận, không biết số nhận (trừ 20, phí 1) → lưu được, bản ghi `receiverFee null, received null`.
+- **Hồi quy trình duyệt:** 24/24 (ô tiền trống, phí / tỷ giá, phạm vi ngày), 30/30 (PayPal email và sổ; nhãn ô cũ trong kịch bản đã cập nhật), 80/80 (luồng 18/10).
