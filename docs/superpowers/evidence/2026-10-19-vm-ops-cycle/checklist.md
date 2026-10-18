@@ -52,3 +52,15 @@ Lỗi tìm ra khi kiểm và đã sửa trước khi phát hành:
 - **Cấu hình proxy giữ lại:** cần cài và xác nhận lại ở lượt mới. Bước xác nhận dùng luồng cài hiện có.
 - **Proxy BLOCKED khi tạo lại:** web để nguyên cấu hình cũ cho luồng thay proxy; bản cài cũ vẫn hiện "Đã cài" cho tới khi thay.
 - **Endpoint cho AI:** dùng chung `vmOps.*` với phiên đăng nhập; chưa có token riêng (ngoài phạm vi đợt này).
+
+## Phát hành
+
+- **Commit:** `df02f8b` (backend) và `debbde5` (giao diện, tài liệu).
+- **Backup host trước deploy:** `846718ee`.
+- **Deploy:** `13374c2a`, SUCCESS. Migration `20261019090000_vm_cycle_payout` (chỉ thêm) chạy ở bước pre-deploy.
+- **Host verify chỉ đọc:** 10 server / 576 VM.
+- **Host xem đọc** (`host-result.txt`, `h1-host-servers.png`):
+  - Cột Tình trạng nằm sau VM; 576 VM đều "Chưa ghi"; ô Rút tiền hiện "Chưa có EarnApp".
+  - Sort và lọc theo URL; tab lịch sử VM; Kho PayPal.
+  - Chỉ có `user.verifyPin` và `user.heartbeat`, không ghi dữ liệu.
+  - Một role=alert là route announcer của Next.js.

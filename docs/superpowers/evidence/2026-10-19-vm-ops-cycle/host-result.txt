@@ -1,0 +1,9 @@
+Cột: SERVER | VM | TÌNH TRẠNG | PROXY | SDK | TÀI KHOẢN EARNAPP | PAYPAL NHẬN | RÚT TIỀN | CÀI PROXY | GHI CHÚ
+Lọc tình trạng: Tình trạng: Chưa ghi 576 Proxy / tiền:
+Tình trạng dòng đầu: Chưa ghi
+Ô Rút tiền dòng đầu: Chưa có EarnApp
+URL sort/lọc: /infrastructure/servers?sort=PRIORITY&st=NONE · Dòng 1–100 / 576 VM
+Lịch sử VM: Lượt vận hành đã đóng Chưa tạo lại lần nào (lượt 1). Yêu cầu rút EarnApp Chưa có yêu cầu rút. Tình trạng đã ghi Chưa ghi tình trạng (Chưa ghi). Lịch sử SDK THỜI GIAN NGƯỜI GHI SDK CŨ SDK MỚI Chưa có lịch sử SDK. Mọi thao tác ghi đều có ở Lịc
+Kho PayPal: Kho tài khoản Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng Server / VM; một VM một tài khoản EarnApp; mỗi EarnAp
+Lỗi JS: 0 · role=alert: 1
+tRPC writes: user.verifyPin,user.heartbeat
