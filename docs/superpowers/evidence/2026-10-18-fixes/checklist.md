@@ -67,3 +67,20 @@ Kết quả: `result-local.txt`, **80/80**. Không quay video; ảnh nằm cùng
 - Dự án chế độ cũ có dữ liệu thật: chỉ kiểm dự án cũ trống ở máy cục bộ.
 - Lỗi thật của máy chủ tài chính: chỉ giả lập bằng cách chặn phản hồi trên trình duyệt; test tự động giả lập lỗi bảng nhận tiền.
 - Theme: chỉ chụp Tổng quan và Kho tài khoản, chưa duyệt mọi trang.
+
+## Phát hành
+
+- **Commit:** `accb334`, không có migration.
+- **Backup host trước deploy:** `0cf66976`.
+- **Deploy:** `dea20433`, SUCCESS.
+- **Host verify:** 10 server / 576 VM.
+- **Host xem chỉ đọc trên mooon** (`host-result.txt`, ảnh `h1`–`h3`):
+  - Menu: Tổng quan · Kho tài khoản · Kho proxy · Server / VM · …
+  - Bấm số 553 trên thanh LIVE của TUT → `?group=TUT&state=LIVE`, 553 dòng (lỗi đã tái hiện trước đây).
+  - Bấm số 69 trên thanh VM → đúng server, Chờ cài, 69 VM.
+  - Bấm phần màu → đúng nhóm/trạng thái.
+  - Kho proxy trang 2 → Server / VM → Back: trang 2 (`Dòng 101–200`); tải lại vẫn trang 2.
+  - Kho tài khoản: hai tab, "Lịch sử nhập kho (1)", không có cảnh báo đối chiếu (0 mục).
+  - `/gmails?tab=batch` → `?view=history`; `/paypals?tab=review` → `?view=review`; `/paypals` → tab PayPal.
+  - Phần tài chính chưa kiểm trên host vì mooon chưa bật thu chi USDT.
+- **Ghi dữ liệu trên host:** chỉ xác thực PIN và heartbeat phiên. Sheet và production cũ giữ nguyên.

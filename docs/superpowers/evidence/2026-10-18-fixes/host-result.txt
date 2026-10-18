@@ -1,0 +1,13 @@
+menu: Tổng quan | Kho tài khoản | Kho proxy | Server / VM | Nhận USDT về team | Tiền vào PayPal | Rút / chuyển gốc | Chi phí | Lợi nhuận | Lịch sử thao tác | Nhân viên | Dự án | Thiết lập
+Thứ tự đầu menu đúng: true
+Bấm số 553 trên thanh Kho proxy → /infrastructure/proxies?group=TUT&state=LIVE · 553 dòng KHỚP
+Bấm số 69 trên thanh VM → /infrastructure/servers/cmv92zv4l0c8n10hwc2fg8oge?view=PENDING · 69 VM KHỚP
+Bấm phần màu Kho proxy → /infrastructure/proxies?group=TUT&state=NEW
+Trang 2: /infrastructure/proxies?page=2 · Dòng 1–100 / 1261 · Trang 1/13
+Back: /infrastructure/proxies?page=2 · Dòng 101–200 / 1261 · Trang 2/13
+Tải lại: /infrastructure/proxies?page=2 · Dòng 101–200 / 1261 · Trang 2/13
+Tab: Gmail / Apple ID (5) | PayPal (0) · phụ: Lịch sử nhập kho (1)
+/gmails?tab=batch → /gmails?view=history · tab Gmail / Apple ID (5)
+/paypals?tab=review → /paypals?view=review · tab PayPal (0)
+/paypals → /paypals · tab PayPal (0)
+tRPC writes: user.verifyPin,user.heartbeat
