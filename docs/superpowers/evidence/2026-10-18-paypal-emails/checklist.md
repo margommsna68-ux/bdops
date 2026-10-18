@@ -79,3 +79,15 @@ Tổng cộng 370/370 test, cùng typecheck, lint (0 lỗi) và build.
 - Nhiều đồng tiền và số dư đầu kỳ trên trình duyệt: mới kiểm trong test tích hợp, chưa bấm qua giao diện.
 - Mất phản hồi khi lưu ("Thử lại" với cùng khoá): đã kiểm phát lại cùng khoá ở server; chưa giả lập mất mạng trên trình duyệt.
 - Dán bảng tài khoản ở Server/VM vẫn bấm Xem trước rồi Áp dụng (yêu cầu bỏ xem trước chỉ áp cho Kho tài khoản và giao dịch PayPal).
+
+## Phát hành
+
+- **Commit:** `4d4fd52`.
+- **Backup host trước deploy:** `8d03d798`.
+- **Deploy:** `8a6c47cd`, SUCCESS. Migration `20261018120000_paypal_email_usage` chạy ở bước pre-deploy.
+- **Host verify:** 10 server / 576 VM.
+- **Host xem chỉ đọc** (`host-result.txt`, `h1`, `h2`):
+  - Tab PayPal (0) có đủ cột Mã PP · Email đã dùng / còn dùng được · Tiền vào · Tiền ra · Còn lại theo sổ · Tình trạng · Thao tác.
+  - Lịch sử nhập kho Gmail giữ bố cục mới: TK-2026-10-18-1 · 18/10/2026 · 1trieumail · Chưa ghi · 5 · 2,12 USDT · Đã ghi.
+  - Ô tài khoản ở Server/VM có hai bước chọn Mã PP và Email.
+  - Chỉ có xác thực PIN và heartbeat; không ghi dữ liệu, không dùng ví dụ để ghi vào host. Sheet và production cũ giữ nguyên.
