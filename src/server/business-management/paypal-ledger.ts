@@ -58,7 +58,7 @@ async function classifyReceipts(db:Db,scope:ActorScope,input:ReceiptInput){
   const date=dayDate(input.date),currency=currencyOf(input.currency),lines=parseReceiptLines(input.text);
   if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng: Email | Số tiền | Mã giao dịch');
   const pp=await db.payPalAccount.findFirst({where:{id:input.paypalId,projectId:scope.projectId},select:{id:true,code:true,archivedAt:true}});if(!pp||pp.archivedAt)throw new ProxyDomainError('NOT_FOUND','PayPal không còn trong kho');
-  const emails=await db.payPalEmail.findMany({where:{paypalId:pp.id,projectId:scope.projectId},select:{id:true,email:true,earnApp:{select:{id:true,vmId:true,vm:{select:{serverId:true}}}}}}),byEmail=new Map(emails.map(e=>[e.email.toLowerCase(),e]));
+  const emails=await db.payPalEmail.findMany({where:{paypalId:pp.id,projectId:scope.projectId},select:{id:true,email:true,earnApp:{select:{id:true,vmId:true,vm:{select:{serverId:true}},payoutRequest:{select:{id:true,paypalEmailId:true,state:true,requestedAt:true}}}}}}),byEmail=new Map(emails.map(e=>[e.email.toLowerCase(),e]));
   const ids=lines.map(l=>l.transactionId).filter((x):x is string=>!!x);
   const [usedIds,sameDay]=await Promise.all([ids.length?db.fundTransaction.findMany({where:{projectId:scope.projectId,transactionId:{in:ids}},select:{transactionId:true,date:true,paypal:{select:{code:true}}}}):Promise.resolve([]),
     db.fundTransaction.findMany({where:{projectId:scope.projectId,paypalId:pp.id,voidedAt:null,date,currency,entryKind:'RECEIPT'},select:{paypalEmailId:true,amount:true,transactionId:true,noTxId:true}})]);
@@ -97,7 +97,10 @@ export async function recordReceipts(scope:ActorScope,input:ReceiptInput&{key:st
     for(const row of ready){
       const e=r.byEmail.get(row.email)!;
       // The payment keeps the EarnApp / VM using this email at the time it is recorded (none = not assigned; nothing is assigned).
-      const f=await tx.fundTransaction.create({data:{projectId:scope.projectId,date:r.date,amount:D(row.amount!),currency:r.currency,transactionId:row.transactionId||'WEB-'+input.key+'-'+row.line,noTxId:!row.transactionId,confirmed:input.status==='RECEIVED',failed:false,company:'',paypalId:r.pp.id,paypalEmailId:e.id,earnAppId:e.earnApp?.id??null,vmId:e.earnApp?.vmId??null,serverId:e.earnApp?.vm?.serverId??null,entryKind:'RECEIPT',distinctConfirmed:(input.distinct||[]).includes(row.line),businessManaged:true,createdById:scope.userId}});
+      // Money for the payout request of that EarnApp through this same email, on or after the request day, belongs to it (that is
+      // the evidence: same EarnApp, same email). Anything else stays unlinked; nothing is matched later by guessing.
+      const req=e.earnApp?.payoutRequest,payoutRequestId=req&&req.paypalEmailId===e.id&&req.state!=='CANCELLED'&&r.date>=dayDate(dayText(req.requestedAt))?req.id:null;
+      const f=await tx.fundTransaction.create({data:{payoutRequestId,projectId:scope.projectId,date:r.date,amount:D(row.amount!),currency:r.currency,transactionId:row.transactionId||'WEB-'+input.key+'-'+row.line,noTxId:!row.transactionId,confirmed:input.status==='RECEIVED',failed:false,company:'',paypalId:r.pp.id,paypalEmailId:e.id,earnAppId:e.earnApp?.id??null,vmId:e.earnApp?.vmId??null,serverId:e.earnApp?.vm?.serverId??null,entryKind:'RECEIPT',distinctConfirmed:(input.distinct||[]).includes(row.line),businessManaged:true,createdById:scope.userId}});
       await images.remember('FUND',f.id,true);
       // A payment on an email is a use that later undo of its first assignment must not erase.
       if(!bumped.has(e.id)){bumped.add(e.id);await images.remember('PAYPAL_EMAIL',e.id);await tx.payPalEmail.update({where:{id:e.id},data:{revision:{increment:1}}});}

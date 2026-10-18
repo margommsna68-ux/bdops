@@ -24,6 +24,7 @@ import { proxyManagementRouter } from './proxyManagement';
 import {vmManagementRouter} from './vmManagement';
 import {businessManagementRouter} from './businessManagement';
 import {accountStoreRouter} from './accountStore';
+import {vmOpsRouter} from './vmOps';
 
 export const appRouter = router({
   project: projectRouter,
@@ -40,6 +41,7 @@ export const appRouter = router({
   vmManagement: vmManagementRouter,
   businessManagement:businessManagementRouter,
   accountStore:accountStoreRouter,
+  vmOps:vmOpsRouter,
   gmail: gmailRouter,
   vmTask: vmTaskRouter,
   auditLog: auditLogRouter,

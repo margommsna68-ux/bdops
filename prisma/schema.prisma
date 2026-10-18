@@ -202,6 +202,7 @@ model VirtualMachine {
   gmail         GmailAccount? @relation(fields: [gmailId], references: [id], onDelete: SetNull)
   gmailId       String? // legacy link (before 17 Oct 2026); the current account is EarnAppAccount.vmId
   earnApp       EarnAppAccount?
+  operation     VmOperation?
   proxyHistory  ProxyAssignmentHistory[]
   tasks         VMTask[]
   fundTransactions FundTransaction[]
@@ -602,6 +603,7 @@ model PayPalAccount {
   firstEarnAppId  String?      // history only (rule before 18/10/2026); usage is controlled per email (PayPalEmail.usedEarnAppId)
   earnApps        EarnAppAccount[]
   payouts         EarnAppPayout[]
+  payoutRequests  EarnPayoutRequest[]
   createdById     String?      // user who created this PP
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -650,6 +652,7 @@ model PayPalEmail {
   reviewNote    String?
   earnApp       EarnAppAccount?
   payouts       EarnAppPayout[]
+  payoutRequests EarnPayoutRequest[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -705,6 +708,9 @@ model FundTransaction {
   serverId      String?
   vm            VirtualMachine? @relation(fields: [vmId], references: [id])
   vmId          String?
+  // EarnApp payout request this money belongs to (same EarnApp and receiving email; set when recorded, never guessed later).
+  payoutRequestId String?
+  payoutRequest EarnPayoutRequest? @relation(fields:[payoutRequestId],references:[id],onDelete:Restrict)
   project       Project       @relation(fields: [projectId], references: [id])
   projectId     String
   createdById   String?       // user who created this fund
@@ -718,6 +724,7 @@ model FundTransaction {
   @@index([confirmed])
   @@index([serverId])
   @@index([vmId])
+  @@index([payoutRequestId])
 }
 
 model Withdrawal {
@@ -1267,6 +1274,10 @@ model EarnAppAccount {
   paypalEmailId String? @unique
   paypalEmail PayPalEmail? @relation(fields:[paypalEmailId],references:[id],onDelete:Restrict)
   payouts EarnAppPayout[]
+  payoutRequest EarnPayoutRequest?
+  // Closed when its VM was recreated (or the account was suspended for good): never assigned again, never back to NEW.
+  closedAt DateTime?
+  closedReason String?
   registeredAt DateTime?
   registeredById String?
   revision Int @default(0)
@@ -1293,4 +1304,118 @@ model EarnAppPayout {
   createdById String?
   @@index([projectId,earnAppId])
   @@index([paypalEmailId])
+}
+
+// ═══════════════════════════════════════
+// VM OPERATION CYCLE (owner brief 18/10/2026)
+// ═══════════════════════════════════════
+// Main operating state of a VM position as recorded by a person / AI. Never inferred from SDK, account or proxy data; no row or a
+// null status = "Chưa ghi". cycle = the current install / operating round of this VM position (1 until it is recreated).
+enum VmOpsStatus {
+  OK
+  NOT_LINKED
+  OFF
+  PROXY_BLOCKED
+  LINKED
+  EARN_ERROR
+  SUSPENDED
+  DELETED
+  NEW_VM
+  MAIL_LOGGED
+}
+
+model VmOperation {
+  id String @id @default(cuid())
+  projectId String
+  vmId String @unique
+  vm VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Restrict)
+  cycle Int @default(1)
+  status VmOpsStatus?
+  statusAt DateTime?
+  statusById String?
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// What happened to a VM position: status changes (old → new), recreations, undo. Append-only.
+model VmOpsEvent {
+  id String @id @default(cuid())
+  projectId String
+  vmId String
+  cycle Int
+  kind String // STATUS | RECREATE | UNDO
+  fromStatus VmOpsStatus?
+  toStatus VmOpsStatus?
+  note String?
+  detail Json?
+  actorId String
+  createdAt DateTime @default(now())
+
+  @@index([vmId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+// A closed round of a VM position, written when the VM is recorded as recreated. One closing per (VM, round) and per payout request.
+model VmCycle {
+  id String @id @default(cuid())
+  projectId String
+  vmId String
+  number Int
+  reason String // PAYOUT_RECEIVED | SUSPENDED
+  earnAppId String?
+  loginId String?
+  paypalEmailId String?
+  sdkId String?
+  status VmOpsStatus?
+  desiredConfigurationId String?
+  installedConfigurationId String?
+  proxyKept String? // endpoint kept for the next round (needs a new install confirmation)
+  payoutRequestId String? @unique
+  note String?
+  closedById String
+  closedAt DateTime @default(now())
+
+  @@unique([vmId, number])
+  @@index([projectId])
+}
+
+// The one payout request of an EarnApp account (owner decision 18/10/2026: one EarnApp, one withdrawal). Retries, lost answers and
+// status corrections stay on this row. Money received is the confirmed FundTransaction rows linked to it (the PayPal book); this
+// row only says what was asked for. state is the person's record: REQUESTED, FAILED or CANCELLED (with a note).
+model EarnPayoutRequest {
+  id String @id @default(cuid())
+  projectId String
+  earnAppId String @unique
+  earnApp EarnAppAccount @relation(fields: [earnAppId], references: [id], onDelete: Restrict)
+  vmId String
+  cycle Int
+  paypalId String
+  paypal PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Restrict)
+  paypalEmailId String
+  paypalEmail PayPalEmail @relation(fields: [paypalEmailId], references: [id], onDelete: Restrict)
+  currency String @default("USD")
+  amount Decimal @db.Decimal(12, 2)
+  reference String?
+  requestedAt DateTime
+  requestedById String
+  state String @default("REQUESTED")
+  stateNote String?
+  // Received less than asked and a person stated why (fee / shortfall): settled with that gap, never assumed.
+  settledAt DateTime?
+  settledById String?
+  settleNote String?
+  shortfall Decimal? @db.Decimal(12, 2)
+  // Set when this money was used to record the VM as recreated (one recreation per request).
+  consumedAt DateTime?
+  history Json @default("[]")
+  revision Int @default(0)
+  receipts FundTransaction[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, paypalId])
+  @@index([vmId])
 }

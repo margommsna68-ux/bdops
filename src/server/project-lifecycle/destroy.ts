@@ -16,6 +16,7 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.businessWorkItem.deleteMany({where});
     await tx.earnWithdrawal.deleteMany({where});
     await tx.fundTransaction.deleteMany({where});
+    await tx.earnPayoutRequest.deleteMany({where});await tx.vmOperation.deleteMany({where});await tx.vmOpsEvent.deleteMany({where});await tx.vmCycle.deleteMany({where});
     await tx.agentSale.deleteMany({where});
     await tx.withdrawal.deleteMany({where});
     await tx.agentPaypalEmail.deleteMany({where});

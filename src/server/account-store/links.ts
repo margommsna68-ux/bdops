@@ -54,6 +54,8 @@ async function check(db:VMReader,projectId:string,vm:VMRef,item:{login?:string|n
     if(!login||login.archivedAt)return fail('Tài khoản không còn trong kho');
     if(login.status!=='ACTIVE')return fail('Tài khoản '+login.email+' đang '+login.status+'; không cấp cho VM');
     if(login.earnApp?.vmId)return fail('Tài khoản '+login.email+' đang giữ cho '+at(login.earnApp.vm)+'; bỏ gán ở đó trước, web không tự chuyển');
+    // The EarnApp of a recreated (or permanently suspended) VM round is closed: its login is used up and never given again.
+    if(login.earnApp?.closedAt)return fail('Tài khoản '+login.email+' đã dùng cho một lượt VM đã đóng (tạo lại / SUS); không cấp lại');
     target={id:login.earnApp?.id??null,loginId:login.id,email:login.email,paypalId:login.earnApp?.paypalId??null,paypalEmailId:login.earnApp?.paypalEmailId??null,label:payoutLabel(login.earnApp)};
   }
   let paypalId=target.paypalId,paypalEmailId=target.paypalEmailId,label=target.label;
@@ -178,4 +180,4 @@ export async function markEarnAppRegistered(scope:ActorScope,input:{vmId:string;
     return {id:e.id,changed:true};
   },db);
 }
-export {earnInclude};
+export {earnInclude,check as checkLink,write as writeLink,activeVM};

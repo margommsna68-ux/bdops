@@ -9,6 +9,7 @@ import {withProxyTransaction} from '../proxy-management/transaction';
 import {recordOperation} from '../operation-history/journal';
 import {readImage,type ResourceImage,type OperationSnapshot} from '../operation-history/snapshot';
 import {authorizeVM,requireGenjy,readManagedVMs,type VMReader} from './repository';
+import {moneyOfRequest} from '../vm-ops/ops';
 import {syncAssignmentState} from '../proxy-management/assignment-state';
 import {vmHash,type AllocationInput,type AllocationPreview,type AllocationRow,type ConfigurationSnapshot} from './types';
 async function planAllocation(projectId:string,input:AllocationInput,db:VMReader){
@@ -19,9 +20,13 @@ async function planAllocation(projectId:string,input:AllocationInput,db:VMReader
   if(input.vmIds&&vms.length!==input.vmIds.length||input.serverId&&!await db.server.findFirst({where:{id:input.serverId,projectId,managed:true}}))throw new ProxyDomainError('NOT_FOUND');
   const pool=(input.mode==='MANUAL'?await getManualInventory(projectId,db):await getEligibleInventory(projectId,db)).sort((a,b)=>a.ip.localeCompare(b.ip,undefined,{numeric:true}));
   const rows:AllocationRow[]=[],items:{vmId:string;endpointId:string;reuseInstalled:boolean}[]=[];
+  // A machine recorded as physically deleted, or waiting to be recreated after its payout, is not a ready machine for autofill.
+  const awaiting=input.mode==='AUTO'?new Set((await db.earnPayoutRequest.findMany({where:{vmId:{in:vms.map(v=>v.id)},consumedAt:null,state:'REQUESTED'},include:{receipts:{select:{amount:true,currency:true,confirmed:true,failed:true,voidedAt:true}}}})).filter(r=>r.cycle===(vms.find(v=>v.id===r.vmId)?.operation?.cycle??1)&&moneyOfRequest(r).phase==='RECEIVED').map(r=>r.vmId)):new Set<string>();
   for(const vm of vms){
     const row:AllocationRow={vmId:vm.id,server:vm.server.code,vm:vm.code,outcome:'SKIP',message:'VM chưa đủ điều kiện'};
     if(vm.archivedAt||vm.server.archivedAt){rows.push({...row,message:'Máy đã xoá'});continue;}
+    if(input.mode==='AUTO'&&vm.operation?.status==='DELETED'){rows.push({...row,message:'Máy thực tế đã xoá (VM deleted); không tự điền'});continue;}
+    if(input.mode==='AUTO'&&awaiting.has(vm.id)){rows.push({...row,message:'VM đang chờ tạo lại; ghi nhận tạo lại trước'});continue;}
     if(input.mode==='AUTO'&&(vm.proxySlotState!=='BLANK'||vm.desiredConfigurationId||vm.installedConfigurationId||vm.proxyId||vm.allocations.length)){rows.push({...row,message:'Giữ nguyên: không phải ô proxy trống chưa giao'});continue;}
     let endpoint=pool.find(e=>input.mode==='AUTO'||e.endpointId===input.endpointId),reuseInstalled=false;
     if(input.mode==='MANUAL'&&vm.desiredConfiguration?.endpointId===input.endpointId){rows.push({...row,message:'Proxy đã là cấu hình đang giao'});continue;}
