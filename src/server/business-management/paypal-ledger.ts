@@ -8,6 +8,7 @@ import {assertPeriodOpen} from './period-lock';
 import {dayDate,dayText} from './money';
 import {LEDGER_CURRENCY} from './types';
 import {isEmail} from '../account-store/parse';
+import {checkTransfer,moneyCents,centsText} from '@/lib/paypal-transfer';
 // PayPal ledger (18/10/2026). One book for money on the PayPal accounts, the same rows as Tiền vào PayPal (FundTransaction) and
 // Rút / chuyển (Withdrawal); Kho tài khoản reads it, nothing is copied into a second book.
 // - Money in = money actually received from outside (RECEIPT, status "đã nhận") + internal transfers in (the amount the receiving
@@ -33,10 +34,17 @@ export interface ReceiptLine {line:number;email:string;amount:string|null;transa
 export function parseReceiptLines(text:string):ReceiptLine[]{
   const out:ReceiptLine[]=[];
   for(const [i,raw] of text.replace(/\r/g,'').split('\n').entries()){
-    if(!raw.trim())continue;const c=(raw.includes('\t')?raw.split('\t'):raw.includes('|')?raw.split('|'):raw.trim().split(/\s+/)).map(x=>x.trim()).filter(Boolean);
+    if(!raw.trim())continue;
+    // Tab or | keep every cell in its place, so an empty amount stays empty and the payment id is never read as the amount; only
+    // separators at the very end are ignored. Without tab or |, cells are separated by spaces (an empty cell cannot be written).
+    const sep=raw.includes('\t')?'\t':raw.includes('|')?'|':null,c=sep?raw.split(sep).map(x=>x.trim()):raw.trim().split(/\s+/);
+    if(sep)while(c.length>1&&!c[c.length-1])c.pop();
     if(!out.length&&/^email$/i.test(c[0]||''))continue;
     const email=(c[0]||'').toLowerCase();let amount:string|null=null,error:string|null=null;
-    if(!isEmail(email))error='Cột đầu là email nhận tiền';else if(c.length<2)error='Thiếu số tiền';else if(c.length>3)error='Mỗi dòng: Email | Số tiền | Mã giao dịch (nếu có)';
+    if(!isEmail(email))error=c[0]?'Cột 1 phải là email nhận tiền':'Cột 1 (email) đang trống';
+    else if(c.length>3)error='Thừa cột: mỗi dòng Email | Số tiền | Mã giao dịch (nếu có)';
+    else if(c.length<2)error='Thiếu số tiền (cột 2)';
+    else if(!c[1])error='Ô số tiền (cột 2) đang trống'+(c[2]?'; cột 3 là mã giao dịch, không dùng làm số tiền':'');
     else{try{amount=ledgerAmount(c[1]).toFixed(2);}catch(e){error=(e as Error).message;}}
     const tx=c[2]||null;if(!error&&tx&&tx.length>160)error='Mã giao dịch quá dài';
     out.push({line:i+1,email,amount,transactionId:tx,error});
@@ -110,17 +118,19 @@ export async function recordOpening(scope:ActorScope,input:{paypalId:string;date
   },db);
 }
 // ─── Transfers / withdrawals ───────────────────────────────────────────────────────────────────────────────────────────────
-export interface TransferInput {paypalId:string;type:'EXCHANGE'|'MIXING';date:string;currency:string;debited:string;fee?:string|null;destPaypalId?:string|null;received?:string|null;receivedCurrency?:string|null;rate?:string|null;transactionId?:string|null;notes?:string|null;distinct?:boolean}
+export interface TransferInput {paypalId:string;type:'EXCHANGE'|'MIXING';date:string;currency:string;debited:string;fee?:string|null;destPaypalId?:string|null;received?:string|null;receivedCurrency?:string|null;rate?:string|null;receiverFee?:string|null;transactionId?:string|null;notes?:string|null;distinct?:boolean}
+// The amounts must add up by the one rule in lib/paypal-transfer.ts (the form uses it too): received =
+// round_half_up((debited − fee) × rate, 2) − receiver fee. "All positive" is not enough; the first wrong field is reported.
 function transferShape(input:TransferInput){
-  const currency=currencyOf(input.currency),debited=ledgerAmount(input.debited,'Tổng PP bị trừ'),fee=input.fee?.trim()?D(input.fee.trim().replace(',','.')):null;
-  if(fee&&(fee.lt(0)||fee.gte(debited)||!/^\d+(\.\d{1,2})?$/.test(input.fee!.trim().replace(',','.'))))throw new ProxyDomainError('INVALID_INPUT','Phí nằm trong tổng PP bị trừ: từ 0 đến nhỏ hơn tổng, tối đa 2 chữ số thập phân');
-  const receivedCurrency=input.received?.trim()?currencyOf(input.receivedCurrency||currency):null,received=input.received?.trim()?ledgerAmount(input.received,'Số bên nhận thực nhận'):null;
-  if(input.type==='MIXING'&&!received)throw new ProxyDomainError('INVALID_INPUT','Chuyển nội bộ: ghi số tiền bên nhận thực nhận');
-  let rate:Prisma.Decimal|null=null;
-  if(received&&receivedCurrency!==currency){if(!input.rate?.trim()||!/^\d+(\.\d{1,12})?$/.test(input.rate.trim())||D(input.rate.trim()).lte(0))throw new ProxyDomainError('INVALID_INPUT','Khác đồng tiền: ghi tỷ giá thực dùng (1 '+currency+' = ? '+receivedCurrency+')');rate=D(input.rate.trim());}
-  else if(received&&received.gt(debited))throw new ProxyDomainError('INVALID_INPUT','Cùng đồng tiền: bên nhận không thể nhận nhiều hơn số PP bị trừ');
+  const currency=currencyOf(input.currency),receivedCurrency=input.received?.trim()||input.type==='MIXING'?currencyOf(input.receivedCurrency||currency):null;
+  if(input.receiverFee?.trim()&&!input.received?.trim())throw new ProxyDomainError('INVALID_INPUT','Phí bên nhận chỉ ghi khi có số bên nhận thực nhận');
+  const c=checkTransfer({type:input.type,currency,receivedCurrency,debited:input.debited,fee:input.fee,received:input.received,rate:input.rate,receiverFee:input.receiverFee});
+  const first=(['debited','fee','rate','receiverFee','received'] as const).map(k=>c.errors[k]).find(Boolean);if(first)throw new ProxyDomainError('INVALID_INPUT',first);
   if(input.transactionId&&input.transactionId.trim().length>160||input.notes&&input.notes.length>2000)throw new ProxyDomainError('INVALID_INPUT','Mã giao dịch / ghi chú quá dài');
-  return {currency,debited,fee,received,receivedCurrency,rate};
+  const cents=(v:string|null|undefined,label:string)=>v?.trim()?D(centsText(moneyCents(v,label,true) as bigint)):null;
+  const debited=ledgerAmount(input.debited,'Tổng PP bị trừ'),fee=cents(input.fee,'Phí'),received=cents(input.received,'Số bên nhận'),receiverFee=received?cents(input.receiverFee,'Phí bên nhận'):null;
+  const rate=received&&receivedCurrency!==currency?D(input.rate!.trim().replace(',','.')):null;
+  return {currency,debited,fee,received,receivedCurrency:received?receivedCurrency:null,rate,receiverFee};
 }
 export async function recordTransfer(scope:ActorScope,input:TransferInput&{key:string},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'PAYPAL_TRANSFER',module:'WITHDRAWALS'},async(tx,images,current)=>{
@@ -137,7 +147,7 @@ export async function recordTransfer(scope:ActorScope,input:TransferInput&{key:s
     await images.remember('PAYPAL',pp.id);await tx.payPalAccount.update({where:{id:pp.id},data:{revision:{increment:1}}});
     if(dest){await images.remember('PAYPAL',dest.id);await tx.payPalAccount.update({where:{id:dest.id},data:{revision:{increment:1}}});}
     // One row = one event: the debit of the source and, for an internal transfer, what the receiving PayPal actually got.
-    const w=await tx.withdrawal.create({data:{projectId:scope.projectId,date,amount:s.debited,currency:s.currency,feeAmount:s.fee,receivedAmount:s.received,receivedCurrency:s.received?s.receivedCurrency:null,fxRate:s.rate,type:input.type,sourcePaypalId:pp.id,destPaypalId:dest?.id??null,transactionId:transactionId||'WEB-'+input.key,noTxId:!transactionId,paidToTeam:false,notes:input.notes?.trim()||null,ledgerVersion:2,businessManaged:true}});
+    const w=await tx.withdrawal.create({data:{projectId:scope.projectId,date,amount:s.debited,currency:s.currency,feeAmount:s.fee,receivedAmount:s.received,receivedCurrency:s.received?s.receivedCurrency:null,fxRate:s.rate,receiverFeeAmount:s.receiverFee,type:input.type,sourcePaypalId:pp.id,destPaypalId:dest?.id??null,transactionId:transactionId||'WEB-'+input.key,noTxId:!transactionId,paidToTeam:false,notes:input.notes?.trim()||null,ledgerVersion:2,businessManaged:true}});
     await images.remember('WITHDRAWAL',w.id,true);
     return {id:w.id};
   },db);
@@ -155,12 +165,17 @@ export function withdrawalReview(w:{ledgerVersion:number;type:string;paypalFee:P
 }
 // Per PayPal and currency: opening (before the month, plus opening entries), in (receipts / internal), out, balance at the end.
 // Without month: the whole book up to today. Amounts a member may not read are null (never zeros), and the balance needs both.
-export async function readPaypalLedger(scope:ActorScope,input:{month?:string|null},db:PrismaClient=prisma){
+// One range for the totals and for the list behind them: a month (its first to last day; earlier rows become the opening), or
+// everything up to a cut-off day (stated, or today in Asia/Bangkok). Rows after the cut-off day are in neither.
+export function ledgerRange(input:{month?:string|null;asOf?:string|null}){
+  const month=input.month&&/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)?input.month:null;
+  const end=month?(()=>{const [y,m]=month.split('-').map(Number);return dayDate(month+'-'+String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0'));})():dayDate(input.asOf&&/^\d{4}-\d{2}-\d{2}$/.test(input.asOf)?input.asOf:dayText(new Date()));
+  return {month,start:month?dayDate(month+'-01'):null,end,until:new Date(end.getTime()+86400000),asOf:dayText(end)};
+}
+export async function readPaypalLedger(scope:ActorScope,input:{month?:string|null;asOf?:string|null},db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),r=rights(current);
   if(current.businessMode!=='PROXY_VM'||!r.funds&&!r.withdrawals)return {rights:r,asOf:null,month:null,paypals:[],emails:[],totals:null};
-  const month=input.month&&/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)?input.month:null;
-  const start=month?dayDate(month+'-01'):null,end=month?(()=>{const [y,m]=month.split('-').map(Number);return dayDate(month+'-'+String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0'));})():dayDate(dayText(new Date()));
-  const until=new Date(end.getTime()+86400000);
+  const {month,start,end,until}=ledgerRange(input);
   const [funds,outs]=await Promise.all([
     r.funds?db.fundTransaction.findMany({where:{projectId:scope.projectId,voidedAt:null,confirmed:true,failed:false,date:{lt:until}},select:{paypalId:true,paypalEmailId:true,amount:true,currency:true,date:true,entryKind:true}}):Promise.resolve([]),
     r.withdrawals?db.withdrawal.findMany({where:{projectId:scope.projectId,voidedAt:null,date:{lt:until}},select:{sourcePaypalId:true,destPaypalId:true,amount:true,currency:true,date:true,type:true,receivedAmount:true,receivedCurrency:true,ledgerVersion:true,paypalFee:true,agentUserId:true}}):Promise.resolve([]),
@@ -194,27 +209,37 @@ export async function readPaypalLedger(scope:ActorScope,input:{month?:string|nul
   return {rights:r,asOf:dayText(end),month,paypals,emails:r.funds?[...emailIn.entries()].map(([emailId,m])=>({emailId,received:text(m)})):[],
     totals:{earnApp:r.funds?text(total.receipts):null,internal:r.withdrawals?text(total.internal):null,out:r.withdrawals?text(total.out):null}};
 }
-// The rows behind one number of one PayPal (Tiền vào = receipts + internal in; Tiền ra = debits), in the month or the whole book.
-export async function readPaypalEntries(scope:ActorScope,input:{paypalId:string;direction:'IN'|'OUT';month?:string|null;currency?:string|null},db:PrismaClient=prisma){
+// The rows behind one number of one PayPal (Tiền vào = receipts + internal in; Tiền ra = debits), in exactly the range of that
+// number (ledgerRange). Rows shown for reconciliation but not added up (pending, failed, voided, the opening balance) carry
+// counted=false and their role; `totals` adds up only the counted rows, so it equals the number that was clicked.
+type EntryRow={kind:'RECEIPT'|'OPENING'|'INTERNAL_IN'|'OUT';id:string;date:string;amount:string;currency:string;email:string|null;place:string|null;other:string|null;fee:string|null;received:string|null;status:string;transactionId:string|null;review:string|null;counted:boolean;role:string|null};
+export async function readPaypalEntries(scope:ActorScope,input:{paypalId:string;direction:'IN'|'OUT';month?:string|null;asOf?:string|null;currency?:string|null},db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),r=rights(current);
   if(current.businessMode!=='PROXY_VM'||input.direction==='OUT'&&!r.withdrawals||input.direction==='IN'&&!r.funds&&!r.withdrawals)throw new ProxyDomainError('FORBIDDEN');
-  const month=input.month&&/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)?input.month:null,range=month?{gte:dayDate(month+'-01'),lt:(()=>{const [y,m]=month.split('-').map(Number);return dayDate(m===12?(y+1)+'-01-01':y+'-'+String(m+1).padStart(2,'0')+'-01');})()}:undefined;
+  const {month,start,until,asOf}=ledgerRange(input),range=start?{gte:start,lt:until}:{lt:until};
   const pp=await db.payPalAccount.findFirst({where:{id:input.paypalId,projectId:scope.projectId},select:{id:true,code:true}});if(!pp)throw new ProxyDomainError('NOT_FOUND');
-  const cur=input.currency?currencyOf(input.currency):undefined;
-  const rows:{kind:'RECEIPT'|'OPENING'|'INTERNAL_IN'|'OUT';id:string;date:string;amount:string;currency:string;email:string|null;place:string|null;other:string|null;fee:string|null;received:string|null;status:string;transactionId:string|null;review:string|null}[]=[];
+  const cur=input.currency?currencyOf(input.currency):undefined,rows:EntryRow[]=[];let later=0;
+  const fundWhere={projectId:scope.projectId,paypalId:pp.id,...(cur?{currency:cur}:{})},wWhere={projectId:scope.projectId,...(input.direction==='OUT'?{sourcePaypalId:pp.id}:{destPaypalId:pp.id,type:'MIXING' as const})};
   if(input.direction==='IN'&&r.funds){
-    const funds=await db.fundTransaction.findMany({where:{projectId:scope.projectId,paypalId:pp.id,...(range?{date:range}:{}),...(cur?{currency:cur}:{})},orderBy:[{date:'desc'},{createdAt:'desc'}],include:{paypalEmail:{select:{email:true}},vm:{select:{code:true,server:{select:{code:true}}}}}});
-    for(const f of funds)rows.push({kind:f.entryKind==='OPENING'?'OPENING':'RECEIPT',id:f.id,date:dayText(f.date),amount:f.amount.toFixed(2),currency:f.currency,email:f.paypalEmail?.email??null,place:f.vm?f.vm.server.code+' / '+f.vm.code:null,other:null,fee:null,received:null,status:f.voidedAt?'Đã thu hồi':f.failed?'Không về':f.confirmed?'Đã nhận':'Chờ nhận',transactionId:f.noTxId?null:f.transactionId,review:null});
+    const funds=await db.fundTransaction.findMany({where:{...fundWhere,date:range},orderBy:[{date:'desc'},{createdAt:'desc'}],include:{paypalEmail:{select:{email:true}},vm:{select:{code:true,server:{select:{code:true}}}}}});
+    for(const f of funds){
+      const role=f.entryKind==='OPENING'?'Số dư đầu kỳ: tính vào Còn lại theo sổ, không tính vào Tiền vào':f.voidedAt?'Đã thu hồi: không cộng':f.failed?'Không về: không cộng':!f.confirmed?'Chờ nhận: không cộng':null;
+      rows.push({kind:f.entryKind==='OPENING'?'OPENING':'RECEIPT',id:f.id,date:dayText(f.date),amount:f.amount.toFixed(2),currency:f.currency,email:f.paypalEmail?.email??null,place:f.vm?f.vm.server.code+' / '+f.vm.code:null,other:null,fee:null,received:null,status:f.voidedAt?'Đã thu hồi':f.failed?'Không về':f.entryKind==='OPENING'?'Số dư đầu':f.confirmed?'Đã nhận':'Chờ nhận',transactionId:f.noTxId?null:f.transactionId,review:null,counted:!role,role});
+    }
+    if(!month)later+=await db.fundTransaction.count({where:{...fundWhere,date:{gte:until}}});
   }
   if(r.withdrawals){
-    const ws=await db.withdrawal.findMany({where:{projectId:scope.projectId,...(input.direction==='OUT'?{sourcePaypalId:pp.id}:{destPaypalId:pp.id,type:'MIXING'}),...(range?{date:range}:{})},orderBy:[{date:'desc'},{createdAt:'desc'}],include:{sourcePaypal:{select:{code:true}},destPaypal:{select:{code:true}}}});
+    const ws=await db.withdrawal.findMany({where:{...wWhere,date:range},orderBy:[{date:'desc'},{createdAt:'desc'}],include:{sourcePaypal:{select:{code:true}},destPaypal:{select:{code:true}}}});
     for(const w of ws){
       const inside=input.direction==='IN',amount=inside?(w.receivedAmount?w.receivedAmount.toFixed(2):w.amount.toFixed(2)):w.amount.toFixed(2),currency=inside?(w.receivedAmount?w.receivedCurrency||w.currency:w.currency):w.currency;
       if(cur&&currency!==cur)continue;
-      rows.push({kind:inside?'INTERNAL_IN':'OUT',id:w.id,date:dayText(w.date),amount,currency,email:null,place:null,other:inside?w.sourcePaypal.code:w.destPaypal?.code??null,fee:inside?null:w.feeAmount?.toFixed(2)??w.paypalFee?.toFixed(2)??null,received:inside?null:w.receivedAmount?w.receivedAmount.toFixed(2)+' '+(w.receivedCurrency||w.currency):null,status:w.voidedAt?'Đã thu hồi':w.type==='MIXING'?'Chuyển nội bộ':'Rút / chuyển ra',transactionId:w.noTxId?null:w.transactionId,review:withdrawalReview(w)});
+      const fees=[w.feeAmount?.toFixed(2)??w.paypalFee?.toFixed(2)??null,w.receiverFeeAmount?'bên nhận '+w.receiverFeeAmount.toFixed(2)+' '+(w.receivedCurrency||w.currency):null].filter(Boolean).join(' · ')||null;
+      rows.push({kind:inside?'INTERNAL_IN':'OUT',id:w.id,date:dayText(w.date),amount,currency,email:null,place:null,other:inside?w.sourcePaypal.code:w.destPaypal?.code??null,fee:inside?null:fees,received:inside?null:w.receivedAmount?w.receivedAmount.toFixed(2)+' '+(w.receivedCurrency||w.currency):null,status:w.voidedAt?'Đã thu hồi':w.type==='MIXING'?'Chuyển nội bộ':'Rút / chuyển ra',transactionId:w.noTxId?null:w.transactionId,review:withdrawalReview(w),counted:!w.voidedAt,role:w.voidedAt?'Đã thu hồi: không cộng':null});
     }
+    if(!month)later+=await db.withdrawal.count({where:{...wWhere,date:{gte:until}}});
   }
   rows.sort((a,b)=>b.date.localeCompare(a.date));
-  return {code:pp.code,month,rows};
+  const sum:Money={};for(const x of rows)if(x.counted)add(sum,x.currency,D(x.amount));
+  return {code:pp.code,month,asOf,rows,totals:Object.fromEntries(Object.entries(sum).map(([k,v])=>[k,v.toFixed(2)])),later};
 }
 export type {BusinessCollector};

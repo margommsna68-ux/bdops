@@ -1,0 +1,25 @@
+PASS Câu đầu trang theo quy tắc mới — Kho tài khoản Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng Server / VM; một VM một tài khoản EarnApp; mỗi EarnApp có một email PayPal nhận tiền, nhiều EarnApp có thể dùng c
+PASS Bộ lọc PP nói về email (Còn email chưa dùng), không phải “NEW · chưa gán” — Tất cả | Còn email chưa dùng35 | Hết email chưa dùng · có email đang gán19 | Hết email chưa dùng · không email nào đang gán4 | Khoá / ngừng dùng0
+PASS “email | | 24”: báo ngay tại dòng ô số tiền trống, không lấy 24 làm số tiền; nút ghi khoá — 1 pp1-blsms@example.invalid — Ô số tiền (cột 2) đang trống; cột 3 là mã giao dịch, không dùng làm số tiền
+PASS Dán bằng tab, ô giữa trống: cũng báo lỗi tại dòng — 
+PASS Thừa cột: báo tại dòng — 
+PASS Chọn chuyển nội bộ, tổng 31 phí 1: bên nhận tự tính 30 — 30.00
+PASS Sửa phí thành 2: số tự điền đổi theo (29), không giữ số cũ — 29.00
+PASS Gõ tay 31: lỗi ngay tại ô “phải nhận 29,00 USD”, nút Lưu khoá, không dialog — 
+PASS Sửa phí khi đang gõ tay: không ghi đè số người dùng (vẫn 31), lỗi cập nhật 30,00 — 31
+PASS “Dùng số tính được” trả về 30.00, hết lỗi — 
+PASS Đổi đồng tiền bên nhận sang VND: không giữ 30 cũ, đòi tỷ giá — 
+PASS Tỷ giá 25000: bên nhận tự tính 750000.00 — 750000.00
+PASS Gõ 30 VND: lỗi “phải nhận 750.000,00 VND”, Lưu khoá — 
+PASS Về USD: tỷ giá ẩn, bên nhận tự tính 30.00 — 30.00
+PASS Lưu hợp lệ 31 gồm phí 1: nguồn giảm 31, PP nhận tăng 30 — pp13blsms 5→-26, pp14blsms 30→60
+PASS Khoản chờ nhận và khoản ngày 2099 không đổi số Tiền vào — 66,00 USD → 66,00 USD
+PASS Bấm Tiền vào: tổng các khoản được cộng = số trong ô; URL giữ ngày chốt — Cộng các khoản được tính: 66,00 USD = số Tiền vào đang xem. 2 khoản chỉ để đối chiếu, không cộng (ghi ở cột Tình trạng). 2 khoản ghi ngày sau 18/10/2026 không thuộc phạm vi này. · /paypals?q=blsms&pp=pp13blsms&show=in&asof=2026-10-18
+PASS Danh sách không có khoản 2099; ghi “1 khoản ghi ngày sau …” — 
+PASS Khoản chờ nhận ghi rõ “(không cộng)” và vai trò — 18/10/2026 Tiền nhận (không cộng) 7,00 USD pp2-blsms@example.invalid ppx-blsms / VM_002 Chờ nhận Chờ nhận: không cộng RV-PEN-1792304985135
+PASS Tải lại: cùng URL, cùng tổng — /paypals?q=blsms&pp=pp13blsms&show=in&asof=2026-10-18
+PASS Bấm Tiền ra: tổng danh sách = số trong ô — Cộng các khoản được tính: 92,00 USD = số Tiền ra đang xem. · ô 92,00 USD
+PASS Back: về danh sách Tiền vào cùng ngày chốt — /paypals?q=blsms&pp=pp13blsms&show=in&asof=2026-10-18
+PASS Forward: về Tiền ra — /paypals?q=blsms&pp=pp13blsms&show=out&asof=2026-10-18
+PASS Tháng 10: tổng danh sách = số Tiền vào của tháng, URL không có asof — 66,00 USD · /paypals?q=blsms&month=2026-10&pp=pp13blsms&show=in
+TOTAL 24 pass / 0 fail

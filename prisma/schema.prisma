@@ -730,6 +730,8 @@ model Withdrawal {
   receivedAmount Decimal? @db.Decimal(18, 6)
   receivedCurrency String?
   fxRate Decimal? @db.Decimal(24, 12)
+  // A fee taken on the receiving side (receiving currency): received = round((amount − feeAmount) × fxRate, 2) − receiverFeeAmount.
+  receiverFeeAmount Decimal? @db.Decimal(18, 6)
   noTxId Boolean @default(false)
   revision Int @default(0)
   voidedAt DateTime?

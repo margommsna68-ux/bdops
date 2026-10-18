@@ -5,7 +5,7 @@ import {links} from '@/lib/links';
 const params=(s:string)=>new URLSearchParams(s);
 describe('Kho tài khoản URL',()=>{
   it('two kind tabs; history and review are views inside the kind; the page kind is the default',()=>{
-    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:'',pp:'',show:'',month:''});
+    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:'',pp:'',show:'',month:'',asof:''});
     expect(readAccountUrl(params(''),'paypal').tab).toBe('paypal');
     const u=readAccountUrl(params('tab=paypal&view=history&batch=PP-2026-10-17'),'login');expect(u).toMatchObject({tab:'paypal',view:'history',batch:'PP-2026-10-17'});
     expect(writeAccountUrl(u,'login')).toBe('?tab=paypal&view=history&batch=PP-2026-10-17');expect(writeAccountUrl(u,'paypal')).toBe('?view=history&batch=PP-2026-10-17');
@@ -30,6 +30,12 @@ describe('PayPal rows in the URL',()=>{
     expect(writeAccountUrl(u,'login')).toBe('?tab=paypal&month=2026-09&pp=pp-13&show=in');
     expect(readAccountUrl(params('pp=pp-13&show=in'),'login')).toMatchObject({pp:'',show:''});
     expect(readAccountUrl(params('tab=paypal&pp=x&show=bad&month=2026-13'),'login')).toMatchObject({show:'',month:''});
+    // Without a month, an open money list keeps its cut-off day; it is dropped with a month, for the email list, or when malformed.
+    const d=readAccountUrl(params('tab=paypal&pp=pp-13&show=in&asof=2026-10-18'),'login');expect(d.asof).toBe('2026-10-18');
+    expect(writeAccountUrl(d,'login')).toBe('?tab=paypal&pp=pp-13&show=in&asof=2026-10-18');
+    expect(readAccountUrl(params('tab=paypal&pp=pp-13&show=in&month=2026-09&asof=2026-10-18'),'login').asof).toBe('');
+    expect(readAccountUrl(params('tab=paypal&pp=pp-13&show=emails&asof=2026-10-18'),'login').asof).toBe('');
+    expect(readAccountUrl(params('tab=paypal&pp=pp-13&show=out&asof=18-10-2026'),'login').asof).toBe('');
   });
 });
 describe('import drafts',()=>{

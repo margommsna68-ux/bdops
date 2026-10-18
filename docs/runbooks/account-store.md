@@ -203,6 +203,7 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - **Ghi tiền vào:**
   - Choose the PayPal, day, currency and status, then paste `Email | Số tiền | Mã giao dịch`. Each email must belong to that PayPal.
   - Lines are checked while typing (`receiptCheck`); only READY lines are written (`receiptRecord`).
+  - With tab or `|`, every cell keeps its place (only separators at the end of a line are ignored): an empty amount, an empty email, extra columns or a wrong amount are errors at the line, and the payment id is never read as the amount.
   - Each payment keeps the EarnApp / VM using the email at that moment; nothing is assigned or marked registered because money arrived.
   - Duplicates:
     - A transaction id is checked per project, voided rows included.
@@ -211,11 +212,19 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - **Ghi chuyển / rút:**
   - `transferRecord` writes Withdrawal `ledgerVersion` 2. `amount` is the total the source was debited, fee included (`feeAmount`, never subtracted again).
   - An internal transfer stores what the receiving PayPal actually got (`receivedAmount`, `receivedCurrency`). With different currencies, the rate actually used (`fxRate`) is required.
+  - The amounts must add up (one rule, `src/lib/paypal-transfer.ts`, used by the form and by `recordTransfer`, review 18/10/2026):
+    - received = round half up to 2 decimals of ((debited − source fee) × rate) − receiver fee;
+    - same currency: rate 1, and no rate is typed;
+    - the source fee is in the source currency and inside the total;
+    - a fee taken on the receiving side is the explicit field "Phí bên nhận" (`receiverFeeAmount`, receiving currency).
+    - A stated received amount that does not match is refused with the right number.
+  - In the form, the received amount is computed live until the person types it. A typed value is kept and only checked, with "Dùng số tính được" next to the error.
   - Both sides are one row, so they never look like two events.
   - `paidToTeam` is not used as proof that the PayPal paid.
   - The old one-amount form refuses to edit v2 rows; void and record again instead.
 - **Totals:**
   - In = confirmed receipts + internal in; out = debits; balance = opening + in − out, per currency, up to the end of the month shown (everything before it included).
+  - Range (`ledgerRange`), the same for a number and the list behind it: a month, or everything up to a cut-off day (today in Asia/Bangkok, or `?asof=`). Rows dated later are in neither.
   - Pending, failed and voided rows never count.
   - EarnApp income = receipts only.
   - v1 internal transfers without a received amount, and v1 rows with a collector fee, are counted as recorded and flagged for reconciliation.
@@ -226,6 +235,7 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - **UI:**
   - One row per code: Mã PP | email used / still usable | Tiền vào | Tiền ra | Còn lại theo sổ | Tình trạng | Thao tác.
   - The emails open under the row with copy, EarnApp / Server / VM, use and money received.
-  - Clicking an amount lists the rows behind it (`?pp=&show=in|out&month=`; Back and reload keep it).
+  - Clicking an amount lists the rows behind it (`?pp=&show=in|out&month=`, or `&asof=` without a month; Back and reload keep it).
+  - The list states "Cộng các khoản được tính: X", which equals the number clicked. Pending, failed, voided and opening rows are shown as "(không cộng)" with their role. Rows after the cut-off day are only counted in a note.
 - **Not counted here:** an EarnApp withdrawal request (EarnWithdrawal) is a different moment and is never added to money received.
 - **Profit is unchanged:** USDT the team received minus costs. Money on PayPal or sent to a collector is not team income.

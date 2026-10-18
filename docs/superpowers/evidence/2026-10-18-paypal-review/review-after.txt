@@ -1,0 +1,4 @@
+FUTURE_RANGE {"asOf":"2026-10-18","received":[{"currency":"USD","receipts":"10.00","internalIn":"0.00","in":"10.00","out":"0.00","opening":"100.00","balance":"110.00"}],"futureRowsInDrilldown":[]}
+EMPTY_AMOUNT {"parsed":[{"amount":null,"transactionId":"24","error":"Ô số tiền (cột 2) đang trống; cột 3 là mã giao dịch, không dùng làm số tiền"}],"saved":0}
+INCONSISTENT_FEE {"accepted":false,"error":"INVALID_INPUT: Bên nhận phải nhận 30,00 USD = (31,00 − phí 1,00). Sửa số nhận hoặc phí; nếu bên nhận bị trừ phí riêng, ghi ở Phí bên nhận"}
+INCONSISTENT_FX {"accepted":false,"error":"INVALID_INPUT: Bên nhận phải nhận 750.000,00 VND = (31,00 − phí 1,00) × 25000. Sửa số nhận, phí hoặc tỷ giá; nếu bên nhận bị trừ phí riêng, ghi ở Phí bên nhận"}

@@ -1,0 +1,4 @@
+FUTURE_RANGE {"asOf":"2026-10-18","received":[{"currency":"USD","receipts":"10.00","internalIn":"0.00","in":"10.00","out":"0.00","opening":"100.00","balance":"110.00"}],"futureRowsInDrilldown":[{"date":"2099-01-01","amount":"50.00","status":"Đã nhận"}]}
+EMPTY_AMOUNT {"parsed":[{"amount":"24.00","transactionId":null,"error":null}],"saved":1}
+INCONSISTENT_FEE {"accepted":true,"debited":"31","fee":"1","credited":"31"}
+INCONSISTENT_FX {"accepted":true,"debited":"31","fee":"1","credited":"30","creditedCurrency":"VND","rate":"25000"}
