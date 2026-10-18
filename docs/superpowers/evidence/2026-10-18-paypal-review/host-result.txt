@@ -1,0 +1,6 @@
+PayPal tab: PayPal (0) · cột: MÃ PP | EMAIL ĐÃ DÙNG / CÒN DÙNG ĐƯỢC | TIỀN VÀO | TIỀN RA | CÒN LẠI THEO SỔ | TÌNH TRẠNG | THAO TÁC
+Lỗi trên trang: 1
+Câu đầu trang: Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng Server / VM; một VM một tài khoản EarnApp; mỗi EarnApp có một email PayPal nhận tiền, nhiều EarnApp có thể dùng cùng mã PP qua các email riêng.
+Bộ lọc PP: Tất cả | Còn email chưa dùng0 | Hết email chưa dùng · có email đang gán0 | Hết email chưa dùng · không email nào đang gán0 | Khoá / ngừng dùng0
+Còn câu cũ “một PayPal riêng”: không
+tRPC writes: user.verifyPin,user.heartbeat

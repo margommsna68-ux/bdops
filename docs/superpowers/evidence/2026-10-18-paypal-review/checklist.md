@@ -49,7 +49,20 @@ Kịch bản người kiểm: `.runtime/paypal-independent-review-20261018.ts` (
   - `r3-transfer-fx.png`: 30 VND với tỷ giá 25.000.
   - `r4-entries.png`: danh sách Tiền vào đến hết 18/10.
 
+## Phát hành
+
+- **Commit:** `f05c623`.
+- **Backup host trước deploy:** `0e5e4531`.
+- **Deploy:** `145249ac`, SUCCESS. Migration `20261018180000_paypal_receiver_fee` (chỉ thêm cột) chạy ở bước pre-deploy.
+- **Host verify:** 10 server / 576 VM.
+- **Host xem chỉ đọc** (`host-result.txt`, `h1-host-paypal.png`):
+  - Câu đầu trang theo quy tắc mới; không còn "một PayPal riêng".
+  - Bộ lọc PP nói về email.
+  - Chỉ có xác thực PIN và heartbeat. Một role=alert là route announcer của Next.js.
+  - Host chưa có PayPal nên không có số tiền để bấm; không nhập ví dụ vào dữ liệu thật.
+
 ## Giới hạn
 
 - Chưa giả lập mất mạng khi lưu trên trình duyệt; phát lại cùng khoá đã kiểm ở server.
 - Đổi đồng tiền nguồn (không phải USD) trên trình duyệt chưa bấm; quy tắc giống nhau và có test.
+- Host chưa có PayPal: các luồng tiền chỉ kiểm trên dữ liệu thử cục bộ.
