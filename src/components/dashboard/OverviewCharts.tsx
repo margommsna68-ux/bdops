@@ -4,6 +4,7 @@ import {useRouter} from 'next/navigation';
 import {Bar,BarChart,CartesianGrid,LabelList,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts';
 import {links,type VmView} from '@/lib/links';
 import type {Overview} from './Overview';
+import type {FinanceTargets} from './finance-links';
 type Ops=NonNullable<Overview['operations']>;
 type Fin=Extract<NonNullable<Overview['finance']>,{enabled:true}>;
 // Colours carry meaning and match the badges on the target pages: installed green, waiting blue, review amber, missing red;
@@ -11,8 +12,9 @@ type Fin=Extract<NonNullable<Overview['finance']>,{enabled:true}>;
 export const VM_SERIES=[{key:'INSTALLED',label:'Đã xác nhận cài',color:'#16a34a'},{key:'PENDING',label:'Chờ cài',color:'#3b82f6'},{key:'REVIEW',label:'Cần kiểm tra',color:'#f59e0b'},{key:'MISSING',label:'Thiếu proxy',color:'#ef4444'}] as const;
 export const STOCK_SERIES=[{key:'NEW',label:'NEW',color:'#3b82f6'},{key:'LIVE',label:'LIVE',color:'#16a34a'},{key:'BLOCKED',label:'BLOCKED',color:'#ef4444'},{key:'OTHER',label:'Khác',color:'#94a3b8'}] as const;
 const fmt=(n:number)=>n.toLocaleString('vi-VN');
-// Segment label only where it fits; every number is also in the legend totals and the table under the chart.
-const segmentLabel=(min:number)=>function SegmentLabel(props:{x?:number|string;y?:number|string;width?:number|string;height?:number|string;value?:unknown}){const w=Number(props.width),v=Number(props.value);if(!v||w<min)return null;return <text x={Number(props.x)+w/2} y={Number(props.y)+Number(props.height)/2} dy={4} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff">{fmt(v)}</text>;};
+// Segment label only where it fits; every number is also in the legend totals and the table under the chart. The label lets clicks
+// through (pointer-events: none) so clicking the number opens the same list as clicking the coloured segment under it.
+const segmentLabel=(min:number)=>function SegmentLabel(props:{x?:number|string;y?:number|string;width?:number|string;height?:number|string;value?:unknown}){const w=Number(props.width),v=Number(props.value);if(!v||w<min)return null;return <text x={Number(props.x)+w/2} y={Number(props.y)+Number(props.height)/2} dy={4} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" pointerEvents="none" style={{pointerEvents:'none'}}>{fmt(v)}</text>;};
 const tooltipStyle={contentStyle:{background:'var(--ds-card)',border:'1px solid var(--ds-border)',borderRadius:8,fontSize:12,color:'var(--ds-text-primary)'},labelStyle:{fontWeight:600,color:'var(--ds-text-primary)'},cursor:{fill:'rgba(59,130,246,.06)'}};
 function Legend({items,totals,href}:{items:readonly {key:string;label:string;color:string}[];totals:Record<string,number>;href:(key:string)=>string}){
   return <ul className="ov-legend">{items.map(i=><li key={i.key}><Link href={href(i.key)}><span className="ov-dot" style={{background:i.color}}/>{i.label} <strong>{fmt(totals[i.key]??0)}</strong></Link></li>)}</ul>;
@@ -60,8 +62,9 @@ export function StockChart({ops}:{ops:Ops}){
     <details className="ov-details"><summary>Bảng số theo nhóm</summary><div className="pm-table-scroll"><table className="pm-table ov-table"><thead><tr><th>Từ nhóm</th>{STOCK_SERIES.map(s=><th key={s.key}>{s.label}</th>)}<th>Tổng</th></tr></thead><tbody>{rows.map(r=><tr key={r.key}><td><Link className="pm-link" href={links.proxies({group:r.key})}>{r.label}</Link></td>{STOCK_SERIES.map(s=><td key={s.key}>{r[s.key]?<Link className="pm-link" href={links.proxies({group:r.key,state:s.key})}>{fmt(r[s.key])}</Link>:<span className="pm-muted">0</span>}</td>)}<td>{fmt(r.total)}</td></tr>)}</tbody></table></div></details>
   </div>;
 }
-export function CashChart({fin,month}:{fin:Fin;month:string}){
-  const router=useRouter();
+// A column opens the list of that day (and month) when the member may read it; otherwise it is only a number.
+export function CashChart({fin,month,targets}:{fin:Fin;month:string;targets:FinanceTargets}){
+  const router=useRouter(),go=(href:string|null)=>{if(href)router.push(href);};
   if(!fin.series.length)return <p className="ov-empty">Chưa có khoản nhận hoặc chi phí trong tháng {month.split('-').reverse().join('/')}.</p>;
   const data=fin.series.map(d=>({day:d.date.slice(8),date:d.date,received:Number(d.received),cost:Number(d.cost)}));
   return <div style={{height:220}} role="img" aria-label={`Thu chi theo ngày tháng ${month}: thực nhận ${fin.received} USDT, chi phí ${fin.cost} USDT`}>
@@ -71,8 +74,8 @@ export function CashChart({fin,month}:{fin:Fin;month:string}){
         <XAxis dataKey="day" tick={{fontSize:10,fill:'var(--ds-text-secondary)'}} interval="preserveStartEnd" axisLine={false} tickLine={false}/>
         <YAxis width={44} tick={{fontSize:10,fill:'var(--ds-text-secondary)'}} axisLine={false} tickLine={false}/>
         <Tooltip {...tooltipStyle} labelFormatter={(_,p)=>{const d=(p?.[0]?.payload as {date?:string}|undefined)?.date;return d?d.split('-').reverse().join('/'):'';}} formatter={(v,name)=>[Number(v).toLocaleString('vi-VN',{maximumFractionDigits:2})+' USDT',name==='received'?'Thực nhận':'Chi phí']}/>
-        <Bar dataKey="received" fill="#16a34a" radius={[3,3,0,0]} cursor="pointer" isAnimationActive={false} onClick={()=>router.push(links.teamReceipts())}/>
-        <Bar dataKey="cost" fill="#ef4444" radius={[3,3,0,0]} cursor="pointer" isAnimationActive={false} onClick={()=>router.push(links.costs({month}))}/>
+        <Bar dataKey="received" fill="#16a34a" radius={[3,3,0,0]} cursor={targets.received?'pointer':'default'} isAnimationActive={false} onClick={(d:{payload?:{date:string}})=>{if(d?.payload)go(targets.receivedDay(d.payload.date));}}/>
+        <Bar dataKey="cost" fill="#ef4444" radius={[3,3,0,0]} cursor={targets.cost?'pointer':'default'} isAnimationActive={false} onClick={(d:{payload?:{date:string}})=>{if(d?.payload)go(targets.costDay(d.payload.date));}}/>
       </BarChart>
     </ResponsiveContainer>
   </div>;

@@ -1,5 +1,5 @@
 "use client";
-import {useState} from 'react';
+import {useCallback,useState} from 'react';
 import toast from 'react-hot-toast';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
@@ -11,6 +11,20 @@ export type StockKind='LOGIN'|'PAYPAL';
 export type AppendTarget={id:string;code:string;type?:'GMAIL'|'APPLE_ID'|null};
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
 const CURRENCIES=['USDT','VND','USD'];
+// Drafts per project and account kind, in this tab's memory only (never the URL, localStorage or sessionStorage: a draft can hold
+// passwords and 2FA). Switching Gmail ↔ PayPal, opening Lịch sử nhập kho or leaving the page and coming back keeps each kind's own
+// draft (text, money, preview); another project has its own. A full reload or closing the tab drops them.
+export type ImportDraft={open:boolean;nonce:number;values:Record<string,unknown>};
+const drafts=new Map<string,ImportDraft>();
+export function importDraft(projectId:string,kind:StockKind):ImportDraft{const k=projectId+':'+kind;let d=drafts.get(k);if(!d){d={open:false,nonce:0,values:{}};drafts.set(k,d);}return d;}
+// Continue one purchase (Nhập bổ sung): the draft's target becomes that batch (its type), and the previous preview is dropped.
+export function appendToBatch(d:ImportDraft,target:AppendTarget){const {text,one,mode}=d.values;d.values={text,one,mode,target,type:target.type||undefined};d.nonce++;}
+export function discardDraft(d:ImportDraft){d.values={};d.nonce++;}
+function useDraft<T>(d:ImportDraft,name:string,initial:T):[T,(v:T)=>void]{
+  const [value,setValue]=useState<T>(()=>name in d.values&&d.values[name]!==undefined?d.values[name] as T:initial);
+  const set=useCallback((v:T)=>{d.values[name]=v;setValue(v);},[d,name]);
+  return [value,set];
+}
 const trim=(n:string)=>n.includes('.')?n.replace(/\.?0+$/,''):n;
 // Display only (the server computes the recorded total exactly).
 const product=(qty:string,unit:string)=>{const q=Number(qty),u=Number(unit);return q>0&&Number.isInteger(q)&&u>0?trim((q*u).toFixed(8)):null;};
@@ -21,11 +35,12 @@ const product=(qty:string,unit:string)=>{const q=Number(qty),u=Number(unit);retu
 // - Opened from a batch ("Nhập bổ sung") it continues that batch only, with no money; after an import with error lines the panel
 //   switches to adding to the batch just created, so fixing them never records a second cost.
 // - One command key per previewed request: a double click or a retry after a lost response replays it instead of buying twice.
-export function ImportPanel({projectId,kind,append,canCost,onDone,onClose}:{projectId:string;kind:StockKind;append?:AppendTarget|null;canCost:boolean;onDone:()=>void;onClose:()=>void}){
-  const [target,setTarget]=useState<AppendTarget|null>(append||null);
-  const [type,setType]=useState<'GMAIL'|'APPLE_ID'|''>(append?.type||''),[mode,setMode]=useState<'paste'|'one'>('paste'),[text,setText]=useState(''),[one,setOne]=useState({email:'',password:'',twoFa:'',recovery:'',notes:'',code:''});
-  const [source,setSource]=useState(''),[date,setDate]=useState(today()),[unitMode,setUnitMode]=useState(false),[amount,setAmount]=useState(''),[quantity,setQuantity]=useState(''),[currency,setCurrency]=useState('USDT'),[rate,setRate]=useState(''),[notes,setNotes]=useState('');
-  const [preview,setPreview]=useState<Preview|null>(null),[done,setDone]=useState<Committed|null>(null),[error,setError]=useState(''),[key,setKey]=useState<string|null>(null);
+export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{projectId:string;kind:StockKind;canCost:boolean;onDone:()=>void;onClose:()=>void;onDiscard:()=>void}){
+  const d=importDraft(projectId,kind);
+  const [target,setTarget]=useDraft<AppendTarget|null>(d,'target',null);
+  const [type,setType]=useDraft<'GMAIL'|'APPLE_ID'|''>(d,'type',''),[mode,setMode]=useDraft<'paste'|'one'>(d,'mode','paste'),[text,setText]=useDraft(d,'text',''),[one,setOne]=useDraft(d,'one',{email:'',password:'',twoFa:'',recovery:'',notes:'',code:''});
+  const [source,setSource]=useDraft(d,'source',''),[date,setDate]=useDraft(d,'date',today()),[unitMode,setUnitMode]=useDraft(d,'unitMode',false),[amount,setAmount]=useDraft(d,'amount',''),[quantity,setQuantity]=useDraft(d,'quantity',''),[currency,setCurrency]=useDraft(d,'currency','USDT'),[rate,setRate]=useDraft(d,'rate',''),[notes,setNotes]=useDraft(d,'notes','');
+  const [preview,setPreview]=useDraft<Preview|null>(d,'preview',null),[done,setDone]=useDraft<Committed|null>(d,'done',null),[error,setError]=useDraft(d,'error',''),[key,setKey]=useDraft<string|null>(d,'key',null);
   const check=trpc.accountStore.importPreview.useMutation(),commit=trpc.accountStore.importCommit.useMutation(),busy=check.isLoading||commit.isLoading;
   const lineText=()=>mode==='paste'?text:kind==='PAYPAL'?`${one.code.trim()}\t${one.email.trim()}`:[one.email,one.password,one.twoFa,one.recovery,one.notes].map(s=>s.replace(/\t/g,' ')).join('\t').replace(/\t+$/,'');
   const priced=canCost&&!!amount.trim();
@@ -47,7 +62,7 @@ export function ImportPanel({projectId,kind,append,canCost,onDone,onClose}:{proj
   }
   const ready=preview?.ready||0,total=unitMode?product(quantity,amount):null;
   const field=(set:(v:string)=>void)=>(e:{target:{value:string}})=>{set(e.target.value);reset();};
-  return <section className="acc-import" aria-label="Nhập kho">
+  return <section className="acc-import" aria-label={kind==='PAYPAL'?'Nhập PayPal':'Nhập Gmail / Apple ID'} data-kind={kind}>
     <div className="flex items-center justify-between gap-2 flex-wrap"><h2 className="text-base font-semibold">{target?<>Nhập bổ sung vào lô <span className="pm-code">{target.code}</span></>:kind==='PAYPAL'?'Nhập PayPal · lần mua mới':'Nhập Gmail / Apple ID · lần mua mới'}</h2>
       <div className="vm-kind-tabs" role="tablist"><button type="button" role="tab" aria-selected={mode==='paste'} className={mode==='paste'?'active':''} onClick={()=>{setMode('paste');reset();}}>Dán danh sách</button><button type="button" role="tab" aria-selected={mode==='one'} className={mode==='one'?'active':''} onClick={()=>{setMode('one');reset();}}>Một tài khoản</button></div></div>
     {target&&<p className="text-xs pm-muted">Thêm tài khoản còn thiếu của lô này; không ghi tiền mua thêm. <button type="button" className="underline" disabled={busy} onClick={()=>{setTarget(null);reset();}}>Đây là lần mua mới</button></p>}
@@ -77,7 +92,7 @@ export function ImportPanel({projectId,kind,append,canCost,onDone,onClose}:{proj
         <td className={r.outcome==='ERROR'?'text-red-600':r.outcome==='EXISTS'?'pm-muted':'text-green-700'}>{r.outcome==='READY'?'Hợp lệ':r.outcome==='EXISTS'?'Đã có':'Lỗi'} · {r.message}</td></tr>)}</tbody></table></div></>}
     {done&&<p role="status" className="pm-success text-sm">Đã nhập {done.applied} · đã có {done.exists} · lỗi {done.errors} vào lô {done.batch.code}{done.batch.appended?' (nhập bổ sung, không ghi chi phí thêm)':done.batch.costRecorded?' (chi phí đã ghi một lần)':' (chưa ghi chi phí)'}. {done.errors?'Ô dán chỉ còn các dòng lỗi; sửa rồi nhập bổ sung vào cùng lô.':''}</p>}
     {error&&<p role="alert" className="pm-error text-sm">{error}</p>}
-    <div className="flex gap-2 justify-end flex-wrap"><button type="button" className="pm-button pm-button-quiet" disabled={busy} onClick={onClose}>Đóng</button>
+    <div className="flex gap-2 justify-end flex-wrap">{(text||one.email||one.code||preview)&&<button type="button" className="pm-button pm-button-quiet mr-auto" disabled={busy} onClick={onDiscard}>Bỏ nháp</button>}<button type="button" className="pm-button pm-button-quiet" disabled={busy} title="Nội dung đang nhập được giữ trong phiên này" onClick={onClose}>Đóng</button>
       {preview&&ready>0?<><button type="button" className="pm-button" disabled={busy} onClick={reset}>Sửa lại</button><button type="button" className="pm-button pm-button-primary" disabled={busy} onClick={()=>void runCommit()}>{busy?'Đang nhập…':`Nhập ${ready} dòng hợp lệ`}</button></>
         :<button type="button" className="pm-button pm-button-primary" disabled={busy||!lineText().trim()||kind==='LOGIN'&&!type} onClick={()=>void runPreview()}>{busy?'Đang kiểm tra…':kind==='LOGIN'&&!type?'Chọn Gmail hoặc Apple ID':'Xem trước'}</button>}</div>
   </section>;

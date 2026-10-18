@@ -153,6 +153,8 @@ it('batches recorded before the fix that look merged are listed for review; thei
     await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:`old-${u()}@example.invalid`,loginType:'GMAIL',batchId:old.id,status:'ACTIVE',businessManaged:true}});
     const store=await readAccountStore(f.scope,db),legacy=store.review.filter(r=>r.kind==='LEGACY_BATCH_COST');
     expect(legacy.length).toBe(1);expect(legacy[0].message).toMatch(/TK-2026-10-17.*5 dòng dán.*1 đã nhận/);expect(legacy[0].message).toMatch(/nhập thêm sau/);
+    // It belongs to the login side and opens that purchase in Lịch sử nhập kho.
+    expect(legacy[0]).toMatchObject({group:'LOGIN',subject:'Lô TK-2026-10-17',open:{type:'batch',code:'TK-2026-10-17'}});
     // A new purchase on the same day gets its own code next to the old one.
     const r=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`n-${u()}@example.invalid|pw`,batch:{purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
     expect(r.batch.code).toBe('TK-2026-10-17-2');
@@ -271,6 +273,10 @@ it('Kho tài khoản serves a PayPal-only member its PayPal part (no logins, no 
     const store=await readAccountStore({...f.scope,userId:pp,role:'MODERATOR'},db);
     expect(store.rights).toMatchObject({logins:false,paypals:true,writeLogins:false,writePaypals:true});
     expect(store.logins).toEqual([]);expect(store.paypals.map(p=>p.code)).toContain('PP-'+x);expect(store.batches.map(b=>b.kind)).toEqual(['PAYPAL']);
+    // Review items carry their kind: a login without a type is shown on the login side to whoever reads logins, never to PayPal-only.
+    const untyped=`untyped-${x}@example.invalid`;await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:untyped,status:'ACTIVE',businessManaged:true}});
+    const adminReview=(await readAccountStore(f.scope,db)).review.find(r=>r.subject===untyped);expect(adminReview).toMatchObject({kind:'LOGIN_TYPE_MISSING',group:'LOGIN',open:{type:'account',q:untyped}});
+    expect((await readAccountStore({...f.scope,userId:pp,role:'MODERATOR'},db)).review.filter(r=>r.group==='LOGIN')).toEqual([]);
     await expect(readAccountStore({...f.scope,userId:none,role:'USER'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
   }finally{await db.projectMember.deleteMany({where:{userId:{in:[pp,none]}}});await db.user.deleteMany({where:{id:{in:[pp,none]}}});await f.cleanup();}
 });

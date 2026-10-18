@@ -46,6 +46,10 @@ it('registry returns structured locations (all positions), server facet, total a
     const bySearch=await queryRegistry(f.scope,{view:'CURRENT',limit:50,search:'moon2/vm_001'},db);expect(bySearch.rows.map(r=>r.ip)).toEqual([f.net+'1']);
     const paged=await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'SERVER',servers:['moon10','moon2']},db);expect(paged.rows.map(r=>r.ip)).toEqual([f.net+'1']);expect(paged.total).toBe(2);
     const next=await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'SERVER',servers:['moon10','moon2'],cursor:paged.nextCursor!},db);expect(next.rows.map(r=>r.ip)).toEqual([f.net+'2']);expect(next.nextCursor).toBeNull();
+    // ?page= in the URL: page 2 is the same rows as the cursor; a page past the end (rows removed since the link) is the last page, reported.
+    const second=await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'SERVER',servers:['moon10','moon2'],page:2},db);expect(second.rows.map(r=>r.ip)).toEqual([f.net+'2']);expect(second.page).toBe(2);expect(second.nextCursor).toBeNull();
+    const gone=await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'SERVER',servers:['moon10','moon2'],page:9},db);expect(gone.page).toBe(2);expect(gone.rows.map(r=>r.ip)).toEqual([f.net+'2']);
+    expect((await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'SERVER',servers:['nowhere'],page:3},db)).page).toBe(1);
   }finally{await f.cleanup();}
 });
 it('bulk copy returns full proxies in the requested order, reports skipped rows by reason, enforces the capability and project, and logs counts only',async()=>{

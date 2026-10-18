@@ -87,6 +87,16 @@ describe('Tổng quan (dashboard read model)',()=>{
       expect((await readOrphanTasks(f.admin,db)).map(t=>t.id)).toEqual([task.id]);
     }finally{await f.cleanup();}
   });
+  it('reads operations and finance separately: a finance failure never hides operations and is an error, not zeros',async()=>{
+    const f=await fixture();try{
+      await db.project.update({where:{id:f.projectId},data:{settings:{businessMode:'PROXY_VM',teamCashEnabled:true}}});
+      // The team receipts table fails (e.g. a database error): only the finance read sees it.
+      const broken=new Proxy(db,{get(target,key,receiver){const v=Reflect.get(target,key,receiver);if(key!=='teamReceipt')return typeof v==='function'?v.bind(target):v;return new Proxy(v as object,{get(d,k){if(k==='findMany'||k==='aggregate')return ()=>Promise.reject(new Error('finance store down'));const m=Reflect.get(d,k);return typeof m==='function'?m.bind(d):m;}});}}) as typeof db;
+      const ops=await readOverview(f.admin,{month:'2026-10',part:'operations'},broken);expect(ops.part).toBe('operations');expect(ops.operations!.totals.vms).toBe(3);expect(ops.finance).toBeNull();
+      await expect(readOverview(f.admin,{month:'2026-10',part:'finance'},broken)).rejects.toThrow('finance store down');
+      const fin=await readOverview(f.admin,{month:'2026-10',part:'finance'},db);expect(fin.operations).toBeNull();expect(fin.finance).toMatchObject({enabled:true,records:0});
+    }finally{await f.cleanup();}
+  });
   it('finance is team-received USDT minus valid costs per day; no records → no series; sections follow backend rights',async()=>{
     const f=await fixture();try{
       let o=await readOverview(f.admin,{month:'2026-10'},db);expect(o.finance).toEqual({enabled:false});
@@ -107,6 +117,16 @@ describe('Tổng quan (dashboard read model)',()=>{
       const op=await readOverview(f.operator,{month:'2026-10'},db);expect(op.operations).not.toBeNull();expect(op.finance).toBeNull();expect(op.rights).toMatchObject({infra:true,profit:false,costs:false});
       const acc=await readOverview(f.accountant,{month:'2026-10'},db);expect(acc.operations).toBeNull();expect(acc.finance).toMatchObject({enabled:true,net:fin.net});
       await expect(readOverview(f.admin,{month:'2026-13'},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      // PROFIT only: the summary is readable, the lists behind it are not (the page links only where the member may go).
+      await db.projectMember.updateMany({where:{projectId:f.projectId,userId:f.accountant.userId},data:{allowedModules:['PROFIT']}});
+      const profitOnly=await readOverview(f.accountant,{month:'2026-10'},db);expect(profitOnly.finance).toMatchObject({enabled:true,net:fin.net});
+      expect(profitOnly.rights).toMatchObject({profit:true,costs:false,withdrawals:false,funds:false});
+      // COSTS without PROFIT: no finance summary at all (null = not allowed, never zeros).
+      await db.projectMember.updateMany({where:{projectId:f.projectId,userId:f.accountant.userId},data:{allowedModules:['COSTS']}});
+      expect((await readOverview(f.accountant,{month:'2026-10'},db)).finance).toBeNull();
+      // A viewer with the modules reads, like the lists it links to.
+      await db.projectMember.updateMany({where:{projectId:f.projectId,userId:f.accountant.userId},data:{role:'VIEWER',allowedModules:['PROFIT','COSTS','WITHDRAWALS','INFRASTRUCTURE']}});
+      const viewer=await readOverview({...f.accountant,role:'VIEWER'},{month:'2026-10'},db);expect(viewer.operations).not.toBeNull();expect(viewer.rights).toMatchObject({profit:true,costs:true,withdrawals:true});
     }finally{await f.cleanup();}
   });
 });

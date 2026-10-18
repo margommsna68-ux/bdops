@@ -106,3 +106,13 @@ textarea.vm-cell-input{resize:none;min-height:36px;line-height:1.3}
 .acc-state.NEW{background:#ecfdf5;color:#047857;border-color:#a7f3d0}.acc-state.ASSIGNED{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.acc-state.USED{background:var(--ds-hover);color:var(--ds-text-secondary)}.acc-state.BLOCKED{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
 [data-theme="dark"] .acc-state.NEW{background:#052e1f;color:#6ee7b7;border-color:#065f46}[data-theme="dark"] .acc-state.ASSIGNED{background:#0b1f44;color:#93c5fd;border-color:#1e3a8a}[data-theme="dark"] .acc-state.BLOCKED{background:#450a0a;color:#fecaca;border-color:#7f1d1d}
 .acc-status-select{font-size:12px;padding:3px 6px;height:auto;width:auto}
+
+/* Kho tài khoản: secondary actions inside the kind being looked at (Lịch sử nhập kho, Cần đối chiếu as a warning only when there is some). */
+.acc-subnav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:32px}
+.acc-subnav .pm-button{display:inline-flex;align-items:center;gap:6px}
+.acc-review-alert{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:5px 12px;border-radius:8px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;cursor:pointer}
+.acc-review-alert:hover{background:#fef3c7}
+[data-theme="dark"] .acc-review-alert,[data-theme="golden"] .acc-review-alert{background:#2a1f05;color:#fcd34d;border-color:#78350f}
+.acc-review-list{display:flex;flex-direction:column;gap:0;list-style:none;margin:0;padding:0}
+.acc-review-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--ds-border)}
+.acc-review-list li>div{min-width:0;overflow-wrap:anywhere}

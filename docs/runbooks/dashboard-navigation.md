@@ -91,3 +91,20 @@ Một hàm `visibleMenu` dùng cho mọi chế độ.
 - **Trình duyệt:** `scratchpad/pw/mth-accept.js` (42/42 ẩn, 3/3 bật lại, MODE=on); trước đó `scratchpad/pw/dash-accept.js`, chạy trên dữ liệu thử cục bộ, kết quả 33/33. Dữ liệu tạo bằng `.runtime/dash-local-setup.ts`, không đẩy lên host.
 - **Bằng chứng:** `docs/superpowers/evidence/2026-10-17-dashboard-navigation/` và `docs/superpowers/evidence/2026-10-17-menu-hidden-modules/`.
 - **Test:** `menu-modules.test.ts` (menu, quyền PayPal, bật/tắt module, link cũ); `account-store` (người chỉ có quyền PayPal).
+
+## 18 October 2026 fixes
+
+- **Menu order:** Tổng quan → Kho tài khoản → Kho proxy → Server / VM, then the rest by rights (`src/components/layout/nav.ts`).
+- **Chart clicks:** the number printed on a segment has `pointer-events: none`, so clicking the number or the coloured part opens
+  the same list (server + VM state, or group + proxy state).
+- **Finance month and day:** money links carry `?month=YYYY-MM` and, from a chart column, `&date=YYYY-MM-DD` (a day implies its
+  month).
+  - Nhận USDT về team, Chi phí and Lợi nhuận read them with `readPeriod` (`src/lib/links.ts`). Changing the month on those pages
+    is a history entry and clears the day.
+  - CashNav keeps the month between the money pages.
+- **Rights on finance numbers:** the summary shows to members with PROFIT, but each number links only to a list the member may
+  read (`src/components/dashboard/finance-links.ts`): received → WITHDRAWALS, costs → COSTS, profit → PROFIT. Otherwise it is
+  plain text and chart columns do not navigate. Backend rights are unchanged.
+- **Errors per section:** the page reads `businessManagement.overview` twice, `part: 'operations'` and `part: 'finance'`.
+  - A failure in one section shows *Chưa tải được phần …* with its own *Thử lại* and leaves the other section on screen.
+  - A section the member may not read is null, never an error and never zeros.

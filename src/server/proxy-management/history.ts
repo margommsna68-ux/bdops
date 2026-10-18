@@ -55,10 +55,12 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
   await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
   const {rows:filtered,counts,servers,groups,groupCounts,stateCounts}=await loadRegistryRows(scope,filter,db);
+  // ?page= of the registry: a page past the end (rows changed since the link was made) is served as the last page and reported back.
   let start=0;
+  if(filter.page&&!filter.cursor){if(!Number.isInteger(filter.page)||filter.page<1) throw new ProxyDomainError('INVALID_INPUT');start=(Math.min(filter.page,Math.max(1,Math.ceil(filtered.length/filter.limit)))-1)*filter.limit;}
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
-  return {rows:page,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
+  return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
 }
 export async function getProxyTimeline(scope:ActorScope,identityId:string,db:PrismaClient=prisma):Promise<ProxyTimeline>{
   await authorize(scope,false,db);

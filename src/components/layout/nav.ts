@@ -19,15 +19,15 @@ export const moneyItems=(cashMode:boolean):NavItem[]=>cashMode?[
   {href:links.paypalIn(),labelKey:'Tiền vào PayPal',label:'Tiền vào PayPal',icon:'$',module:'FUNDS'},
   {href:links.originalWithdrawals(false),labelKey:'Rút / chuyển gốc',label:'Rút / chuyển gốc',icon:'R',module:'WITHDRAWALS'},
 ];
-// MoneyToHome (Proxy / VM) menu. Kho tài khoản is one item for Gmail / Apple ID, PayPal, Lô nhập and Cần kiểm tra; /paypals stays
+// MoneyToHome (Proxy / VM) menu, owner order: Tổng quan → Kho tài khoản → Kho proxy → Server / VM. Kho tài khoản is one item for Gmail / Apple ID and PayPal (Lịch sử nhập kho and Cần đối chiếu inside it); /paypals stays
 // as its PayPal tab. Việc cài proxy and Giao việc show only when switched on in src/lib/features.ts.
 export const personalItems=(cashMode:boolean):NavItem[]=>[
   {href:'/dashboard',labelKey:'Tổng quan',icon:'D'},
+  {href:'/gmails',labelKey:'Kho tài khoản',icon:'G',anyModule:['INFRASTRUCTURE','PAYPALS'],also:['/paypals']},
   {href:links.proxies(),labelKey:'Kho proxy',icon:'P',module:'INFRASTRUCTURE'},
   {href:links.vms(),labelKey:'Server / VM',icon:'S',module:'INFRASTRUCTURE'},
   {href:'/vm-tasks',labelKey:'Việc cài proxy',icon:'V',module:'INFRASTRUCTURE',optional:'INSTALL_TASKS'},
   {href:'/work',labelKey:'Giao việc',icon:'W',module:'INFRASTRUCTURE',optional:'WORK'},
-  {href:'/gmails',labelKey:'Kho tài khoản',icon:'G',anyModule:['INFRASTRUCTURE','PAYPALS'],also:['/paypals']},
   {type:'separator',labelKey:'Tài chính'},
   ...moneyItems(cashMode),
   {href:'/costs',labelKey:'Chi phí',icon:'C',module:'COSTS'},

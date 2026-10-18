@@ -17,12 +17,19 @@ describe('shared link builder',()=>{
     expect(links.proxies({state:'BLOCKED'})).toBe('/infrastructure/proxies?state=BLOCKED');
     const href=links.proxies({q:'1.2.3.4',group:'TUT',state:'OTHER',package:'due',servers:['moon1','none'],tab:'history'});
     const u=readRegistryUrl(params(href.split('?')[1]));
-    expect(u).toEqual({q:'1.2.3.4',servers:['moon1',UNASSIGNED_SERVER],group:'TUT',state:'OTHER',pkg:'due',sort:'PACKAGE',view:'HISTORY'});
+    expect(u).toEqual({q:'1.2.3.4',servers:['moon1',UNASSIGNED_SERVER],group:'TUT',state:'OTHER',pkg:'due',sort:'PACKAGE',view:'HISTORY',page:1});
     expect('/infrastructure/proxies'+writeRegistryUrl(u)).toBe(href);
     expect(writeRegistryUrl({...u,sort:'IP'})).toContain('sort=IP');
     expect(readRegistryUrl(params('state=bogus&tab=nope&sort=x'))).toMatchObject({state:'',view:'CURRENT',sort:'PACKAGE'});
     expect(writeRegistryUrl(readRegistryUrl(params('group=SHARED')),'240292')).toBe('?group=SHARED&pay=240292');
     expect(filterKey(readRegistryUrl(params('group=TUT')))).not.toBe(filterKey(readRegistryUrl(params('group=TUT&tab=all'))));
+  });
+  it('keeps the registry page in the URL; a filter change is a new result, a page change is not',()=>{
+    const u=readRegistryUrl(params('group=TUT&state=NEW&page=2'));expect(u.page).toBe(2);expect(writeRegistryUrl(u)).toBe('?group=TUT&state=NEW&page=2');
+    expect(writeRegistryUrl({...u,page:1})).toBe('?group=TUT&state=NEW');
+    expect(filterKey(u)).toBe(filterKey({...u,page:5}));expect(filterKey(u)).not.toBe(filterKey({...u,state:'LIVE'}));
+    for(const bad of ['0','-1','abc','1.5','9999999'])expect(readRegistryUrl(params('page='+bad)).page).toBe(1);
+    expect(links.proxies({state:'BLOCKED',page:3})).toBe('/infrastructure/proxies?state=BLOCKED&page=3');
   });
   it('keeps the three money flows apart and builds filtered work, install and cost links',()=>{
     expect(links.teamReceipts()).toBe('/withdrawals');expect(links.teamReceipts({sources:true})).toBe('/withdrawals?view=sources');

@@ -16,9 +16,9 @@ Owner brief 17/10/2026. Replaces the old "Tài khoản VM" page and the rule tha
 
 | Table / field | Meaning |
 |---|---|
-| `GmailAccount.loginType` | `GMAIL` / `APPLE_ID`, chosen explicitly on import, never inferred from the email domain. Old rows stay empty and are listed under *Cần kiểm tra*. |
+| `GmailAccount.loginType` | `GMAIL` / `APPLE_ID`, chosen explicitly on import, never inferred from the email domain. Old rows stay empty and are listed under *Cần đối chiếu*. |
 | `GmailAccount.batchId`, `PayPalAccount.batchId` | Receiving batch. |
-| `AccountPurchaseBatch` | Lô nhập = one purchase: code, kind, source, purchase date, price mode (NONE / UNIT / TOTAL), `paidQuantity` (quantity actually bought), `lineCount` (lines pasted the first time, information only), `costRule` (1 = recorded before the 17/10 evening fix) and `costRecordId` (unique). |
+| `AccountPurchaseBatch` | Đợt nhập (a row of Lịch sử nhập kho) = one purchase: code, kind, source, purchase date, price mode (NONE / UNIT / TOTAL), `paidQuantity` (quantity actually bought), `lineCount` (lines pasted the first time, information only), `costRule` (1 = recorded before the 17/10 evening fix) and `costRecordId` (unique). |
 | `EarnAppAccount` | EarnApp account: `loginId` (unique), `vmId` (unique, nullable), `paypalId` (unique, nullable), `registeredAt`. |
 | `PayPalAccount.firstEarnAppId` | First EarnApp account this PayPal received for. |
 | `BusinessWorkItem.kind` | `TASK` (work for staff) or `SHEET_REVIEW` (old Sheet reconciliation rows). |
@@ -48,7 +48,7 @@ creates, merges and deletes nothing.
   - *Nhập Gmail / Apple ID* / *Nhập PayPal* is always a new purchase with its own batch. The code is generated as
     `TK-<ngày mua>-<n>` / `PP-<ngày mua>-<n>` (next free number, withdrawn batches included) inside the command under the project
     lock, so two people importing at once get different codes. A typed code that already exists is refused, never merged.
-  - *Lô nhập → Nhập bổ sung* continues that batch only (`append.batchId`), never with money, source or date. Sending money with
+  - *Lịch sử nhập kho → Nhập bổ sung* continues that batch only (`append.batchId`), never with money, source or date. Sending money with
     an append is refused, not ignored.
   - After an import that left error lines, the panel switches to *Nhập bổ sung vào lô …* of the batch just created.
 - One command key per previewed request: the key is made at *Xem trước* and kept until the input changes or the import
@@ -66,19 +66,19 @@ creates, merges and deletes nothing.
     imported may still have been paid for.
   - Original amount, currency and USDT rate are kept, and the period lock applies.
 - Needs team cash and the right to write costs. Without them the batch is saved as *Chưa ghi chi phí*. A person with that right
-  records the payment later in *Lô nhập → Ghi chi phí*. This is refused once a cost is recorded; it is allowed again only after
+  records the payment later in *Lịch sử nhập kho → Ghi chi phí*. This is refused once a cost is recorded; it is allowed again only after
   the cost is voided in Chi phí.
 - The price shown per account (*Giá phân bổ*) is the unit price, otherwise the total divided by the quantity bought (or by the
   accounts received when no quantity was entered). It is for
   information only and is never added to profit. Only ADMIN or members with the COSTS module see amounts.
 - Assigning, unassigning, moving, re-importing and appending never add a cost or change the recorded total.
-- The current cost record in Chi phí is the paid amount. *Lô nhập* and *Giá phân bổ* read total, currency, rate, USDT and state
+- The current cost record in Chi phí is the paid amount. *Lịch sử nhập kho* and *Giá phân bổ* read total, currency, rate, USDT and state
   from it. After an edit there the batch shows the new total, with *Đã điều chỉnh ở Chi phí · ban đầu …* (the first price is kept
   as history and never rewritten). The `số lượng × đơn giá` formula is shown only while it still equals the ledger total.
   Allocation = ledger total / quantity bought. A voided cost shows *Khoản chi đã thu hồi*; *Ghi chi phí* records it again once.
   Undo of an edit is followed automatically.
 - *Xem ở Chi phí* opens `/costs?cost=<id>&month=<YYYY-MM>`: the right month, with that row highlighted and scrolled into view.
-- Batches recorded before this fix (`costRule = 1`) are listed under *Cần kiểm tra* when unit price × pasted lines differs from
+- Batches recorded before this fix (`costRule = 1`) are listed under *Cần đối chiếu* when unit price × pasted lines differs from
   the accounts received, or when accounts were added later under the same code (possibly another purchase without its own
   cost). Their money is never recomputed or changed. Migration `20261017180000_account_batch_quantity` is additive.
 
@@ -115,6 +115,31 @@ creates, merges and deletes nothing.
 
 - `src/__tests__/proxy-management/account-store.integration.test.ts` and `account-parse.test.ts`.
 - Purchase money: `scratchpad/pw/purchase-accept.js` on PROXY_TRIAL (two purchases the same day, lost response + retry,
-  quantity × unit price with bad / repeated lines, append after errors, Lô nhập tab).
+  quantity × unit price with bad / repeated lines, append after errors, Lịch sử nhập kho).
 - Local browser acceptance: `scratchpad/pw/accounts-accept.js` on PROXY_TRIAL. It creates a new `ac-xxxx` server and synthetic
   `@example.invalid` accounts on each run.
+
+## Page layout and URL (18 October 2026)
+
+- **Two tabs only:** Gmail / Apple ID and PayPal (`?tab=login | paypal`; `/gmails` defaults to login, `/paypals` to PayPal).
+- **Inside the kind being looked at:**
+  - *Lịch sử nhập kho* (`?view=history`): one row per purchase with source, date, quantity bought / received and money paid
+    once. Buttons: *Xem tài khoản (N)* (the accounts of that purchase, `?batch=<code>`), *Nhập bổ sung* (continues that purchase,
+    no money), *Ghi chi phí*, *Xem ở Chi phí*.
+  - *Cần đối chiếu (N)* (`?view=review`): an amber warning shown only when the kind has items. Each item has a subject, a short
+    reason and one button to the place to handle it: the VM, the account (searched in its table) or the purchase in the history.
+    Account states (locked, PayPal limit, stopped) are not review items; they are the *Lỗi / ngừng dùng* filter.
+- **Old URLs keep working:** `?tab=batch` → `?view=history`, `?tab=review` → `?view=review` (kind of the page),
+  `?import=1` opens the import panel once. They are replaced by their canonical URL without a history entry.
+- **Navigation:** kind, view, filter chips and the purchase filter are history entries; typing a search replaces the URL. Reload,
+  Back/Forward and a direct URL show the same content. A PayPal-only member is shown the PayPal tab whatever the URL says.
+- **Import panel per kind:** the tab, table, import button, panel and target purchase are always the same kind.
+  - Each kind keeps its own draft (text, money, preview, target) in this tab's memory only (`importDraft` in
+    `src/components/account-store/ImportPanel.tsx`), keyed by project and kind. Never in the URL, localStorage or
+    sessionStorage (drafts can hold passwords and 2FA); a full reload drops them.
+  - *Đóng* keeps the draft for the session; *Bỏ nháp* empties it.
+  - Switching tabs never saves or imports. The row selection resets on any kind, view or filter change.
+  - The page remounts per project, so drafts, panels and previews never cross projects.
+- **Review data:** `readAccountStore().review[]` carries `group` (LOGIN / PAYPAL), `subject`, `reason` and `open`
+  (`vm` / `account` / `batch`); `message` is kept for older readers. Items follow the member's rights (PayPal-only members never
+  get login items).

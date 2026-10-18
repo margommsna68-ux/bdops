@@ -12,13 +12,19 @@ export function query(values:Record<string,Value>):string{
   const p=new URLSearchParams();for(const [k,v] of Object.entries(values)) if(v!==undefined&&v!==null&&v!==false&&v!=='') p.set(k,String(v));
   const s=p.toString();return s?'?'+s:'';
 }
-const MONTH=/^\d{4}-\d{2}$/;
+const MONTH=/^\d{4}-(0[1-9]|1[0-2])$/,DAY=/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const period=(o:{month?:string;date?:string}):{month?:string;date?:string}=>{const date=o.date&&DAY.test(o.date)?o.date:undefined;return {month:date?date.slice(0,7):o.month&&MONTH.test(o.month)?o.month:undefined,date};};
+// Read back by the money pages: the month (default: this month) and a day inside that month (anything else is ignored).
+export function readPeriod(p:{get(name:string):string|null},fallbackMonth:string):{month:string;date:string|null}{
+  const d=p.get('date')||'',m=p.get('month')||'',date=DAY.test(d)&&(!m||d.startsWith(m))?d:null;
+  return {month:date?date.slice(0,7):MONTH.test(m)?m:fallbackMonth,date};
+}
 export const links={
   dashboard:()=>'/dashboard',
   // Server / VM grid. The server is in the path; vm + tab open the side panel on that VM (same keys as grid-model writeGridUrl).
   vms:(o:{serverId?:string|null;view?:VmView;q?:string;vm?:string|null;tab?:VmTab}={})=>(o.serverId?'/infrastructure/servers/'+encodeURIComponent(o.serverId):'/infrastructure/servers')+query({q:o.q,view:o.view,vm:o.vm,tab:o.vm&&o.tab&&o.tab!=='overview'?o.tab:undefined}),
-  // Proxy registry: ?q &servers &group &state &package &tab (current is the default tab). servers uses 'none' for unassigned.
-  proxies:(o:{q?:string;group?:ProxyGroupKey|string;state?:ProxyStateKey|string;package?:string;servers?:string[];tab?:ProxyTab;pay?:string}={})=>'/infrastructure/proxies'+query({q:o.q,servers:o.servers?.length?o.servers.join(','):undefined,group:o.group,state:o.state,package:o.package,tab:o.tab&&o.tab!=='current'?o.tab:undefined,pay:o.pay}),
+  // Proxy registry: ?q &servers &group &state &package &tab (current is the default tab) &page. servers uses 'none' for unassigned.
+  proxies:(o:{q?:string;group?:ProxyGroupKey|string;state?:ProxyStateKey|string;package?:string;servers?:string[];tab?:ProxyTab;pay?:string;page?:number}={})=>'/infrastructure/proxies'+query({q:o.q,servers:o.servers?.length?o.servers.join(','):undefined,group:o.group,state:o.state,package:o.package,tab:o.tab&&o.tab!=='current'?o.tab:undefined,page:o.page&&o.page>1?o.page:undefined,pay:o.pay}),
   // Proxy packages: the package list (Thiết lập → Gói proxy) on the registry, due ones first, or the payment form of one package.
   packages:(o:{pay?:string}={})=>'/infrastructure/proxies'+(o.pay?query({pay:o.pay}):query({packages:'due'})),
   // Install work happens at the VM (Server / VM, tab Cài proxy) while the Việc cài proxy page is hidden (src/lib/features.ts).
@@ -26,13 +32,15 @@ export const links={
   // Open install tasks without a pending configuration: the VM itself when there is one, otherwise the Server / VM filter.
   orphanTasks:(list:{serverId:string;vmId:string}[]):string=>list.length===1?links.vms({serverId:list[0].serverId,vm:list[0].vmId,tab:'install'}):links.vms({view:'TASK_ORPHAN'}),
   work:(o:{kind?:'TASK'|'SHEET_REVIEW';vm?:string}={})=>'/work'+query({kind:o.kind==='SHEET_REVIEW'?'SHEET_REVIEW':undefined,vm:o.vm}),
-  accounts:(o:{tab?:'login'|'paypal'|'batch'|'review';q?:string;state?:string}={})=>'/gmails'+query({tab:o.tab&&o.tab!=='login'?o.tab:undefined,q:o.q,state:o.state}),
-  costs:(o:{month?:string;cost?:string;server?:string}={})=>'/costs'+query({month:o.month&&MONTH.test(o.month)?o.month:undefined,cost:o.cost,server:o.server}),
+  // Kho tài khoản (see components/account-store/account-url.ts): kind tab, then Lịch sử nhập kho / Cần đối chiếu inside that kind.
+  accounts:(o:{tab?:'login'|'paypal';view?:'history'|'review';q?:string;state?:string;batch?:string}={})=>'/gmails'+query({tab:o.tab&&o.tab!=='login'?o.tab:undefined,view:o.view,q:o.q,state:o.state,batch:o.batch}),
+  // Money lists open on the month (and optionally the day) they were opened from: ?month=YYYY-MM &date=YYYY-MM-DD (a day implies its month).
+  costs:(o:{month?:string;date?:string;cost?:string;server?:string}={})=>'/costs'+query({...period(o),cost:o.cost,server:o.server}),
   // Money pages. With team cash on, /withdrawals is "Nhận USDT về team" and the original withdrawals/transfers live under
   // ?view=original; without it /withdrawals is the original withdrawals page. /funds is always money arriving in PayPal.
-  teamReceipts:(o:{sources?:boolean}={})=>'/withdrawals'+query({view:o.sources?'sources':undefined}),
+  teamReceipts:(o:{sources?:boolean;month?:string;date?:string}={})=>'/withdrawals'+query({view:o.sources?'sources':undefined,...period(o)}),
   originalWithdrawals:(cashMode:boolean)=>cashMode?'/withdrawals?view=original':'/withdrawals',
   paypalIn:()=>'/funds',
-  profit:()=>'/profit',
+  profit:(o:{month?:string}={})=>'/profit'+query(period(o)),
   history:()=>'/history',
 };

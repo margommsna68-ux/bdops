@@ -8,6 +8,7 @@ import {trpc} from '@/lib/trpc';
 import {links,query} from '@/lib/links';
 import {today} from '@/components/business-management/workflow';
 import {CashChart,StockChart,VmByServerChart} from './OverviewCharts';
+import {financeTargets} from './finance-links';
 import '@/components/proxy-management/proxy-management.css';
 import './dashboard.css';
 export type Overview=inferRouterOutputs<AppRouter>['businessManagement']['overview'];
@@ -17,27 +18,37 @@ const usdt=(s:string)=>Number(s).toLocaleString('vi-VN',{minimumFractionDigits:2
 // Tổng quan: operations (current state) and what needs attention first, finance in its own section (the month only filters finance). Every number
 // links to the list it counts; the read model uses the same rules as those lists (see src/server/dashboard/overview.ts).
 export function Overview({projectId}:{projectId:string}){
-  const params=useSearchParams(),router=useRouter(),pathname=usePathname();
-  const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(params.get('month')||'')?params.get('month')!:today().slice(0,7);
+  const params=useSearchParams(),router=useRouter(),pathname=usePathname(),thisMonth=today().slice(0,7);
+  const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(params.get('month')||'')?params.get('month')!:thisMonth;
   // A month change is a history entry: Back returns to the previous month.
-  const setMonth=(m:string)=>router.push(pathname+query({month:m===today().slice(0,7)?undefined:m}),{scroll:false});
-  const data=trpc.businessManagement.overview.useQuery({projectId,month},{keepPreviousData:true,refetchOnWindowFocus:true});
-  const o=data.data;
+  const setMonth=(m:string)=>router.push(pathname+query({month:m===thisMonth?undefined:m}),{scroll:false});
+  // Operations and finance are read separately: an error in one section leaves the other on screen, each with its own retry. A section
+  // the member may not read comes back null (not an error); an error is never shown as zeros.
+  const ops=trpc.businessManagement.overview.useQuery({projectId,month:thisMonth,part:'operations'},{keepPreviousData:true,refetchOnWindowFocus:true,retry:1});
+  const fin=trpc.businessManagement.overview.useQuery({projectId,month,part:'finance'},{keepPreviousData:true,refetchOnWindowFocus:true,retry:1});
+  const o=ops.data,f=fin.data,rights=(o||f)?.rights,fetching=ops.isFetching||fin.isFetching;
   return <div className="proxy-workspace ov">
     <div className="ov-head"><h1>Tổng quan</h1>
-      <span className="pm-muted text-xs">{o?'Vận hành hiện tại · cập nhật '+new Date(o.generatedAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}):data.isLoading?'Đang tải…':''}</span>
-      <button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" disabled={data.isFetching} onClick={()=>void data.refetch()}><RefreshCw size={16} className={data.isFetching?'animate-spin':''}/></button></div>
-    {data.error&&<div className="ov-error" role="alert"><span>Chưa tải được tổng quan: {data.error.message}</span><button className="pm-button" onClick={()=>void data.refetch()}>Thử lại</button></div>}
-    {data.isLoading&&<div className="ov-skeleton" aria-busy="true"><div/><div/><div/></div>}
-    {o&&!o.operations&&!showFinance(o)&&<p className="ov-empty">Tài khoản này chưa được cấp mục nào hiển thị ở Tổng quan. Mở các mục ở menu bên trái theo quyền được giao.</p>}
+      <span className="pm-muted text-xs">{o?'Vận hành hiện tại · cập nhật '+new Date(o.generatedAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}):ops.isLoading?'Đang tải…':''}</span>
+      <button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" disabled={fetching} onClick={()=>{void ops.refetch();void fin.refetch();}}><RefreshCw size={16} className={fetching?'animate-spin':''}/></button></div>
+    {ops.isLoading&&<div className="ov-skeleton" aria-busy="true"><div/><div/><div/></div>}
+    {ops.error&&<SectionError label="phần vận hành" message={ops.error.message} busy={ops.isFetching} retry={()=>void ops.refetch()}/>}
+    {o&&f&&!o.operations&&!showFinance(f)&&<p className="ov-empty">Tài khoản này chưa được cấp mục nào hiển thị ở Tổng quan. Mở các mục ở menu bên trái theo quyền được giao.</p>}
     {o?.operations&&<Operations ops={o.operations}/>}
-    {o&&showFinance(o)&&<Finance projectId={projectId} o={o} month={month} onMonth={setMonth} fetching={data.isFetching}/>}
+    {fin.error&&<SectionError label="phần tài chính" message={fin.error.message} busy={fin.isFetching} retry={()=>void fin.refetch()}/>}
+    {f&&rights&&showFinance(f)&&<Finance projectId={projectId} o={f} month={month} onMonth={setMonth} fetching={fin.isFetching}/>}
   </div>;
 }
 // Finance shows for members who may read it (team cash on), or as the switch-on prompt for an admin while it is off.
 const showFinance=(o:Overview)=>o.finance?.enabled===true||(o.rights.admin&&!o.rights.cashEnabled);
-function Kpi({href,label,value,tone,hint}:{href:string;label:string;value:number|string|null;tone?:'green'|'blue'|'amber'|'red';hint?:string}){
-  return <Link href={href} className={'ov-kpi'+(tone?' ov-'+tone:'')}><span>{label}</span><strong>{value===null?'—':typeof value==='number'?fmt(value):value}</strong>{hint&&<small>{hint}</small>}</Link>;
+// One section could not be read (network, server): say so in place, keep the rest of the page, offer a retry of that section only.
+function SectionError({label,message,busy,retry}:{label:string;message:string;busy:boolean;retry:()=>void}){
+  return <div className="ov-error" role="alert"><span>Chưa tải được {label}: {message}</span><button className="pm-button" disabled={busy} onClick={retry}>{busy?'Đang thử lại…':'Thử lại'}</button></div>;
+}
+function Kpi({href,label,value,tone,hint}:{href:string|null;label:string;value:number|string|null;tone?:'green'|'blue'|'amber'|'red';hint?:string}){
+  const body=<><span>{label}</span><strong>{value===null?'—':typeof value==='number'?fmt(value):value}</strong>{hint&&<small>{hint}</small>}</>;
+  // No right to the list behind the number: the number stays, without a link to a page that would refuse it.
+  return href?<Link href={href} className={'ov-kpi'+(tone?' ov-'+tone:'')}>{body}</Link>:<div className={'ov-kpi ov-kpi-static'+(tone?' ov-'+tone:'')}>{body}</div>;
 }
 function Operations({ops}:{ops:Ops}){
   const t=ops.totals;
@@ -88,19 +99,19 @@ function Gaps({ops}:{ops:Ops}){
 }
 function Finance({projectId,o,month,onMonth,fetching}:{projectId:string;o:Overview;month:string;onMonth:(m:string)=>void;fetching:boolean}){
   const utils=trpc.useUtils(),activate=trpc.businessManagement.activateCash.useMutation({onSuccess:()=>{void utils.project.myMembership.invalidate();void utils.businessManagement.invalidate();}});
-  const f=o.finance;
+  const f=o.finance,t=financeTargets(o.rights,month);
   return <section className="pm-surface ov-card ov-finance" aria-labelledby="ov-finance">
     <div className="ov-card-head"><h2 id="ov-finance">Tài chính</h2>{f?.enabled&&<><input type="month" aria-label="Tháng tài chính" className="pm-input ov-month" value={month} onChange={e=>{if(e.target.value)onMonth(e.target.value);}}/>{fetching&&<span className="pm-muted text-xs">Đang tải…</span>}<span className="pm-muted text-xs">Tháng chỉ áp dụng cho phần tài chính.</span></>}</div>
     {!f?.enabled?<div className="ov-empty">{o.rights.admin?<><span>Thu chi USDT chưa bật cho dự án này: lợi nhuận tính từ USDT thực nhận về team trừ chi phí.</span> <button className="pm-button" disabled={activate.isLoading} onClick={()=>activate.mutate({projectId,key:crypto.randomUUID()})}>Bật thu chi USDT</button>{activate.error&&<p role="alert" className="pm-error">{activate.error.message}</p>}</>:'Thu chi USDT chưa bật cho dự án này.'}</div>:<>
-      {f.records===0&&f.blockingCount===0&&Number(f.received)===0&&Number(f.cost)===0?<div className="ov-empty">Tháng {month.split('-').reverse().join('/')} chưa có khoản nhận USDT hay chi phí nào.{o.rights.withdrawals&&<> <Link className="pm-link" href={links.teamReceipts()}>Ghi nhận USDT về team</Link></>}{o.rights.costs&&<> · <Link className="pm-link" href={links.costs({month})}>Ghi chi phí</Link></>}</div>:<>
+      {f.records===0&&f.blockingCount===0&&Number(f.received)===0&&Number(f.cost)===0?<div className="ov-empty">Tháng {month.split('-').reverse().join('/')} chưa có khoản nhận USDT hay chi phí nào.{t.received&&<> <Link className="pm-link" href={t.received}>Ghi nhận USDT về team</Link></>}{t.cost&&<> · <Link className="pm-link" href={t.cost}>Ghi chi phí</Link></>}</div>:<>
       <div className="ov-kpis ov-kpis-3">
-        <Kpi href={links.teamReceipts()} label="USDT thực nhận về team" value={usdt(f.received)} tone="green" hint="đã xác nhận nhận"/>
-        <Kpi href={links.costs({month})} label="Chi phí" value={usdt(f.cost)} tone="red" hint="quy đổi theo tỷ giá từng khoản"/>
-        <Kpi href={links.profit()} label="Lợi nhuận" value={usdt(f.net)} tone={Number(f.net)<0?'red':'blue'} hint="USDT"/>
+        <Kpi href={t.received} label="USDT thực nhận về team" value={usdt(f.received)} tone="green" hint="đã xác nhận nhận"/>
+        <Kpi href={t.cost} label="Chi phí" value={usdt(f.cost)} tone="red" hint="quy đổi theo tỷ giá từng khoản"/>
+        <Kpi href={t.profit} label="Lợi nhuận" value={usdt(f.net)} tone={Number(f.net)<0?'red':'blue'} hint="USDT"/>
       </div>
-      {f.blockingCount>0&&<p className="ov-warn">Còn {f.blockingCount} khoản cần xử lý trước khi chốt kỳ{f.missingRate?<> · <Link className="pm-link" href={links.costs({month})}>{f.missingRate} chi phí thiếu tỷ giá</Link></>:null}{f.unverified?<> · <Link className="pm-link" href={links.teamReceipts({sources:true})}>{f.unverified} khoản nhận / collector cần đối soát</Link></>:null}</p>}
-      <CashChart fin={f} month={month}/>
-      {f.series.length>0&&<p className="ov-legend-line"><span className="ov-dot" style={{background:'#16a34a'}}/>Thực nhận <span className="ov-dot ml-3" style={{background:'#ef4444'}}/>Chi phí · bấm cột để mở danh sách. Tiền còn ở collector chưa tính là đã nhận.</p>}
+      {f.blockingCount>0&&<p className="ov-warn">Còn {f.blockingCount} khoản cần xử lý trước khi chốt kỳ{f.missingRate?<> · {t.cost?<Link className="pm-link" href={t.cost}>{f.missingRate} chi phí thiếu tỷ giá</Link>:<>{f.missingRate} chi phí thiếu tỷ giá</>}</>:null}{f.unverified?<> · {t.unverified?<Link className="pm-link" href={t.unverified}>{f.unverified} khoản nhận / collector cần đối soát</Link>:<>{f.unverified} khoản nhận / collector cần đối soát</>}</>:null}</p>}
+      <CashChart fin={f} month={month} targets={t}/>
+      {f.series.length>0&&<p className="ov-legend-line"><span className="ov-dot" style={{background:'#16a34a'}}/>Thực nhận <span className="ov-dot ml-3" style={{background:'#ef4444'}}/>Chi phí{t.received||t.cost?' · bấm cột để mở danh sách ngày đó':''}. Tiền còn ở collector chưa tính là đã nhận.</p>}
     </>}</>}
   </section>;
 }

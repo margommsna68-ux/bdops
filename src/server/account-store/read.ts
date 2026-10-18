@@ -50,11 +50,16 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
     money:money?(()=>{const p=paidOf(b),original=b.totalPaid?{total:b.totalPaid.toString(),currency:b.currency,unit:b.unitPrice?.toString()??null,quantity:b.paidQuantity}:null;
       if(p.c)return {priceMode:b.priceMode,total:p.c.amount.toString(),currency:p.c.currency,rate:p.c.usdtRate?.toString()??null,usdt:p.c.usdtAmount?.toString()??null,unit:p.unit,adjusted:!p.same,original:p.same?null:original};
       return original?{priceMode:b.priceMode,total:null,currency:null,rate:null,usdt:null,unit:null,adjusted:false,original}:null;})():null}));
-  // Old data that conflicts with the new rules: listed for a person to check; never merged, moved or deleted automatically.
-  const review:{kind:string;message:string;place:ReturnType<typeof place>}[]=[];
-  for(const v of legacyVms)if(!v.earnApp)review.push({kind:'LEGACY_VM_LOGIN',message:'VM có Gmail cũ '+v.gmail?.email+' (trước quy tắc mới) nhưng chưa có tài khoản EarnApp; gán lại tại ô nếu đúng',place:v.archivedAt?null:place(v)});
-  for(const g of loginRows)if(g.legacyVmCount>1)review.push({kind:'LEGACY_SHARED_LOGIN',message:'Gmail '+g.email+' từng ghi cho '+g.legacyVmCount+' VM (quy tắc cũ dùng chung); mỗi tài khoản giờ chỉ cho một VM',place:null});
-  for(const p of paypalRows)if(p.legacyLoginCount>1)review.push({kind:'LEGACY_SHARED_PAYPAL',message:'PayPal '+p.code+' từng liên kết '+p.legacyLoginCount+' Gmail (quy tắc cũ); một PayPal chỉ nhận cho một EarnApp',place:null});
+  // Old data that conflicts with the new rules: listed for a person to check; never merged, moved or deleted automatically. Each item
+  // belongs to one account kind (shown with that kind), has a short reason and opens the place to handle it: the VM, the account
+  // (searched in its own table) or the purchase in Lịch sử nhập kho. Account states (locked, PayPal limit, stopped) are not listed here.
+  type Open={type:'vm';place:NonNullable<ReturnType<typeof place>>}|{type:'account';q:string}|{type:'batch';code:string};
+  type Review={kind:string;group:'LOGIN'|'PAYPAL';subject:string;reason:string;message:string;place:ReturnType<typeof place>;open:Open};
+  const review:Review[]=[];
+  const add=(r:Omit<Review,'message'>)=>review.push({...r,message:r.subject+': '+r.reason});
+  for(const v of legacyVms)if(!v.earnApp){const at=v.archivedAt?null:place(v),email=v.gmail?.email||'';add({kind:'LEGACY_VM_LOGIN',group:'LOGIN',subject:email,reason:'Gmail cũ ghi trên VM '+v.server.code+' / '+v.code+' (trước quy tắc mới), VM chưa có tài khoản EarnApp. Gán lại tại ô nếu đúng.',place:at,open:at?{type:'vm',place:at}:{type:'account',q:email}});}
+  for(const g of loginRows)if(g.legacyVmCount>1)add({kind:'LEGACY_SHARED_LOGIN',group:'LOGIN',subject:g.email,reason:'Từng ghi cho '+g.legacyVmCount+' VM (quy tắc cũ dùng chung); nay một tài khoản chỉ cho một VM.',place:null,open:{type:'account',q:g.email}});
+  for(const p of paypalRows)if(p.legacyLoginCount>1)add({kind:'LEGACY_SHARED_PAYPAL',group:'PAYPAL',subject:p.code,reason:'Từng liên kết '+p.legacyLoginCount+' Gmail (quy tắc cũ); nay một PayPal chỉ nhận cho một EarnApp.',place:null,open:{type:'account',q:p.code}});
   // Batches recorded before the 17/10 fix: unit price × pasted lines (errors and repeats included), and a same-day code reused by
   // a later import fell into the first batch without its own cost. Listed for comparison with what was paid; never recomputed.
   const legacy=batches.filter(b=>b.costRule===1&&(b.kind==='PAYPAL'?paypals:logins)),ids=legacy.map(b=>b.id);
@@ -65,10 +70,10 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
       const received=b.kind==='PAYPAL'?b._count.paypals:b._count.logins,late=last.get(b.id),why:string[]=[];
       if(b.priceMode==='UNIT'&&received!==b.lineCount)why.push('tiền tính theo giá × '+b.lineCount+' dòng dán, '+received+' đã nhận');
       if(late&&late.getTime()-b.createdAt.getTime()>120000)why.push('có tài khoản nhập thêm sau lần đầu cùng mã lô (có thể là lần mua khác chưa ghi chi phí riêng)');
-      if(why.length)review.push({kind:'LEGACY_BATCH_COST',message:'Lô '+b.code+' (ghi trước bản sửa 17/10): '+why.join('; ')+'. Đối chiếu với tiền thực trả; web không tự tính lại hay sửa chi phí.',place:null});
+      if(why.length)add({kind:'LEGACY_BATCH_COST',group:b.kind==='PAYPAL'?'PAYPAL':'LOGIN',subject:'Lô '+b.code,reason:'Ghi trước bản sửa 17/10: '+why.join('; ')+'. Đối chiếu với tiền thực trả; web không tự tính lại hay sửa chi phí.',place:null,open:{type:'batch',code:b.code}});
     }
   }
-  for(const g of loginRows)if(!g.type)review.push({kind:'LOGIN_TYPE_MISSING',message:'Tài khoản '+g.email+' chưa chọn loại Gmail / Apple ID (dữ liệu cũ); web không tự đoán từ đuôi email',place:null});
+  for(const g of loginRows)if(!g.type)add({kind:'LOGIN_TYPE_MISSING',group:'LOGIN',subject:g.email,reason:'Chưa chọn loại Gmail / Apple ID (dữ liệu cũ); web không tự đoán từ đuôi email.',place:null,open:{type:'account',q:g.email}});
   return {logins:logins?loginRows:[],paypals:paypalRows,batches:batchRows,review,
     rights:{logins,paypals,writeLogins:can(current,'INFRASTRUCTURE',true)&&['ADMIN','MODERATOR'].includes(current.role),writePaypals:can(current,'PAYPALS',true)&&['ADMIN','MODERATOR'].includes(current.role),money,writeCosts:!!current.teamCashEnabled&&(current.role==='ADMIN'||current.role==='MODERATOR'&&!!current.allowedModules?.includes('COSTS')),copy:current.role!=='VIEWER'&&(current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS'))}};
 }

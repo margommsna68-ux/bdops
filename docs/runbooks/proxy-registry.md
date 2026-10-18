@@ -37,3 +37,12 @@ Một proxy có nhiều vị trí hợp lệ (ví dụ đang giữ cho một VM 
 - Nhật ký `COPY_PROXY_CREDENTIALS` chỉ ghi số dòng copy / tổng / số bỏ qua, không ghi user/pass; không có credentials trong URL, log hay thông báo.
 - Thông báo toast dùng `react-hot-toast`; `<Toaster/>` được gắn trong `src/app/providers.tsx` (trước đây thiếu nên mọi toast không hiện).
 - Chưa làm: nhớ lựa chọn qua nhiều trang, xuất file, lọc theo VM riêng, phân trang phía server (danh sách vẫn tải cả kho rồi lọc trong bộ nhớ, ~1 s với 1.362 proxy).
+
+## Page in the URL (18 October 2026)
+
+- `?page=N` (1 is the default) is part of the registry URL. Next / previous page are history entries.
+- Back from another page, reload or a direct URL open the same page with the same filters.
+- Any change of search, servers, group, state, package, sort or tab goes back to page 1.
+- `proxyManagement.list` accepts `page` (cursor still works). A page past the end (rows changed since the link) is served as the
+  last page and reported back (`page` in the result). The URL is corrected without a history entry, with the note
+  *Trang N không còn (danh sách đã thay đổi)*.

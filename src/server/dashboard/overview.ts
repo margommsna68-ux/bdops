@@ -29,12 +29,15 @@ export function monthBounds(month:string){
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new ProxyDomainError('INVALID_INPUT','Tháng không hợp lệ');
   const [y,m]=month.split('-').map(Number);return {start:month+'-01',end:month+'-'+String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0')};
 }
-export async function readOverview(scope:ActorScope,input:{month:string},db:PrismaClient=prisma,now:Date=new Date()){
-  const range=monthBounds(input.month),current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
+// part: the page asks for operations and finance separately, so a failure in one section never hides the other (each shows its own
+// error and retry). Without part both are read (tests, scripts). The month only concerns finance.
+export type OverviewPart='operations'|'finance';
+export async function readOverview(scope:ActorScope,input:{month:string;part?:OverviewPart},db:PrismaClient=prisma,now:Date=new Date()){
+  const range=monthBounds(input.month),current=await loadInfrastructureScope(db,scope.userId,scope.projectId),want=(p:OverviewPart)=>!input.part||input.part===p;
   const can=(area:'INFRASTRUCTURE'|'COSTS'|'PROFIT'|'FUNDS'|'WITHDRAWALS'|'PAYPALS',write=false)=>{try{assertBusinessArea(current,area,write);return true;}catch{return false;}};
   const rights={infra:current.businessMode==='PROXY_VM'&&can('INFRASTRUCTURE'),cashEnabled:!!current.teamCashEnabled,admin:current.role==='ADMIN',costs:can('COSTS'),profit:can('PROFIT'),funds:can('FUNDS'),withdrawals:can('WITHDRAWALS'),paypals:can('PAYPALS')};
-  const [operations,finance]=await Promise.all([rights.infra?readOperations(scope,db,now,rights.costs):Promise.resolve(null),readFinance(scope,input.month,range,!!current.teamCashEnabled,db)]);
-  return {generatedAt:now.toISOString(),month:input.month,rights,operations,finance};
+  const [operations,finance]=await Promise.all([want('operations')&&rights.infra?readOperations(scope,db,now,rights.costs):Promise.resolve(null),want('finance')?readFinance(scope,input.month,range,!!current.teamCashEnabled,db):Promise.resolve(null)]);
+  return {generatedAt:now.toISOString(),month:input.month,part:input.part??null,rights,operations,finance};
 }
 async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:boolean){
   const workspace=await maybe(()=>readVMWorkspace(scope,db));if(!workspace)return null;

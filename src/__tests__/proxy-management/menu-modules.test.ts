@@ -7,7 +7,7 @@ const labels=(items:NavItem[])=>items.filter((i):i is NavLinkItem=>!('type' in i
 describe('MoneyToHome menu',()=>{
   it('has one Kho proxy and one Kho tài khoản; Việc cài proxy, Giao việc and the separate PayPal item are gone',()=>{
     const menu=visibleMenu(personalItems(true),{role:'ADMIN',modules:[]});
-    expect(labels(menu)).toEqual(['Tổng quan','Kho proxy','Server / VM','Kho tài khoản','Nhận USDT về team','Tiền vào PayPal','Rút / chuyển gốc','Chi phí','Lợi nhuận','Lịch sử thao tác','Nhân viên','Dự án','Thiết lập']);
+    expect(labels(menu)).toEqual(['Tổng quan','Kho tài khoản','Kho proxy','Server / VM','Nhận USDT về team','Tiền vào PayPal','Rút / chuyển gốc','Chi phí','Lợi nhuận','Lịch sử thao tác','Nhân viên','Dự án','Thiết lập']);
     expect(hrefs(menu)).not.toContain('/paypals');expect(hrefs(menu)).not.toContain('/vm-tasks');expect(hrefs(menu)).not.toContain('/work');
   });
   it('switching a hidden module on brings its item back (central config, no settings screen)',()=>{
@@ -20,7 +20,7 @@ describe('MoneyToHome menu',()=>{
     expect(labels(menu)).toEqual(['Tổng quan','Kho tài khoản','Lịch sử thao tác','Thiết lập']);
     const store=menu.find((i):i is NavLinkItem=>!('type' in i)&&i.labelKey==='Kho tài khoản')!;expect(store.href).toBe('/paypals');expect(store.also).toEqual(['/gmails']);
     // Server / VM staff open the login tab; a member with neither right gets no store link (no link that would be refused).
-    expect(hrefs(visibleMenu(personalItems(true),{role:'USER',modules:['INFRASTRUCTURE']}))).toEqual(['/dashboard','/infrastructure/proxies','/infrastructure/servers','/gmails','/history','/settings']);
+    expect(hrefs(visibleMenu(personalItems(true),{role:'USER',modules:['INFRASTRUCTURE']}))).toEqual(['/dashboard','/gmails','/infrastructure/proxies','/infrastructure/servers','/history','/settings']);
     expect(labels(visibleMenu(personalItems(true),{role:'USER',modules:['COSTS']}))).not.toContain('Kho tài khoản');
     // Nhân viên: admin, or a moderator granted user management — the page refuses other moderators.
     expect(labels(visibleMenu(personalItems(true),{role:'MODERATOR',modules:['PAYPALS']}))).not.toContain('Nhân viên');
