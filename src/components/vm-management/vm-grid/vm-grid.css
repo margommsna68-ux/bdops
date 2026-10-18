@@ -148,3 +148,20 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
   .acc-batch-actions{flex-direction:row;flex-wrap:wrap;justify-content:flex-end}
   .acc-batch-detail td{display:block;text-align:left}
 }
+
+/* Kho PayPal: one row per PayPal code; money right-aligned per currency; labelled cards on phones. */
+.acc-pp-table td,.acc-pp-table th{vertical-align:middle;padding:8px 12px}
+.acc-pp-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.acc-money-link{text-align:right;font-weight:600}
+.acc-pp-emails{text-align:left}
+.acc-email-table td,.acc-email-table th{padding:6px 10px}
+.acc-email-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+@media (max-width:640px){
+  .acc-pp-table thead{display:none}
+  .acc-pp-table,.acc-pp-table>tbody,.acc-pp-table>tbody>tr,.acc-pp-table>tbody>tr>td{display:block;width:100%}
+  .acc-pp-table>tbody>tr{border-top:1px solid var(--ds-border);padding:8px 0}
+  .acc-pp-table>tbody>tr>td{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:4px 14px;border:0;text-align:right}
+  .acc-pp-table>tbody>tr>td::before{content:attr(data-label);font-size:12px;color:var(--ds-text-secondary);text-align:left;flex-shrink:0}
+  .acc-pp-table>tbody>tr.acc-batch-detail>td{display:block;text-align:left;overflow-x:auto}
+  .acc-pp-table>tbody>tr.acc-batch-detail>td::before{display:none}
+}

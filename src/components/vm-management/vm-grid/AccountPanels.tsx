@@ -15,7 +15,7 @@ function useLinks(projectId:string,onSaved:()=>void){
     reset:()=>{setResult(null);setApplied(null);setError('');},
     check:async(fn:()=>Promise<Preview>)=>{setError('');setApplied(null);setChecking(true);try{setResult(await fn());}catch(e){setError(errorMessage(e));setResult(null);}finally{setChecking(false);}},
     save:async()=>{
-      if(!result)return null;const items=result.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,...(r.login!==undefined?{login:r.login}:{}),...(r.paypal!==undefined?{paypal:r.paypal}:{})}));if(!items.length)return null;
+      if(!result)return null;const items=result.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,...(r.login!==undefined?{login:r.login}:{}),...(r.paypalEmail!==undefined?{paypalEmail:r.paypalEmail}:{})}));if(!items.length)return null;
       setError('');try{const r=await apply.mutateAsync({projectId,key:crypto.randomUUID(),items});setApplied(r);await utils.accountStore.invalidate();onSaved();
         if(r.applied)toast.success(`Đã lưu ${r.applied} VM`+(r.errors?` · ${r.errors} dòng chưa lưu`:''));else toast.error('Không dòng nào được lưu; xem lý do từng dòng');return r;}
       catch(e){setError(errorMessage(e));return null;}
@@ -39,8 +39,8 @@ export function AccountPasteBody({projectId,serverCode,text,setText,onSaved}:{pr
     setText(text.replace(/\r/g,'').split('\n').filter((_,i)=>failed.has(i+1)).join('\n'));
   }
   return <>
-    <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách dán" disabled={links.busy} value={text} placeholder={serverCode?'VM_001\tacc01@example.invalid\ttut-09':'moon05\tVM_001\tacc01@example.invalid\ttut-09'} onChange={e=>{setText(e.target.value);links.reset();}}/></label>
-    <p className="pm-muted text-xs">{serverCode?'Mỗi dòng: VM | Tài khoản | Mã PP.':'Mỗi dòng: Server | VM | Tài khoản | Mã PP.'} Ghép theo server + mã VM. Tài khoản và PayPal phải có sẵn trong Kho tài khoản. Ô trống giữ nguyên; gõ dấu - ở cột Tài khoản để bỏ gán. Tài khoản / PayPal đang giữ cho VM khác bị chặn, không tự chuyển.</p>
+    <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách dán" disabled={links.busy} value={text} placeholder={serverCode?'VM_001\tacc01@example.invalid\tpp13a@example.invalid':'moon05\tVM_001\tacc01@example.invalid\tpp13a@example.invalid'} onChange={e=>{setText(e.target.value);links.reset();}}/></label>
+    <p className="pm-muted text-xs">{serverCode?'Mỗi dòng: VM | Tài khoản | Email PP (hoặc … | Mã PP | Email PP).':'Mỗi dòng: Server | VM | Tài khoản | Email PP (hoặc … | Mã PP | Email PP).'} Ghép theo server + mã VM. Tài khoản và email PayPal phải có sẵn trong Kho tài khoản; chỉ mã PP thì chưa đủ vì một PP có nhiều email. Ô trống giữ nguyên; gõ dấu - để bỏ. Tài khoản / email đang giữ hoặc đã dùng cho EarnApp khác bị chặn, không tự chuyển.</p>
     {links.result&&<><Counts p={links.result}/><LinkTable preview={links.result} applied={links.applied}/></>}
     {links.applied&&<p role="status" className="pm-success text-sm">Đã lưu {links.applied.applied} · không thay đổi {links.applied.skipped} · lỗi {links.applied.errors}. {text.trim()?'Ô dán chỉ còn các dòng lỗi.':''}</p>}
     {links.error&&<p role="alert" className="pm-error">{links.error}</p>}
@@ -55,7 +55,7 @@ export function AccountBulkPanel({projectId,vms,onSaved}:{projectId:string;vms:M
   return <div className="space-y-3">
     <p className="text-sm">Gán tài khoản NEW trong kho cho {vms.length} VM đã chọn. VM đã có tài khoản được giữ nguyên{withPaypal?' (chỉ thêm PayPal nếu còn thiếu)':''}.</p>
     <div className="flex gap-2 flex-wrap" role="radiogroup" aria-label="Loại tài khoản">{(['GMAIL','APPLE_ID'] as const).map(t=><button key={t} type="button" role="radio" aria-checked={type===t} className={'pm-button'+(type===t?' pm-button-primary':'')} disabled={links.busy} onClick={()=>{setType(t);links.reset();}}>{t==='GMAIL'?'Gmail':'Apple ID'}</button>)}</div>
-    <label className="flex gap-2 items-center text-sm"><input type="checkbox" checked={withPaypal} disabled={links.busy} onChange={e=>{setWithPaypal(e.target.checked);links.reset();}}/>Kèm một PayPal NEW cho mỗi VM</label>
+    <label className="flex gap-2 items-center text-sm"><input type="checkbox" checked={withPaypal} disabled={links.busy} onChange={e=>{setWithPaypal(e.target.checked);links.reset();}}/>Kèm một email PayPal chưa dùng cho mỗi VM (nhiều VM có thể dùng chung một PP qua các email khác nhau)</label>
     {links.result&&<><Counts p={links.result}/><LinkTable preview={links.result} applied={links.applied}/></>}
     {info?.notPlanned.length?<p className="text-xs pm-muted">Không gán: {info.notPlanned.slice(0,8).map(n=>`${n.server}/${n.vm} (${n.message})`).join(', ')}{info.notPlanned.length>8?` và ${info.notPlanned.length-8} VM khác`:''}</p>:null}
     {links.error&&<p role="alert" className="pm-error">{links.error}</p>}

@@ -27,7 +27,7 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
     await assertImagesUnchanged(tx,scope.projectId,snapshot);
     const reversed:OperationSnapshot={version:snapshot.version===4?4:2,resources:[],eventIds:[],replacementIds:[]};
     const earnApps=snapshot.resources.filter(r=>r.resource==='EARNAPP').map(r=>r.id);
-    if(earnApps.length)await tx.earnAppAccount.updateMany({where:{id:{in:earnApps},projectId:scope.projectId},data:{vmId:null,paypalId:null}});
+    if(earnApps.length)await tx.earnAppAccount.updateMany({where:{id:{in:earnApps},projectId:scope.projectId},data:{vmId:null,paypalId:null,paypalEmailId:null}});
     const resources=[...snapshot.resources].sort((a,b)=>Number(b.resource==='VM_ALLOCATION'&&!b.before)-Number(a.resource==='VM_ALLOCATION'&&!a.before));
     for(const image of resources){
       if(image.resource==='ENDPOINT'){

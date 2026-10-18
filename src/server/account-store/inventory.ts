@@ -10,7 +10,7 @@ import {authorizeTeamCash} from '../business-management/team-cash-scope';
 import {assertPeriodOpen} from '../business-management/period-lock';
 import {dayDate} from '../business-management/money';
 import {CashDecimal,cashCurrency,normalizeCostMoney,parseOriginalMoney} from '../business-management/usdt-money';
-import {MAX_LINES,parseLoginLines,parsePaypalLines,repeats} from './parse';
+import {MAX_LINES,isEmail,parseLoginLines,parsePaypalLines,repeats,type PaypalLine} from './parse';
 // Kho tài khoản: receive Gmail / Apple ID logins and PayPals in bulk (one preview, one import of the valid lines), each line with
 // its own result. An existing account is never overwritten (credentials included). A purchase batch records what was actually paid
 // once in the cost ledger; repeat imports, fixes in the same batch and assignments never add a cost.
@@ -20,7 +20,9 @@ export type PriceMode='NONE'|'UNIT'|'TOTAL';
 // source or date, and a new purchase never falls into an old batch because its code matches.
 export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;currency?:string|null;rate?:string|null;notes?:string|null}
 export interface ImportInput {kind:StockKind;loginType?:AccountLoginType|null;text:string;batch?:BatchInput|null;append?:{batchId:string}|null}
-export interface ImportRow {line:number;account:string;email:string;hasPassword:boolean;has2fa:boolean;hasRecovery:boolean;outcome:'READY'|'EXISTS'|'ERROR';message:string;existingId:string|null}
+// PayPal rows also carry the emails of the line and, for a code already in stock, the emails it would add (outcome ADD: shown with
+// a "Bổ sung email" action; never imported as a new purchase or a second PayPal).
+export interface ImportRow {line:number;account:string;email:string;hasPassword:boolean;has2fa:boolean;hasRecovery:boolean;outcome:'READY'|'EXISTS'|'ADD'|'ERROR';message:string;existingId:string|null;emails?:string[];newEmails?:string[];head?:boolean}
 export const LOGIN_TYPES:AccountLoginType[]=['GMAIL','APPLE_ID'];
 export const typeLabel=(t:AccountLoginType|null|undefined)=>t==='APPLE_ID'?'Apple ID':t==='GMAIL'?'Gmail':'Chưa chọn loại';
 const area=(kind:StockKind)=>kind==='PAYPAL'?'PAYPALS' as const:'INFRASTRUCTURE' as const;
@@ -86,27 +88,46 @@ async function classify(db:Db,scope:ActorScope,input:ImportInput){
       out.push({...base,outcome:'READY',message:l.password?'Nhập mới':'Nhập mới · chưa có mật khẩu'});
     }
   }else{
-    const lines=parsed as PaypalLines,codeAgain=repeats(lines,r=>r.error?null:r.code.toLowerCase(),r=>r.line),mailAgain=repeats(lines,r=>r.error?null:r.email,r=>r.line);
-    const [codes,mails]=await Promise.all([db.payPalAccount.findMany({where:{projectId:scope.projectId,code:{in:lines.map(l=>l.code),mode:'insensitive'}},select:{id:true,code:true,primaryEmail:true,archivedAt:true}}),db.payPalEmail.findMany({where:{projectId:scope.projectId,email:{in:lines.map(l=>l.email),mode:'insensitive'}},select:{email:true,paypal:{select:{id:true,code:true}}}})]);
-    const byCode=new Map(codes.map(c=>[c.code.toLowerCase(),c])),byMail=new Map(mails.map(m=>[m.email.toLowerCase(),m.paypal]));
-    for(const l of lines){
-      const base={line:l.line,account:l.code,email:l.email,hasPassword:false,has2fa:false,hasRecovery:false,existingId:null};
-      if(l.error){out.push({...base,outcome:'ERROR',message:l.error});continue;}
-      const a=codeAgain(l),b=mailAgain(l);
-      if(a){out.push({...base,outcome:'ERROR',message:'Trùng mã với dòng '+a.join(', ')+' trong danh sách; giữ một dòng'});continue;}
-      if(b){out.push({...base,outcome:'ERROR',message:'Trùng email với dòng '+b.join(', ')+' trong danh sách; giữ một dòng'});continue;}
-      const old=byCode.get(l.code.toLowerCase()),mail=byMail.get(l.email);
-      if(old&&old.primaryEmail.toLowerCase()===l.email){out.push({...base,existingId:old.id,outcome:'EXISTS',message:'Đã có PayPal này'+(old.archivedAt?' (đã ẩn)':'')+'; giữ nguyên'});continue;}
-      if(old){out.push({...base,outcome:'ERROR',message:'Mã '+old.code+' đã có với email khác; không tự ghi đè'});continue;}
-      if(mail){out.push({...base,outcome:'ERROR',message:'Email đã thuộc PayPal '+mail.code});continue;}
-      out.push({...base,outcome:'READY',message:'Nhập mới'});
+    const lines=parsed as PaypalLines,codes=[...new Set(lines.map(l=>l.code).filter(Boolean))],mails=[...new Set(lines.flatMap(l=>l.emails))];
+    const [pps,known]=await Promise.all([db.payPalAccount.findMany({where:{projectId:scope.projectId,code:{in:codes,mode:'insensitive'}},select:{id:true,code:true,archivedAt:true,batchId:true,emails:{select:{email:true}}}}),
+      db.payPalEmail.findMany({where:{email:{in:mails,mode:'insensitive'}},select:{email:true,projectId:true,paypal:{select:{id:true,code:true}}}})]);
+    const byCode=new Map(pps.map(p=>[p.code.toLowerCase(),p])),byMail=new Map<string,{projectId:string;paypal:{id:string;code:string}}>();for(const k of known)byMail.set(k.email.toLowerCase(),k);
+    // Group lines by code (no case). An email on two different codes is an error on both; a group with a broken line waits for it.
+    const groups=new Map<string,PaypalLines>();for(const l of lines)if(l.code)groups.set(l.code.toLowerCase(),[...(groups.get(l.code.toLowerCase())||[]),l]);
+    const codeOfMail=new Map<string,Set<string>>();for(const l of lines)if(!l.error)for(const m of l.emails)codeOfMail.set(m,new Set([...(codeOfMail.get(m)||[]),l.code.toLowerCase()]));
+    for(const [key,group] of groups){
+      const first=group[0],emails=[...new Set(group.filter(l=>!l.error).flatMap(l=>l.emails))],old=byCode.get(key);
+      const push=(l:PaypalLine,outcome:ImportRow['outcome'],message:string,extra:Partial<ImportRow>={})=>out.push({line:l.line,account:l.code,email:l.emails.join(' '),hasPassword:false,has2fa:false,hasRecovery:false,existingId:old?.id??null,outcome,message,emails:l.emails,...extra});
+      const broken=group.filter(l=>l.error);
+      if(broken.length===group.length){for(const l of group)push(l,'ERROR',l.error!);continue;}
+      const crossed=emails.filter(m=>(codeOfMail.get(m)?.size||0)>1),foreign=emails.filter(m=>{const k=byMail.get(m);return k&&k.projectId!==scope.projectId;}),other=emails.filter(m=>{const k=byMail.get(m);return k&&k.projectId===scope.projectId&&k.paypal.code.toLowerCase()!==key;});
+      const groupError=broken.length&&broken.length<group.length?'Mã '+first.code+' còn dòng lỗi '+broken.map(l=>l.line).join(', ')+'; sửa xong nhập cả mã một lần'
+        :crossed.length?'Email '+crossed.join(', ')+' nằm ở mã khác trong danh sách; mỗi email thuộc một PP'
+        :other.length?other.map(m=>'Email '+m+' đã thuộc PP '+byMail.get(m)!.paypal.code).join('; ')
+        :foreign.length?'Email '+foreign.join(', ')+' đã thuộc dự án khác'
+        :old?.archivedAt?'Mã '+old.code+' đã có (đã ẩn); không tạo PP thứ hai':null;
+      const repeatedNote=(l:PaypalLine)=>l.repeated.length?' · email lặp trên dòng chỉ nhận một lần':'';
+      const joined=(l:PaypalLine,i:number)=>i===0?'':' · gộp vào mã '+first.code+' (dòng '+first.line+')';
+      if(groupError){for(const l of group)push(l,'ERROR',l.error||groupError);continue;}
+      if(old){
+        const have=new Set(old.emails.map(e=>e.email.toLowerCase())),fresh=emails.filter(m=>!have.has(m));
+        group.forEach((l,i)=>push(l,fresh.length?'ADD':'EXISTS',i===0?(fresh.length?'Mã '+old.code+' đã có; '+fresh.length+' email mới: '+fresh.join(', ')+'. Bấm Bổ sung email (không phải lần mua mới)':'Đã có PP '+old.code+' với các email này; không thay đổi'):'Cùng mã '+old.code+' với dòng '+first.line,{newEmails:i===0?fresh:[],head:i===0}));
+        continue;
+      }
+      group.forEach((l,i)=>push(l,'READY',(i===0?'PP mới · '+emails.length+' email':'Email cho mã '+first.code)+joined(l,i)+repeatedNote(l),{newEmails:i===0?emails:[],head:i===0}));
     }
+    out.sort((a,b)=>a.line-b.line);
   }
   return {rows:out,parsed};
 }
+// Counts shown before importing. PayPal: one PayPal per code however many emails or lines it has (ready = PayPals to create).
+function countRows(kind:StockKind,rows:ImportRow[]){
+  const firsts=kind==='PAYPAL'?rows.filter(r=>r.head):rows;
+  return {rows,ready:firsts.filter(r=>r.outcome==='READY').length,exists:firsts.filter(r=>r.outcome==='EXISTS').length,add:firsts.filter(r=>r.outcome==='ADD').length,emails:kind==='PAYPAL'?rows.filter(r=>r.outcome==='READY').reduce((a,r)=>a+(r.newEmails?.length||0),0):0,errors:rows.filter(r=>r.outcome==='ERROR').length};
+}
 export async function previewStockImport(scope:ActorScope,input:ImportInput,db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertStockWrite(current,input.kind);
-  const purchase=purchaseOf(input),{rows}=await classify(db,current,input),counts={rows,ready:rows.filter(r=>r.outcome==='READY').length,exists:rows.filter(r=>r.outcome==='EXISTS').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
+  const purchase=purchaseOf(input),{rows}=await classify(db,current,input),counts=countRows(input.kind,rows);
   if(!purchase){
     const batch=await appendTarget(db,current,input);
     return {...counts,batch:{existing:true,id:batch.id,code:batch.code,cost:batch.costRecordId&&!batch.costRecord?.voidedAt?'RECORDED' as const:'NONE' as const,total:null}};
@@ -139,13 +160,14 @@ export async function commitStockImport(scope:ActorScope,input:ImportInput&{key:
       await images.remember('ACCOUNT_BATCH',batch.id,true);
     }
     const applied=await createRows(tx,images,current,input,parsed,new Set(ready.map(r=>r.line)),batch.id);
-    const result=rows.map(r=>({line:r.line,account:r.account,outcome:r.outcome==='READY'?'APPLIED' as const:r.outcome,message:r.outcome==='READY'?'Đã nhập':r.message}));
-    return {rows:result,applied,exists:rows.filter(r=>r.outcome==='EXISTS').length,errors:rows.filter(r=>r.outcome==='ERROR').length,batch:{id:batch.id,code:batch.code,appended:!purchase,costRecorded:!!batch.costRecordId}};
+    const counted=countRows(input.kind,rows);
+    const result=rows.map(r=>({line:r.line,account:r.account,outcome:r.outcome==='READY'?'APPLIED' as const:r.outcome,message:r.outcome==='READY'?'Đã nhập':r.message,newEmails:r.newEmails,existingId:r.existingId}));
+    return {rows:result,applied,emails:counted.emails,exists:counted.exists,add:counted.add,errors:counted.errors,batch:{id:batch.id,code:batch.code,appended:!purchase,costRecorded:!!batch.costRecordId}};
   },db);
 }
 const costNote=(code:string,source:string|null|undefined,quantity:number|null,kind:StockKind,type?:AccountLoginType|null)=>'Mua lô '+code+' · '+(quantity?quantity+' ':'')+(kind==='PAYPAL'?'PayPal':typeLabel(type))+(source?' · '+source:'');
 async function createRows(tx:Prisma.TransactionClient,images:BusinessCollector,scope:ActorScope,input:ImportInput,parsed:LoginLines|PaypalLines,take:Set<number>,batchId:string){
-  let n=0;
+  let n=0;const done=new Set<string>();
   for(const l of parsed){
     if(!take.has(l.line))continue;
     if(input.kind==='LOGIN'){
@@ -153,14 +175,42 @@ async function createRows(tx:Prisma.TransactionClient,images:BusinessCollector,s
       const row=await tx.gmailAccount.create({data:{projectId:scope.projectId,email:a.email,loginType:input.loginType,batchId,status:'ACTIVE',businessManaged:true,recoveryEmail:a.recovery,notes:a.notes,...(a.password?{password:encrypt(a.password)}:{}),...(a.twoFa?{twoFaCurrent:encrypt(a.twoFa)}:{})}});
       await images.remember('GMAIL',row.id,true);
     }else{
-      const p=l as PaypalLines[number];
-      const row=await tx.payPalAccount.create({data:{projectId:scope.projectId,code:p.code,primaryEmail:p.email,status:'ACTIVE',company:'',businessManaged:true,batchId,createdById:scope.userId}});
+      // The first line of a code creates the PayPal with every email of the code (all lines); later lines of the code add nothing.
+      const p=l as PaypalLines[number],key=p.code.toLowerCase();if(done.has(key))continue;done.add(key);
+      const emails=[...new Set((parsed as PaypalLines).filter(x=>x.code.toLowerCase()===key&&!x.error).flatMap(x=>x.emails))];
+      const row=await tx.payPalAccount.create({data:{projectId:scope.projectId,code:p.code,primaryEmail:emails[0],status:'ACTIVE',company:'',businessManaged:true,batchId,createdById:scope.userId}});
       await images.remember('PAYPAL',row.id,true);
-      const mail=await tx.payPalEmail.create({data:{projectId:scope.projectId,paypalId:row.id,email:p.email,isPrimary:true,businessManaged:true}});await images.remember('PAYPAL_EMAIL',mail.id,true);
+      for(const [i,email] of emails.entries()){const mail=await tx.payPalEmail.create({data:{projectId:scope.projectId,paypalId:row.id,email,isPrimary:i===0,businessManaged:true}});await images.remember('PAYPAL_EMAIL',mail.id,true);}
     }
     n++;
   }
   return n;
+}
+// "Bổ sung email": more receiving emails for one PayPal already in stock. Not a purchase (no batch, no cost). Every email is checked
+// in this project (active, hidden and used ones) and other projects (reported only as "dự án khác"); same emails again = no change.
+export async function addPaypalEmails(scope:ActorScope,input:{paypalId:string;emails:string[];key:string},db:PrismaClient=prisma){
+  const emails=[...new Set(input.emails.map(e=>e.trim().toLowerCase()).filter(Boolean))];
+  if(!emails.length||emails.length>200)throw new ProxyDomainError('INVALID_INPUT','Từ 1 đến 200 email mỗi lần');
+  return runBusinessCommand(scope,{key:input.key,payload:{paypalId:input.paypalId,emails},kind:'PAYPAL_EMAIL_ADD',module:'PAYPALS',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+    assertStockWrite(current,'PAYPAL');
+    const pp=await tx.payPalAccount.findFirst({where:{id:input.paypalId,projectId:scope.projectId}});if(!pp||pp.archivedAt)throw new ProxyDomainError('NOT_FOUND','PayPal không còn trong kho');
+    const known=await tx.payPalEmail.findMany({where:{email:{in:emails,mode:'insensitive'}},select:{email:true,projectId:true,paypalId:true,paypal:{select:{code:true}}}}),by=new Map(known.map(k=>[k.email.toLowerCase(),k]));
+    const rows:{email:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string}[]=[];
+    for(const email of emails){
+      const k=by.get(email);
+      if(!isEmail(email))rows.push({email,outcome:'ERROR',message:'Email không hợp lệ'});
+      else if(k&&k.projectId!==scope.projectId)rows.push({email,outcome:'ERROR',message:'Email đã thuộc dự án khác'});
+      else if(k&&k.paypalId!==pp.id)rows.push({email,outcome:'ERROR',message:'Email đã thuộc PP '+k.paypal.code});
+      else if(k)rows.push({email,outcome:'SKIP',message:'Đã có trong PP này'});
+      else rows.push({email,outcome:'APPLIED',message:'Đã bổ sung'});
+    }
+    const add=rows.filter(r=>r.outcome==='APPLIED');
+    if(add.length){
+      await images.remember('PAYPAL',pp.id);await tx.payPalAccount.update({where:{id:pp.id},data:{revision:{increment:1}}});
+      for(const r of add){const mail=await tx.payPalEmail.create({data:{projectId:scope.projectId,paypalId:pp.id,email:r.email,isPrimary:false,businessManaged:true}});await images.remember('PAYPAL_EMAIL',mail.id,true);}
+    }
+    return {code:pp.code,rows,applied:add.length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
+  },db);
 }
 // A batch received without a price gets its actual payment later, once (total paid, or unit price × quantity bought). A batch whose cost was voided in Chi phí may be recorded again.
 export async function recordBatchCost(scope:ActorScope,input:{batchId:string;expectedRevision:number;priceMode:'UNIT'|'TOTAL';amount:string;quantity?:number|null;currency:string;rate?:string|null;date?:string|null;key:string},db:PrismaClient=prisma){

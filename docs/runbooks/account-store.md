@@ -160,3 +160,72 @@ creates, merges and deletes nothing.
   - **Thao tác:** *Nhập bổ sung*, and *Ghi chi phí* when no cost is recorded and the member may write costs; no ⋯ menu.
 - **Order:** purchase day (Asia/Bangkok) newest first; same day, the purchase created last first; then id (`readAccountStore`).
 - **Size:** rows 56–80px and no horizontal scroll at 1280px. Under 640px each purchase is a labelled card.
+
+## PayPal: many emails, one email per EarnApp (18 October 2026)
+
+This section replaces the earlier "one PayPal code for one EarnApp account" rule.
+
+### Rules
+
+- **Data model:**
+  - A PP code is one PayPal account with many `PayPalEmail` rows.
+  - `EarnAppAccount.paypalEmailId` (unique) is the current receiving email; `paypalId` is that email's PayPal (not unique any more).
+  - `PayPalEmail.usedEarnAppId` records the EarnApp account an email was given to. Unassigning never clears it.
+  - An email may receive money many times; "not reused" means it is not given to another EarnApp account.
+  - `reviewHold` keeps an email out of new assignments until reconciled.
+- **Assigning:**
+  - Done at Server/VM in two steps, Mã PP then Email. The chosen code and email are shown right away.
+  - Paste format: `Server | VM | Tài khoản | Email PP` or `… | Mã PP | Email PP`; a bare code is refused.
+  - Bulk pick takes unused emails of active PayPals (several VMs may share a PayPal).
+  - The checks are in `account-store/links.ts` (`emailFor`). The unique index makes two simultaneous assignments of one email end with one success.
+  - The old API field `paypal` (a PayPal id) is refused unless it is null (remove).
+- **History and undo:**
+  - Each change of receiving email closes and opens an `EarnAppPayout` period. Undo removes the period the operation opened.
+  - Undo of a first assignment returns the email to unused only while no payment is recorded on it (`operation-images.ts`).
+
+### Import
+
+- **Format:** `Mã PP email1 email2 …`, separated by spaces, tabs or `|`.
+  - Lines of one code (case-insensitive) are grouped into one PayPal.
+  - A code with a broken line waits until the line is fixed.
+  - An email on two codes is refused on both lines.
+  - Emails of another PayPal, hidden ones or emails in another project are refused; another project is never named.
+- **Existing code with new emails:** shown as ADD with "Bổ sung email" (`accountStore.addEmails`, no batch, no cost). The same emails again change nothing.
+- **Checking while typing:** the panel checks automatically (`importPreview`, writes nothing).
+  - A result is used only while it matches the text; the request key belongs to that exact content.
+  - "Nhập" saves the valid lines and keeps only the lines still to fix (and ADD lines).
+  - A save without an answer freezes the content and keeps the key: "Thử lại" replays it, "Kiểm tra lại" reloads first.
+- **Counting:** a PayPal purchase counts PayPals (`received`) and emails separately (`emails`). The price per PayPal uses the quantity bought, never the number of emails.
+
+### PayPal book (Kho PayPal)
+
+- **One book:** the same rows as Tiền vào PayPal (`FundTransaction`) and Rút / chuyển (`Withdrawal`). The code is in `business-management/paypal-ledger.ts`.
+- **Ghi tiền vào:**
+  - Choose the PayPal, day, currency and status, then paste `Email | Số tiền | Mã giao dịch`. Each email must belong to that PayPal.
+  - Lines are checked while typing (`receiptCheck`); only READY lines are written (`receiptRecord`).
+  - Each payment keeps the EarnApp / VM using the email at that moment; nothing is assigned or marked registered because money arrived.
+  - Duplicates:
+    - A transaction id is checked per project, voided rows included.
+    - Without an id, the same email / day / amount is SUSPECT at the line until "Khoản riêng".
+- **Opening balance:** `openingRecord`, one per currency, counted in the balance, never as EarnApp income.
+- **Ghi chuyển / rút:**
+  - `transferRecord` writes Withdrawal `ledgerVersion` 2. `amount` is the total the source was debited, fee included (`feeAmount`, never subtracted again).
+  - An internal transfer stores what the receiving PayPal actually got (`receivedAmount`, `receivedCurrency`). With different currencies, the rate actually used (`fxRate`) is required.
+  - Both sides are one row, so they never look like two events.
+  - `paidToTeam` is not used as proof that the PayPal paid.
+  - The old one-amount form refuses to edit v2 rows; void and record again instead.
+- **Totals:**
+  - In = confirmed receipts + internal in; out = debits; balance = opening + in − out, per currency, up to the end of the month shown (everything before it included).
+  - Pending, failed and voided rows never count.
+  - EarnApp income = receipts only.
+  - v1 internal transfers without a received amount, and v1 rows with a collector fee, are counted as recorded and flagged for reconciliation.
+- **Rights:**
+  - Money in needs FUNDS; money out needs WITHDRAWALS; the balance needs both.
+  - The PayPal stock right alone shows no money.
+  - The purchase price follows Chi phí (COSTS).
+- **UI:**
+  - One row per code: Mã PP | email used / still usable | Tiền vào | Tiền ra | Còn lại theo sổ | Tình trạng | Thao tác.
+  - The emails open under the row with copy, EarnApp / Server / VM, use and money received.
+  - Clicking an amount lists the rows behind it (`?pp=&show=in|out&month=`; Back and reload keep it).
+- **Not counted here:** an EarnApp withdrawal request (EarnWithdrawal) is a different moment and is never added to money received.
+- **Profit is unchanged:** USDT the team received minus costs. Money on PayPal or sent to a collector is not team income.

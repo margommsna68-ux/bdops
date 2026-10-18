@@ -1,0 +1,21 @@
+PASS Cột: Đợt nhập | Nơi mua | Số lượng mua | Đã nhập kho | Tổng tiền mua | Chi phí | Thao tác — đợt nhập | nơi mua | số lượng mua | đã nhập kho | tổng tiền mua | chi phí | thao tác
+PASS TK-2026-10-18-1 đọc được: 18/10/2026 | 1trieumail | Chưa ghi | 5 | 2,12 USDT | Đã ghi — TK-2026-10-18-1 18/10/2026 Gmail | [hist] 1trieumail | Chưa ghi | 5 | 2,12 USDT | Đã ghi | Nhập bổ sung
+PASS Dòng thường cao 56–80px — cao nhất 79px, thấp nhất 57px, 29 dòng
+PASS 1280px: không cần kéo ngang bảng — 
+PASS Không ép chữ nhỏ (mã đợt ≥ 13px) — 13px
+PASS Cùng ngày mua: đợt mới tạo đứng trước — TK-2026-10-18-8,TK-2026-10-18-7,TK-2026-10-18-6,TK-2026-10-18-5,TK-2026-10-18-4,TK-2026-10-18-3,TK-2026-10-18-2,TK-2026-10-18-1
+PASS Ngày mua mới nhất trước — 18/10/2026
+Gmail, 18/10/2026
+Gmail, 18/10/2026
+Gmail …
+PASS VND: tổng tiền định dạng Việt Nam kèm ≈ USDT, số lượng mua đã ghi — TK-2026-10-18-2 18/10/2026 Gmail | [hist] shop VND | 4 | 3 | 100.000 VND ≈ 3,824019 USDT Chi tiết | Đã ghi | Nhập bổ sung
+PASS Thiếu nơi mua / số lượng / tiền: “Chưa ghi”, có nhãn Apple ID, không tự điền số đã nhập — TK-2026-10-18-3 18/10/2026 Apple ID | Chưa ghi | Chưa ghi | 2 | Chưa ghi | Chưa ghi | Nhập bổ sung Ghi chi phí
+PASS Khoản chi thu hồi: “Đã thu hồi”, có Ghi chi phí — TK-2026-10-18-5 18/10/2026 Gmail | [hist] thu hồi | Chưa ghi | 1 | Không có khoản chi Chi tiết | Đã thu hồi | Nhập bổ sung Ghi chi phí
+PASS Khoản chi điều chỉnh: tiền hiện hành 8,5 USDT; chi tiết mở ngay dưới dòng có giá ban đầu — 8,5 USDT Chi tiết · Khoản chi hiện hành: 8,5 USDT Đã điều chỉnh ở Chi phí · ban đầu 10 USDT Dán lần đầu 2 dòng.
+PASS “Đã ghi” mở đúng khoản chi ở Chi phí — /costs?month=2026-10&cost=cmvd95pzg001b11iw8iim10nk
+PASS Back về Lịch sử nhập kho — /gmails?view=history
+PASS Bấm số Đã nhập kho → đúng 5 tài khoản của đợt, tab Gmail — /gmails?batch=TK-2026-10-18-1 · 5
+PASS Mã đợt dài: một dòng, dòng gọn, không kéo ngang ở 1280px — 79px · kéo ngang false
+PASS Điện thoại 390px: thẻ có nhãn, trang không tràn ngang — "Đợt nhập","Nơi mua","Số lượng mua","Đã nhập kho","Tổng tiền mua","Chi phí","Thao tác"
+PASS Người không có quyền tiền: không có cột Tổng tiền mua, không link Chi phí, không thấy số tiền — đợt nhập | nơi mua | số lượng mua | đã nhập kho | chi phí | thao tác
+TOTAL 17 pass / 0 fail

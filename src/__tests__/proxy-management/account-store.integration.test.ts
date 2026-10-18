@@ -52,18 +52,19 @@ it('bulk Gmail / Apple ID import keeps every line, never overwrites, protects se
     expect(store.batches[0]).toMatchObject({code:done.batch.code,lineCount:5,paidQuantity:5,received:3,cost:'RECORDED'});expect(JSON.stringify(store)).not.toMatch(/pw-|TOTP/);
   }finally{await f.cleanup();}
 });
-it('PayPal stock: Mã PP | Email per line, duplicates and conflicts reported per line, no password needed, price missing = no cost',async()=>{
+it('PayPal stock: Mã PP and its emails, lines of one code grouped, conflicts reported per line, no password needed, price missing = no cost',async()=>{
   const f=await setup();try{
     const x=u(),text=[`tut-${x}1 | pp${x}1@example.invalid`,`tut-${x}2 | pp${x}2@example.invalid`,`tut-${x}1 | pp${x}9@example.invalid`,`tut-${x}3`,`tut-${x}4 | pp${x}2@example.invalid`].join('\n');
     const p=await previewStockImport(f.scope,{kind:'PAYPAL',text,batch:{code:'PP-'+x,purchasedAt:'2026-10-17',priceMode:'NONE'}},db);
-    expect(p.rows.map(r=>r.outcome)).toEqual(['ERROR','ERROR','ERROR','ERROR','ERROR']);
+    // tut-1 on lines 1 and 3 is one PayPal with two emails; pp2 on two codes is refused on both; tut-3 has no email.
+    expect(p.rows.map(r=>r.outcome)).toEqual(['READY','ERROR','READY','ERROR','ERROR']);expect(p).toMatchObject({ready:1,emails:2});
     const ok=[`tut-${x}1 | pp${x}1@example.invalid`,`tut-${x}2 | pp${x}2@example.invalid`].join('\n');
     const first=await commitStockImport(f.scope,{kind:'PAYPAL',text:ok,batch:{code:'PP-'+x,purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);expect(first).toMatchObject({applied:2,batch:{code:'PP-'+x}});
     const append={batchId:first.batch.id};
     const next=await previewStockImport(f.scope,{kind:'PAYPAL',text:[`tut-${x}1 | pp${x}1@example.invalid`,`tut-${x}2 | other${x}@example.invalid`,`tut-${x}5 | pp${x}1@example.invalid`].join('\n'),append},db);
-    expect(next.rows.map(r=>[r.outcome,r.message])).toEqual([['ERROR',expect.stringMatching(/Trùng email/)],['ERROR',expect.stringMatching(/email khác/)],['ERROR',expect.stringMatching(/Trùng email/)]]);
+    expect(next.rows.map(r=>[r.outcome,r.message])).toEqual([['ERROR',expect.stringMatching(/mã khác/)],['ADD',expect.stringMatching(/Bổ sung email/)],['ERROR',expect.stringMatching(/mã khác/)]]);
     const known=await previewStockImport(f.scope,{kind:'PAYPAL',text:[`tut-${x}1 | pp${x}1@example.invalid`,`tut-${x}6 | pp${x}2@example.invalid`].join('\n'),append},db);
-    expect(known.rows.map(r=>[r.outcome,r.message])).toEqual([['EXISTS',expect.stringMatching(/Đã có/)],['ERROR',expect.stringMatching(/Email đã thuộc/)]]);
+    expect(known.rows.map(r=>[r.outcome,r.message])).toEqual([['EXISTS',expect.stringMatching(/Đã có/)],['ERROR',expect.stringMatching(/đã thuộc PP/)]]);
     expect(await costs(f.scope.projectId)).toBe(0);
     const store=await readAccountStore(f.scope,db),batch=store.batches.find(b=>b.code==='PP-'+x)!;expect(batch.cost).toBe('NONE');
     // The payment recorded later, once.
@@ -203,32 +204,32 @@ async function stock(f:Awaited<ReturnType<typeof setup>>){
   const x=u(),mails=[1,2,3].map(n=>`m${n}-${x}@example.invalid`);
   await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:mails.map(m=>m+'|pw').join('\n'),batch:{code:'G-'+x,purchasedAt:'2026-10-17',priceMode:'TOTAL',amount:'3',currency:'USDT'},key:randomUUID()},db);
   await commitStockImport(f.scope,{kind:'PAYPAL',text:[1,2,3].map(n=>`PP${n}-${x} | p${n}-${x}@example.invalid`).join('\n'),batch:{code:'P-'+x,purchasedAt:'2026-10-17',priceMode:'NONE'},key:randomUUID()},db);
-  return {x,mails,pp:[1,2,3].map(n=>`PP${n}-${x}`)};
+  return {x,mails,pp:[1,2,3].map(n=>`PP${n}-${x}`),ppMail:[1,2,3].map(n=>`p${n}-${x}@example.invalid`)};
 }
-it('paste Server | VM | Tài khoản | Mã PP: matched by server + VM, held accounts and PayPals refused with their position, rows all-or-nothing',async()=>{
+it('paste Server | VM | Tài khoản | Email PP: matched by server + VM, held accounts and PayPal emails refused with their position, rows all-or-nothing',async()=>{
   const f=await setup();try{
     const s=await stock(f),code=f.server.code,before=await costs(f.scope.projectId);
-    const preview=await previewLinks(f.scope,{text:[`Server\tVM\tTài khoản\tMã PP`,`${code}\tVM_002\t${s.mails[1]}\t${s.pp[1]}`,`${code}\tVM_001\t${s.mails[0]}\t${s.pp[0]}`,`${code}\tVM_009\t${s.mails[2]}`].join('\n')},db);
+    const preview=await previewLinks(f.scope,{text:[`Server\tVM\tTài khoản\tEmail PP`,`${code}\tVM_002\t${s.mails[1]}\t${s.ppMail[1]}`,`${code}\tVM_001\t${s.mails[0]}\t${s.pp[0]}\t${s.ppMail[0]}`,`${code}\tVM_009\t${s.mails[2]}`].join('\n')},db);
     expect(preview.rows.map(r=>[r.vm,r.outcome])).toEqual([['VM_002','READY'],['VM_001','READY'],['VM_009','ERROR']]);
-    const items=preview.rows.filter(r=>r.outcome==='READY').map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,login:r.login,paypal:r.paypal}));
+    const items=preview.rows.filter(r=>r.outcome==='READY').map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,login:r.login,paypalEmail:r.paypalEmail}));
     const applied=await applyLinks(f.scope,{key:randomUUID(),items},db);expect(applied).toMatchObject({applied:2,errors:0});
     const vm2=await db.earnAppAccount.findUniqueOrThrow({where:{vmId:f.vms[1].id},include:{login:true,paypal:true}});expect([vm2.login.email,vm2.paypal?.code,vm2.registeredAt]).toEqual([s.mails[1],s.pp[1],null]);
     // Same link again: no change and no extra history.
     const ops=(await listOperations(f.scope,db)).length;
-    const again=await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:f.vms[1].id,expectedRevision:await rev(f.vms[1].id),login:vm2.loginId,paypal:vm2.paypalId}]},db);
+    const again=await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:f.vms[1].id,expectedRevision:await rev(f.vms[1].id),login:vm2.loginId,paypalEmail:vm2.paypalEmailId}]},db);
     expect(again.rows[0]).toMatchObject({outcome:'SKIP',message:'Không thay đổi'});expect((await listOperations(f.scope,db)).length).toBe(ops);
     // Login held on VM_002 → refused with its position. A row with a free login but a held PayPal saves nothing.
     const taken=await previewLinks(f.scope,{text:`${code} | VM_003 | ${s.mails[1]}`},db);expect(taken.rows[0].message).toMatch(new RegExp(`đang giữ cho ${code} / VM_002`));
-    const half=await previewLinks(f.scope,{text:`${code} | VM_003 | ${s.mails[2]} | ${s.pp[1]}`},db);expect(half.rows[0]).toMatchObject({outcome:'ERROR'});expect(half.rows[0].message).toMatch(/đang nhận cho/);
-    const forced=await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:f.vms[2].id,expectedRevision:await rev(f.vms[2].id),login:(await db.gmailAccount.findFirstOrThrow({where:{email:s.mails[2]}})).id,paypal:vm2.paypalId}]},db);
+    const half=await previewLinks(f.scope,{text:`${code} | VM_003 | ${s.mails[2]} | ${s.ppMail[1]}`},db);expect(half.rows[0]).toMatchObject({outcome:'ERROR'});expect(half.rows[0].message).toMatch(/đang nhận cho/);
+    const forced=await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:f.vms[2].id,expectedRevision:await rev(f.vms[2].id),login:(await db.gmailAccount.findFirstOrThrow({where:{email:s.mails[2]}})).id,paypalEmail:vm2.paypalEmailId}]},db);
     expect(forced.rows[0].outcome).toBe('ERROR');expect(await db.earnAppAccount.findUnique({where:{vmId:f.vms[2].id}})).toBeNull();
     expect(await db.earnAppAccount.count({where:{login:{email:s.mails[2]}}})).toBe(0);
     // Repeats inside one paste are reported on every line.
     const dup=await previewLinks(f.scope,{text:[`${code}|VM_003|${s.mails[2]}`,`${code}|VM_003|${s.mails[2]}`].join('\n')},db);expect(dup.rows.every(r=>r.outcome==='ERROR')).toBe(true);
-    // Unassign: the login stays USED (never NEW again); its PayPal can never receive for another EarnApp account.
+    // Unassign: the login stays USED (never NEW again); its PayPal email can never receive for another EarnApp account.
     await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:f.vms[1].id,expectedRevision:await rev(f.vms[1].id),login:null}]},db);
     const store=await readAccountStore(f.scope,db);expect(store.logins.find(l=>l.email===s.mails[1])?.state).toBe('USED');expect(store.paypals.find(p=>p.code===s.pp[1])?.state).toBe('USED');
-    const reuse=await previewLinks(f.scope,{text:`${code}|VM_002|${s.mails[2]}|${s.pp[1]}`},db);expect(reuse.rows[0].message).toMatch(/đang nhận cho|đã từng nhận/);
+    const reuse=await previewLinks(f.scope,{text:`${code}|VM_002|${s.mails[2]}|${s.ppMail[1]}`},db);expect(reuse.rows[0].message).toMatch(/đang nhận cho|đã dùng cho EarnApp/);
     expect(await costs(f.scope.projectId)).toBe(before); // assignment and unassignment never add a cost
     const vmView=await readVmAccounts(f.scope,db);expect(vmView.find(v=>v.vmId===f.vms[0].id)?.earnApp).toMatchObject({login:{email:s.mails[0],type:'GMAIL'},paypal:{code:s.pp[0]}});
   }finally{await f.cleanup();}
@@ -249,7 +250,7 @@ it('two people assigning at the same time: one wins, the other is told; undo res
 it('registration, status and the old Gmail API follow the new rules; bulk pick takes NEW stock only',async()=>{
   const f=await setup();try{
     const s=await stock(f),plan=await planAutoLinks(f.scope,{vmIds:f.vms.map(v=>v.id),loginType:'GMAIL',withPaypal:true},db);
-    expect(plan.ready).toBe(3);const done=await applyLinks(f.scope,{key:randomUUID(),items:plan.rows.map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,login:r.login,paypal:r.paypal}))},db);expect(done.applied).toBe(3);
+    expect(plan.ready).toBe(3);const done=await applyLinks(f.scope,{key:randomUUID(),items:plan.rows.map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,login:r.login,paypalEmail:r.paypalEmail}))},db);expect(done.applied).toBe(3);
     expect(await db.earnAppAccount.count({where:{projectId:f.scope.projectId,registeredAt:{not:null}}})).toBe(0); // assignment is not registration
     const e=await db.earnAppAccount.findUniqueOrThrow({where:{vmId:f.vms[0].id}});
     expect(await markEarnAppRegistered(f.scope,{vmId:f.vms[0].id,registered:true,expectedRevision:e.revision,key:randomUUID()},db)).toMatchObject({changed:true});

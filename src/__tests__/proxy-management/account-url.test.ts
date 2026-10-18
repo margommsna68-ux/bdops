@@ -5,7 +5,7 @@ import {links} from '@/lib/links';
 const params=(s:string)=>new URLSearchParams(s);
 describe('Kho tài khoản URL',()=>{
   it('two kind tabs; history and review are views inside the kind; the page kind is the default',()=>{
-    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:''});
+    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:'',pp:'',show:'',month:''});
     expect(readAccountUrl(params(''),'paypal').tab).toBe('paypal');
     const u=readAccountUrl(params('tab=paypal&view=history&batch=PP-2026-10-17'),'login');expect(u).toMatchObject({tab:'paypal',view:'history',batch:'PP-2026-10-17'});
     expect(writeAccountUrl(u,'login')).toBe('?tab=paypal&view=history&batch=PP-2026-10-17');expect(writeAccountUrl(u,'paypal')).toBe('?view=history&batch=PP-2026-10-17');
@@ -19,9 +19,17 @@ describe('Kho tài khoản URL',()=>{
   });
   it('switching kind drops the other kind’s filters; a view keeps the kind; bad values are ignored',()=>{
     const u=readAccountUrl(params('type=APPLE_ID&state=NEW&q=abc&batch=TK-1'),'login');
-    expect(switchKind(u,'paypal')).toEqual({tab:'paypal',view:'',q:'',type:'',state:'',batch:''});
+    expect(switchKind(u,'paypal')).toEqual({tab:'paypal',view:'',q:'',type:'',state:'',batch:'',month:''});
     expect(openView(u,'history','TK-1')).toMatchObject({tab:'login',view:'history',batch:'TK-1',q:'',state:''});
     expect(readAccountUrl(params('tab=paypal&type=GMAIL&state=WHATEVER'),'login')).toMatchObject({type:'',state:''});
+  });
+});
+describe('PayPal rows in the URL',()=>{
+  it('opens the emails of a PayPal or the rows behind its money, with the month; only on the PayPal tab',()=>{
+    const u=readAccountUrl(params('tab=paypal&pp=pp-13&show=in&month=2026-09'),'login');expect(u).toMatchObject({pp:'pp-13',show:'in',month:'2026-09'});
+    expect(writeAccountUrl(u,'login')).toBe('?tab=paypal&month=2026-09&pp=pp-13&show=in');
+    expect(readAccountUrl(params('pp=pp-13&show=in'),'login')).toMatchObject({pp:'',show:''});
+    expect(readAccountUrl(params('tab=paypal&pp=x&show=bad&month=2026-13'),'login')).toMatchObject({show:'',month:''});
   });
 });
 describe('import drafts',()=>{

@@ -52,7 +52,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const active=useMemo(()=>inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),[inScope,servers]),deleted=useMemo(()=>inScope.filter(v=>v.archivedAt),[inScope]),deletedView=url.view==='DELETED';
   const counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdk).length;
   // EarnApp account (login + PayPal) of each VM; the search also finds VMs by login email or PayPal code.
-  const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.legacyGmail].filter(Boolean).join(' '):'';};
+  const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.earnApp?.paypal?.email,a.legacyGmail].filter(Boolean).join(' '):'';};
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;

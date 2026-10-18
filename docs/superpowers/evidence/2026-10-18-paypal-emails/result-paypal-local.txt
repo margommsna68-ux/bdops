@@ -1,0 +1,31 @@
+PASS Không còn nút Xem trước riêng — 
+PASS Tự kiểm tra: một mã nhiều dòng = một PP; báo dòng lỗi tại chỗ — 2 PP mới (6 email) · 0 đã có · 1 dòng cần sửa · Lô mới PP-2026-10-18-7 · Chưa ghi chi phí.
+PASS Nhập một lần: lưu đúng 2 PP, chỉ còn dòng lỗi để sửa, không tạo chi phí — còn: pp15blsms sai-email · chi phí 25→25
+PASS Dán lại đúng dữ liệu → không thay đổi, nút nhập khoá — 0 PP mới (0 email) · 1 đã có · 0 dòng cần sửa · Vào lô PP-2026-10-18-7, chưa ghi chi phí (ghi ở tab Lô nhập).
+PASS Bảng PayPal: một dòng mỗi mã, đếm email dùng / còn dùng được — 0 đã dùng / 5 còn dùng được 0 đang gán
+PASS Chọn Mã PP → Email, hiện ngay mã và email đã chọn — Đã chọn: pp13blsms · pp1-blsms@example.invalid
+PASS Dán bảng Server | VM | Tài khoản | Email PP: 4 VM nhận 4 email của cùng một PP — 
+PASS VM thứ sáu: không có email nào của PP đã hết email, không tạo email bằng suy đoán — — Chưa có PayPal — | fix-add-mvd7bauj · còn 1 email | fix-add-mvd7hl2p · còn 1 email | fix-add-mvd9dkug · còn 1 email | fix-add-mvd75vsy · còn 1 email | fix-new-mvd7bc8u · còn 1 email | fix-new-mvd7hmgy · còn 1 email | fix-new-mvd9dm8q · còn 1 email | fix-new-mvd75x81 · còn 1 email | pp14bes1e · còn 2 email | pp14bjwrf · còn 2 email | pp14blsms · còn 1 email | tut-5d81n-3 · còn 1 email | tut-5d81n-4 · còn 1 email | tut-5d81n-5 · còn 1 email | tut-5d81n-6 · còn 1 email | tut-5en38-2 · còn 1 email | tut-5en38-3 · còn 1 email | tut-5en38-4 · còn 1 email | tut-5en38-5 · còn 1 email | tut-5en38-6 · còn 1 email | tut-5g0jk-3 · còn 1 email | tut-5g0jk-4 · còn 1 email | tut-5g0jk-5 · còn 1 email | tut-5g0jk-6 · còn 1 email | tut-5jplr-3 · còn 1 email | tut-5jplr-4 · còn 1 email | tut-5jplr-5 · còn 1 email | tut-5m5e9-3 · còn 1 email | tut-5m5e9-4 · còn 1 email | tut-5m5e9-5 · còn 1 email | tut-5pwe9-3 · còn 1 email | tut-5pwe9-4 · còn 1 email | tut-5pwe9-5 · còn 1 email
+PASS PP đã cấp 5 email: 5 đã dùng / 0 còn dùng được (không gọi cả PP hết chỉ vì một email) — 5 đã dùng / 0 còn dùng được 4 đang gán
+PASS Danh sách email dưới dòng: bỏ gán → Đã dùng (không về Chưa dùng); email khác Đang gán với Server / VM — pp1-blsms@example.invalid ppx1-blsms@example.invalid · chưa trên VM Đã dùng 0 || pp2-blsms@example.invalid ppx2-blsms@example.invalid · ppx-blsms / VM_002 Đang gán 0
+PASS Có nút copy email một lần bấm — 
+PASS Tìm theo bất kỳ email nào ra đúng PP — 
+PASS Ghi tiền vào: tự kiểm tra, không có nút xem trước, tổng 46 — 3 hợp lệ · tổng 46,00 USD · 0 cần sửa
+PASS Tiền vào 46,00 USD; còn lại theo sổ 46,00 USD — 46,00 USD · 46,00 USD
+PASS Cùng email/ngày/số tiền → nghi trùng tại dòng (có “Khoản riêng”); mã giao dịch lặp → chặn — DÒNG EMAIL SỐ TIỀN KẾT QUẢ 1 pp2-blsms@example.invalid 10,00 Đã có khoản cùng email, cùng ngày, cùng số tiền; nếu là khoản riêng thì bấm "Khoản riêng" Khoản riêng 2 pp1-blsms@example.invalid 24,00 Mã 
+PASS Chuyển ra 30 không phí → còn 16,00 USD — 16,00 USD
+PASS Email đã dùng (đã bỏ gán) vẫn nhận thêm tiền được → 36,00 USD — 36,00 USD
+PASS PP bị trừ 31 gồm phí 1, bên nhận 30 → nguồn chỉ giảm 31 (còn 5,00), PP nhận +30 — pp13blsms bị trừ 31,00 USD (gồm phí 1,00) · pp14blsms nhận 30,00 USD. Số dư pp13blsms giảm đúng một lần số bị trừ. · pp13blsms 5,00 USD · pp14blsms 30,00 USD
+PASS Tổng thu EarnApp toàn dự án không đổi khi chuyển nội bộ — Thu EarnApp: 278,00 USD (không gồm chuyển nội bộ) → Thu EarnApp: 278,00 USD (không gồm chuyển nội bộ)
+PASS Bấm số Tiền ra → đúng các khoản tạo nên số đó (30 và 31 gồm phí 1) — /paypals?q=blsms&pp=pp13blsms&show=out
+PASS Tải lại giữ PP và danh sách khoản — /paypals?q=blsms&pp=pp13blsms&show=out
+PASS Back đóng danh sách khoản — /paypals?q=blsms
+PASS Forward mở lại — /paypals?q=blsms&pp=pp13blsms&show=out
+PASS Lọc tháng 9: tháng chưa có khoản → tiền vào 0, còn lại 0 (không mất số dư khi về tháng 10) — 0
+PASS Tháng 10: còn lại 5,00 USD, ghi rõ đến ngày — 
+PASS Bổ sung email vào đúng PP: email mới thêm, email đã có giữ nguyên; không đợt mua, không chi phí — 0 đã dùng / 2 còn dùng được 0 đang gán · chi phí 25→25 · đợt 45→45
+PASS Lịch sử nhập kho: đợt PayPal đếm theo PP, số email ghi riêng — PP-2026-10-18-7 18/10/2026 Chưa ghi Chưa ghi 2 PP 7 email Chưa ghi Chưa ghi Nhập bổ sung Ghi chi phí
+PASS Điện thoại: thẻ có nhãn, trang không tràn ngang — 
+PASS Chỉ quyền kho PayPal: không thấy tiền vào/ra/số dư, không có Ghi tiền vào / Ghi chuyển — MÃ PP|EMAIL ĐÃ DÙNG / CÒN DÙNG ĐƯỢC|TÌNH TRẠNG|THAO TÁC
+PASS VIEWER đủ module: thấy tiền và số dư, không có nút ghi — 
+TOTAL 30 pass / 0 fail

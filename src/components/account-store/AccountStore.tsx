@@ -11,6 +11,7 @@ import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy} from '@/components/business-management/AccountsWorkspace';
 import {viAmount,viDate} from './batch-format';
+import {PaypalStock} from './PaypalStock';
 import {ImportPanel,appendToBatch,discardDraft,importDraft,type StockKind} from './ImportPanel';
 import {openView,readAccountUrl,sameQuery,switchKind,writeAccountUrl,type AccountKind,type AccountUrl} from './account-url';
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
@@ -54,7 +55,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   const refresh=()=>Promise.all([utils.accountStore.invalidate(),utils.businessManagement.invalidate()]);
   const data=store.data,rights=data?.rights,needle=q.trim().toLowerCase();
   const logins=useMemo(()=>(data?.logins||[]).filter(l=>(!type||l.type===type)&&(!state||l.state===state)&&(!batch||l.batch===batch)&&(!needle||[l.email,l.notes,l.batch,l.place?.server,l.place?.vm,l.earnApp?.paypal].join(' ').toLowerCase().includes(needle))),[data,type,state,batch,needle]);
-  const paypals=useMemo(()=>(data?.paypals||[]).filter(p=>(!state||p.state===state)&&(!batch||p.batch===batch)&&(!needle||[p.code,p.email,p.notes,p.batch,p.place?.server,p.place?.vm,p.earnAppLogin].join(' ').toLowerCase().includes(needle))),[data,state,batch,needle]);
+  const paypals=useMemo(()=>(data?.paypals||[]).filter(p=>(!state||p.state===state)&&(!batch||p.batch===batch)&&(!needle||[p.code,p.notes,p.batch,...p.emails.flatMap(e=>[e.email,e.earnAppLogin,e.place?.server,e.place?.vm])].join(' ').toLowerCase().includes(needle))),[data,state,batch,needle]);
   const counts=(rows:{state:string}[])=>Object.fromEntries(['NEW','ASSIGNED','USED','BLOCKED'].map(s=>[s,rows.filter(r=>r.state===s).length]));
   const base=kind==='paypal'?data?.paypals||[]:(data?.logins||[]).filter(l=>!type||l.type===type),stateCounts=counts(base);
   const batches=(data?.batches||[]).filter(b=>b.kind===stock),review=(data?.review||[]).filter(r=>r.group===stock);
@@ -79,7 +80,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
         <div className="vm-chips">{['','NEW','ASSIGNED','USED','BLOCKED'].map(s=><button key={s} type="button" className={'vm-chip'+(state===s?' active':'')} onClick={()=>go({...url,tab:kind,state:s})}>{s?STATE_LABEL[s]:'Tất cả'}{s?<strong>{stateCounts[s]}</strong>:null}</button>)}</div>
         {batch&&<span className="pm-filter-chip" role="status">Đợt nhập <strong className="pm-code">{batch}</strong> · {(kind==='paypal'?paypals:logins).length} {kind==='paypal'?'PayPal':'tài khoản'} <button type="button" className="pm-link" onClick={()=>go({...url,tab:kind,batch:''})}>Bỏ lọc đợt</button> · <button type="button" className="pm-link" onClick={()=>go(openView(url,'history',batch))}>Xem đợt trong lịch sử</button></span>}
       </div>
-      {kind==='login'?<LoginTable projectId={projectId} rows={logins} store={data} selected={selected} setSelected={setSelected} onCopy={setCopy} onBatch={b=>go({...url,tab:kind,batch:b})} onSaved={()=>void refresh()}/>:<PaypalTable projectId={projectId} rows={paypals} store={data} selected={selected} setSelected={setSelected} onBatch={b=>go({...url,tab:kind,batch:b})} onSaved={()=>void refresh()}/>}
+      {kind==='login'?<LoginTable projectId={projectId} rows={logins} store={data} selected={selected} setSelected={setSelected} onCopy={setCopy} onBatch={b=>go({...url,tab:kind,batch:b})} onSaved={()=>void refresh()}/>:<PaypalPart projectId={projectId} rows={paypals} store={data} url={{...url,tab:kind}} go={go} selected={selected} setSelected={setSelected} onSaved={()=>void refresh()}/>}
     </div>}
     {view==='history'&&<BatchTable projectId={projectId} kindLabel={kindLabel} rows={batches} focus={batch} store={data} onContinue={continueBatch} onOpen={b=>go({...switchKind(url,kind),batch:b.code})} onSaved={()=>void refresh()}/>}
     {view==='review'&&<div className="pm-surface p-4 space-y-3"><h2 className="font-semibold">Cần đối chiếu · {kindLabel}</h2>
@@ -121,18 +122,11 @@ function LoginTable({projectId,rows,store,selected,setSelected,onCopy,onBatch,on
     {rows.length>shown.length&&<p className="pm-muted text-xs p-3">Hiện 500 / {rows.length} dòng; dùng ô tìm hoặc bộ lọc để thu hẹp.</p>}
     {store?.rights.money&&<p className="pm-muted text-xs p-3">Giá phân bổ chỉ để tham khảo: tiền thực trả đã ghi một lần trong Chi phí theo lô, không cộng thêm vào lợi nhuận.</p>}</>;
 }
-function PaypalTable({projectId,rows,store,selected,setSelected,onBatch,onSaved}:{projectId:string;rows:Paypal[];store:Store|undefined;selected:Set<string>;setSelected:(s:Set<string>)=>void;onBatch:(b:string)=>void;onSaved:()=>void}){
-  const status=useStatus(projectId,'PAYPAL',onSaved),sel=useSelection(rows,selected,setSelected),write=!!store?.rights.writePaypals,shown=rows.slice(0,500);
+// PayPal tab: bulk status for the selected PayPals, then the PayPal stock (one row per code with its emails and money).
+function PaypalPart({projectId,rows,store,url,go,selected,setSelected,onSaved}:{projectId:string;rows:Paypal[];store:Store|undefined;url:AccountUrl;go:(u:AccountUrl,mode?:'push'|'replace')=>void;selected:Set<string>;setSelected:(s:Set<string>)=>void;onSaved:()=>void}){
+  const status=useStatus(projectId,'PAYPAL',onSaved),write=!!store?.rights.writePaypals;
   return <><BulkStatus count={selected.size} options={PP_STATUS} busy={status.busy} onApply={s=>void status.save(rows.filter(r=>selected.has(r.id)),s).then(()=>setSelected(new Set()))}/>
-    <div className="pm-table-scroll"><table className="pm-table"><thead><tr>{write&&<th><input type="checkbox" aria-label="Chọn tất cả" checked={sel.all} onChange={sel.toggleAll}/></th>}<th>Mã PP</th><th>Email nhận tiền</th><th>Kho / VM</th><th>Tình trạng</th><th>Lô</th>{store?.rights.money&&<th>Giá phân bổ</th>}<th>Ghi chú</th></tr></thead>
-      <tbody>{shown.map(p=><tr key={p.id}>{write&&<td><input type="checkbox" aria-label={'Chọn '+p.code} checked={selected.has(p.id)} onChange={()=>sel.toggle(p.id)}/></td>}
-        <td className="whitespace-nowrap"><strong>{p.code}</strong></td><td className="whitespace-nowrap">{p.email}</td>
-        <td><StateCell state={p.state} place={p.place} extra={p.earnAppLogin?'EarnApp: '+p.earnAppLogin:null}/></td>
-        <td>{write?<select className="pm-input acc-status-select" aria-label={'Tình trạng '+p.code} value={p.status} disabled={status.busy} onChange={e=>void status.save([p],e.target.value)}>{Object.entries(PP_STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>:PP_STATUS[p.status]}</td>
-        <td className="whitespace-nowrap">{p.batch?<button className="underline text-xs" onClick={()=>onBatch(p.batch!)}>{p.batch}</button>:<span className="pm-muted">—</span>}</td>
-        {store?.rights.money&&<td className="text-xs">{p.price?`${money(p.price.amount)} ${p.price.currency}`:<span className="pm-muted">{PRICE_EMPTY[p.priceState]}</span>}</td>}
-        <td className="max-w-xs text-xs whitespace-pre-wrap">{p.notes||''}</td></tr>)}
-        {!rows.length&&<tr><td colSpan={8} className="pm-empty">{store?'Chưa có PayPal trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div></>;
+    <PaypalStock projectId={projectId} rows={rows} store={store} url={url} go={go} write={write} status={status} selected={write?selected:null} setSelected={setSelected} onSaved={onSaved}/></>;
 }
 // Lịch sử nhập kho of one kind: one row per purchase. Columns: Đợt nhập (code, purchase date, login type) | Nơi mua | Số lượng mua
 // (as recorded, never filled from the import count) | Đã nhập kho (accounts of the purchase in the web stock, opens them) | Tổng tiền
@@ -144,14 +138,14 @@ function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSa
   useEffect(()=>{if(focus&&store)document.querySelector(`[data-batch="${CSS.escape(focus)}"]`)?.scrollIntoView({block:'center'});},[focus,store]);
   const money=!!store?.rights.money,cols=money?7:6;
   const toggle=(id:string)=>setOpen(o=>{const n=new Set(o);if(n.has(id))n.delete(id);else n.add(id);return n;});
-  return <div className="pm-surface"><div className="px-4 pt-3"><h2 className="font-semibold">Lịch sử nhập kho · {kindLabel}</h2><p className="pm-muted text-xs">Mỗi dòng là một đợt mua. Ngày dưới mã đợt là ngày mua. <em>Đã nhập kho</em> là số tài khoản của đợt đang có trên web, không phải số NEW hay số đã gán VM. <em>Chưa ghi</em> chi phí không có nghĩa là chưa thanh toán. Nhập bổ sung không tạo đợt mới và không ghi tiền thêm.</p>{focusMissing&&<p className="pm-review text-xs mt-1">Không có đợt {focus} trong {kindLabel}.</p>}</div>
+  return <div className="pm-surface"><div className="px-4 pt-3"><h2 className="font-semibold">Lịch sử nhập kho · {kindLabel}</h2><p className="pm-muted text-xs">Mỗi dòng là một đợt mua. Ngày dưới mã đợt là ngày mua. <em>Đã nhập kho</em> là số tài khoản của đợt đang có trên web (PayPal đếm theo mã PP, số email ghi riêng), không phải số NEW hay số đã gán VM. <em>Chưa ghi</em> chi phí không có nghĩa là chưa thanh toán. Nhập bổ sung không tạo đợt mới và không ghi tiền thêm.</p>{focusMissing&&<p className="pm-review text-xs mt-1">Không có đợt {focus} trong {kindLabel}.</p>}</div>
     <div className="pm-table-scroll"><table className="pm-table acc-batch-table"><thead><tr><th>Đợt nhập</th><th>Nơi mua</th><th className="num">Số lượng mua</th><th className="num">Đã nhập kho</th>{money&&<th className="num">Tổng tiền mua</th>}<th>Chi phí</th><th>Thao tác</th></tr></thead>
     <tbody>{rows.map(b=>{const m=money?b.money:null,detail=!!m&&(!!m.original||(!!m.currency&&m.currency!=='USDT')||!!b.notes),isOpen=open.has(b.id),canAppend=b.kind==='PAYPAL'?!!store?.rights.writePaypals:!!store?.rights.writeLogins;
       return [<tr key={b.id} data-batch={b.code} aria-current={b.code===focus||undefined} className={b.code===focus?'pm-row-focus':undefined}>
         <td data-label="Đợt nhập"><span className="acc-batch-code">{b.code}</span><span className="acc-batch-sub">{viDate(b.purchasedAt)}{b.kind!=='PAYPAL'&&b.type?<span className="acc-batch-type">{TYPE[b.type]}</span>:null}</span></td>
         <td data-label="Nơi mua">{b.source||<span className="pm-muted">Chưa ghi</span>}</td>
         <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?viAmount(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
-        <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}</button></td>
+        <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}{b.kind==='PAYPAL'?' PP':''}</button>{b.kind==='PAYPAL'&&b.emails!=null?<span className="acc-batch-sub">{viAmount(String(b.emails))} email</span>:null}</td>
         {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{viAmount(m.total)} {m.currency}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
           {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<>≈ {viAmount(m.usdt)} USDT</>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
         <td data-label="Chi phí">{b.cost==='RECORDED'?(b.costLink?<Link className="acc-state NEW" href={links.costs({cost:b.costLink.id,month:b.costLink.month})} title="Mở khoản chi ở Chi phí">Đã ghi</Link>:<span className="acc-state NEW">Đã ghi</span>):b.cost==='VOIDED'?<span className="acc-state BLOCKED" title="Khoản chi đã thu hồi ở Chi phí">Đã thu hồi</span>:<span className="acc-state USED" title="Chưa ghi khoản chi trên web; không có nghĩa là chưa thanh toán">Chưa ghi</span>}</td>

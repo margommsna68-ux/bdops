@@ -8,3 +8,9 @@ describe('Lịch sử nhập kho display',()=>{
   });
   it('shows the purchase date as dd/MM/yyyy',()=>{expect(viDate('2026-10-18')).toBe('18/10/2026');expect(viDate('')).toBe('');});
 });
+describe('ledger money',()=>{
+  it('keeps two decimals at least and every recorded decimal',async()=>{
+    const {viMoney}=await import('@/components/account-store/batch-format');
+    expect(viMoney('46.00')).toBe('46,00');expect(viMoney('1234.5')).toBe('1.234,50');expect(viMoney('-15.00')).toBe('-15,00');expect(viMoney('0.00')).toBe('0,00');expect(viMoney('9.9')).toBe('9,90');expect(viMoney('3.824019')).toBe('3,824019');
+  });
+});
