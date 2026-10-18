@@ -78,3 +78,4 @@ Kịch bản người kiểm: `.runtime/paypal-independent-review-20261018.ts` (
   - Phí bên nhận + đồng tiền nhận VND chưa có tỷ giá → lỗi tại ô tỷ giá và ô số nhận, Lưu khoá, không ghi gì (`rf3-fee-no-rate.png`).
   - Không phí bên nhận, không biết số nhận (trừ 20, phí 1) → lưu được, bản ghi `receiverFee null, received null`.
 - **Hồi quy trình duyệt:** 24/24 (ô tiền trống, phí / tỷ giá, phạm vi ngày), 30/30 (PayPal email và sổ; nhãn ô cũ trong kịch bản đã cập nhật), 80/80 (luồng 18/10).
+- **Phát hành:** commit `440c025`; backup host `1b2b2482` trước deploy; deploy `830de684` SUCCESS, không migration; host verify chỉ đọc 10 server / 576 VM. Không ghi thử trên host (host chưa có PayPal), không quay video.
