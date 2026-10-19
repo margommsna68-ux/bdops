@@ -34,6 +34,14 @@ làm tròn 3,872967), dữ liệu đúng; đã sửa kịch bản và chạy l�
 
 Ảnh: `a1-inexact-kept-total.png`, `a2-vnd-kept-total.png`, `a5-batch-cost-form.png`. Không quay video.
 
+## Phát hành
+
+Commit 77f0365, backup host e70673c0-314d-4a7b-8e44-d232afd1a29d (40.438.626 byte) trước khi deploy, deploy f183c784 SUCCESS, không có
+migration. Host chỉ đọc trước / sau giống hệt (10 server / 576 VM; 553 Có proxy, 23 Cần kiểm tra; 2 lô đều Đã ghi chi phí:
+PP-2026-10-19-1 420.000 VND = 16,26646 USDT, TK-2026-10-18-1 2,12 USDT, nên không có lô nào bị lỗi này nhập thiếu). Trình duyệt trên
+host: mở Nhập PayPal với danh sách trống, gõ 10 / 3, bấm "Tính theo giá mỗi PP" → vẫn Tổng 10 kèm ghi chú, rời trang không lưu; chỉ có
+POST user.verifyPin / user.heartbeat (`host-browser-result.txt`, `host-inexact-note.png`).
+
 ## Giới hạn
 
 - Host chỉ kiểm đọc, không nhập dữ liệu thử. Giá Binance thật không dùng (máy chủ giá giả 25.820 cục bộ).
