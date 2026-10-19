@@ -1,0 +1,74 @@
+PASS S1 chọn VM_001–003 → Thiết lập → Đồng ấm → Back: còn đúng 3 dòng chọn — VM_001/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail, VM_002/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail, VM_003/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail · Đã chọn 3 VM
+PASS S1b quay lại không tự chạy thao tác hàng loạt (không có lệnh ghi)
+PASS S2 VM_003 bị xoá ở tab khác khi đang ở Thiết lập → Back: còn VM_001, VM_002 (bỏ dòng đã xoá) — VM_001/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail, VM_002/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail · Đã chọn 2 VM
+PASS S3 đổi bộ lọc (Thiếu proxy) bỏ chọn như cũ; Back về bộ lọc trước không hiện lại dấu chọn cũ — sau Back: 0
+PASS S4 đang chọn VM_004, VM_005 ở Thiếu proxy; VM_005 được gán proxy ở tab khác → Back: chỉ còn VM_004 — VM_004/Chưa ghi
+OK
+Chưa nối
+OFF VM
+Blocked
+LINKED
+Earn/VM lỗi
+SUS
+VM deleted
+New VM
+Đã login mail · Đã chọn 2 VM
+PASS S5 chọn 1 dòng trang 1 + 1 dòng trang 2 (tìm "VM_00") → Thiết lập → Back: vẫn "Đã chọn 2 VM", ô tìm và trang giữ nguyên — Đã chọn 2 VM · /infrastructure/servers?q=VM_00&page=2&size=50
+PASS S6 sang dự án khác: không có dòng nào được chọn sẵn; lựa chọn lưu theo khoá dự án riêng — khoá: 1
+PASS S7 Kho proxy chọn 2 proxy → Thiết lập → Tối → Back: còn 2 proxy được chọn — Đã chọn 2 proxy
+PASS S7b đổi bộ lọc nhóm (TUT) bỏ chọn như cũ
+PASS S8 nháp Nhập PayPal còn nguyên sau khi đổi theme
+PASS S9 Sáng: số trên chip SUS chữ trắng trên nền đỏ đậm (thường) và trên nền xanh (đang chọn) — {"thuong":{"bg":"rgb(153, 27, 27)","fg":"rgb(255, 255, 255)","num":"rgb(255, 255, 255)"},"dangChon":{"bg":"rgb(29, 78, 216)","fg":"rgb(255, 255, 255)","num":"rgb(255, 255, 255)"}}
+PASS Không có lỗi JS
+
+12 PASS / 0 FAIL

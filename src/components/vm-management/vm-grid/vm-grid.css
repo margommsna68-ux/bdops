@@ -281,3 +281,5 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .vm-proxy-pick li button:hover,.vm-proxy-pick li button.active{background:var(--ds-surface-muted,rgba(59,130,246,.12))}
 .vm-proxy-pick li button.active{outline:1px solid #3b82f6}
 @media (max-width:640px){.vm-proxy-pop{width:calc(100vw - 16px)}}
+/* SUS chip (dark red) in the light theme: its count used the page text colour (dark on dark red). Light theme only; Tối / Vàng kim already read well, Đồng ấm has its own rule. */
+html:not([data-theme]) .vm-chip.vm-ops-severe strong{color:#fff}

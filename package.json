@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "node scripts/build-bronze-theme.cjs && prisma generate && next build",
+    "theme:check": "node scripts/build-bronze-theme.cjs --check",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",

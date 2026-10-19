@@ -1,6 +1,8 @@
 "use client";
 import Link from 'next/link';
-import {Fragment,useCallback,useEffect,useRef,useState} from 'react';
+import {Fragment,useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {useSession} from 'next-auth/react';
+import {selectionKey,useSessionSelection} from '@/lib/session-selection';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
 import type {RegistrySort} from '@/server/proxy-management/package-terms';
 import {PackageDialog,packageHeading,dueBadge,dueLabel} from './PackageDialog';
@@ -38,7 +40,11 @@ export function RegistryTable({projectId}:{projectId:string}){
   const go=useCallback((patch:Partial<RegistryUrl>,mode:'push'|'replace'='push',pay?:string|null)=>{const next={...(pending.current||readRegistryUrl(new URLSearchParams(window.location.search))),page:1,...patch};pending.current=next;const href=pathname+writeRegistryUrl(next,pay===undefined?new URLSearchParams(window.location.search).get('pay'):pay);if(mode==='push')router.push(href,{scroll:false});else router.replace(href,{scroll:false});},[pathname,router]);
   const [search,setSearch]=useState(query);useEffect(()=>{setSearch(query);},[query]);
   const [kind,setKind]=useState<BatchKind|null>(null),[history,setHistory]=useState<string|null>(null),[catalogOpen,setCatalogOpen]=useState(false);
-  const [selected,setSelected]=useState<Set<string>>(new Set()),[fallback,setFallback]=useState<string|null>(null),[copying,setCopying]=useState(false);
+  // The selection (one page, as before) is kept in the tab's session by id with its filter and page (src/lib/session-selection.ts):
+  // leaving for another page and coming Back ticks the same proxies again, minus rows no longer on that page.
+  const session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
+  const [selected,setSelected,restoreSelection]=useSessionSelection(session.status==='authenticated'?selectionKey('proxy',userId,projectId):null,projectId+'|'+filterKey(url)+'|'+url.page);
+  const [fallback,setFallback]=useState<string|null>(null),[copying,setCopying]=useState(false);
   const [rightsOpen,setRightsOpen]=useState(false);
   const [operationsOpen,setOperationsOpen]=useState(false),[backupsOpen,setBackupsOpen]=useState(false);
   const refreshVM=useVMRefresh();
@@ -67,6 +73,8 @@ export function RegistryTable({projectId}:{projectId:string}){
   const canGroup=!!rights?.canImport,canLocate=!!vmAccess.data?.canAssign,canEdit=canGroup||canLocate;
   const selectable=rows.filter(r=>r.endpointId),allOnPage=selectable.length>0&&selectable.every(r=>selected.has(r.endpointId!)),columns=rights?.canCopy?10:9,selectedRows=selectable.filter(r=>selected.has(r.endpointId!));
   const editorProps={projectId,groups:groupChoices,targets:targets.data||[]};
+  const pageReady=!!data.data&&!data.isPreviousData&&data.data.page===url.page,validIds=useMemo(()=>pageReady?new Set(selectable.map(r=>r.endpointId!)):null,[pageReady,data.data]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{restoreSelection(validIds);},[validIds,restoreSelection]);
   const toggleRow=(row:RegistryRow,checked:boolean)=>setSelected(prev=>{const next=new Set(prev);if(checked) next.add(row.endpointId!);else next.delete(row.endpointId!);return next;});
   // Copy flows: one click each. Credentials are fetched through the COPY_CREDENTIALS endpoint on demand, never preloaded.
   async function copyProxy(row:RegistryRow){

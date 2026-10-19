@@ -25,11 +25,24 @@ trạng thái bảng, không ghi gì vào máy chủ.
   - `src/app/theme-bronze.generated.css`: **sinh tự động** bởi `node scripts/build-bronze-theme.cjs` (thêm `--contrast` để in độ
     tương phản). Script quét các lớp màu Tailwind thật sự dùng trong `src` và các màu viết cứng trong `globals.css`,
     `proxy-management.css`, `vm-grid.css`, `dashboard.css`, rồi ghi bản tương ứng chỉ dưới `[data-theme="bronze"]`. Chữ được làm đậm
-    dần đến 4,5:1. Chạy lại script khi thêm màu mới vào các file đó hoặc thêm lớp màu Tailwind mới.
+    dần đến 4,5:1.
+  - Tự đồng bộ (19/10/2026): script là bước đầu của `npm run build` và của Dockerfile (bản phát hành Railway), nên màu mới luôn có
+    quy tắc Đồng ấm khi build. Script chỉ ghi khi nội dung đổi; chạy lại trên cùng source không đổi gì (file và lớp được sắp xếp).
+    `npm run theme:check` (và test `theme-bronze-sync.test.ts` trong `npm test`) báo lỗi nếu bản trong source chưa được sinh lại,
+    và kiểm mọi quy tắc sinh ra đều nằm dưới `[data-theme="bronze"]`.
   - Móc lớp không có kiểu riêng ở theme khác: `mth-sidebar`, `mth-nav-link`, `mth-nav-active`, `mth-nav-icon`, `mth-login`,
     `mth-pin-backdrop`, `mth-toast`.
 - Thêm theme khác: thêm mã vào `AppTheme`, thẻ trong `THEMES` của `src/app/(dashboard)/settings/page.tsx` (có màu xem trước nền,
   sidebar, bảng, nút), khối biến màu, và mọi quy tắc đặt dưới `[data-theme="<mã>"]` để theme cũ không đổi.
+
+## Giữ lựa chọn khi rời trang
+
+Server / VM và Kho proxy giữ dòng đang chọn trong bộ nhớ phiên của tab (`src/lib/session-selection.ts`, `sessionStorage`, không vào
+URL, mất khi đóng tab), theo người dùng, dự án và phạm vi bộ lọc (Server / VM: server, bộ lọc, tìm kiếm, tình trạng; Kho proxy: bộ lọc
+và trang). Rời trang (ví dụ Thiết lập → đổi theme) rồi Back về cùng phạm vi thì đúng các dòng đó được chọn lại, trừ dòng đã xoá hoặc
+không còn trong danh sách. Chỉ tích lại ô chọn: không tự chạy thao tác hàng loạt, không hỏi lại. Quy tắc cũ giữ nguyên: đổi server, tìm
+kiếm, bộ lọc hoặc dự án thì bỏ chọn (Back về bộ lọc cũ cũng không hiện lại); Server / VM giữ lựa chọn qua các trang, Kho proxy bỏ chọn
+khi sang trang khác như trước.
 
 ## Kiểm khi sửa theme
 

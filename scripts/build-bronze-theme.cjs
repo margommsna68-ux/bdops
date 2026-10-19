@@ -8,7 +8,8 @@
 //      declaration holding a Tailwind palette colour (hex or rgba) is re-emitted with the matching bronze colour, same alpha.
 // Text colours are darkened step by step until they reach 4.5:1 on the card colour, so small text stays readable.
 // Hand-written parts (tokens, sidebar, login, PIN, toasts, charts) live in src/app/theme-bronze.css, loaded after this file.
-// Run after changing colours in those CSS files or adding new colour classes:  node scripts/build-bronze-theme.cjs
+// Runs as the first step of `npm run build` (writes only when the output changes); the test suite runs it with --check, so a colour
+// added without regenerating fails the tests before release. By hand: node scripts/build-bronze-theme.cjs [--check] [--contrast]
 const fs = require('fs'), path = require('path'), postcss = require('postcss'), tw = require('tailwindcss/colors');
 const root = path.join(__dirname, '..'), out = path.join(root, 'src/app/theme-bronze.generated.css');
 const T = '[data-theme="bronze"]';
@@ -52,48 +53,60 @@ function recolor(value, prop) {
   return changed ? v : null;
 }
 // ── part 1: Tailwind utilities used in the source ──
-const files = []; (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (/\.(tsx|ts)$/.test(e.name)) files.push(p); } })(path.join(root, 'src'));
-const CORE = String.raw`((?:hover|focus|focus-visible|focus-within|active|disabled|group-hover|placeholder):)?(bg|text|border|border-[trblxy]|ring|divide|fill|stroke|accent)-(white|(?:gray|slate|zinc|neutral|stone|blue|green|emerald|lime|red|rose|yellow|amber|orange)-(?:50|100|200|300|400|500|600|700|800|900|950))(?:\/(\d{1,3}|\[[\d.]+\]))?`;
-const used = new Set(), RE = new RegExp(String.raw`(?<![\w-])` + CORE + String.raw`(?![\w-])`, 'g'), ONE = new RegExp('^' + CORE + '$');
-for (const f of files) for (const m of fs.readFileSync(f, 'utf8').matchAll(RE)) used.add(m[0]);
-const esc = s => s.replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
-const PSEUDO = { 'hover:': ':hover', 'focus:': ':focus', 'focus-visible:': ':focus-visible', 'focus-within:': ':focus-within', 'active:': ':active', 'disabled:': ':disabled' };
-const lines = [];
-const SIDE = { 'border-t': ['border-top-color'], 'border-b': ['border-bottom-color'], 'border-l': ['border-left-color'], 'border-r': ['border-right-color'], 'border-x': ['border-left-color', 'border-right-color'], 'border-y': ['border-top-color', 'border-bottom-color'] };
-for (const cls of [...used].sort()) {
-  const m = ONE.exec(cls); if (!m) continue;
-  const [, pre = '', util, color, op] = m;
-  const role = util === 'text' || util === 'fill' || util === 'stroke' ? 'text' : util.startsWith('border') || util === 'ring' || util === 'divide' || util === 'accent' ? 'border' : 'bg';
-  let hex = color === 'white' ? (role === 'text' ? WHITE_TEXT : WHITE_BG) : pick(...color.split('-'), role); if (!hex) continue;
-  const alpha = op ? (op.startsWith('[') ? parseFloat(op.slice(1, -1)) : +op / 100) : null; const c = withAlpha(hex, alpha);
-  let sel = '.' + esc(cls); if (pre === 'group-hover:') sel = '.group:hover ' + sel; else if (pre === 'placeholder:') sel += '::placeholder'; else if (PSEUDO[pre]) sel += PSEUDO[pre];
-  if (util === 'divide') sel += ' > :not([hidden]) ~ :not([hidden])';
-  const props = util === 'bg' ? ['background-color'] : util === 'text' ? ['color'] : util === 'ring' ? ['--tw-ring-color'] : util === 'fill' ? ['fill'] : util === 'stroke' ? ['stroke'] : util === 'accent' ? ['accent-color'] : SIDE[util] || ['border-color'];
-  lines.push(`${T} ${sel}{${props.map(p => `${p}:${c} !important`).join(';')}}`);
+// Pure: the same source always gives the same text (files and classes are sorted; rules keep their source order).
+function generate() {
+  const files = []; (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) { const p = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (/\.(tsx|ts)$/.test(e.name)) files.push(p); } })(path.join(root, 'src'));
+  const CORE = String.raw`((?:hover|focus|focus-visible|focus-within|active|disabled|group-hover|placeholder):)?(bg|text|border|border-[trblxy]|ring|divide|fill|stroke|accent)-(white|(?:gray|slate|zinc|neutral|stone|blue|green|emerald|lime|red|rose|yellow|amber|orange)-(?:50|100|200|300|400|500|600|700|800|900|950))(?:\/(\d{1,3}|\[[\d.]+\]))?`;
+  const used = new Set(), RE = new RegExp(String.raw`(?<![\w-])` + CORE + String.raw`(?![\w-])`, 'g'), ONE = new RegExp('^' + CORE + '$');
+  for (const f of files) for (const m of fs.readFileSync(f, 'utf8').matchAll(RE)) used.add(m[0]);
+  const esc = s => s.replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
+  const PSEUDO = { 'hover:': ':hover', 'focus:': ':focus', 'focus-visible:': ':focus-visible', 'focus-within:': ':focus-within', 'active:': ':active', 'disabled:': ':disabled' };
+  const lines = [];
+  const SIDE = { 'border-t': ['border-top-color'], 'border-b': ['border-bottom-color'], 'border-l': ['border-left-color'], 'border-r': ['border-right-color'], 'border-x': ['border-left-color', 'border-right-color'], 'border-y': ['border-top-color', 'border-bottom-color'] };
+  for (const cls of [...used].sort()) {
+    const m = ONE.exec(cls); if (!m) continue;
+    const [, pre = '', util, color, op] = m;
+    const role = util === 'text' || util === 'fill' || util === 'stroke' ? 'text' : util.startsWith('border') || util === 'ring' || util === 'divide' || util === 'accent' ? 'border' : 'bg';
+    let hex = color === 'white' ? (role === 'text' ? WHITE_TEXT : WHITE_BG) : pick(...color.split('-'), role); if (!hex) continue;
+    const alpha = op ? (op.startsWith('[') ? parseFloat(op.slice(1, -1)) : +op / 100) : null; const c = withAlpha(hex, alpha);
+    let sel = '.' + esc(cls); if (pre === 'group-hover:') sel = '.group:hover ' + sel; else if (pre === 'placeholder:') sel += '::placeholder'; else if (PSEUDO[pre]) sel += PSEUDO[pre];
+    if (util === 'divide') sel += ' > :not([hidden]) ~ :not([hidden])';
+    const props = util === 'bg' ? ['background-color'] : util === 'text' ? ['color'] : util === 'ring' ? ['--tw-ring-color'] : util === 'fill' ? ['fill'] : util === 'stroke' ? ['stroke'] : util === 'accent' ? ['accent-color'] : SIDE[util] || ['border-color'];
+    lines.push(`${T} ${sel}{${props.map(p => `${p}:${c} !important`).join(';')}}`);
+  }
+  // ── part 2: hard-coded colours in the app CSS ──
+  const SOURCES = ['src/app/globals.css', 'src/components/proxy-management/proxy-management.css', 'src/components/vm-management/vm-grid/vm-grid.css', 'src/components/dashboard/dashboard.css'];
+  const comp = [];
+  for (const rel of SOURCES) {
+    const ast = postcss.parse(fs.readFileSync(path.join(root, rel), 'utf8'));
+    ast.walkRules(rule => {
+      if (rule.parent.type === 'atrule' && /^(keyframes|-webkit-keyframes)$/.test(rule.parent.name)) return;
+      if (rule.parent.type === 'atrule' && rule.parent.name === 'media' && /print/.test(rule.parent.params)) return;
+      if (rule.parent.type === 'atrule' && rule.parent.name === 'layer') return; // shadcn HSL variables: set by hand
+      const sels = rule.selectors.filter(s => !s.includes('data-theme') && !/^(:root|html)\b/.test(s.trim()) || /^:root\s+::-webkit/.test(s.trim()));
+      if (!sels.length) return;
+      const decls = [];
+      rule.each(d => { if (d.type !== 'decl' || d.prop.startsWith('--')) return; const v = recolor(d.value, d.prop); if (v) decls.push(`${d.prop}:${v}${d.important ? ' !important' : ''}`); });
+      if (!decls.length) return;
+      const scoped = sels.map(s => s.trim().startsWith(':root') ? s.replace(':root', T) : `${T} ${s.trim()}`).join(',');
+      const css = `${scoped}{${decls.join(';')}}`;
+      const media = rule.parent.type === 'atrule' && rule.parent.name === 'media' ? rule.parent.params : null;
+      comp.push(media ? `@media ${media}{${css}}` : css);
+    });
+  }
+  const head = `/* GENERATED by scripts/build-bronze-theme.cjs — do not edit by hand. Theme "Đồng ấm" (data-theme="bronze"). */\n`;
+  return { css: head + '/* 1. Tailwind colour utilities used in src */\n' + lines.join('\n') + '\n/* 2. Hard-coded colours of the app CSS */\n' + comp.join('\n') + '\n', utilities: lines.length, rules: comp.length };
 }
-// ── part 2: hard-coded colours in the app CSS ──
-const SOURCES = ['src/app/globals.css', 'src/components/proxy-management/proxy-management.css', 'src/components/vm-management/vm-grid/vm-grid.css', 'src/components/dashboard/dashboard.css'];
-const comp = [];
-for (const rel of SOURCES) {
-  const ast = postcss.parse(fs.readFileSync(path.join(root, rel), 'utf8'));
-  ast.walkRules(rule => {
-    if (rule.parent.type === 'atrule' && /^(keyframes|-webkit-keyframes)$/.test(rule.parent.name)) return;
-    if (rule.parent.type === 'atrule' && rule.parent.name === 'media' && /print/.test(rule.parent.params)) return;
-    if (rule.parent.type === 'atrule' && rule.parent.name === 'layer') return; // shadcn HSL variables: set by hand
-    const sels = rule.selectors.filter(s => !s.includes('data-theme') && !/^(:root|html)\b/.test(s.trim()) || /^:root\s+::-webkit/.test(s.trim()));
-    if (!sels.length) return;
-    const decls = [];
-    rule.each(d => { if (d.type !== 'decl' || d.prop.startsWith('--')) return; const v = recolor(d.value, d.prop); if (v) decls.push(`${d.prop}:${v}${d.important ? ' !important' : ''}`); });
-    if (!decls.length) return;
-    const scoped = sels.map(s => s.trim().startsWith(':root') ? s.replace(':root', T) : `${T} ${s.trim()}`).join(',');
-    const css = `${scoped}{${decls.join(';')}}`;
-    const media = rule.parent.type === 'atrule' && rule.parent.name === 'media' ? rule.parent.params : null;
-    comp.push(media ? `@media ${media}{${css}}` : css);
-  });
-}
-const head = `/* GENERATED by scripts/build-bronze-theme.cjs — do not edit by hand. Theme "Đồng ấm" (data-theme="bronze"). */\n`;
-fs.writeFileSync(out, head + '/* 1. Tailwind colour utilities used in src */\n' + lines.join('\n') + '\n/* 2. Hard-coded colours of the app CSS */\n' + comp.join('\n') + '\n');
-console.log(`utilities ${lines.length}, component rules ${comp.length} → ${path.relative(root, out)}`);
 // Contrast report of the main pairs (for the evidence checklist).
 const pairs = [['chữ chính / bề mặt', '#3A2A1C', CARD], ['chữ phụ token / bề mặt', '#7A6450', CARD], ['chữ phụ token / nền trang', '#7A6450', '#FAF6EF'], ['chữ phụ token / tiêu đề bảng', '#7A6450', '#F3E8D7'], ['chữ trên nút chính', WHITE_TEXT, '#8C5A2B'], ['nút chính khi rê', WHITE_TEXT, '#744820'], ['liên kết / điểm nhấn chữ', '#8C5A2B', CARD], ['olive 600 / bề mặt', P.olive['600'], CARD], ['hổ phách 700 / bề mặt', P.amber['700'], CARD], ['đỏ gạch 600 / bề mặt', P.brick['600'], CARD], ['chữ sidebar đang chọn', '#5E3A19', '#F3E4CF'], ['chữ sidebar', '#4E3B2A', '#F7EFE3']];
-if (process.argv.includes('--contrast')) for (const [n, a, b] of pairs) console.log(`${n}: ${a} / ${b} = ${contrast(a, b).toFixed(2)}:1`);
+if (require.main === module) {
+  // Default (part of `npm run build`): write the file only when it changed, so a rebuild with the same source changes nothing.
+  // --check: exit 1 when the committed file is not what the source gives (used by the test suite).
+  const { css, utilities, rules } = generate(), rel = path.relative(root, out);
+  const current = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').replace(/\r\n/g, '\n') : null;
+  if (process.argv.includes('--check')) { if (current !== css) { console.error(`${rel} is out of date: run node scripts/build-bronze-theme.cjs`); process.exit(1); } console.log(`${rel} up to date (utilities ${utilities}, component rules ${rules})`); }
+  else if (current === css) console.log(`${rel} unchanged (utilities ${utilities}, component rules ${rules})`);
+  else { fs.writeFileSync(out, css); console.log(`utilities ${utilities}, component rules ${rules} → ${rel}`); }
+  if (process.argv.includes('--contrast')) for (const [n, a, b] of pairs) console.log(`${n}: ${a} / ${b} = ${contrast(a, b).toFixed(2)}:1`);
+}
+module.exports = { generate, out };

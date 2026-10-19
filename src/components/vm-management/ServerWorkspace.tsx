@@ -25,6 +25,7 @@ import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
 import {SDK_STORE_DEFAULT,type SdkStoreUrl,DEFAULT_PREFS,OPS_FILTERS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type MoneyFilter,type OpsFilter,type PanelTab} from './vm-grid/grid-model';
 import type {OpsRow} from './vm-grid/OpsCells';
+import {selectionKey,useSessionSelection} from '@/lib/session-selection';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
 type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|null;
@@ -45,10 +46,13 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const [prefs,setPrefs]=useState<GridPrefs>(DEFAULT_PREFS);
   useEffect(()=>{try{setPrefs(normalizePrefs(JSON.parse(localStorage.getItem(prefsKey(userId))||'null')));}catch{setPrefs(DEFAULT_PREFS);}},[userId]);
   const savePrefs=(p:GridPrefs)=>{setPrefs(p);try{localStorage.setItem(prefsKey(userId),JSON.stringify(p));}catch{/* private mode */}};
-  const [selected,setSelected]=useState<Set<string>>(new Set()),[blocked,setBlocked]=useState<Blocked[]>([]),[bulk,setBulk]=useState<BulkPanel>(null),[form,setForm]=useState<'CREATE'|'ADD'|null>(null),[manualCopy,setManualCopy]=useState<string|null>(null);
-  // A selection never survives a change of project, server, filter or search; page and sort keep it (ids, not positions).
+  const [blocked,setBlocked]=useState<Blocked[]>([]),[bulk,setBulk]=useState<BulkPanel>(null),[form,setForm]=useState<'CREATE'|'ADD'|null>(null),[manualCopy,setManualCopy]=useState<string|null>(null);
+  // A selection never survives a change of project, server, filter or search; page and sort keep it (ids, not positions). It is kept
+  // in the tab's session (src/lib/session-selection.ts), so leaving the page (Thiết lập, another menu) and coming Back to the same
+  // scope ticks the same rows again, minus rows no longer in it.
   const scopeKey=projectId+'|'+(serverId||'')+'|'+url.view+'|'+url.q+'|'+url.st.join(',')+'|'+url.money+'|'+url.warn,firstScope=useRef(scopeKey);
-  useEffect(()=>{if(firstScope.current===scopeKey) return;firstScope.current=scopeKey;setSelected(new Set());setBlocked([]);setBulk(b=>b==='paste'?b:null);},[scopeKey]);
+  const [selected,setSelected,restoreSelection]=useSessionSelection(session.status==='authenticated'?selectionKey('vm',userId,projectId):null,scopeKey);
+  useEffect(()=>{if(firstScope.current===scopeKey) return;firstScope.current=scopeKey;setSelected(new Set());setBlocked([]);setBulk(b=>b==='paste'?b:null);},[scopeKey,setSelected]);
   const allServers=useMemo(()=>[...(workspace.data?.servers||[])].sort((a,b)=>compareCodes(a.code,b.code)),[workspace.data]),servers=allServers.filter(s=>!s.archivedAt),current=allServers.find(s=>s.id===serverId),single=!!current;
   const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),inScope=useMemo(()=>allVMs.filter(v=>!serverId||v.serverId===serverId),[allVMs,serverId]);
   const active=useMemo(()=>inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),[inScope,servers]),deleted=useMemo(()=>inScope.filter(v=>v.archivedAt),[inScope]),deletedView=url.view==='DELETED';
@@ -72,6 +76,11 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,opsOfVm]);
+  // Back on the page: tick the saved rows again once the whole result is known (VMs, accounts and statuses loaded), so a row still in
+  // the list is never dropped for being late; deleted or filtered-out rows are not restored.
+  const restoreReady=!!workspace.data&&(!!accounts.data||accounts.isError)&&(!!board.data||board.isError);
+  const validIds=useMemo(()=>restoreReady?new Set(filtered.map(v=>v.id)):null,[restoreReady,filtered]);
+  useEffect(()=>{restoreSelection(validIds);},[validIds,restoreSelection]);
   // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Có proxy) stays selected and stays in
   // the open bulk panel. Bulk actions take the selected rows in table order.
   const selectedRows=useMemo(()=>[...(deletedView?deleted:active)].filter(v=>selected.has(v.id)).sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),[deletedView,deleted,active,selected]);
