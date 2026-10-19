@@ -8,10 +8,12 @@ describe('shared link builder',()=>{
   it('opens the Server / VM grid on the server, view, VM and tab that the grid itself reads back',()=>{
     expect(links.vms()).toBe('/infrastructure/servers');
     expect(links.vms({view:'MISSING'})).toBe('/infrastructure/servers?view=MISSING');
-    const href=links.vms({serverId:'srv1',vm:'vm9',tab:'install'});expect(href).toBe('/infrastructure/servers/srv1?vm=vm9&tab=install');
-    const back=readGridUrl(params(href.split('?')[1]));expect(back).toMatchObject({vm:'vm9',tab:'install',view:''});expect(writeGridUrl(back)).toBe('?vm=vm9&tab=install');
-    for(const view of ['ACCOUNT_MISSING','PAYPAL_MISSING','SDK_MISSING','REVIEW','PENDING'] as const)expect(readGridUrl(params(links.vms({view}).split('?')[1])).view).toBe(view);
-    expect(links.vms({tab:'install'})).toBe('/infrastructure/servers');// a tab without a VM means nothing
+    const href=links.vms({serverId:'srv1',vm:'vm9',tab:'proxy'});expect(href).toBe('/infrastructure/servers/srv1?vm=vm9&tab=proxy');
+    const back=readGridUrl(params(href.split('?')[1]));expect(back).toMatchObject({vm:'vm9',tab:'proxy',view:''});expect(writeGridUrl(back)).toBe('?vm=vm9&tab=proxy');
+    for(const view of ['ACCOUNT_MISSING','PAYPAL_MISSING','SDK_MISSING','REVIEW','ASSIGNED','BLOCKED'] as const)expect(readGridUrl(params(links.vms({view}).split('?')[1])).view).toBe(view);
+    // Links from before 19/10/2026: Chờ cài / Đã cài open "Có proxy", the orphan-task view and the install tab are gone.
+    expect(readGridUrl(params('view=PENDING')).view).toBe('ASSIGNED');expect(readGridUrl(params('view=TASK_ORPHAN')).view).toBe('');expect(readGridUrl(params('vm=v1&tab=install')).tab).toBe('proxy');
+    expect(links.vms({tab:'proxy'})).toBe('/infrastructure/servers');// a tab without a VM means nothing
   });
   it('opens the registry with every filter the registry reads, OTHER state and history tab included',()=>{
     expect(links.proxies({state:'BLOCKED'})).toBe('/infrastructure/proxies?state=BLOCKED');
@@ -37,14 +39,11 @@ describe('shared link builder',()=>{
     expect(links.paypalIn()).toBe('/funds');
     expect(links.costs({month:'2026-10',server:'s1'})).toBe('/costs?month=2026-10&server=s1');expect(links.costs({month:'bad'})).toBe('/costs');
     expect(links.work({kind:'SHEET_REVIEW'})).toBe('/work?kind=SHEET_REVIEW');expect(links.work({kind:'TASK',vm:'v1'})).toBe('/work?vm=v1');
-    // Việc cài proxy is hidden by default: install links open the VM (or the pending filter) in Server / VM.
-    expect(links.installs({vm:'v1'})).toBe('/infrastructure/servers?vm=v1&tab=install');expect(links.installs()).toBe('/infrastructure/servers?view=PENDING');
+    // 19/10/2026: no install step; old install links open the VM (or Server / VM).
+    expect(links.installs({vm:'v1'})).toBe('/infrastructure/servers?vm=v1');expect(links.installs()).toBe('/infrastructure/servers');
     expect(links.accounts({tab:'paypal'})).toBe('/gmails?tab=paypal');expect(links.accounts({tab:'login'})).toBe('/gmails');
   });
-  it('opens package payment in the package list, and orphan install tasks at the VM or the Server / VM filter',()=>{
+  it('opens package payment in the package list',()=>{
     expect(links.packages()).toBe('/infrastructure/proxies?packages=due');expect(links.packages({pay:'231243'})).toBe('/infrastructure/proxies?pay=231243');
-    expect(links.orphanTasks([{serverId:'s1',vmId:'v1'}])).toBe('/infrastructure/servers/s1?vm=v1&tab=install');
-    const many=links.orphanTasks([{serverId:'s1',vmId:'v1'},{serverId:'s2',vmId:'v2'}]);expect(many).toBe('/infrastructure/servers?view=TASK_ORPHAN');
-    expect(readGridUrl(params(many.split('?')[1])).view).toBe('TASK_ORPHAN');
   });
 });

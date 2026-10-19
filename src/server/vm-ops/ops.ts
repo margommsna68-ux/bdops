@@ -8,6 +8,9 @@ import {runBusinessCommand,type BusinessCollector} from '../business-management/
 import {authorizeVM} from '../vm-management/repository';
 import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
 import {releaseForRecreate} from '../vm-management/sdk-store';
+import {currentProxyOf,loadChangeVM,markVmBlocked} from '../vm-management/proxy-change';
+import {assertInfrastructureAction} from '../permissions/infrastructure';
+const canBlock=(scope:ActorScope)=>{try{assertInfrastructureAction(scope,'BLOCK');return true;}catch{return false;}};
 // VM operating state and rounds (owner brief 18/10/2026).
 // - The main status is what a person / AI recorded. Recording SDK, assigning an account or confirming a proxy never sets it.
 // - Every command names the round it was meant for (expectedCycle); a command prepared for an older round is refused, so an old
@@ -31,7 +34,7 @@ export async function setVmStatus(scope:ActorScope,input:{key:string;items:Statu
   if(!input.items.length||input.items.length>1000||new Set(input.items.map(i=>i.vmId)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM');
   if(input.items.some(i=>!VM_OPS_STATUSES.includes(i.status as never)))throw new ProxyDomainError('INVALID_INPUT','Trạng thái không hợp lệ');
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_STATUS',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    const infra=await authorizeVM(current,'ASSIGN',tx),now=new Date();
     const rows:{vmId:string;where:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string;status:VmOpsStatus|null;cycle:number|null}[]=[];
     for(const item of input.items){
       const vm=await vmFor(tx,scope.projectId,item.vmId);
@@ -40,8 +43,25 @@ export async function setVmStatus(scope:ActorScope,input:{key:string;items:Statu
       if(vm.archivedAt||vm.server.archivedAt){rows.push({...base,outcome:'ERROR',message:'Bản ghi VM đã xoá khỏi web; khôi phục trước khi ghi tình trạng',status:vm.operation?.status??null,cycle});continue;}
       if(cycle!==item.expectedCycle){rows.push({...base,outcome:'ERROR',message:staleCycle(cycle),status:vm.operation?.status??null,cycle});continue;}
       if(vm.operation?.status===item.status){rows.push({...base,outcome:'SKIP',message:'Giữ nguyên '+opsLabel(item.status),status:item.status,cycle});continue;}
+      // "Blocked" at the VM is the current proxy reported BLOCKED in Kho proxy too (BLOCK right), one fact on both pages; the status
+      // before it is remembered for the replacement (owner decision 19/10/2026).
+      if(item.status==='PROXY_BLOCKED'){
+        const change=await loadChangeVM(tx,vm.id),cur=currentProxyOf(change);
+        if(!cur.endpointId){rows.push({...base,outcome:'ERROR',message:cur.review?'VM có proxy cần đối chiếu; chọn proxy đang dùng ở ô Proxy trước khi báo Blocked':'VM chưa có proxy; không có proxy nào để báo Blocked',status:vm.operation?.status??null,cycle});continue;}
+        if(!canBlock(infra)){rows.push({...base,outcome:'ERROR',message:'Cần quyền Báo BLOCKED proxy để ghi Blocked',status:vm.operation?.status??null,cycle});continue;}
+        const endpoint=await tx.proxyIP.findUniqueOrThrow({where:{id:cur.endpointId}});
+        if(endpoint.inventoryState!=='BLOCKED'){
+          if(endpoint.retiredAt||!['NEW','LIVE'].includes(endpoint.inventoryState)){rows.push({...base,outcome:'ERROR',message:'Proxy đang '+endpoint.inventoryState+'; không báo BLOCKED được',status:vm.operation?.status??null,cycle});continue;}
+          await images.remember('ENDPOINT',endpoint.id);
+          await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:now,revision:{increment:1}}});
+          if(endpoint.identityId)await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId,endpointId:endpoint.id,ip:endpoint.host!,kind:'BLOCKED',occurredAt:now,actorId:current.userId,reason:'Báo tại '+where(vm)}});
+        }
+        const r=await markVmBlocked(tx,images,{projectId:scope.projectId,actorId:current.userId,now,via:'Server/VM'},vm.id,endpoint.id,(input.note?.trim()?input.note.trim()+' · ':'')+'Proxy '+endpoint.host+(endpoint.port?':'+endpoint.port:'')+' BLOCKED');
+        rows.push({...base,outcome:'APPLIED',message:r==='KEPT'?'Proxy '+endpoint.host+' đã BLOCKED; giữ tình trạng '+opsLabel(vm.operation?.status??null):opsLabel(vm.operation?.status??null)+' → Blocked (proxy '+endpoint.host+' BLOCKED)',status:r==='KEPT'?vm.operation?.status??null:'PROXY_BLOCKED',cycle});continue;
+      }
       const ops=await ensureOps(tx,images,scope.projectId,vm.id);
-      await tx.vmOperation.update({where:{id:ops.id},data:{status:item.status,statusAt:new Date(),statusById:current.userId,revision:{increment:1}}});
+      // A status chosen by a person replaces a pending Blocked: the replacement will then keep this newer decision.
+      await tx.vmOperation.update({where:{id:ops.id},data:{status:item.status,statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1}}});
       await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,kind:'STATUS',fromStatus:ops.status,toStatus:item.status,note:input.note?.trim().slice(0,500)||null,actorId:current.userId}});
       rows.push({...base,outcome:'APPLIED',message:opsLabel(ops.status)+' → '+VM_OPS[item.status].label,status:item.status,cycle});
     }
@@ -93,16 +113,15 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
     }
     if(!position)proxyNote='VM chưa có proxy được giao';
     else{
-      const endpoint=position.endpoint,why=keepable(endpoint),hold=endpoint?holds.find(h=>h.endpointId===endpoint.id&&h.role!=='UNCERTAIN'):undefined,proxy=endpoint?decodeEndpoint(endpoint):null;
+      const endpoint=position.endpoint,blocked=endpoint?.inventoryState==='BLOCKED'&&!endpoint.retiredAt,why=blocked?null:keepable(endpoint),hold=endpoint?holds.find(h=>h.endpointId===endpoint.id&&h.role!=='UNCERTAIN'):undefined,proxy=endpoint?decodeEndpoint(endpoint):null;
       if(why||!endpoint||!hold||!proxy||proxy.format!=='FULL')proxyNote=(why||'Proxy không còn được giữ đúng máy')+'; giữ trên VM để kiểm tra / thay, chưa giao lại';
       else{
         const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identity!.id,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
         await images.remember('ENDPOINT',endpoint.id);
         const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:current.userId}});await images.remember('VM_CONFIG',config.id,true);
-        const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version} (lượt ${cycle+1})`,scheduledAt:now}});await images.remember('VM_TASK',task.id,true);
         await images.remember('VM_ALLOCATION',hold.id);await tx.vMProxyAllocation.update({where:{id:hold.id},data:{role:'DESIRED',configurationId:config.id,revision:{increment:1}}});
         await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
-        keptHold=hold.id;keptConfig=config.id;proxyKept=endpoint.id;proxyNote='Giữ proxy '+proxy.ip+' cho vị trí; cần cài và xác nhận lại ở lượt mới';
+        keptHold=hold.id;keptConfig=config.id;proxyKept=blocked?null:endpoint.id;proxyNote=blocked?'Proxy '+proxy.ip+' đang BLOCKED: vẫn ở vị trí và vẫn phải thay (bấm ô Proxy)':'Giữ proxy '+proxy.ip+' cho vị trí ở lượt mới (gán là xong, không có bước cài)';
       }
     }
     // Whatever else was installed or started on the old machine is not an installation of the new round: it stays on the VM as
@@ -122,7 +141,7 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
     // The real machine gets a new SDK: the current code leaves the position (back to Kho SDK if never linked, history if linked).
     const sdkLeft=await releaseForRecreate(tx,images,scope.projectId,current.userId,vm,cycle);
     const ops=await ensureOps(tx,images,scope.projectId,vm.id);
-    await tx.vmOperation.update({where:{id:ops.id},data:{cycle:cycle+1,status:'NEW_VM',statusAt:now,statusById:current.userId,revision:{increment:1}}});
+    await tx.vmOperation.update({where:{id:ops.id},data:{cycle:cycle+1,status:'NEW_VM',statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1}}});
     await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle:cycle+1,kind:'RECREATE',fromStatus:ops.status,toStatus:'NEW_VM',note:input.note?.trim().slice(0,500)||null,detail:{closedCycle:cycle,reason,proxy:proxyNote,earnAppClosed:!!earnApp,sdkMoved:!!sdkLeft},actorId:current.userId}});
     return {vmId:vm.id,where:where(vm),cycle:cycle+1,reason,proxy:proxyNote,proxyKept:!!proxyKept};
   },db);

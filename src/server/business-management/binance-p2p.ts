@@ -5,7 +5,9 @@ export type P2PQuote={fiat:string;side:'BUY'|'SELL';rate:string;fetchedAt:string
 const unavailable=()=>new ProxyDomainError('SOURCE_UNAVAILABLE','Chưa lấy được giá Binance P2P. Thử lại hoặc nhập tỷ giá đã kiểm chứng.');
 export async function fetchP2PQuote(fiat:string,side:'BUY'|'SELL',fetcher:typeof fetch=fetch,now=new Date()):Promise<P2PQuote>{
  fiat=cashCurrency(fiat);if(fiat==='USDT'||!['BUY','SELL'].includes(side))throw new ProxyDomainError('INVALID_INPUT');
- const url=new URL('https://www.binance.com/bapi/c2c/v1/public/c2c/agent/quote-price');url.search=new URLSearchParams({fiat,asset:'USDT',tradeType:side}).toString();
+ // Local acceptance only: MTH_P2P_QUOTE_URL may point at a stub on 127.0.0.1 (fixed price / failure); any other value is ignored.
+ const local=process.env.MTH_P2P_QUOTE_URL&&/^http:\/\/127\.0\.0\.1:\d+\//.test(process.env.MTH_P2P_QUOTE_URL)?process.env.MTH_P2P_QUOTE_URL:null;
+ const url=new URL(local||'https://www.binance.com/bapi/c2c/v1/public/c2c/agent/quote-price');url.search=new URLSearchParams({fiat,asset:'USDT',tradeType:side}).toString();
  try{
   const response=await fetcher(url,{headers:{'User-Agent':'bdops-price-reference/1.0'},signal:AbortSignal.timeout(5000),redirect:'error',cache:'no-store'});if(!response.ok)throw unavailable();
   const text=await response.text();if(text.length>100000)throw unavailable();const body=JSON.parse(text),prices=Array.from(text.matchAll(/"price"\s*:\s*"?(0|[1-9]\d*)(\.\d+)?"?\s*[,}]/g));

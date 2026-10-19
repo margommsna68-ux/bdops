@@ -7,13 +7,15 @@ it('only a literal empty unoccupied slot is missing; unresolved and source confl
   expect(vmView({...blank,holds:[{role:'UNCERTAIN',owner:'SELF',state:'NEW'}]})).toBe('REVIEW');
   expect(vmView({...blank,holds:[{role:'DESIRED',owner:'GENJY',state:'NEW'}]})).toBe('REVIEW');
 });
-it('installed versus desired remains visible while waiting and failed or blocked requires attention',()=>{
-  const a={id:'a',status:'CONFIRMED'},b={id:'b',status:'PLANNED'};
-  expect(vmView({...blank,slotState:'FULL',installed:a,desired:b})).toBe('PENDING');
-  expect(vmView({...blank,slotState:'FULL',installed:a,desired:a})).toBe('INSTALLED');
-  expect(vmView({...blank,desired:{...b,status:'FAILED'}})).toBe('REVIEW');
-  expect(vmView({...blank,desired:a,installed:a,holds:[{role:'INSTALLED',owner:'SELF',state:'BLOCKED'}]})).toBe('REVIEW');
-  expect(summarizeVMs([blank,{...blank,archivedAt:'2026-10-14'}])).toEqual({total:1,missing:1,pending:0,installed:0,review:0});
+// Owner decision 19/10/2026: the assigned proxy is the VM's proxy (no Chờ cài / Đã cài); two different older positions are kept for review.
+it('one clear position is the current proxy; a Blocked current proxy is its own view; two different positions need review',()=>{
+  const a={id:'a',endpointId:'ea'},b={id:'b',endpointId:'eb'},hold=(endpointId:string,state='LIVE',role='DESIRED')=>({role,owner:'SELF',state,endpointId});
+  expect(vmView({...blank,slotState:'FULL',desired:b,holds:[hold('eb')]})).toBe('ASSIGNED');
+  expect(vmView({...blank,slotState:'FULL',installed:a,holds:[hold('ea','LIVE','INSTALLED')]})).toBe('ASSIGNED');
+  expect(vmView({...blank,slotState:'FULL',installed:a,desired:b,holds:[hold('ea','LIVE','INSTALLED'),hold('eb')]})).toBe('REVIEW');
+  expect(vmView({...blank,slotState:'FULL',desired:b,holds:[hold('eb','BLOCKED')]})).toBe('BLOCKED');
+  expect(vmView({...blank,slotState:'FULL',desired:b,holds:[hold('eb','REPLACED')]})).toBe('REVIEW');
+  expect(summarizeVMs([blank,{...blank,archivedAt:'2026-10-14'}])).toEqual({total:1,missing:1,assigned:0,blocked:0,review:0});
 });
 it('a shortage stops autofill for explicit partial approval; retry preserves the checked token',async()=>{
   const input={mode:'AUTO' as const,idempotencyKey:'fixed-retry-key'},commit=vi.fn(),onPreview=vi.fn();

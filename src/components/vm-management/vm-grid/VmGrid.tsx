@@ -2,20 +2,19 @@
 import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import {links} from '@/lib/links';
-import {Check,Copy,MoreHorizontal,X,Server} from 'lucide-react';
+import {Check,MoreHorizontal,X,Server} from 'lucide-react';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
 import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {displayNote} from '@/server/vm-management/vm-codes';
-import {vmView,proxyAddress} from '../workflow';
+import {vmView} from '../workflow';
 import type {ManagedVM} from '../shared';
 import {AccountCell,type VmAccount} from './AccountCell';
-import {StatusCell} from './StatusCell';
+import {ProxyCell} from './ProxyCell';
 import {SdkCell,type SdkDraft} from './SdkCell';
 import {OpsStatusCell,PayoutCell,type OpsRow,type OpsRights} from './OpsCells';
 import type {VmOpsStatus} from '@/lib/vm-ops';
-import type {StatusActionKind} from './status-actions';
 import {FIXED,editableFields,nextCell,resizeColumn,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
-export interface GridRights {manage:boolean;assign:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean}
+export interface GridRights {manage:boolean;assign:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean;replace?:boolean;block?:boolean}
 export type CopyWhich='DESIRED'|'INSTALLED';
 type Draft=Record<string,string>;
 const draftKey=(vmId:string,field:EditField)=>vmId+'|'+field;
@@ -30,19 +29,6 @@ export function useDrafts(projectId:string){
 }
 export function reviewReason(v:ManagedVM){const blocked=v.holds.some(h=>h.state==='BLOCKED');return v.desired?.failureNote||(blocked?'Proxy BLOCKED':v.holds.some(h=>h.owner!=='SELF'&&!h.shared)?'Proxy Genjy / chưa rõ sở hữu':v.holds.some(h=>h.role==='UNCERTAIN')?'Proxy cần kiểm tra thực tế':'Ô cũ có công thức / nội dung chưa rõ');}
 function currentValue(v:ManagedVM,field:EditField){return field==='code'?v.code:field==='sdk'?v.sdk?.id||'':displayNote(v.notes)||'';}
-// Proxy cell: assigned and installed side by side only when they differ (never one IP covering a difference); the same configuration
-// is one line. The install progress sits under the lines and the whole content opens the install actions (StatusCell).
-function ProxyLines({v,canCopy,onCopy}:{v:ManagedVM;canCopy:boolean;onCopy:(which:CopyWhich)=>void}){
-  const d=v.desired,i=v.installed,same=d&&i&&d.id===i.id,extra=v.holds.filter(h=>h.role==='UNCERTAIN'&&h.endpointId!==d?.endpointId&&h.endpointId!==i?.endpointId);
-  const copy=(which:CopyWhich,label:string)=>canCopy&&<button type="button" className="vm-cell-icon" aria-label={label+' '+v.code} title={label+' (chỉ copy, không bắt đầu cài)'} onClick={e=>{e.stopPropagation();onCopy(which);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button>;
-  if(!d&&!i&&!extra.length) return <span className="pm-muted vm-proxy-line">—</span>;
-  return <div className={'vm-proxy'+(d&&i&&!same?' vm-proxy-diff':'')}>
-    {same?<div className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={proxyAddress(i)}>{proxyAddress(i)}</span>{copy('INSTALLED','Copy đã cài')}</div>:<>
-      {d&&<div className="vm-proxy-line"><span className="vm-tag vm-tag-plan">Giao</span><span className="pm-ip vm-ellipsis" title={proxyAddress(d)}>{proxyAddress(d)}</span>{copy('DESIRED','Copy được giao')}</div>}
-      {i&&<div className="vm-proxy-line"><span className="vm-tag vm-tag-ok">Cài</span><span className="pm-ip vm-ellipsis" title={proxyAddress(i)}>{proxyAddress(i)}</span>{copy('INSTALLED','Copy đã cài')}</div>}</>}
-    {extra.length>0&&<div className="vm-proxy-line pm-muted text-xs vm-ellipsis" title={extra.map(h=>h.ip).join(', ')}>Giữ kiểm tra: {extra.map(h=>h.ip).join(', ')}</div>}
-  </div>;
-}
 function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCancel,onFocus}:{field:EditField;label:string;value:string;error?:string;active:boolean;saving:boolean;onChange:(v:string)=>void;onSave:(dir:'next'|'prev'|null)=>void;onCancel:()=>void;onFocus:()=>void}){
   const ref=useRef<HTMLInputElement&HTMLTextAreaElement>(null);
   useEffect(()=>{if(active&&ref.current&&document.activeElement!==ref.current){ref.current.focus();const n=ref.current.value.length;ref.current.setSelectionRange(n,n);}},[active]);
@@ -61,7 +47,7 @@ function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCan
   </div>;
 }
 export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;accountOf:(vmId:string)=>VmAccount|undefined;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
-  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onCopyToInstall:(vm:ManagedVM)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;onStatus:(vm:ManagedVM,kind:StatusActionKind,note?:string)=>Promise<string|void>;
+  onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;
   opsOf:(vmId:string)=>OpsRow|undefined;opsRights:OpsRights;onOpsStatus:(vm:ManagedVM,status:VmOpsStatus,cycle:number)=>Promise<void>;onOpsDone:()=>Promise<unknown>|void}){
   const {rows,single,deletedView,prefs,rights,selected}=props,columns=visibleColumns(prefs),drafts=useDrafts(props.projectId);
   // A row whose status action is saving is locked (other cells and ⋯) until the answer comes back.
@@ -100,14 +86,14 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
   const left=(n:number)=>({position:'sticky' as const,left:n});
   const cell=(v:ManagedVM,key:ColumnKey)=>{
 
-    if(key==='proxy'){const lines=<ProxyLines v={v} canCopy={rights.copy} onCopy={w=>props.onCopy(v,w)}/>;return deletedView?lines:<StatusCell vm={v} rights={rights} onAction={props.onStatus} onBusy={markBusy}>{lines}</StatusCell>;}
+    if(key==='proxy') return <ProxyCell projectId={props.projectId} vm={v} rights={{assign:rights.assign&&!deletedView,copy:rights.copy,replace:!!rights.replace&&!deletedView}} onCopy={x=>props.onCopy(x,x.desired?'DESIRED':'INSTALLED')} onBusy={markBusy}/>;
     if(key==='sdk') return <SdkCell projectId={props.projectId} vm={v} account={props.accountOf(v.id)} canEdit={rights.assign&&!deletedView} draft={sdkDraft(v.id)} onDraft={d=>d?drafts.set(v.id,'sdk',JSON.stringify(d)):drafts.drop(v.id,'sdk')} onBusy={markBusy}/>;
     if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={rights.assign&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
     if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
-    if(key==='version') return <span className="text-xs">{v.desired?'Giao #'+v.desired.version:''}{v.desired&&v.installed&&v.desired.id!==v.installed.id?' · ':''}{v.installed&&v.installed.id!==v.desired?.id?'Cài #'+v.installed.version:v.installed?' (đã cài)':''}{!v.desired&&!v.installed&&<span className="pm-muted">—</span>}</span>;
+    if(key==='version'){const c=v.desired||v.installed;return c?<span className="text-xs">#{c.version}</span>:<span className="pm-muted">—</span>;}
     if(key==='sdkMeta') return v.sdk?<span className="text-xs vm-ellipsis" title={(v.sdk.recordedBy||'')+' · '+localDate(v.sdk.recordedAt)}>{v.sdk.recordedBy||'—'} · {v.sdk.recordedAt?localDate(v.sdk.recordedAt,true):'chưa rõ ngày'}</span>:<span className="pm-muted">—</span>;
-    return v.desired&&v.desired.id!==v.installed?.id?<span className="text-xs">{v.desired.status==='FAILED'?'Cài chưa xong':v.desired.startedAt?'Đang cài':'Chưa bắt đầu'}</span>:<span className="pm-muted">—</span>;
+    return <span className="pm-muted">—</span>;
   };
   return <div className="vm-grid-scroll" style={{maxHeight:props.maxHeight}} data-testid="vm-grid-scroll">
     <table className="vm-grid" style={{width:total}}><colgroup><col style={{width:selectW}}/>{!single&&<col style={{width:serverW}}/>}<col style={{width:vmW}}/><col style={{width:opsW}}/>{columns.map(c=><col key={c.key} style={{width:widthOf(prefs,c.key)}}/>)}<col style={{width:FIXED.menu}}/></colgroup>
@@ -119,8 +105,8 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
         {columns.map(c=><th key={c.key}>{c.label}{resizer(c.key)}</th>)}
         <th className="vm-sticky-right" aria-label="Thao tác"></th>
       </tr></thead>
-      <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=v.holds.some(h=>h.state==='BLOCKED');
-        return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy?'pm-row-blocked ':status==='PENDING'&&!deletedView?'vm-row-pending ':'')}>
+      <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=status==='BLOCKED';
+        return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy&&!deletedView?'pm-row-blocked ':'')}>
           <td className="vm-sticky vm-sticky-check" style={left(0)}><input type="checkbox" aria-label={'Chọn '+v.server+' / '+v.code} checked={isSel} onChange={e=>props.onToggle(v.id,e.target.checked)}/></td>
           {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={links.vms({serverId:v.serverId})} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
           <td className="vm-sticky vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>
@@ -131,10 +117,8 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
               <DropdownMenuItem onSelect={()=>props.onOpen(v.id)}>Mở chi tiết</DropdownMenuItem>
               {deletedView?(rights.manage&&<DropdownMenuItem onSelect={()=>props.onRestore(v)}>Khôi phục</DropdownMenuItem>):<>
                 {rights.assign&&<DropdownMenuItem disabled={!rights.sourceConnected} onSelect={()=>props.onOpen(v.id,'proxy')}>{status==='MISSING'?'Gán proxy':'Đổi proxy'}</DropdownMenuItem>}
-                {rights.copy&&v.desired&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'DESIRED')}>Copy proxy được giao</DropdownMenuItem>}
-                {rights.copy&&v.installed&&<DropdownMenuItem onSelect={()=>props.onCopy(v,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem>}
+                {rights.copy&&(v.desired||v.installed)&&<DropdownMenuItem onSelect={()=>props.onCopy(v,v.desired?'DESIRED':'INSTALLED')}>Copy proxy</DropdownMenuItem>}
                 <DropdownMenuSeparator/>
-                <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'install')}>Cài proxy</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'account')}>Tài khoản EarnApp</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'work')}>Công việc</DropdownMenuItem>
                 <DropdownMenuItem onSelect={()=>props.onOpen(v.id,'history')}>Lịch sử</DropdownMenuItem>

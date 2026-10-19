@@ -93,7 +93,9 @@ export type CopySelection={endpointIds:string[]}|{filter:RowsFilter};
 export const MAX_COPY_ROWS=2000;
 // Full proxies for selected rows (display order) or for a whole filtered result. Copying from the registry never changes
 // allocation or install state; it only logs how many credentials left the server, never the credentials themselves.
-export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma):Promise<CopyResult>{
+// onlyBlocked ("Copy proxy Blocked", 19/10/2026): only rows whose proxy is current and BLOCKED (structured state, never a note), each
+// endpoint once, in display order; the full IP:port:user:pass only, nothing else in the line.
+export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma,options:{onlyBlocked?:boolean}={}):Promise<CopyResult>{
   await authorize(scope,true,db);
   let ordered:{endpointId:string|null}[];
   if('endpointIds' in selection){
@@ -102,14 +104,15 @@ export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:
     if(found.size!==ids.length) throw new ProxyDomainError('NOT_FOUND','Có dòng không thuộc dự án này');
     ordered=ids.map(id=>({endpointId:id}));
   } else ordered=(await loadRegistryRows(scope,selection.filter,db)).rows;
-  const ids=ordered.flatMap(r=>r.endpointId?[r.endpointId]:[]);
+  let ids=ordered.flatMap(r=>r.endpointId?[r.endpointId]:[]);
   const endpoints=new Map((await db.proxyIP.findMany({where:{id:{in:ids},projectId:scope.projectId}})).map(e=>[e.id,e]));
+  if(options.onlyBlocked){const seen=new Set<string>();ordered=ordered.filter(r=>{const e=r.endpointId?endpoints.get(r.endpointId):undefined;if(!e||e.inventoryState!=='BLOCKED'||e.retiredAt||seen.has(e.id))return false;seen.add(e.id);return true;});ids=ordered.map(r=>r.endpointId!);}
   const proxies:string[]=[],skipped:Record<CopySkipReason,number>={NO_CREDENTIALS:0,NO_ENDPOINT:0};
   for(const r of ordered){
     const e=r.endpointId?endpoints.get(r.endpointId):undefined;if(!e){skipped.NO_ENDPOINT++;continue;}
     const p=decodeEndpoint(e);if(p?.format==='FULL') proxies.push(fullProxy(p));else skipped.NO_CREDENTIALS++;
   }
   const result:CopyResult={proxies,copied:proxies.length,total:ordered.length,skipped:(Object.keys(skipped) as CopySkipReason[]).filter(k=>skipped[k]>0).map(reason=>({reason,count:skipped[reason]}))};
-  if(proxies.length) await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'endpointIds' in selection&&ids.length===1?ids[0]:'bulk-copy',changes:{count:proxies.length,total:ordered.length,skipped:result.skipped}}});
+  if(proxies.length) await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:options.onlyBlocked?'blocked-copy':'endpointIds' in selection&&ids.length===1?ids[0]:'bulk-copy',changes:{count:proxies.length,total:ordered.length,skipped:result.skipped}}});
   return result;
 }

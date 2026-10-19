@@ -23,7 +23,7 @@ async function fixture(){
   const snapshot=await db.proxySourceSnapshot.create({data:{projectId,sourceKey:'GENJY',hash:'vm-table',scanSucceeded:true}});
   const scope:ActorScope={projectId,userId,role:'ADMIN',capabilities:['PROXY_IMPORT','COPY_CREDENTIALS']};
   const service=createVMService(db,{refreshSource:async()=>({id:snapshot.id,sourceKey:'GENJY',hash:'vm-table',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
-  const cleanup=async()=>{await db.sdkEvent.deleteMany({where:{projectId}});await db.sdkRecord.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null,gmailId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.vMSdkHistory.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.gmailAccount.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxyStatusEvent.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:identities}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
+  const cleanup=async()=>{await db.sdkEvent.deleteMany({where:{projectId}});await db.sdkRecord.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null,gmailId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.vMSdkHistory.deleteMany({where:{projectId}});await db.vmOpsEvent.deleteMany({where:{projectId}});await db.vmOperation.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.gmailAccount.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxyStatusEvent.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:identities}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
   return {projectId,userId,scope,a,b,v,b1,net,tut1,tut2,shared,genjy,g1,g2,service,cleanup};
 }
 const ready=(rows:{outcome:string;vmId:string|null;expectedRevision:number|null;value:string|null;line:number}[])=>rows.filter(r=>r.outcome==='READY').map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,value:r.value}));
@@ -101,16 +101,14 @@ describe('Autofill only on the selected VMs',()=>{
   });
 });
 describe('Copy and delete',()=>{
-  it('plain copy returns the assigned or installed snapshot in order and never starts the install; Copy để cài still does',async()=>{
+  it('copy returns the current proxies in order and changes nothing (19/10/2026: no install step, no task)',async()=>{
     const f=await fixture();try{
       const p=await previewVmBulk(f.scope,{kind:'PROXY',serverId:f.a.id,text:`VM_002 | ${f.net}1\nVM_001 | ${f.net}2`},db);await applyVmBulk(f.scope,{kind:'PROXY',key:randomUUID(),items:ready(p.rows)},db);
       const c=await copyVmConfigurations(f.scope,{vmIds:[f.v.VM_001.id,f.v.VM_002.id,f.v.VM_003.id],which:'DESIRED'},db);
       expect(c.items.map(i=>i.proxy)).toEqual([f.net+'2:8080:u2:p2',f.net+'1:8080:u1:p1']);expect(c.skipped).toEqual([expect.objectContaining({vmId:f.v.VM_003.id})]);
       const configs=await db.vMConfiguration.findMany({where:{projectId:f.projectId},include:{task:true}});
-      expect(configs.every(x=>x.status==='PLANNED'&&!x.startedAt&&x.task?.status==='PENDING')).toBe(true);
+      expect(configs.every(x=>x.status==='PLANNED'&&!x.startedAt&&!x.task)).toBe(true);
       expect((await copyVmConfigurations(f.scope,{vmIds:[f.v.VM_001.id],which:'INSTALLED'},db)).skipped).toHaveLength(1);
-      await startInstall(f.scope,configs.find(x=>x.vmId===f.v.VM_001.id)!.id,db);
-      expect((await db.vMConfiguration.findFirstOrThrow({where:{vmId:f.v.VM_001.id}})).startedAt).not.toBeNull();
     }finally{await f.cleanup();}
   });
   it('the old archive API uses the same delete checks',async()=>{

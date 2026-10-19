@@ -5,7 +5,7 @@ import {createProxyBatchService} from '@/server/proxy-management/batches';
 import {persistSourceSnapshot} from '@/server/proxy-management/sources';
 import {getEligibleInventory} from '@/server/proxy-management/repository';
 import {createVMService} from '@/server/vm-management/allocation';
-import {copyConfiguration,startInstall,confirmInstalled,reportInstallFailure} from '@/server/vm-management/installation';
+import {copyConfiguration,startInstall,confirmInstalled} from '@/server/vm-management/installation';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 import {createManagedServer,addManagedVMs} from '@/server/vm-management/metadata';
@@ -45,16 +45,18 @@ it('autofill only literal blank; reservation excludes stock and invalidates stoc
     const current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(current.proxyId).toBeNull();expect(current.installedConfigurationId).toBeNull();expect(current.desiredConfigurationId).not.toBeNull();
   }finally{await f.cleanup();}
 });
-it('installed A remains occupied until exact current B is confirmed; failure retains holds',async()=>{
+// Owner decision 19/10/2026 (replaces "installed A stays until B is confirmed"): assigning B makes B the VM's proxy at once; the old
+// confirmed A leaves the VM (its configuration stays CONFIRMED as history) and goes back to stock by the NEW / LIVE rule.
+it('assigning B replaces an older confirmed A at once; A keeps its history, never a second current proxy',async()=>{
   const f=await fixture(['203.0.113.173','203.0.113.174']);try{
-    await f.allocate();let current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});const a=current.desiredConfigurationId!;
-    expect((await copyConfiguration(f.scope,a,db)).proxy).toBe('203.0.113.173:80:u:vm-test-secret');await f.confirm();
+    await f.allocate();const current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});const a=current.desiredConfigurationId!;
+    await db.vMConfiguration.update({where:{id:a},data:{status:'IN_PROGRESS',startedAt:new Date()}});await f.confirm(); // older data: confirmed A
     const endpointB=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:'203.0.113.174'}});await f.allocate(endpointB.id);
-    current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(current.installedConfigurationId).toBe(a);expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(2);
-    const configB=await db.vMConfiguration.findUniqueOrThrow({where:{id:current.desiredConfigurationId!}});
-    await expect(confirmInstalled(f.scope,{configurationId:a,configurationHash:configB.configurationHash,expectedVmRevision:current.revision},db,{refreshSource:f.refresh})).rejects.toMatchObject({code:'STALE_PREVIEW'});
-    await copyConfiguration(f.scope,configB.id,db);await reportInstallFailure(f.scope,configB.id,'Chưa cài xong',db);expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(2);
-    await copyConfiguration(f.scope,configB.id,db);await f.confirm();current=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});expect(current.proxyId).toBe(endpointB.id);expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(1);expect(await getEligibleInventory(f.scope.projectId,db)).toHaveLength(0);
+    const after=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id},include:{desiredConfiguration:true}});
+    expect(after.installedConfigurationId).toBeNull();expect(after.desiredConfiguration?.endpointId).toBe(endpointB.id);
+    expect(await db.vMProxyAllocation.count({where:{projectId:f.scope.projectId,releasedAt:null}})).toBe(1);
+    expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:a}})).status).toBe('CONFIRMED');
+    expect(await db.vMTask.count({where:{vmId:f.vm.id,status:{in:['PENDING','IN_PROGRESS']}}})).toBe(0);
   }finally{await f.cleanup();}
 });
 it('untouched plan undo releases pending only; copy/start prevents ordinary undo',async()=>{
@@ -101,7 +103,7 @@ it('managed create has reversible history, rejects duplicate codes without a par
 });
 it('legacy task completion, deletion and editHistory cannot bypass managed configuration',async()=>{
   const f=await fixture(['203.0.113.182']);try{
-    await f.allocate();const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),task=await db.vMTask.findFirstOrThrow({where:{configurationId:vm.desiredConfigurationId}});
+    await f.allocate();await db.vMTask.create({data:{vmId:f.vm.id,configurationId:(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).desiredConfigurationId!,type:'PROXY_INSTALL',title:'Việc cài cũ (dữ liệu trước 19/10/2026)',scheduledAt:new Date()}});const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),task=await db.vMTask.findFirstOrThrow({where:{configurationId:vm.desiredConfigurationId}});
     const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,memberships:[]},expires:'2099-01-01'}} as unknown as Context);
     await expect(caller.vmTask.updateStatus({projectId:f.scope.projectId,id:task.id,status:'COMPLETED'})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
     await expect(caller.deleteRequest.create({projectId:f.scope.projectId,entity:'VMTask',entityId:task.id})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
@@ -116,8 +118,8 @@ it('allocation tokens stay in the VM flow and pending locations appear in proxy 
     await f.service.commit(f.scope,p.token,key);const endpoint=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId}});
     expect((await getProxyTimeline(f.scope,endpoint.identityId!,db)).vmRefs).toContain('personal-fixture/VM_001 · Chờ cài');
     const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,memberships:[]},expires:'2099-01-01'}} as unknown as Context);
-    const alerts=await caller.notification.alerts({projectId:f.scope.projectId});// Việc cài proxy is hidden: the pending-install alert opens Server / VM filtered Chờ cài, never the hidden page.
-    expect(alerts.find(a=>a.id==='vm-install')?.link).toBe('/infrastructure/servers?view=PENDING');expect(alerts.some(a=>a.link?.startsWith('/vm-tasks')||a.link?.startsWith('/work')||a.link==='/infrastructure/vms')).toBe(false);
+    const alerts=await caller.notification.alerts({projectId:f.scope.projectId});// 19/10/2026: no install step, so no "chờ cài" alert and no link to the old pages.
+    expect(alerts.find(a=>a.id==='vm-install')).toBeUndefined();expect(alerts.some(a=>a.link?.startsWith('/vm-tasks')||a.link?.startsWith('/work')||a.link==='/infrastructure/vms')).toBe(false);
   }finally{await f.cleanup();}
 });
 it('changing project mode cannot destroy managed infrastructure or its journal',async()=>{
@@ -140,17 +142,19 @@ it('registry copy of a held proxy neither starts the install nor blocks undo; on
     const op=(await listOperations(f.scope,db)).find(o=>o.kind==='VM_PLAN')!;await expect(undoOperation(f.scope,op.id,'Copied',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
   }finally{await f.cleanup();}
 });
-it('a started then superseded proxy never returns to unused NEW stock after confirmation',async()=>{
+// 19/10/2026: an older plan whose install had started is just released when another proxy is assigned; it is NEW again but stays out
+// of the autofill pool (its INSTALL_STARTED event is history), so it is never handed out as untouched stock.
+it('a proxy whose old install had started is released on a change and never re-enters the autofill pool',async()=>{
   const f=await fixture(['203.0.113.185','203.0.113.186']);try{
-    await f.allocate();let vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});await copyConfiguration(f.scope,vm.desiredConfigurationId!,db);await reportInstallFailure(f.scope,vm.desiredConfigurationId!,'May be partly installed',db);
-    const c=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:'203.0.113.186'}});await f.allocate(c.id);vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});await copyConfiguration(f.scope,vm.desiredConfigurationId!,db);await f.confirm();
-    expect(await getEligibleInventory(f.scope.projectId,db)).toHaveLength(0);expect((await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:'203.0.113.185'}})).inventoryState).toBe('QUARANTINED');
-    expect(await db.proxyStatusEvent.count({where:{projectId:f.scope.projectId,kind:'INSTALL_STARTED'}})).toBe(2);
+    await f.allocate();const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});await copyConfiguration(f.scope,vm.desiredConfigurationId!,db);
+    const c=await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:'203.0.113.186'}});await f.allocate(c.id);
+    expect((await db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:'203.0.113.185'}})).inventoryState).toBe('NEW');
+    expect(await getEligibleInventory(f.scope.projectId,db)).toHaveLength(0);
   }finally{await f.cleanup();}
 });
 it('managed legacy reads and mutations remain blocked even after project settings change',async()=>{
   const f=await fixture(['203.0.113.187']);try{
-    await f.allocate();const task=await db.vMTask.findFirstOrThrow({where:{vmId:f.vm.id}}),caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,memberships:[]},expires:'2099-01-01'}} as unknown as Context);
+    await f.allocate();await db.vMTask.create({data:{vmId:f.vm.id,configurationId:(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).desiredConfigurationId!,type:'PROXY_INSTALL',title:'Việc cài cũ (dữ liệu trước 19/10/2026)',scheduledAt:new Date()}});const task=await db.vMTask.findFirstOrThrow({where:{vmId:f.vm.id}}),caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,memberships:[]},expires:'2099-01-01'}} as unknown as Context);
     await expect(caller.server.getById({projectId:f.scope.projectId,id:f.server.id})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
     await db.project.update({where:{id:f.scope.projectId},data:{settings:{businessMode:'FULL'}}});
     await expect(caller.vmTask.updateStatus({projectId:f.scope.projectId,id:task.id,status:'COMPLETED'})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});

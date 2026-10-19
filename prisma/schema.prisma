@@ -1370,6 +1370,13 @@ model VmOperation {
   status     VmOpsStatus?
   statusAt   DateTime?
   statusById String?
+  // Status before "Blocked" (owner decision 19/10/2026): which proxy caused it, in which round, and the status to bring back when
+  // that proxy is replaced. blockedFromKnown=false: the earlier status could not be found in this round's history (restore = Chưa ghi).
+  blockedFrom       VmOpsStatus?
+  blockedFromKnown  Boolean        @default(false)
+  blockedEndpointId String?
+  blockedCycle      Int?
+  blockedAt         DateTime?
   revision   Int            @default(0)
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt

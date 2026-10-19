@@ -65,9 +65,15 @@ export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{pro
  * The SDK frame (cell popover and the VM side panel): code, accumulated money (USD), note, "Chọn SDK đã lưu", save, remove from the VM,
  * "Đã nối EarnApp" and the code's history. Every save goes through vmManagement.sdkSave / sdkLink (same checks as paste and Kho SDK).
  */
-export function SdkEditor({projectId,vm,account,canEdit,draft,onDraft,onBusy,onDone,onCancel,embedded}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy?:(b:boolean)=>void;onDone?:()=>void;onCancel?:()=>void;embedded?:boolean}){
+type EditorProps={projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy?:(b:boolean)=>void;onDone?:()=>void;onCancel?:()=>void;embedded?:boolean};
+// A stored draft belongs to one person: it is matched only once the session is known (right after a reload it is still loading).
+export function SdkEditor(props:EditorProps){
+  const session=useSession();
+  if(session.status==='loading')return <p className="text-xs pm-muted p-3"><Loader2 size={12} className="inline animate-spin"/> Đang tải…</p>;
+  return <SdkEditorBody {...props} userId={(session.data?.user as {id?:string}|undefined)?.id||'anon'}/>;
+}
+function SdkEditorBody({projectId,vm,account,canEdit,draft,onDraft,onBusy,onDone,onCancel,embedded,userId}:EditorProps&{userId:string}){
   const store=trpc.vmManagement.sdkStore.useQuery({projectId},{staleTime:10000}),save=trpc.vmManagement.sdkSave.useMutation(),link=trpc.vmManagement.sdkLink.useMutation(),refresh=useVMRefresh(),utils=trpc.useUtils();
-  const session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
   const cur=vm.sdk,base:SdkDraft={code:cur?.id||''};
   const live=():SdkDraftBase=>({userId,projectId,vmId:vm.id,cycle:vm.cycle,vmRevision:vm.revision,sdkRevision:cur?.recordId?cur.revision:null});
   // A stored draft of another person, project or VM is never used here.
@@ -103,7 +109,7 @@ export function SdkEditor({projectId,vm,account,canEdit,draft,onDraft,onBusy,onD
   useEffect(()=>{onDraft(dirty?d:null);},[d,dirty]);// eslint-disable-line react-hooks/exhaustive-deps
   // A different code brings its own stored money / note; a brand-new code starts empty (never the replaced code's values). Values the
   // person typed stay.
-  const setCode=(next:string)=>setD(prev=>({...prev,code:next}));
+  const setCode=(next:string)=>setD(prev=>({...prev,code:next,base:prev.base||live()}));
   async function run(kind:'save'|'remove'|'link',fn:()=>Promise<{message:string;changed:boolean}>){
     if(busyRef.current)return;busyRef.current=true;setBusy(kind);setError('');onBusy?.(true);
     try{const r=await fn();resync.current=true;await Promise.all([refresh(),utils.vmManagement.sdkStore.invalidate(),utils.vmManagement.sdkDetail.invalidate(),utils.vmManagement.sdkHistory.invalidate()]);toast.success(vm.code+': '+r.message,{duration:2500});onDraft(null);onDone?.();}
@@ -131,11 +137,11 @@ export function SdkEditor({projectId,vm,account,canEdit,draft,onDraft,onBusy,onD
       {!isCurrent&&code&&!codeError&&<p className="text-xs" aria-live="polite">{target?<>Mã đã lưu · {placeText(target)} · <span className={stateClass(target.state)}>{SDK_STATE_LABEL[target.state]}</span></>:<span className="pm-muted">Mã mới: chưa có tiền / ghi chú riêng.</span>}{cur&&!blocked?<span className="pm-muted"> {cur.id} {cur.state==='LINKED'?'giữ trong lịch sử':'giữ trong kho với tiền / ghi chú của nó'}.</span>:null}</p>}
       {blocked&&<p className="vm-status-error" role="alert">{blocked}</p>}
       <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-        <label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ SDK '+vm.code} placeholder="Chưa ghi tiền" value={amountText} readOnly={!canEdit||!!busy} onChange={e=>setD({...d,amount:e.target.value})} onKeyDown={e=>keys(e)}/></label>
+        <label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ SDK '+vm.code} placeholder="Chưa ghi tiền" value={amountText} readOnly={!canEdit||!!busy} onChange={e=>{const v=e.target.value;setD(p=>({...p,amount:v,base:p.base||live()}));}} onKeyDown={e=>keys(e)}/></label>
         <span className="text-xs pm-muted pb-2">{stored.amount!==null?'Đang lưu '+formatSdkAmount(stored.amount):'Chưa ghi'}</span>
       </div>
       {amountError&&<p className="vm-cell-error" role="alert">{amountError}</p>}
-      <label className="pm-label text-xs">Ghi chú SDK<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú SDK '+vm.code} value={noteText} readOnly={!canEdit||!!busy} onChange={e=>setD({...d,note:e.target.value})} onKeyDown={e=>keys(e,true)}/></label>
+      <label className="pm-label text-xs">Ghi chú SDK<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú SDK '+vm.code} value={noteText} readOnly={!canEdit||!!busy} onChange={e=>{const v=e.target.value;setD(p=>({...p,note:v,base:p.base||live()}));}} onKeyDown={e=>keys(e,true)}/></label>
       {canEdit&&<div className="flex flex-wrap gap-2 items-center">
         <button type="button" className={'pm-button pm-button-quiet'+(picking?' active':'')} aria-expanded={picking} disabled={!!busy} onClick={()=>setPicking(p=>!p)}><Search size={14}/>Chọn SDK đã lưu</button>
         {cur?.recordId&&<button type="button" className="pm-button pm-button-quiet" aria-expanded={history} onClick={()=>setHistory(h=>!h)}><History size={14}/>Lịch sử</button>}

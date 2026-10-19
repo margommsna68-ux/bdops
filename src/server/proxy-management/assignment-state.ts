@@ -1,6 +1,6 @@
 import type {Prisma} from '@prisma/client';
 import type {InventoryState} from './types';
-// Decided 16/10/2026: a "Chờ cài" / "Đã cài" hold makes the proxy LIVE; releasing its last hold returns it to NEW. LIVE may also be
+// Decided 16/10/2026 (19/10/2026: assigning is the record, no install step): a VM position makes the proxy LIVE; releasing its last hold returns it to NEW. LIVE may also be
 // recorded by the user without a VM ("in use, position not updated") — that is never reverted automatically, only by a release.
 // A "Giữ để kiểm tra" hold is not a valid assignment, but while one remains the proxy is not put back into NEW stock.
 // Only TUT and Chung mooon–Genjy follow the rule (the classes that sit on the user's VMs); BLOCKED, QUARANTINED, REPLACED,
@@ -13,7 +13,7 @@ const where=(a:EndpointForState['allocations'][number])=>a.vm?a.vm.server.code+'
 export function expectedAssignmentState(e:EndpointForState):AssignmentTarget|null{
   if(e.retiredAt||!['NEW','LIVE'].includes(e.inventoryState)||!followsAssignmentRule(e)) return null;
   const holds=e.allocations.filter(a=>!a.releasedAt),active=holds.filter(a=>a.role==='DESIRED'||a.role==='INSTALLED');
-  if(active.length) return {from:e.inventoryState,to:'LIVE',reason:'Đang giữ ở '+active.map(a=>where(a)+' · '+(a.role==='INSTALLED'?'Đã cài':'Chờ cài')).join(', ')};
+  if(active.length) return {from:e.inventoryState,to:'LIVE',reason:'Đang giữ ở '+active.map(a=>where(a)+' · '+'đang dùng').join(', ')};
   if(holds.length) return {from:e.inventoryState,to:null,reason:'Chỉ còn bản Giữ để kiểm tra ở '+holds.map(where).join(', ')+'; không tính là đã gán, chưa đưa về kho NEW'};
   return {from:e.inventoryState,to:'NEW',reason:'Không còn VM nào giữ'};
 }

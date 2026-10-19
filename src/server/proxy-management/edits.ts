@@ -5,7 +5,7 @@ import {encrypt,decrypt} from '@/lib/encryption';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {recordOperation} from '../operation-history/journal';
 import {snapshotCollector} from '../vm-management/allocation';
-import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
+import {vmHash} from '../vm-management/types';
 import {compareCodes} from './package-terms';
 import {decodeEndpoint} from './repository';
 import {fullProxy,parseProxy} from './parse';
@@ -13,6 +13,7 @@ import {withProxyTransaction} from './transaction';
 import {assertGroupName,ownerLabel} from './groups';
 import {INVALID_LINE} from './parse';
 import {expectedAssignmentState,syncAssignmentState} from './assignment-state';
+import {assignProxyToVm,markUsersBlocked,type Collector} from '../vm-management/proxy-change';
 import {HISTORICAL_STATES,isShared,ProxyDomainError,type NotListedRef,type ActorScope,type EditInput,type EditItem,type EditPreview,type EditResult,type EditRow,type InventoryState,type IssueCode,type LocationChoice,type ManageChoice,type VmTarget} from './types';
 const STATE_LABEL:Record<InventoryState,string>={NEW:'NEW',LIVE:'LIVE',BLOCKED:'BLOCKED',REPLACED:'Đã replace',DIE:'Ngừng dùng',QUARANTINED:'Cần kiểm tra',VOID:'Đã thu hồi',RETIRED:'Ngừng quản lý'};
 export const RETIRED_LABEL=STATE_LABEL.RETIRED;
@@ -20,7 +21,7 @@ type RetiredNote={reason:string;previousState:InventoryState;previousStatus:stri
 const readNotes=(cipher:string|null)=>{if(!cipher) return {} as Record<string,unknown>;try{return JSON.parse(decrypt(cipher)) as Record<string,unknown>;}catch{return {};}};
 export const MAX_EDIT_ROWS=2000;
 type Reader=PrismaClient|Prisma.TransactionClient;
-const ROLE_LABEL={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'} as const;
+const ROLE_LABEL={DESIRED:'Đang dùng',INSTALLED:'Đang dùng',UNCERTAIN:'Giữ để kiểm tra'} as const;
 // A pasted "Proxy | Server | VM" table: cells split on | or tab, blank lines skipped, a header row ignored. Row numbers follow the pasted lines.
 export function parsePasteMapping(text:string){
   const out:{row:number;proxy:string;server:string;vm:string}[]=[];
@@ -50,9 +51,9 @@ const positionLabel=(e:EndpointRow)=>{const parts=e.allocations.map(a=>a.vm.serv
 function immovableReason(e:EndpointRow):string|null{
   for(const a of e.allocations){
     const at=a.vm.server.code+'/'+a.vm.code;
-    if(a.role==='INSTALLED') return 'Đã cài trên '+at+'; đổi proxy qua Server/VM và xác nhận lại';
-    if(a.configuration.startedAt) return a.role==='UNCERTAIN'?'Đang giữ để kiểm tra trên '+at+' (đã bắt đầu cài); xử lý ở Server/VM trước':'Đã bắt đầu cài trên '+at+'; xác nhận hoặc báo lỗi ở Việc cài trước';
-    if(!['PLANNED','FAILED'].includes(a.configuration.status)) return 'Đã bắt đầu cài trên '+at+'; xác nhận hoặc báo lỗi ở Việc cài trước';
+    // 19/10/2026: an assigned or (older) confirmed position is simply the VM's current proxy and may be moved or dropped here.
+    // Only a "Giữ để kiểm tra" hold left by an install that had started stays with Server/VM for review.
+    if(a.role==='UNCERTAIN'&&a.configuration.startedAt) return 'Đang giữ để kiểm tra trên '+at+' (dữ liệu cài cũ chưa rõ); đối chiếu ở ô Proxy của VM trước';
   }
   return null;
 }
@@ -198,7 +199,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
       else if(duplicate) push('GROUP',before,after,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
       else if(target!.owner===e.identity!.owner&&target!.subgroup===(e.identity!.subgroup||null)&&(target!.groupId||null)===(e.groupId||null)&&!target!.newName) push('GROUP',before,after,'SKIP','Đã ở nhóm này');
       // TUT and Chung mooon–Genjy may sit on VMs; Genjy riêng and operator groups never do.
-      else if((e.allocations.length||e.vm)&&(target!.owner==='OTHER'||(target!.owner==='GENJY'&&!target!.subgroup))) push('GROUP',before,after,'ERROR','Proxy đang giữ hoặc đã cài trên VM; nhóm '+after+' không ở VM — bỏ gán trước','OWNER_CONFLICT');
+      else if((e.allocations.length||e.vm)&&(target!.owner==='OTHER'||(target!.owner==='GENJY'&&!target!.subgroup))) push('GROUP',before,after,'ERROR','Proxy đang dùng trên VM; nhóm '+after+' không ở VM — bỏ gán trước','OWNER_CONFLICT');
       else{push('GROUP',before,after,'READY',(target!.owner==='SELF'?'Chuyển về kho TUT':'Chuyển sang '+after)+(e.allocations.length||e.vm?'; giữ vị trí VM':'')+'; giữ IP, user/pass, nguồn và lịch sử');plan.group=target!;}
     }
     if(item.location){
@@ -207,7 +208,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         if(duplicate) push('LOCATION',current,'Bỏ gán','ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
         else if(!e.allocations.length&&!e.vm) push('LOCATION',current,'Bỏ gán','SKIP','Chưa gán; giữ nguyên');
         else if(blocked) push('LOCATION',current,'Bỏ gán','ERROR',blocked,'STALE_PREVIEW');
-        else{const review=reviewHolds(e);push('LOCATION',current,'Bỏ gán','READY',review.length?'Thả bản giữ để kiểm tra ở '+review.join(', ')+' (chưa ai bắt đầu cài); VM trống lại, chưa gỡ ngoài máy':'Thả bản giao chưa cài; VM trống lại');plan.location={kind:'UNASSIGN'};}
+        else{const review=reviewHolds(e);push('LOCATION',current,'Bỏ gán','READY',review.length?'Thả bản giữ để kiểm tra ở '+review.join(', ')+' (chưa ai bắt đầu cài); VM trống lại, chưa gỡ ngoài máy':'Bỏ gán; VM trống lại');plan.location={kind:'UNASSIGN'};}
       }else{
         const server=loc.kind==='SERVER'?vms.find(v=>v.serverId===loc.serverId)?.server:vmById.get(loc.vmId)?.server;
         const serverLabel=server?.code||'?';
@@ -223,12 +224,12 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
           const vm=vmById.get(loc.vmId);
           if(!vm||vm.archivedAt) push('LOCATION',current,after,'ERROR','VM không có hoặc đã ẩn','NOT_FOUND');
           else if(taken.get(vm.id)!>1) push('LOCATION',current,after,'ERROR','VM được gán cho nhiều proxy trong cùng đợt','DUPLICATE_INPUT');
-          else{const who=occupantOf(vm,e.id);if(who) push('LOCATION',current,after,'ERROR','VM đang giữ hoặc dùng proxy '+who+'; bỏ gán proxy đó trước','CURRENT_IP');else{push('LOCATION',current,after,'READY','Giao cấu hình mới; chờ cài thực tế');plan.location={kind:'VM',vmId:vm.id};}}
+          else{const who=occupantOf(vm,e.id);if(who) push('LOCATION',current,after,'ERROR','VM đang giữ hoặc dùng proxy '+who+'; bỏ gán proxy đó trước','CURRENT_IP');else{push('LOCATION',current,after,'READY','Gán cho VM; dùng ngay (không có bước cài)');plan.location={kind:'VM',vmId:vm.id};}}
         }else{
           // Bulk server move: the next free VM (blank slot, nobody on it, not already chosen in this batch) in natural order.
           const vm=vms.find(v=>v.serverId===loc.serverId&&!v.archivedAt&&v.proxySlotState==='BLANK'&&!occupantOf(v)&&!taken.has(v.id)&&!picked.has(v.id));
           if(!vm) push('LOCATION',current,after,'ERROR','Hết VM trống trên server '+serverLabel,'NOT_FOUND');
-          else{picked.add(vm.id);after=serverLabel+'/'+vm.code;push('LOCATION',current,after,'READY','Giao cấu hình mới; chờ cài thực tế');plan.location={kind:'VM',vmId:vm.id};}
+          else{picked.add(vm.id);after=serverLabel+'/'+vm.code;push('LOCATION',current,after,'READY','Gán cho VM; dùng ngay (không có bước cài)');plan.location={kind:'VM',vmId:vm.id};}
         }
       }
     }
@@ -253,7 +254,7 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         else if(retired) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ngừng quản lý');
         else if(HISTORICAL_STATES.includes(e.inventoryState)) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ra khỏi kho hiện tại');
         else if(blocked) push('STATE',stateLabel,RETIRED_LABEL,'ERROR',blocked.replace(/; .*$/,'')+'; thay hoặc gỡ proxy ở Server/VM trước','STALE_PREVIEW');
-        else if(plans.length&&!m.releasePlans) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Đang giao chờ cài cho '+plans.join(', ')+'; chọn "Huỷ giao" để ngừng quản lý','STALE_PREVIEW');
+        else if(plans.length&&!m.releasePlans) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Đang dùng cho '+plans.join(', ')+'; chọn "Huỷ giao" để ngừng quản lý','STALE_PREVIEW');
         else if(!m.reason.trim()) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Cần lý do ngừng quản lý','INVALID_INPUT');
         else{push('STATE',stateLabel,RETIRED_LABEL,'READY',(plans.length?'Ngừng quản lý và huỷ giao '+plans.join(', ')+' (chưa gỡ ngoài máy)':'Ngừng quản lý; giữ IP, user/pass và lịch sử')+(genjy?'; vẫn thuộc genjy, không nhập lại thành kho TUT':''));plan.manage={kind:'RETIRE',reason:m.reason.trim(),releasePlans:!!plans.length};}
       }else{
@@ -294,23 +295,18 @@ async function releasePlans(tx:Prisma.TransactionClient,images:Awaited<ReturnTyp
   for(const hold of endpoint.allocations){
     await images.remember('VM_ALLOCATION',hold.id);await images.remember('VM',hold.vmId);await images.remember('VM_CONFIG',hold.configurationId);
     const task=await tx.vMTask.findFirst({where:{configurationId:hold.configurationId}});if(task){await images.remember('VM_TASK',task.id);await tx.vMTask.update({where:{id:task.id},data:{status:'CANCELLED'}});}
-    await tx.vMConfiguration.update({where:{id:hold.configurationId},data:{status:'CANCELLED',revision:{increment:1}}});
+    const cfg=await tx.vMConfiguration.findUniqueOrThrow({where:{id:hold.configurationId}});if(cfg.status!=='CONFIRMED')await tx.vMConfiguration.update({where:{id:hold.configurationId},data:{status:'CANCELLED',revision:{increment:1}}}); // a confirmed one stays as history
     await tx.vMProxyAllocation.update({where:{id:hold.id},data:{releasedAt:now,releaseReason:reason,revision:{increment:1}}});
     const vm=await tx.virtualMachine.findUniqueOrThrow({where:{id:hold.vmId},include:{allocations:{where:{releasedAt:null}}}});
-    const empty=!vm.installedConfigurationId&&!vm.allocations.length&&(!vm.proxyId||vm.proxyId===endpoint.id);
-    await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:vm.desiredConfigurationId===hold.configurationId?null:vm.desiredConfigurationId,proxyId:vm.proxyId===endpoint.id?null:vm.proxyId,...(empty?{proxySlotState:'BLANK' as const}:{}),revision:{increment:1}}});
+    const empty=(!vm.installedConfigurationId||vm.installedConfigurationId===hold.configurationId)&&!vm.allocations.length&&(!vm.proxyId||vm.proxyId===endpoint.id);
+    await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:vm.desiredConfigurationId===hold.configurationId?null:vm.desiredConfigurationId,installedConfigurationId:vm.installedConfigurationId===hold.configurationId?null:vm.installedConfigurationId,proxyId:vm.proxyId===endpoint.id?null:vm.proxyId,...(empty?{proxySlotState:'BLANK' as const}:{}),revision:{increment:1}}});
   }
   if(endpoint.vm&&!endpoint.allocations.some(a=>a.vmId===endpoint.vm!.id)){await images.remember('VM',endpoint.vm.id);const vm=await tx.virtualMachine.findUniqueOrThrow({where:{id:endpoint.vm.id},include:{allocations:{where:{releasedAt:null}}}});await tx.virtualMachine.update({where:{id:vm.id},data:{proxyId:null,...(!vm.installedConfigurationId&&!vm.desiredConfigurationId&&!vm.allocations.length?{proxySlotState:'BLANK' as const}:{}),revision:{increment:1}}});}
 }
-// New "Chờ cài" plan of an endpoint on an empty VM: configuration snapshot, DESIRED hold, install task, VM pointer. The caller has checked
-// eligibility (assignableReason), that the VM is free (occupantOf) and syncs NEW/LIVE afterwards.
-export async function placeOnVm(tx:Prisma.TransactionClient,images:{remember:(resource:'VM'|'VM_CONFIG'|'VM_ALLOCATION'|'VM_TASK',id:string,created?:boolean)=>Promise<void>},scope:ActorScope,endpoint:EndpointRow,vm:VMRow,now:Date){
-  await images.remember('VM',vm.id);
-  const proxy=decodeEndpoint(endpoint)!,snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId!,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
-  const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
-  const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey!,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);
-  const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version}`,scheduledAt:now}});await images.remember('VM_TASK',task.id,true);
-  await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});}
+// Put an endpoint on a VM: the VM's current proxy from now on (owner decision 19/10/2026: no install step). The caller has checked
+// eligibility (assignableReason) and that the VM may take it; the NEW / LIVE state follows inside assignProxyToVm.
+export async function placeOnVm(tx:Prisma.TransactionClient,images:Collector,scope:ActorScope,endpoint:EndpointRow,vm:VMRow,now:Date,via='Kho proxy'){
+  return assignProxyToVm(tx,images,{projectId:scope.projectId,actorId:scope.userId,now,via},vm.id,endpoint.id);}
 // previewRows is the row array, or {rows, notListed} for a shared-list preview.
 const dto=(batch:{token:string;previewRows:Prisma.JsonValue;expiresAt:Date}):EditPreview=>{const stored=batch.previewRows as unknown as EditRow[]|{rows:EditRow[];notListed:NotListedRef[]};const rows=Array.isArray(stored)?stored:stored.rows,notListed=Array.isArray(stored)?[]:stored.notListed;return {token:batch.token,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,expiresAt:batch.expiresAt.toISOString(),notListed};};
 // Registry edits (group / server / VM) for one or many rows. Preview stores the plan; commit re-plans inside the transaction and
@@ -386,6 +382,8 @@ export function createProxyEditService(db:PrismaClient=prisma){
             if(item.manage.state==='BLOCKED'){
               await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:now,revision:{increment:1}}});
               await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:'BLOCKED',occurredAt:now,actorId:scope.userId}});states++;
+              // The VM using it shows Blocked too (status before it remembered for the replacement).
+              await markUsersBlocked(tx,images,{projectId:scope.projectId,actorId:scope.userId,now,via:'Kho proxy'},endpoint.id,'Proxy '+endpoint.identity!.ip+(endpoint.port?':'+endpoint.port:'')+' báo BLOCKED ở Kho proxy');
             }else if(fresh.inventoryState!==item.manage.state){
               await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:item.manage.state,status:item.manage.state==='LIVE'?'IN_USE':'AVAILABLE',statusAt:now,revision:{increment:1}}});
               await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:plan.needs.sync?'STATE_SYNC':'STATE_CHANGED',occurredAt:now,actorId:scope.userId,reason:fresh.inventoryState+' → '+item.manage.state}});states++;

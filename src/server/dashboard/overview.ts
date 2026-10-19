@@ -3,7 +3,6 @@ import {prisma} from '@/lib/prisma';
 import {loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {readVMWorkspace} from '../vm-management/repository';
 import {vmView} from '../vm-management/state';
-import {readOrphanTasks} from '../vm-management/orphan-tasks';
 import {loadRegistryRows,registryGroupKey} from '../proxy-management/history';
 import {packageReminders} from '../proxy-management/reminders';
 import {compareCodes} from '../proxy-management/package-terms';
@@ -14,15 +13,14 @@ import {teamCashSources} from '../business-management/team-cash-report';
 import {assertBusinessArea} from '../business-management/scope';
 import {dayText,period} from '../business-management/money';
 import {CashDecimal} from '../business-management/usdt-money';
-import {links} from '@/lib/links';
 // Dashboard read model (MoneyToHome Proxy / VM). Giao việc and Việc cài proxy are hidden modules (src/lib/features.ts): no work
-// block here, and install tasks left without a pending configuration are handled at the VM (Server / VM filter TASK_ORPHAN).
+// block here. Since 19/10/2026 there is no install step: VMs are counted as with a proxy, with a Blocked proxy, to review or missing.
 // Dashboard read model. Every section reuses the checked read of the page it links to (same permission, same rule, whole result
 // before pagination), so the numbers here are the numbers the target list shows. A section the member may not read is null; other
 // failures propagate so the page shows an error instead of zeros.
 const forbidden=(e:unknown)=>e instanceof ProxyDomainError&&e.code==='FORBIDDEN';
 async function maybe<T>(read:()=>Promise<T>):Promise<T|null>{try{return await read();}catch(e){if(forbidden(e))return null;throw e;}}
-export type VmBucket='INSTALLED'|'PENDING'|'REVIEW'|'MISSING';
+export type VmBucket='ASSIGNED'|'BLOCKED'|'REVIEW'|'MISSING';
 export type StockBucket='NEW'|'LIVE'|'BLOCKED'|'OTHER';
 const MAIN=['NEW','LIVE','BLOCKED'];
 export function monthBounds(month:string){
@@ -41,10 +39,9 @@ export async function readOverview(scope:ActorScope,input:{month:string;part?:Ov
 }
 async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:boolean){
   const workspace=await maybe(()=>readVMWorkspace(scope,db));if(!workspace)return null;
-  const [accounts,registry,orphans,packages,autofill,manual]=await Promise.all([
+  const [accounts,registry,packages,autofill,manual]=await Promise.all([
     maybe(()=>readVmAccounts(scope,db)),
     loadRegistryRows(scope,{view:'CURRENT'},db),
-    readOrphanTasks(scope,db),
     db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null},renewalStoppedAt:null}}),
     // NEW is a state; "can be given to a VM" is the allocation pool itself (not held, no install/BLOCKED event, package, credentials).
     getEligibleInventory(scope.projectId,db),getManualInventory(scope.projectId,db),
@@ -52,7 +49,7 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   // Server / VM: deleted servers and VMs are not operating; buckets are the grid's own vmView rule.
   const servers=workspace.servers.filter(s=>!s.archivedAt).sort((a,b)=>compareCodes(a.code,b.code)),active=new Set(servers.map(s=>s.id));
   const vms=workspace.vms.filter(v=>!v.archivedAt&&active.has(v.serverId));
-  const perServer=servers.map(s=>{const own=vms.filter(v=>v.serverId===s.id),b:Record<VmBucket,number>={INSTALLED:0,PENDING:0,REVIEW:0,MISSING:0};for(const v of own){const k=vmView(v);if(k!=='ARCHIVED')b[k]++;}return {id:s.id,code:s.code,total:own.length,...b};});
+  const perServer=servers.map(s=>{const own=vms.filter(v=>v.serverId===s.id),b:Record<VmBucket,number>={ASSIGNED:0,BLOCKED:0,REVIEW:0,MISSING:0};for(const v of own){const k=vmView(v);if(k!=='ARCHIVED')b[k]++;}return {id:s.id,code:s.code,total:own.length,...b};});
   const sum=(k:VmBucket)=>perServer.reduce((a,s)=>a+s[k],0);
   const accountOf=new Map((accounts||[]).map(a=>[a.vmId,a.earnApp]));
   // Gaps overlap (a VM without an account has no PayPal either); they are never added up into one "VM lỗi" number.
@@ -67,11 +64,10 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   const reminders=packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,costs);
   return {
     servers:perServer,
-    totals:{servers:servers.length,vms:vms.length,INSTALLED:sum('INSTALLED'),PENDING:sum('PENDING'),REVIEW:sum('REVIEW'),MISSING:sum('MISSING')},
+    totals:{servers:servers.length,vms:vms.length,ASSIGNED:sum('ASSIGNED'),BLOCKED:sum('BLOCKED'),REVIEW:sum('REVIEW'),MISSING:sum('MISSING')},
     gaps,
     stock:{rows:Array.from(stock.values()),total:registry.rows.length,ready:{autofill:autofill.length,sharedManual:manual.filter(m=>m.shared).length}},
     packages:reminders.map(r=>({id:r.packageId,code:r.code,title:r.title,severity:r.severity,daysLeft:r.daysLeft,link:r.link})),
-    orphanTasks:{count:orphans.length,link:links.orphanTasks(orphans)},
   };
 }
 // Finance for one month: USDT confirmed as received by the team minus valid costs, each at its own recorded rate — the team cash

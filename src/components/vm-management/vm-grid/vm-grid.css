@@ -274,3 +274,10 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .acc-money{display:flex;flex-direction:column;gap:8px}
 .pm-field-error{display:block;color:#b91c1c;font-size:12px;line-height:1.35;font-weight:400;margin-top:2px;white-space:normal}
 .acc-money-sum{font-variant-numeric:tabular-nums}
+/* Thay proxy next to the Proxy cell (19/10/2026): current proxy, stock list, one Áp dụng. */
+.vm-proxy-pop{width:380px;overflow-y:auto}
+.vm-proxy-pick{max-height:220px;overflow-y:auto;border:1px solid var(--ds-border);border-radius:8px;margin:0;padding:2px;list-style:none}
+.vm-proxy-pick li button{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:left;padding:5px 8px;border-radius:6px;font-size:12px}
+.vm-proxy-pick li button:hover,.vm-proxy-pick li button.active{background:var(--ds-surface-muted,rgba(59,130,246,.12))}
+.vm-proxy-pick li button.active{outline:1px solid #3b82f6}
+@media (max-width:640px){.vm-proxy-pop{width:calc(100vw - 16px)}}

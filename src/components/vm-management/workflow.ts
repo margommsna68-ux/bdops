@@ -8,4 +8,4 @@ export async function submitAllocation<T>(input:AllocationInput,inspect:(input:A
   const preview=await inspect(input);onPreview(preview);if(preview.errors||!preview.ready)return {phase:'REVIEW' as const,preview};
   return {phase:'SAVED' as const,preview,result:await commit({token:preview.token,idempotencyKey:input.idempotencyKey})};
 }
-export const viewLabels:Record<VMView,string>={MISSING:'Thiếu proxy',PENDING:'Chờ cài',INSTALLED:'Đã cài',REVIEW:'Cần kiểm tra',ARCHIVED:'Đã ẩn'};
+export const viewLabels:Record<VMView,string>={MISSING:'Thiếu proxy',ASSIGNED:'Có proxy',BLOCKED:'Proxy Blocked',REVIEW:'Cần kiểm tra',ARCHIVED:'Đã ẩn'};

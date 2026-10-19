@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {formatMoney} from '@/lib/money-input';
-import {applyQuote,changeCurrency,editRate,quoteLabel,readPurchase,switchMode,type PurchaseState} from './purchase-money';
+import {applyQuote,changeCurrency,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
 const CURRENCIES=['USDT','VND','USD'];
 // Money of a purchase (Nhập kho, Ghi chi phí of a batch): total paid by default, or price per account × quantity bought. Vietnamese
 // number input ("70.000", "16,27"), every field checked in place; the canonical numbers are built by readPurchase. With VND the
@@ -13,7 +13,7 @@ const CURRENCIES=['USDT','VND','USD'];
 export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{projectId:string;unitWord:string;value:PurchaseState;onChange:(v:PurchaseState)=>void;locked:boolean}){
   const latest=useRef(value);latest.current=value;
   const p2p=trpc.businessManagement.p2pQuote.useQuery({projectId,currency:value.currency==='USDT'?'VND':value.currency,side:'BUY'},{enabled:false,retry:false});
-  const [fetchError,setFetchError]=useState(''),[fetching,setFetching]=useState(false),[,tick]=useState(0),tried=useRef('');
+  const [fetchError,setFetchError]=useState(''),[fetching,setFetching]=useState(false),tried=useRef('');
   const r=readPurchase(value,unitWord);
   async function fetchQuote(){
     setFetchError('');setFetching(true);const currency=latest.current.currency;
@@ -25,8 +25,6 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
   }
   // VND: fetch the reference once per currency choice while the rate is empty (never over a typed rate).
   useEffect(()=>{if(value.currency==='VND'&&!value.rate.trim()&&!value.quote&&tried.current!==value.currency&&!locked){tried.current=value.currency;void fetchQuote();}if(value.currency!=='VND')tried.current='';},[value.currency,value.rate,value.quote,locked]);// eslint-disable-line react-hooks/exhaustive-deps
-  // Expiry is shown as time passes, not discovered at the click.
-  useEffect(()=>{if(!value.quote)return;const t=setInterval(()=>tick(n=>n+1),15000);return ()=>clearInterval(t);},[value.quote]);
   const err=(f:keyof typeof r.errors,shown:boolean)=>shown&&r.errors[f]?<span className="pm-field-error" role="alert">{r.errors[f]}</span>:null;
   const unit=value.mode==='UNIT';
   return <div className="acc-money">
@@ -50,4 +48,10 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
     {r.priced&&r.total&&<p className="text-sm acc-money-sum" aria-live="polite">{r.formula?<strong>{r.formula}</strong>:<strong>Tổng {formatMoney(r.total,value.currency,{exact:true})}</strong>}
       {r.usdtText&&<> · <span title={'Lưu chính xác: '+formatMoney(r.usdt!,'USDT',{exact:true})}>{r.usdtText}</span></>}{r.allocation&&<span className="pm-muted"> · {r.allocation}</span>}<span className="pm-muted"> · ghi một lần vào Chi phí.</span></p>}
   </div>;
+}
+// Re-render the form that holds a quote at the moment it expires, so the whole form (the Nhập / Ghi chi phí button included) shows the
+// expiry before any click; nothing is re-priced.
+export function useQuoteExpiry(quote:{fetchedAt:string}|null){
+  const [,tick]=useState(0);
+  useEffect(()=>{if(!quote)return;const left=Date.parse(quote.fetchedAt)+QUOTE_TTL_MS-Date.now()+50;if(left<=0)return;const t=setTimeout(()=>tick(n=>n+1),left);return ()=>clearTimeout(t);},[quote]);
 }

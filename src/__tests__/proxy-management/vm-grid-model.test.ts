@@ -7,7 +7,7 @@ describe('Server/VM grid model',()=>{
   });
   it('stored preferences are cleaned: unknown keys dropped, new columns put at their default place, widths bounded',()=>{
     const p=normalizePrefs({order:['notes','bogus','proxy','notes'],hidden:['paypal','gmail'],widths:{sdk:20,notes:300}});
-    expect(p.order).toEqual(['notes','version','sdkMeta','progress','proxy','sdk','account','paypal','payout']);expect(p.hidden).toContain('paypal');expect(p.hidden).not.toContain('gmail');expect(p.hidden).toContain('version');
+    expect(p.order).toEqual(['notes','version','sdkMeta','proxy','sdk','account','paypal','payout']);expect(p.hidden).toContain('paypal');expect(p.hidden).not.toContain('gmail');expect(p.hidden).toContain('version');
     expect(p.widths).toEqual({notes:300});expect(normalizePrefs(null)).toEqual(DEFAULT_PREFS);
   });
   it('a stored layout from before the merge never brings the old "Cài proxy" column back and keeps the other settings',()=>{
@@ -31,9 +31,9 @@ describe('Server/VM grid model',()=>{
     expect(nextCell(rows,fields,{vmId:'b',field:'notes'})).toBeNull();expect(nextCell(rows,fields,{vmId:'a',field:'code'},true)).toBeNull();
   });
   it('URL keeps search, filter, sort, page, size and the open VM; defaults stay out of the URL',()=>{
-    const s=readGridUrl(params('q=VM_07&view=PENDING&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD'));
-    expect(s).toEqual({q:'VM_07',view:'PENDING',sort:'SDK',page:3,size:200,vm:'x',tab:'work',cause:'HOLD',st:[],money:'',warn:false,sdk:{open:false,q:'',state:'FREE',place:'ALL',sort:'UPDATED',page:1}});
-    expect(writeGridUrl(s)).toBe('?q=VM_07&view=PENDING&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD');
+    const s=readGridUrl(params('q=VM_07&view=ASSIGNED&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD'));
+    expect(s).toEqual({q:'VM_07',view:'ASSIGNED',sort:'SDK',page:3,size:200,vm:'x',tab:'work',cause:'HOLD',st:[],money:'',warn:false,sdk:{open:false,q:'',state:'FREE',place:'ALL',sort:'UPDATED',page:1}});
+    expect(writeGridUrl(s)).toBe('?q=VM_07&view=ASSIGNED&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD');
     expect(writeGridUrl(readGridUrl(params('view=bogus&size=7&page=-2')))).toBe('');
     // Operating status filter (several, NONE = Chưa ghi), money milestone, proxy warning and the priority sort survive reload / Back.
     const o=readGridUrl(params('st=SUSPENDED,NONE,bogus,SUSPENDED&money=RECREATE&warn=proxy&sort=PRIORITY'));

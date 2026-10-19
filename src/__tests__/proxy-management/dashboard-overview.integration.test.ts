@@ -4,14 +4,11 @@ import {encrypt} from '@/lib/encryption';
 import {createVMService} from '@/server/vm-management/allocation';
 import {readVMWorkspace} from '@/server/vm-management/repository';
 import {summarizeVMs} from '@/server/vm-management/state';
-import {readOrphanTasks,closeOrphanTask} from '@/server/vm-management/orphan-tasks';
 import {queryRegistry} from '@/server/proxy-management/history';
 import {readOverview} from '@/server/dashboard/overview';
 import {saveTeamReceipt} from '@/server/business-management/team-receipts';
 import {saveUsdtCost} from '@/server/business-management/usdt-costs';
 import {teamCashSources} from '@/server/business-management/team-cash-report';
-import {listOperations} from '@/server/operation-history/journal';
-import {undoOperation} from '@/server/operation-history/undo';
 import type {ActorScope} from '@/server/proxy-management/types';
 import {testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
@@ -31,7 +28,7 @@ async function fixture(){
   const snapshot=await db.proxySourceSnapshot.create({data:{projectId,sourceKey:'GENJY',hash:'dash',scanSucceeded:true}});
   const scope=(userId:string,role:'ADMIN'|'USER'|'MODERATOR'):ActorScope=>({projectId,userId,role,capabilities:role==='ADMIN'?['PROXY_IMPORT','COPY_CREDENTIALS']:[]});
   const service=createVMService(db,{refreshSource:async()=>({id:snapshot.id,sourceKey:'GENJY',hash:'dash',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
-  const cleanup=async()=>{await db.operationJournal.deleteMany({where:{projectId}});await db.businessWorkItem.deleteMany({where:{projectId}});await db.costRecord.deleteMany({where:{projectId}});await db.teamReceipt.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.proxyStatusEvent.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:identities}}});await db.auditLog.deleteMany({where:{projectId}});await db.projectMember.deleteMany({where:{projectId}});await db.project.delete({where:{id:projectId}});await db.user.deleteMany({where:{id:{in:[admin,operator,accountant]}}});};
+  const cleanup=async()=>{await db.operationJournal.deleteMany({where:{projectId}});await db.businessWorkItem.deleteMany({where:{projectId}});await db.costRecord.deleteMany({where:{projectId}});await db.teamReceipt.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.proxyStatusEvent.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.vmOpsEvent.deleteMany({where:{projectId}});await db.vmOperation.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:identities}}});await db.auditLog.deleteMany({where:{projectId}});await db.projectMember.deleteMany({where:{projectId}});await db.project.delete({where:{id:projectId}});await db.user.deleteMany({where:{id:{in:[admin,operator,accountant]}}});};
   return {projectId,admin:scope(admin,'ADMIN'),operator:scope(operator,'USER'),accountant:scope(accountant,'MODERATOR'),s2,s10,a1,a2,a3,b1,tut,service,cleanup};
 }
 describe('Tổng quan (dashboard read model)',()=>{
@@ -40,10 +37,10 @@ describe('Tổng quan (dashboard read model)',()=>{
       const key=randomUUID(),p=await f.service.preview(f.admin,{mode:'MANUAL',vmIds:[f.a2.id],endpointId:f.tut.id,idempotencyKey:key});expect(p.ready).toBe(1);await f.service.commit(f.admin,p.token,key);
       const o=await readOverview(f.admin,{month:'2026-10'},db),ops=o.operations!;
       expect(ops.servers.map(s=>s.code)).toEqual(['moon2','moon10']);
-      expect(ops.servers[0]).toMatchObject({code:'moon2',total:2,PENDING:1,MISSING:1,INSTALLED:0,REVIEW:0});
+      expect(ops.servers[0]).toMatchObject({code:'moon2',total:2,ASSIGNED:1,MISSING:1,BLOCKED:0,REVIEW:0});
       // Same numbers as the Server / VM grid (active servers, active VMs) — the list the chart opens.
       const w=await readVMWorkspace(f.admin,db),live=new Set(w.servers.filter(s=>!s.archivedAt).map(s=>s.id)),grid=summarizeVMs(w.vms.filter(v=>!v.archivedAt&&live.has(v.serverId)));
-      expect(ops.totals).toMatchObject({servers:2,vms:grid.total,PENDING:grid.pending,MISSING:grid.missing,INSTALLED:grid.installed,REVIEW:grid.review});
+      expect(ops.totals).toMatchObject({servers:2,vms:grid.total,ASSIGNED:grid.assigned,MISSING:grid.missing,BLOCKED:grid.blocked,REVIEW:grid.review});
       expect(ops.gaps.noSdk).toBe(2);expect(ops.gaps.noAccount).toBe(3);expect(ops.gaps.noPaypal).toBe(3);
     }finally{await f.cleanup();}
   });
@@ -64,27 +61,14 @@ describe('Tổng quan (dashboard read model)',()=>{
       expect(after.rows[0].NEW).toBe(3);expect(after.ready).toEqual({autofill:2,sharedManual:1});
     }finally{await f.cleanup();}
   });
-  it('no Giao việc block (old-Sheet rows never count as open work); orphan install tasks open the VM, close once, undo reopens',async()=>{
+  it('no Giao việc block (old-Sheet rows never count as open work); old install tasks are not shown',async()=>{
     const f=await fixture();try{
       await db.businessWorkItem.createMany({data:[{projectId:f.projectId,title:'Kiểm tra máy',createdById:f.admin.userId,kind:'TASK',dueDate:new Date('2026-01-01')},{projectId:f.projectId,title:'Dòng Sheet cũ',createdById:f.admin.userId,kind:'SHEET_REVIEW'},{projectId:f.projectId,title:'Đã xong',createdById:f.admin.userId,status:'COMPLETED'}]});
       const task=await db.vMTask.create({data:{vmId:f.b1.id,type:'PROXY_INSTALL',title:'Cài proxy cũ',scheduledAt:new Date('2026-01-01')}});
-      let o=await readOverview(f.admin,{month:'2026-10'},db);
+      const o=await readOverview(f.admin,{month:'2026-10'},db);
       expect(o.operations).not.toHaveProperty('work');expect(JSON.stringify(o)).not.toContain('Dòng Sheet cũ');
-      // One orphan task: the link opens that VM on its install tab (Server / VM), not the hidden Việc cài proxy page.
-      expect(o.operations!.orphanTasks).toEqual({count:1,link:`/infrastructure/servers/${f.s10.id}?vm=${f.b1.id}&tab=install`});expect((await readOrphanTasks(f.operator,db)).map(t=>t.id)).toEqual([task.id]);
-      const member={projectId:f.projectId,userId:f.operator.userId};await db.projectMember.updateMany({where:member,data:{role:'VIEWER'}});
-      await expect(closeOrphanTask(f.operator,{taskId:task.id},db)).rejects.toMatchObject({code:'FORBIDDEN'});// a viewer only reads
-      await db.projectMember.updateMany({where:member,data:{role:'USER'}});
-      expect(await closeOrphanTask(f.admin,{taskId:task.id},db)).toMatchObject({closed:true});
-      expect(await closeOrphanTask(f.admin,{taskId:task.id},db)).toMatchObject({closed:false});// retry writes nothing
-      o=await readOverview(f.admin,{month:'2026-10'},db);expect(o.operations!.orphanTasks.count).toBe(0);
-      const op=(await listOperations(f.admin,db)).find(x=>x.kind==='VM_TASK_CLOSE')!;await undoOperation(f.admin,op.id,'',db);
-      expect((await db.vMTask.findUniqueOrThrow({where:{id:task.id}})).status).toBe('PENDING');
-      // A task that belongs to the VM's pending configuration is handled on Việc cài, never closed here.
-      const key=randomUUID(),p=await f.service.preview(f.admin,{mode:'MANUAL',vmIds:[f.a1.id],endpointId:f.tut.id,idempotencyKey:key});await f.service.commit(f.admin,p.token,key);
-      const live=await db.vMTask.findFirstOrThrow({where:{vmId:f.a1.id,status:'PENDING'}});
-      await expect(closeOrphanTask(f.admin,{taskId:live.id},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
-      expect((await readOrphanTasks(f.admin,db)).map(t=>t.id)).toEqual([task.id]);
+      // 19/10/2026: no install step; an old open install task is history and never shown as work to do.
+      expect(o.operations).not.toHaveProperty('orphanTasks');expect(task.status).toBe('PENDING');
     }finally{await f.cleanup();}
   });
   it('reads operations and finance separately: a finance failure never hides operations and is an error, not zeros',async()=>{

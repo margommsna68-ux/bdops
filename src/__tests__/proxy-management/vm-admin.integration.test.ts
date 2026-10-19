@@ -34,7 +34,7 @@ async function fixture(role:'ADMIN'|'USER'='ADMIN'){
   await db.vMTask.create({data:{vmId:v3.id,type:'PROXY_INSTALL',title:'Cài proxy',scheduledAt:new Date(),status:'IN_PROGRESS'}});
   const snapshot=await db.proxySourceSnapshot.create({data:{projectId,sourceKey:'GENJY',hash:'vm-admin',scanSucceeded:true}});
   const scope:ActorScope={projectId,userId,role,capabilities:['PROXY_IMPORT']};
-  const cleanup=async()=>{await db.sdkEvent.deleteMany({where:{projectId}});await db.sdkRecord.deleteMany({where:{projectId}});await db.vMSdkHistory.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:ids}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
+  const cleanup=async()=>{await db.sdkEvent.deleteMany({where:{projectId}});await db.sdkRecord.deleteMany({where:{projectId}});await db.vMSdkHistory.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.vmOpsEvent.deleteMany({where:{projectId}});await db.vmOperation.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:ids}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
   return {projectId,userId,scope,s7,s8,v1,v2,v3,v4,snapshot,cleanup};
 }
 const codes=async(serverId:string,archived=false)=>(await db.virtualMachine.findMany({where:{serverId,archivedAt:archived?{not:null}:null},orderBy:{code:'asc'}})).map(v=>v.code);
@@ -72,14 +72,16 @@ it('deletes VMs that hold nothing (single and bulk), reports blocked rows, undoe
     const one=await archiveVMs(f.scope,[f.v1.id],db);expect(one).toMatchObject({archived:1,blocked:[]});expect(one.operationId).toBeTruthy();
     await undoOperation(f.scope,one.operationId!,'',db);expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v1.id}})).archivedAt).toBeNull();
     const bulk=await archiveVMs(f.scope,[f.v1.id,f.v2.id,f.v3.id],db);
-    expect(bulk.archived).toBe(1);expect(bulk.blocked.map(b=>[b.code,b.reason.includes('proxy')||b.reason.includes('cài')])).toEqual([['VM_002',true],['VM_003',true]]);
-    expect(bulk.blocked[0].reason).toMatch(/Chờ cài/);expect(bulk.blocked[1].reason).toMatch(/việc cài/);
+    // 19/10/2026: an old open install task is history and no longer blocks a delete; a proxy on the VM still does.
+    expect(bulk.archived).toBe(2);expect(bulk.blocked.map(b=>[b.code,b.reason.includes('proxy')])).toEqual([['VM_002',true]]);
+    expect(bulk.blocked[0].reason).toMatch(/đang dùng/);
     expect(await db.vMProxyAllocation.count({where:{vmId:f.v2.id,releasedAt:null}})).toBe(1); // nothing released to make room
     // a deleted VM is never autofilled
     const vm=createVMService(db,{refreshSource:async()=>({id:f.snapshot.id,sourceKey:'GENJY',hash:'vm-admin',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
     const p=await vm.preview(f.scope,{mode:'AUTO',vmIds:[f.v1.id,f.v2.id,f.v3.id],idempotencyKey:randomUUID()});expect(p.rows.find(r=>r.vm==='VM_001')?.message).toMatch(/ẩn|xoá/i);
     // restore (SDK store 19/10/2026): the never-linked SDK of deleted VM_004 was moved to VM_003 explicitly (source → target). Restoring
     // VM_004 brings the machine back without that SDK: it is never taken back, and VM_003 keeps it.
+    await restoreVMs(f.scope,[f.v3.id],db);// VM_003 was deleted above (its old install task no longer blocks a delete)
     const old='sdk-old-'+f.projectId.slice(0,8),v4=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v4.id}}),v3=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v3.id}});
     await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.v3.id,expectedVmRevision:v3.revision,expectedCycle:1,code:old,expectedSdkRevision:(await db.sdkRecord.findFirstOrThrow({where:{code:old}})).revision,from:{vmId:f.v4.id,expectedRevision:v4.revision}},db);
     const back=await restoreVMs(f.scope,[f.v1.id,f.v4.id],db);expect(back.restored).toBe(2);expect(back.blocked).toEqual([]);

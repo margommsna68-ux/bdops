@@ -5,7 +5,7 @@ import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
-import {PurchaseMoneyFields} from './PurchaseMoneyFields';
+import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
 import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
 import {formatMoney} from '@/lib/money-input';
 type Preview=inferRouterOutputs<AppRouter>['accountStore']['importPreview'];
@@ -49,6 +49,7 @@ export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{p
   const lineText=()=>mode==='paste'?text:kind==='PAYPAL'?`${one.code.trim()}\t${one.email.trim()}`:[one.email,one.password,one.twoFa,one.recovery,one.notes].map(s=>s.replace(/\t/g,' ')).join('\t').replace(/\t+$/,'');
   // Money: canonical numbers only (the typed Vietnamese text is parsed once in readPurchase); a money field with an error blocks the
   // check and Nhập instead of sending something the server could read differently.
+  useQuoteExpiry(money.quote);
   const unitWord=kind==='PAYPAL'?'PP':'tài khoản',m=readPurchase(money,unitWord),priced=canCost&&m.priced,moneyBlocked=priced&&!m.payload;
   const input=()=>({projectId,kind,loginType:kind==='LOGIN'?(type||null):null,text:lineText(),
     ...(target?{append:{batchId:target.id}}:{batch:{source:source||null,purchasedAt:date,...(priced&&m.payload?m.payload:{priceMode:'NONE' as const,amount:null,quantity:canCost?m.payload?.quantity??null:null,currency:null,rate:null,p2pQuoteToken:null}),notes:notes||null}})});

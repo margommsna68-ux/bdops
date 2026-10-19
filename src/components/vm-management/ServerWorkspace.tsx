@@ -11,13 +11,12 @@ import {displayNote} from '@/server/vm-management/vm-codes';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
 import {copyWhenReady} from '@/components/proxy-management/clipboard';
 import {links} from '@/lib/links';
-import {moduleOn} from '@/lib/features';
 import {InlineText} from './InlineText';
 import {AddVmDialog,CreateServerDialog} from './VmForms';
 import {useVMRefresh,errorMessage,type ManagedVM} from './shared';
 import {vmView,summarizeVMs} from './workflow';
 import {VmGrid,type CopyWhich,type GridRights} from './vm-grid/VmGrid';
-import type {StatusActionKind} from './vm-grid/status-actions';
+import {proxyCellInfo} from './vm-grid/ProxyCell';
 import {VmSidePanel} from './vm-grid/VmSidePanel';
 import {SdkStorePanel} from './vm-grid/SdkStore';
 import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels';
@@ -29,12 +28,12 @@ import type {OpsRow} from './vm-grid/OpsCells';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
 type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|null;
-const CAUSE_TAB:Record<string,PanelTab>={HOLD:'install',TASK:'install',INSTALLED:'overview',SDK:'overview',SERVER:'overview'};
-const STATUS_ORDER={REVIEW:0,PENDING:1,MISSING:2,INSTALLED:3,ARCHIVED:4} as const;
+const CAUSE_TAB:Record<string,PanelTab>={HOLD:'proxy',TASK:'overview',INSTALLED:'proxy',SDK:'overview',SERVER:'overview'};
+const STATUS_ORDER={BLOCKED:0,REVIEW:1,MISSING:2,ASSIGNED:3,ARCHIVED:4} as const;
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
 // action columns; side panel instead of stacked dialogs; everything the user picked lives in the URL. See docs/runbooks/server-vm-table.md.
 export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?:string}){
-  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false}),orphans=trpc.vmManagement.orphanTasks.useQuery({projectId}),board=trpc.vmOps.board.useQuery({projectId},{retry:false}),setOps=trpc.vmOps.setStatus.useMutation();
+  const workspace=trpc.vmManagement.workspace.useQuery({projectId}),access=trpc.vmManagement.access.useQuery({projectId}),business=trpc.businessManagement.access.useQuery({projectId}),accounts=trpc.accountStore.vmAccounts.useQuery({projectId},{retry:false}),board=trpc.vmOps.board.useQuery({projectId},{retry:false}),setOps=trpc.vmOps.setStatus.useMutation();
   const refresh=useVMRefresh(),params=useSearchParams(),router=useRouter(),pathname=usePathname(),session=useSession(),userId=(session.data?.user as {id?:string}|undefined)?.id||'anon';
   const url=readGridUrl(params);
   // Two quick changes (sort, then page size) must both survive: build on the last URL we asked for until the router catches up.
@@ -59,23 +58,21 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;
-  // Open install tasks whose configuration is no longer pending: handled at the VM (tab Cài proxy → Đóng việc), never auto-closed.
-  const orphanVms=useMemo(()=>new Set((orphans.data||[]).map(t=>t.vmId)),[orphans.data]),orphanView=url.view==='TASK_ORPHAN',orphansReady=!!orphans.data,noOrphan=orphansReady?active.filter(v=>orphanVms.has(v.id)).length:null;
-  const inView=(v:ManagedVM)=>!url.view||(url.view==='TASK_ORPHAN'?orphanVms.has(v.id):url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
+  const inView=(v:ManagedVM)=>!url.view||(url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
   // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
   const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
   const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
-  const proxyBlocked=(v:ManagedVM)=>v.holds.some(h=>h.state==='BLOCKED');
+  const proxyBlocked=(v:ManagedVM)=>vmView(v)==='BLOCKED';
   const opsKey=(v:ManagedVM):OpsFilter=>opsStatus(v)??'NONE';
   const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&(!url.money||(url.money==='NONE'?!milestone(v):milestone(v)===url.money))&&(!url.warn||proxyBlocked(v));
   const priority=(v:ManagedVM)=>opsPriority({status:opsStatus(v),proxyBlocked:proxyBlocked(v),milestone:milestone(v)});
   const needle=url.q.trim().toLowerCase();
   // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(accountView&&!accountsReady||orphanView&&!orphansReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
+  const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
     .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,orphanVms,orphanView,orphansReady,opsOfVm]);
-  // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Chờ cài) stays selected and stays in
+    [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,opsOfVm]);
+  // The selection is a set of ids: a row that leaves the filter after an action (Thiếu proxy → Có proxy) stays selected and stays in
   // the open bulk panel. Bulk actions take the selected rows in table order.
   const selectedRows=useMemo(()=>[...(deletedView?deleted:active)].filter(v=>selected.has(v.id)).sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),[deletedView,deleted,active,selected]);
   const paged=pageOf(filtered,url.page,url.size),onPage=new Set(paged.rows.map(v=>v.id)),offPage=selectedRows.filter(v=>!onPage.has(v.id)).length,selectedInFilter=filtered.filter(v=>selected.has(v.id)).length;
@@ -92,7 +89,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const goStore=useCallback((patch:Partial<SdkStoreUrl>,mode:'push'|'replace'='push')=>{const base=(pending.current||readGridUrl(new URLSearchParams(window.location.search))).sdk||SDK_STORE_DEFAULT;go({sdk:{...base,...patch}},mode);},[go]);
   const closePanel=useCallback(()=>{const id=new URLSearchParams(window.location.search).get('vm');setBulk(null);if(id){go({vm:null,tab:'overview',cause:null});requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-row="${id}"] .vm-id-button`)?.focus({preventScroll:true}));}},[go]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&(url.vm||bulk)&&!(e.target as HTMLElement)?.closest?.('.vm-cell-edit,.vm-popover,.vm-status-pop,[role="menu"],.pm-inline-edit,textarea,input,select')) closePanel();};window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key);},[url.vm,bulk,closePanel]);
-  const copyProxies=trpc.vmManagement.copyProxies.useMutation(),copyInstall=trpc.vmManagement.copy.useMutation(),updateServer=trpc.vmManagement.updateServer.useMutation(),updateVM=trpc.vmManagement.updateVM.useMutation();
+  const copyProxies=trpc.vmManagement.copyProxies.useMutation(),copyBlocked=trpc.proxyManagement.copyBlockedEndpoints.useMutation(),updateServer=trpc.vmManagement.updateServer.useMutation(),updateVM=trpc.vmManagement.updateVM.useMutation();
   const deleteVMs=trpc.vmManagement.deleteVMs.useMutation(),restoreVMs=trpc.vmManagement.restoreVMs.useMutation(),deleteServer=trpc.vmManagement.deleteServer.useMutation(),restoreServer=trpc.vmManagement.restoreServer.useMutation(),undo=trpc.proxyManagement.undo.useMutation();
   const busy=deleteVMs.isLoading||restoreVMs.isLoading||deleteServer.isLoading||restoreServer.isLoading;
   function undoToast(text:string,operationId?:string){toast.success(t=><span className="flex items-center gap-3">{text}{operationId&&<button className="pm-button pm-button-quiet" onClick={()=>{toast.dismiss(t.id);undo.mutateAsync({projectId,id:operationId,reason:''}).then(()=>{toast.success('Đã hoàn tác');void refresh();}).catch(e=>toast.error(e.message));}}>Hoàn tác</button>}</span>,{duration:8000});}
@@ -100,14 +97,23 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   async function copyList(vms:ManagedVM[],which:CopyWhich){
     if(!vms.length) return;let skipped:{vm:string;reason:string}[]=[],copied=0;
     const out=await copyWhenReady(async()=>{const r=await copyProxies.mutateAsync({projectId,vmIds:vms.map(v=>v.id),which});skipped=r.skipped.map(s=>({vm:s.vm,reason:s.reason}));copied=r.items.length;if(!r.items.length) throw new Error(r.skipped[0]?.reason||'Không có proxy để copy');return r.items.map(i=>i.proxy).join('\n');});
-    const label=which==='DESIRED'?'được giao':'đã cài';
+    const label=which==='DESIRED'?'đang dùng':'cũ';
     if(out.ok) toast.success(vms.length===1?`Đã copy proxy ${label} · ${vms[0].code}`:`Đã copy ${copied} proxy ${label}`+(skipped.length?` · bỏ qua ${skipped.length} (${skipped[0].reason})`:''),{duration:5000});
     else if(out.text){setManualCopy(out.text);setBulk('copy');toast('Trình duyệt chặn copy; chọn và copy trong khung bên phải.');}
     else toast.error(out.error||'Chưa copy được');
   }
-  async function copyToInstall(vm:ManagedVM){
-    const out=await copyWhenReady(async()=>(await copyInstall.mutateAsync({projectId,configurationId:vm.desired!.id})).proxy);void refresh();
-    if(out.ok) toast.success('Đã copy để cài '+vm.code+'; việc cài đã bắt đầu');else if(out.text){setManualCopy(out.text);setBulk('copy');}else toast.error(out.error||'Chưa copy được');
+  // "Copy proxy Blocked (N)" (19/10/2026): the selected rows, or the whole filtered result on every page (never the whole project
+  // silently); the current BLOCKED proxy of each VM once, in table order, full IP:port:user:pass only. Copy only copies.
+  const blockedIds=(vms:ManagedVM[])=>Array.from(new Set(vms.flatMap(v=>{const c=proxyCellInfo(v).current;return c&&c.state==='BLOCKED'&&c.endpointId?[c.endpointId]:[];})));
+  const blockedIn=(vms:ManagedVM[])=>blockedIds(vms).length;
+  async function copyBlockedOf(vms:ManagedVM[]){
+    const ids=blockedIds(vms);
+    if(!ids.length){toast('Không có proxy Blocked trong '+(selected.size?'các dòng đã chọn':'bộ lọc này'));return;}
+    let note='',count=0;
+    const out=await copyWhenReady(async()=>{const r=await copyBlocked.mutateAsync({projectId,endpointIds:ids});if(r.skipped.length)note=' · bỏ qua '+r.skipped.map(x=>x.count+' ('+(x.reason==='NO_CREDENTIALS'?'thiếu user/pass':'không còn proxy')+')').join(', ');if(!r.proxies.length)throw new Error('Không có proxy Blocked đủ IP:port:user:pass'+note);count=r.proxies.length;return r.proxies.join('\n');});
+    if(out.ok)toast.success('Đã copy '+count+' proxy Blocked'+note,{duration:5000});
+    else if(out.text){setManualCopy(out.text);setBulk('copy');toast('Trình duyệt chặn copy; chọn và copy trong khung bên phải.');}
+    else toast.error(out.error||'Chưa copy được');
   }
   async function remove(ids:string[]){
     try{const r=await deleteVMs.mutateAsync({projectId,vmIds:ids});setBlocked(r.blocked);setSelected(prev=>{const n=new Set(prev);ids.forEach(id=>{if(!r.blocked.some(b=>b.id===id)) n.delete(id);});return n;});void refresh();
@@ -124,7 +130,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   async function removeServer(){
     if(!current) return;const held=active.filter(v=>v.holds.length>0);
     // Known blockers first: no confirmation for something that cannot succeed. The server re-checks anyway.
-    if(held.length){setBlocked(held.map(v=>({id:v.id,code:v.code,cause:'HOLD',reason:'Còn proxy '+v.holds.map(h=>h.ip+' · '+(h.role==='INSTALLED'?'Đã cài':h.role==='UNCERTAIN'?'Giữ để kiểm tra':'Chờ cài')).join(', ')+'; bỏ gán trước'})));toast.error(held.length+' VM còn giữ proxy; chưa xoá được server',{duration:7000});return;}
+    if(held.length){setBlocked(held.map(v=>({id:v.id,code:v.code,cause:'HOLD',reason:'Còn proxy '+v.holds.map(h=>h.ip+' · '+(h.role==='UNCERTAIN'?'Giữ để kiểm tra':'đang dùng')).join(', ')+'; bỏ gán trước'})));toast.error(held.length+' VM còn giữ proxy; chưa xoá được server',{duration:7000});return;}
     if(!window.confirm(`Xoá server ${current.code} cùng ${active.length} VM? Dữ liệu và lịch sử được giữ; khôi phục ở bộ lọc Đã xoá.`)) return;
     try{const r=await deleteServer.mutateAsync({projectId,serverId:current.id});undoToast(`Đã xoá ${current.code} · ${r.archivedVMs} VM`,r.operationId);void refresh();router.push('/infrastructure/servers');}
     catch(e){toast.error(errorMessage(e),{duration:8000});}
@@ -141,19 +147,6 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     toast.success('Đã lưu '+vm.code,{duration:1500});await refresh();
   }
   // Tình trạng cell actions. Each one is the existing checked command; errors propagate so the cell keeps the old state and shows why.
-  const startInstall=trpc.vmManagement.start.useMutation(),confirmInstall=trpc.vmManagement.confirm.useMutation(),reportFailure=trpc.vmManagement.reportFailure.useMutation(),autoPreview=trpc.vmManagement.preview.useMutation(),autoCommit=trpc.vmManagement.commit.useMutation();
-  async function statusAction(vm:ManagedVM,kind:StatusActionKind,note?:string):Promise<void>{
-    if(kind==='ASSIGN'||kind==='CHANGE_PROXY'){openVm(vm.id,'proxy');return;}
-    if(kind==='OPEN_INSTALL'){openVm(vm.id,'install');return;}
-    if(kind==='OPEN_REGISTRY'){const ip=vm.holds.find(h=>h.endpointId===vm.desired?.endpointId)?.ip||vm.holds[0]?.ip||vm.desired?.ip||'';router.push(links.proxies({q:ip||undefined}));return;}
-    const d=vm.desired;let message='';
-    if(kind==='START'){const r=await startInstall.mutateAsync({projectId,configurationId:d!.id,expectedVmRevision:vm.revision});message=r.replay?vm.code+' đã ở trạng thái đang cài':'Đã bắt đầu cài '+vm.code;}
-    else if(kind==='COPY_INSTALL'){const out=await copyWhenReady(async()=>(await copyInstall.mutateAsync({projectId,configurationId:d!.id})).proxy);if(!out.ok){if(out.text){setManualCopy(out.text);setBulk('copy');}else throw new Error(out.error||'Chưa copy được');}message='Đã copy để cài '+vm.code+'; việc cài đã bắt đầu';}
-    else if(kind==='CONFIRM'){const r=await confirmInstall.mutateAsync({projectId,configurationId:d!.id,configurationHash:d!.hash,expectedVmRevision:vm.revision});message=r.replay?vm.code+' đã được xác nhận trước đó':'Đã xác nhận cài '+(d!.ip||'')+' trên '+vm.code;}
-    else if(kind==='FAIL'){const r=await reportFailure.mutateAsync({projectId,configurationId:d!.id,note:note||'',expectedVmRevision:vm.revision});message=r.saved?'Đã ghi vướng mắc '+vm.code:'Vướng mắc không đổi; không ghi thêm';}
-    else if(kind==='AUTOFILL'){const key=crypto.randomUUID(),p=await autoPreview.mutateAsync({projectId,mode:'AUTO',vmIds:[vm.id],idempotencyKey:key});const row=p.rows[0];if(!p.ready) throw new Error(row?.message||'Không giao được proxy cho VM này');await autoCommit.mutateAsync({projectId,token:p.token,idempotencyKey:key});message='Đã giao '+(row?.ip||'proxy')+' cho '+vm.code+'; chờ cài';}
-    toast.success(message,{duration:3000});await refresh();
-  }
   // Tình trạng: one command for the cell and for bulk; same value = nothing written; old-round commands are refused by the server.
   const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney};
   async function setOpsStatus(vm:ManagedVM,status:VmOpsStatus,cycle:number){
@@ -176,7 +169,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
   const openBulk=(panel:BulkPanel,toggle=false)=>{if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
   useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
-  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','PENDING','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','TASK_ORPHAN'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
+  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
   if(current?.archivedAt)return <div className="proxy-workspace space-y-4"><div className="pm-heading"><div><h1>{current.code}</h1><p className="pm-muted">Server đã xoá. Dữ liệu và lịch sử vẫn được giữ.</p></div>{rights.manage&&<button className="pm-button pm-button-primary" disabled={busy} onClick={()=>void bringBackServer(current.id)}><RotateCcw size={16}/>Khôi phục server</button>}</div><Link className="pm-button pm-button-quiet w-fit" href="/infrastructure/servers">Về danh sách server</Link></div>;
@@ -191,32 +184,32 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
       <div className="vm-head-actions">{rights.manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{(rights.assign||rights.manage)&&<button className={'pm-button'+(bulk==='paste'?' pm-button-primary':'')} onClick={()=>openBulk('paste',true)}><ClipboardPaste size={16}/>Dán bảng</button>}<button className={'pm-button'+(storeOpen?' pm-button-primary':'')} aria-pressed={storeOpen} onClick={()=>goStore({open:!storeOpen})}><Boxes size={16}/>Kho SDK</button><button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" onClick={()=>void refresh()}><RefreshCw size={16}/></button>
         <DropdownMenu><DropdownMenuTrigger asChild><button className="pm-icon-button" aria-label="Quản lý server" title="Quản lý server"><MoreHorizontal size={16}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="vm-menu">
           {rights.manage&&<DropdownMenuItem onSelect={()=>setForm('CREATE')}>Thêm server</DropdownMenuItem>}
-          {moduleOn('INSTALL_TASKS')&&<DropdownMenuItem asChild><Link href={links.installs()}>Việc cài proxy</Link></DropdownMenuItem>}<DropdownMenuItem asChild><Link href={links.proxies()}>Kho proxy</Link></DropdownMenuItem>
+          <DropdownMenuItem asChild><Link href={links.proxies()}>Kho proxy</Link></DropdownMenuItem>
           {rights.manage&&single&&<><DropdownMenuSeparator/><DropdownMenuItem className="text-red-600" disabled={busy} onSelect={()=>void removeServer()}>Xoá server {current!.code}</DropdownMenuItem></>}
         </DropdownMenuContent></DropdownMenu></div>
     </div>
     {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
-    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('PENDING','Chờ cài',counts.pending)}{chip('INSTALLED','Đã cài',counts.installed)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{(noOrphan||orphanView)?chip('TASK_ORPHAN','Việc cài bị bỏ lại',noOrphan):null}{chip('DELETED','Đã xoá',deleted.length)}</div>
+    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('ASSIGNED','Có proxy',counts.assigned)}{chip('BLOCKED','Proxy Blocked',counts.blocked)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{chip('DELETED','Đã xoá',deleted.length)}</div>
     <div className="vm-chips vm-chips-ops" role="group" aria-label="Lọc theo tình trạng vận hành"><span className="pm-muted text-xs">Tình trạng:</span>
       {OPS_FILTERS.map(k=>{const n=active.filter(v=>opsKey(v)===k).length,on=url.st.includes(k);if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{n}</strong></button>;})}
       <span className="pm-muted text-xs ml-2">Proxy / tiền:</span>
-      {(()=>{const n=active.filter(proxyBlocked).length;return (n||url.warn)?<button type="button" className={'vm-chip'+(url.warn?' active':'')+(n?' attention':'')} aria-pressed={url.warn} onClick={()=>go({warn:!url.warn,page:1})}>Proxy BLOCKED <strong>{n}</strong></button>:null;})()}
+      {rights.copy&&!deletedView&&(()=>{const scope=selected.size?selectedRows:filtered,n=blockedIn(scope);return <button type="button" className="pm-button" disabled={!n} title={selected.size?'Proxy Blocked của các dòng đã chọn':'Proxy Blocked trong bộ lọc hiện tại (mọi trang)'} onClick={()=>void copyBlockedOf(scope)}><Copy size={15}/>Copy proxy Blocked ({n})</button>;})()}
       {(['WAITING','RECREATE','MONEY_REVIEW','FAILED'] as const).map(k=>{const n=board.data?active.filter(v=>milestone(v)===k).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='RECREATE'||k==='MONEY_REVIEW'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MILESTONE_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
       {(url.st.length>0||url.money||url.warn)&&<button type="button" className="pm-link text-xs" onClick={()=>go({st:[],money:'',warn:false,page:1})}>Bỏ lọc tình trạng</button>}
     </div>
     {board.error&&<p role="alert" className="pm-error">Chưa đọc được tình trạng vận hành: {board.error.message} <button className="pm-link" onClick={()=>void board.refetch()}>Thử lại</button></p>}
-    {orphanView&&orphans.error&&<p role="alert" className="pm-error">Chưa đọc được việc cài: {orphans.error.message} <button className="pm-link" onClick={()=>void orphans.refetch()}>Thử lại</button></p>}{accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
+    {accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
         {!storeOpen&&<div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
-          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Theo tiến độ cài</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
+          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>}
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
         {hasSelection&&!storeOpen&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}
           {paged.rows.length>0&&paged.rows.every(v=>selected.has(v.id))&&selectedInFilter<filtered.length&&<button className="pm-link text-sm" onClick={()=>setSelected(new Set(filtered.map(v=>v.id)))}>Chọn tất cả {filtered.length} kết quả đang lọc</button>}
           <span className="vm-bulkbar-actions">{deletedView?(rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void restore(selectedRows.map(v=>v.id))}><RotateCcw size={15}/>Khôi phục</button>):<>
-            {rights.copy&&<DropdownMenu><DropdownMenuTrigger asChild><button className="pm-button"><Copy size={15}/>Copy proxy</button></DropdownMenuTrigger><DropdownMenuContent className="vm-menu"><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'DESIRED')}>Copy proxy được giao</DropdownMenuItem><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
+            {rights.copy&&<DropdownMenu><DropdownMenuTrigger asChild><button className="pm-button"><Copy size={15}/>Copy proxy</button></DropdownMenuTrigger><DropdownMenuContent className="vm-menu"><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'DESIRED')}>Copy proxy đang dùng</DropdownMenuItem><DropdownMenuItem onSelect={()=>void copyBlockedOf(selectedRows)}>Copy proxy Blocked ({blockedIn(selectedRows)})</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
             {rights.assign&&<span className="vm-bulk-ops"><select aria-label="Tình trạng cho các VM đã chọn" className="pm-input w-auto" value={bulkOps} onChange={e=>setBulkOps(e.target.value as VmOpsStatus)}><option value="">Tình trạng…</option>{VM_OPS_STATUSES.map(st=><option key={st} value={st}>{VM_OPS[st].label}</option>)}</select><button className="pm-button pm-button-primary" disabled={!opsChanges||setOps.isLoading} onClick={()=>void applyBulkOps()}>{setOps.isLoading?'Đang lưu…':`Áp dụng ${opsChanges} VM`}</button></span>}
             {rights.assign&&<button className={'pm-button'+(bulk==='assign'?' pm-button-primary':'')} onClick={()=>openBulk('assign')}>Gán proxy</button>}
             {rights.assign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
@@ -228,7 +221,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         {storeOpen&&<SdkStorePanel projectId={projectId} url={sdkUrl} onUrl={goStore} canEdit={rights.assign} maxHeight={maxHeight+60} onClose={()=>goStore({open:false})} onOpenVm={id=>go({sdk:{...sdkUrl,open:false},vm:id,tab:'overview',cause:null})}/>}
         <div hidden={storeOpen}>{pager('top')}</div>
         <div ref={gridHost} hidden={storeOpen}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
-          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}
+          emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell}
           opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])}/></div>
         <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>

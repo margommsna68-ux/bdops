@@ -12,6 +12,7 @@ import {buildReconciliation} from './reconcile';
 import {withProxyTransaction} from './transaction';
 import {findGroupByName} from './groups';
 import {recordOperation} from '../operation-history/journal';
+import {assignProxyToVm,currentProxyOf,loadChangeVM,markUsersBlocked} from '../vm-management/proxy-change';
 import {captureAccount,captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
 import {DUPLICATE_CODES,HISTORICAL_STATES,ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type IssueCode,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
 export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;groupId?:string|null;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
@@ -98,6 +99,10 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
       const conflict=findConflict(next,identity?.owner||'UNKNOWN',ctx,projectId,{ignoreGenjy:true});
       const decision=decideReplacement({old,oldIdentity:identity,oldCandidates:found.length,next,nextEvidence:evidence,nextIdentities:ctx.identities.filter(i=>i.ip===next.ip),nextConflict:conflict,exactReceiptReplay,sourceScanSucceeded:ctx.source.scanSucceeded});
       const packageCode=matchPackage(next,catalog);
+      // 19/10/2026: the VM using the old proxy takes the new one in the same save. A new proxy whose package is unknown could not be
+      // placed, so that pair is refused at its line instead of leaving the VM on a replaced proxy.
+      if(decision.outcome==='READY'&&old?.vmKeys.length&&(!packageCode||next.format!=='FULL'))Object.assign(decision,{outcome:'ERROR',code:'PACKAGE_MISMATCH',message:'Proxy cũ đang dùng ở '+old.vmKeys.join(', ')+'; proxy mới chưa xác định được gói / user-pass nên chưa đổi được VM. Dán đầy đủ IP:port:user:pass của gói'});
+      else if(decision.outcome==='READY'&&old?.vmKeys.length)decision.message='Nhận proxy thay thế; VM '+old.vmKeys.join(', ')+' đổi sang proxy mới ngay (cùng lần lưu)';
       rows.push({...decision,row:pair.row,oldIp,newIp:next.ip,owner:identity?.owner,subgroup:identity?.subgroup,packageCode,endpointId:decision.outcome!=='ERROR'?old?.id:undefined,sourceRefs:evidence.map(e=>e.sourceRef),...(decision.outcome==='ERROR'&&conflict&&decision.code===conflict.code?{existing:conflict.existing}:{}),...(decision.outcome==='READY'&&!packageCode?{code:'UNKNOWN_PACKAGE' as const,message:'Nhận replace, cần xác định gói trước khi cấp VM'}:{})});
       if(decision.outcome==='READY'&&identity&&old) items.push({row:pair.row,oldEndpointId:old.id,next,owner:identity.owner,subgroup:identity.subgroup,packageCode,state:packageCode?'NEW':'QUARANTINED'});
     }
@@ -185,7 +190,11 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
       if(hash(planned)!==hash({rows:saved.rows,items:saved.items,reconciliation:saved.reconciliation})) throw new ProxyDomainError('STALE_PREVIEW');
       const groupId=group&&planned.items.length?group.id||(await tx.proxyGroup.create({data:{projectId:scope.projectId,name:group.name,normalizedName:group.name.toLocaleLowerCase('vi'),createdById:scope.userId}})).id:null;
       const now=new Date(),receivedDate=parseReceivedDate(saved.input.receivedDate);
-      const beforeImages=new Map<string,ReturnType<typeof captureEndpoint>|null>();
+      const beforeImages=new Map<string,ReturnType<typeof captureEndpoint>|null>(),vmImages=new Map<string,{resource:ResourceImage['resource'];id:string;before:unknown}>();
+      const images={remember:async(resource:ResourceImage['resource'],id:string,created=false)=>{
+        if(resource==='ENDPOINT'){if(!beforeImages.has(id))beforeImages.set(id,created?null:await readImage(tx,scope.projectId,'ENDPOINT',id) as ReturnType<typeof captureEndpoint>|null);return;}
+        const key=resource+'/'+id;if(!vmImages.has(key))vmImages.set(key,{resource,id,before:created?null:await readImage(tx,scope.projectId,resource,id)});}};
+      const change={projectId:scope.projectId,actorId:scope.userId,now:new Date(),via:batch.kind==='REPLACE'?'Nhận replace':'Báo BLOCKED'};
       for(const item of planned.items)if(item.oldEndpointId){const row=await tx.proxyIP.findFirstOrThrow({where:{id:item.oldEndpointId,projectId:scope.projectId},include:endpointInclude});beforeImages.set(row.id,captureEndpoint(row));}
       for(const item of planned.items){
         if(batch.kind==='BLOCKED'){
@@ -193,6 +202,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
           if(!old.identityId) throw new ProxyDomainError('OWNER_CONFLICT','Proxy cũ cần được đối chiếu trước');
           await tx.proxyIP.update({where:{id:old.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:now,revision:{increment:1}}});
           await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:old.identityId,endpointId:old.id,batchId:batch.id,ip:old.host!,kind:'BLOCKED',occurredAt:now,actorId:scope.userId}});
+          await markUsersBlocked(tx,images,change,old.id,'Proxy '+old.host+(old.port?':'+old.port:'')+' báo BLOCKED ở Kho proxy');
         }else{
           const p=item.next!;
           let identity=await tx.proxyIdentity.findUnique({where:{ip:p.ip}});
@@ -214,6 +224,12 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
             await tx.proxyIP.update({where:{id:old.id},data:{inventoryState:'REPLACED',status:'RESERVED',retiredAt:now,statusAt:now,revision:{increment:1}}});
             await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:old.identityId,endpointId:old.id,batchId:batch.id,ip:old.host!,kind:'REPLACED',occurredAt:receivedDate,actorId:scope.userId}});
             await tx.proxyReplacement.create({data:{projectId:scope.projectId,oldEndpointId:old.id,newEndpointId:endpoint.id,ownerSnapshot:item.owner,subgroupSnapshot:item.subgroup,receivedDate,actorId:scope.userId,batchId:batch.id}});
+            // Every VM using the old proxy now uses the new one (same transaction); its status before Blocked comes back.
+            const users=await tx.vMProxyAllocation.findMany({where:{endpointId:old.id,releasedAt:null,role:{in:['DESIRED','INSTALLED']}},select:{vmId:true}});
+            for(const vmId of Array.from(new Set(users.map(u=>u.vmId)))){
+              const vm=await loadChangeVM(tx,vmId);if(currentProxyOf(vm).endpointId!==old.id)throw new ProxyDomainError('STALE_PREVIEW','VM '+vm.server.code+'/'+vm.code+' đang có proxy cần đối chiếu; xử lý ở ô Proxy của VM trước');
+              await assignProxyToVm(tx,images,change,vmId,endpoint.id);
+            }
           }
         }
         await deps.afterEvent?.(tx);
@@ -228,6 +244,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
           resources.push({resource:'ACCOUNT',id:account.id,before:null,after:captureAccount(account)});
         }
         for(const [id,before] of Array.from(beforeImages))resources.push({resource:'ENDPOINT',id,before,after:await readImage(tx,scope.projectId,'ENDPOINT',id)} as ResourceImage);
+        for(const image of Array.from(vmImages.values()))resources.push({...image,after:await readImage(tx,scope.projectId,image.resource,image.id)} as ResourceImage);
         const [events,replacements]=await Promise.all([tx.proxyStatusEvent.findMany({where:{batchId:batch.id},select:{id:true}}),tx.proxyReplacement.findMany({where:{batchId:batch.id},select:{id:true}})]);
         await recordOperation(tx,{scope:current,kind:batch.kind,summary:{count:result.applied,skipped:result.skipped,errors:result.errors},batchId:batch.id,snapshot:{version:1,resources,eventIds:events.map(e=>e.id),replacementIds:replacements.map(r=>r.id)}});
       }

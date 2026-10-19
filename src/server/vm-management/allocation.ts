@@ -1,4 +1,5 @@
 import {randomBytes} from 'node:crypto';
+import {assignProxyToVm} from './proxy-change';
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt,decrypt} from '@/lib/encryption';
@@ -10,8 +11,7 @@ import {recordOperation} from '../operation-history/journal';
 import {readImage,type ResourceImage,type OperationSnapshot} from '../operation-history/snapshot';
 import {authorizeVM,requireGenjy,readManagedVMs,type VMReader} from './repository';
 import {moneyOfRequest} from '../vm-ops/ops';
-import {syncAssignmentState} from '../proxy-management/assignment-state';
-import {vmHash,type AllocationInput,type AllocationPreview,type AllocationRow,type ConfigurationSnapshot} from './types';
+import {vmHash,type AllocationInput,type AllocationPreview,type AllocationRow} from './types';
 async function planAllocation(projectId:string,input:AllocationInput,db:VMReader){
   if(!['AUTO','MANUAL'].includes(input.mode)||input.vmIds&&(!input.vmIds.length||input.vmIds.length>1000||new Set(input.vmIds).size!==input.vmIds.length)||input.mode==='MANUAL'&&(!input.endpointId||input.vmIds?.length!==1))throw new ProxyDomainError('INVALID_INPUT');
   // Autofill works on exactly the VMs the operator selected; it never widens to a whole server or project.
@@ -36,7 +36,7 @@ async function planAllocation(projectId:string,input:AllocationInput,db:VMReader
       if(existing?.identity&&existing.port&&existing.inventoryKey&&existing.credentialCipher&&existing.packageCode){endpoint={identityId:existing.identity.id,endpointId:existing.id,ip:existing.identity.ip,port:existing.port,revision:existing.revision,allocationKey:existing.inventoryKey};reuseInstalled=true;}
     }
     if(!endpoint){rows.push({...row,outcome:'ERROR',message:input.mode==='AUTO'?'Thiếu proxy NEW TUT chưa dùng':'Proxy chưa đủ điều kiện hoặc đã được giữ cho máy khác'});continue;}
-    rows.push({...row,outcome:'READY',message:reuseInstalled?'Giao lại cấu hình đã cài; cần xác nhận mới':'Giao proxy; chờ cài thực tế',ip:endpoint.ip,endpointId:endpoint.endpointId});items.push({vmId:vm.id,endpointId:endpoint.endpointId,reuseInstalled});
+    rows.push({...row,outcome:'READY',message:'Gán proxy; VM dùng ngay (không có bước cài)',ip:endpoint.ip,endpointId:endpoint.endpointId});items.push({vmId:vm.id,endpointId:endpoint.endpointId,reuseInstalled});
     const index=pool.findIndex(e=>e.endpointId===endpoint!.endpointId);if(index>=0)pool.splice(index,1);
   }
   return {rows,items,facts:{vms:vms.map(v=>[v.id,v.revision,v.server.revision,v.desiredConfiguration?.revision??null,v.installedConfiguration?.revision??null,v.allocations.map(a=>[a.id,a.revision])]),pool:input.mode==='MANUAL'?await getManualInventory(projectId,db):await getEligibleInventory(projectId,db)}};
@@ -66,23 +66,13 @@ export function createVMService(db:PrismaClient=prisma,deps:{refreshSource?:(pro
       const saved=JSON.parse(decrypt(batch.encryptedPlan)) as {input:AllocationInput;plan:Awaited<ReturnType<typeof planAllocation>>};if(vmHash(saved.input)!==batch.payloadHash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
       const plan=await planAllocation(scope.projectId,saved.input,tx);if(source.hash!==batch.sourceHash||vmHash(plan)!==vmHash(saved.plan))throw new ProxyDomainError('STALE_PREVIEW','Danh sách VM/proxy đã thay đổi; kiểm tra lại');
       const images=await snapshotCollector(tx,current);
+      const now=new Date();
       for(const item of plan.items){
-        const vm=await tx.virtualMachine.findFirstOrThrow({where:{id:item.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},include:{server:true,desiredConfiguration:{include:{task:true}}}});
-        await images.remember('VM',vm.id);await images.remember('ENDPOINT',item.endpointId);
-        const old=vm.desiredConfiguration;
-        if(old&&old.id!==vm.installedConfigurationId){
-          await images.remember('VM_CONFIG',old.id);await tx.vMConfiguration.update({where:{id:old.id},data:{status:'CANCELLED',revision:{increment:1}}});
-          if(old.task){await images.remember('VM_TASK',old.task.id);await tx.vMTask.update({where:{id:old.task.id},data:{status:'CANCELLED'}});}
-          const holds=await tx.vMProxyAllocation.findMany({where:{vmId:vm.id,configurationId:old.id,role:'DESIRED',releasedAt:null}});
-          for(const hold of holds){await images.remember('VM_ALLOCATION',hold.id);await images.remember('ENDPOINT',hold.endpointId);await tx.vMProxyAllocation.update({where:{id:hold.id},data:old.startedAt?{role:'UNCERTAIN',revision:{increment:1}}:{releasedAt:new Date(),releaseReason:'Thay kế hoạch chưa bắt đầu',revision:{increment:1}}});await tx.proxyIP.update({where:{id:hold.endpointId},data:{revision:{increment:1}}});await syncAssignmentState(tx,hold.endpointId,{released:!old.startedAt});}
-        }
+        await tx.virtualMachine.findFirstOrThrow({where:{id:item.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true}});
         const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:item.endpointId,projectId:scope.projectId},include:{identity:true}}),proxy=decodeEndpoint(endpoint);
         if(!proxy||proxy.format!=='FULL'||!endpoint.identity||(endpoint.identity.owner!=='SELF'&&!(saved.input.mode==='MANUAL'&&isShared(endpoint.identity.owner,endpoint.identity.subgroup)))||!endpoint.inventoryKey)throw new ProxyDomainError('OWNER_CONFLICT');
-        const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identity.id,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
-        const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:scope.userId}});await images.remember('VM_CONFIG',config.id,true);
-        if(!item.reuseInstalled){const hold=await tx.vMProxyAllocation.create({data:{projectId:scope.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:scope.userId}});await images.remember('VM_ALLOCATION',hold.id,true);}
-        const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version}`,scheduledAt:new Date()}});await images.remember('VM_TASK',task.id,true);
-        await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await syncAssignmentState(tx,endpoint.id);await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1},proxySlotState:'FULL',revision:{increment:1}}});await deps.afterWrite?.(tx);
+        // Assigning is recording the proxy the VM uses (owner decision 19/10/2026): no install task, no confirmation step.
+        await assignProxyToVm(tx,images,{projectId:scope.projectId,actorId:scope.userId,now,via:saved.input.mode==='AUTO'?'Điền VM thiếu':'Gán proxy'},item.vmId,endpoint.id);await deps.afterWrite?.(tx);
       }
       const result={batchId:batch.id,applied:plan.items.length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length,rows:plan.rows,replay:false,undone:false};
       if(plan.items.length)await recordOperation(tx,{scope:current,kind:'VM_PLAN',summary:{count:plan.items.length},snapshot:await images.finish(),batchId:batch.id});

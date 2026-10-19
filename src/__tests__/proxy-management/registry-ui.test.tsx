@@ -13,13 +13,13 @@ describe('location cells',()=>{
       const cells=html.match(/<td[^>]*>.*?<\/td>/g)||[];expect(cells).toHaveLength(3);
       expect(cells[0]).toContain('An-01');expect(cells[0]).toContain('moon2');expect(cells[0]).not.toContain('VM_001');
       expect(cells[1]).toContain('VM_001');expect(cells[1]).toContain('VM_010');expect(cells[1]).not.toContain('An-01');
-      expect(cells[2]).toContain('Chờ cài');expect(cells[2]).toContain('Đã cài');expect(html).not.toContain('An-01/VM_001');
+      expect(cells[2]).toContain('Đang dùng');expect(html).not.toContain('An-01/VM_001');
       const empty=renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({})}/></tr></tbody></table>);expect(empty).toContain('Chưa gán');
       const genjy=renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({owner:'GENJY',endpointId:null})}/></tr></tbody></table>);expect(genjy).toContain('Genjy riêng');expect(genjy).not.toContain('Chưa gán');expect(renderToStaticMarkup(<table><tbody><tr><LocationCells row={row({owner:'GENJY',subgroup:'PC_CHUNG'})}/></tr></tbody></table>)).toContain('Chưa gán');
     }finally{vi.unstubAllGlobals();}
   });
   it('maps allocation roles to short operating notes',()=>{
-    expect(roleLabel('DESIRED')).toBe('Chờ cài');expect(roleLabel('INSTALLED')).toBe('Đã cài');expect(roleLabel('UNCERTAIN')).toBe('Giữ để kiểm tra');expect(roleLabel(null)).toBe('');
+    expect(roleLabel('DESIRED')).toBe('Đang dùng');expect(roleLabel('INSTALLED')).toBe('Đang dùng');// 19/10/2026: no install stepexpect(roleLabel('UNCERTAIN')).toBe('Giữ để kiểm tra');expect(roleLabel(null)).toBe('');
   });
 });
 describe('server filter',()=>{

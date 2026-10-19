@@ -196,7 +196,7 @@ function RecreateForm({projectId,vm,cycle,sus,lock,onDone}:{projectId:string;vm:
       <li>Giữ id, server và mã <strong>{vm.code}</strong>; mở lượt {cycle+1} (New VM), lưu lượt {cycle}.</li>
       <li>Đóng EarnApp cũ: tài khoản và email không về NEW, không cấp lại.</li>
       <li>{vm.sdk?'SDK '+vm.sdk.id.slice(0,10)+'… rời VM: '+(vm.sdk.state==='LINKED'?'đã nối EarnApp nên vào lịch sử':vm.sdk.state==='UNLINKED'?'chưa nối nên về Kho SDK (giữ tiền, ghi chú)':'giữ ở Kho SDK, chưa xác nhận')+'. Máy mới có SDK mới; ghi mã thật sau khi cài.':'Chưa có SDK hiện hành.'}</li>
-      <li>{blocked?'Proxy đang BLOCKED: không giữ như proxy tốt; thay qua luồng thay proxy.':installed?'Giữ proxy '+(installed.ip||'')+' cho vị trí; cần cài và xác nhận lại.':'Không có proxy đã cài để giữ.'}</li>
+      <li>{blocked?'Proxy đang BLOCKED: vẫn ở vị trí và vẫn phải thay (bấm ô Proxy).':installed?'Giữ proxy '+(installed.ip||'')+' cho vị trí ở lượt mới (gán là xong, không có bước cài).':'Không có proxy để giữ.'}</li>
       {sus&&<li>Yêu cầu rút và tiền chờ của lượt cũ giữ nguyên để đối chiếu; mã PP không bị đóng.</li>}
     </ul>
     <label className="pm-label text-xs">Ghi chú (nếu có)<input className="pm-input" maxLength={500} value={note} disabled={save.isLoading} onChange={e=>setNote(e.target.value)}/></label>

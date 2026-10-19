@@ -22,7 +22,7 @@ const fields:Record<BusinessResource,string[]>={
  PACKAGE:['code','nextDueDate','lastPaidAt','revision'],
  EARNAPP:['loginId','vmId','paypalId','paypalEmailId','registeredAt','registeredById','revision','closedAt','closedReason'],
  PAYOUT:['earnAppId','paypalId','paypalEmailId','vmId','startedAt','endedAt'],
- VM_OPS:['vmId','cycle','status','statusAt','statusById','revision'],
+ VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
  PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision'],
  VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','closedAt'],
  SDK:['code','vmId','amount','currency','amountAt','amountById','note','noteAt','noteById','linkState','linkedEarnAppId','linkedVmId','linkedCycle','linkedAt','linkedById','confirmedAt','confirmedById','revision'],

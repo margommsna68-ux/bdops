@@ -7,9 +7,9 @@ import type {Overview} from './Overview';
 import type {FinanceTargets} from './finance-links';
 type Ops=NonNullable<Overview['operations']>;
 type Fin=Extract<NonNullable<Overview['finance']>,{enabled:true}>;
-// Colours carry meaning and match the badges on the target pages: installed green, waiting blue, review amber, missing red;
+// Colours carry meaning and match the badges on the target pages: with a proxy green, Blocked red, review amber, missing red;
 // proxy NEW blue, LIVE green, BLOCKED red, other grey.
-export const VM_SERIES=[{key:'INSTALLED',label:'Đã xác nhận cài',color:'#16a34a'},{key:'PENDING',label:'Chờ cài',color:'#3b82f6'},{key:'REVIEW',label:'Cần kiểm tra',color:'#f59e0b'},{key:'MISSING',label:'Thiếu proxy',color:'#ef4444'}] as const;
+export const VM_SERIES=[{key:'ASSIGNED',label:'Có proxy',color:'#16a34a'},{key:'BLOCKED',label:'Proxy Blocked',color:'#dc2626'},{key:'REVIEW',label:'Cần kiểm tra',color:'#f59e0b'},{key:'MISSING',label:'Thiếu proxy',color:'#ef4444'}] as const;
 export const STOCK_SERIES=[{key:'NEW',label:'NEW',color:'#3b82f6'},{key:'LIVE',label:'LIVE',color:'#16a34a'},{key:'BLOCKED',label:'BLOCKED',color:'#ef4444'},{key:'OTHER',label:'Khác',color:'#94a3b8'}] as const;
 const fmt=(n:number)=>n.toLocaleString('vi-VN');
 // Segment label only where it fits; every number is also in the legend totals and the table under the chart. The label lets clicks

@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {checkVmProxyChange,changeVmProxy} from '../vm-management/proxy-command';
 import {TRPCError} from '@trpc/server';
 import {Prisma} from '@prisma/client';
 import {router,protectedProcedure} from '../trpc';
@@ -7,7 +8,7 @@ import {loadInfrastructureScope,assertInfrastructureAction,type InfrastructureAc
 import {createVMService} from '../vm-management/allocation';
 import {readVMWorkspace} from '../vm-management/repository';
 import {createManagedServer,addManagedVMs,updateManagedServer,archiveManagedResource,updateManagedVM,archiveVMs,restoreVMs,archiveServer,restoreServer} from '../vm-management/metadata';
-import {startInstall,copyConfiguration,copyVmConfigurations,reportInstallFailure,confirmInstalled} from '../vm-management/installation';
+import {copyVmConfigurations} from '../vm-management/installation';
 import {previewVmBulk,applyVmBulk} from '../vm-management/bulk';
 import {readVMDetail} from '../vm-management/detail';
 import {readOrphanTasks,closeOrphanTask} from '../vm-management/orphan-tasks';
@@ -25,9 +26,12 @@ async function domain<T>(fn:()=>Promise<T>){try{return await fn();}catch(error){
 export const vmManagementRouter=router({
   access:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>{
     const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'READ');const can=(action:InfrastructureAction)=>{try{assertInfrastructureAction(scope,action);return scope.businessMode==='PROXY_VM';}catch{return false;}};
-    const source=await ctx.prisma.proxySourceSnapshot.findFirst({where:{projectId:input.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}});return {businessMode:scope.businessMode,canManage:can('MANAGE'),canAssign:can('ASSIGN'),canConfirm:can('CONFIRM'),canCopy:can('COPY_CREDENTIALS'),sourceConnected:!!source?.scanSucceeded,trial:['trial','staging'].includes(process.env.APP_ENV||'')};
+    const source=await ctx.prisma.proxySourceSnapshot.findFirst({where:{projectId:input.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}});return {businessMode:scope.businessMode,canManage:can('MANAGE'),canAssign:can('ASSIGN'),canConfirm:can('CONFIRM'),canCopy:can('COPY_CREDENTIALS'),canBlock:can('BLOCK'),canReplace:can('REPLACE'),sourceConnected:!!source?.scanSucceeded,trial:['trial','staging'].includes(process.env.APP_ENV||'')};
   })),
   workspace:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readVMWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
+  // "Thay proxy" at the Proxy cell (19/10/2026): check while choosing, then one Áp dụng (same core as the registry and Dán bảng).
+  proxyCheck:protectedProcedure.input(project.extend({vmId:id,endpointId:id.optional(),text:z.string().max(300).optional()})).mutation(({ctx,input})=>domain(async()=>checkVmProxyChange(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  changeProxy:protectedProcedure.input(project.extend({key,vmId:id,expectedVmRevision:z.number().int().nonnegative(),expectedCycle:z.number().int().positive(),endpointId:id})).mutation(({ctx,input})=>domain(async()=>{const {projectId:_p,...rest}=input;return changeVmProxy(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),rest,ctx.prisma);})),
   eligible:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>{const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'ASSIGN');if(scope.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');return getManualInventory(input.projectId,ctx.prisma);})),
   orphanTasks:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readOrphanTasks(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
   closeTask:protectedProcedure.input(project.extend({taskId:id})).mutation(({ctx,input})=>domain(async()=>closeOrphanTask(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
@@ -43,9 +47,9 @@ export const vmManagementRouter=router({
   archive:protectedProcedure.input(project.extend({type:z.enum(['SERVER','VM']),id})).mutation(({ctx,input})=>domain(async()=>archiveManagedResource(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.type,input.id,ctx.prisma))),
   preview:protectedProcedure.input(project.extend({mode:z.enum(['AUTO','MANUAL']),serverId:id.optional(),vmIds:z.array(id).min(1).max(1000).optional(),endpointId:id.optional(),idempotencyKey:key})).mutation(({ctx,input})=>domain(async()=>createVMService(ctx.prisma).preview(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input))),
   commit:protectedProcedure.input(project.extend({token:z.string().max(100),idempotencyKey:key})).mutation(({ctx,input})=>domain(async()=>createVMService(ctx.prisma).commit(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.token,input.idempotencyKey))),
-  start:protectedProcedure.input(project.extend({configurationId:id,expectedVmRevision:z.number().int().nonnegative().optional()})).mutation(({ctx,input})=>domain(async()=>startInstall(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,ctx.prisma,{expectedVmRevision:input.expectedVmRevision}))),
-  copy:protectedProcedure.input(project.extend({configurationId:id})).mutation(({ctx,input})=>domain(async()=>copyConfiguration(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,ctx.prisma))),
-  reportFailure:protectedProcedure.input(project.extend({configurationId:id,note:z.string().min(1).max(1000),expectedVmRevision:z.number().int().nonnegative().optional()})).mutation(({ctx,input})=>domain(async()=>reportInstallFailure(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.configurationId,input.note,ctx.prisma,{expectedVmRevision:input.expectedVmRevision}))),
+  start:protectedProcedure.input(project.extend({configurationId:id,expectedVmRevision:z.number().int().nonnegative().optional()})).mutation(()=>domain(async()=>{throw new ProxyDomainError('INVALID_INPUT','Từ 19/10/2026 gán proxy là xong: không còn bước Bắt đầu cài, Copy để cài hay Xác nhận đã cài. Đổi proxy ở ô Proxy của VM (vmManagement.changeProxy).');})),
+  copy:protectedProcedure.input(project.extend({configurationId:id})).mutation(()=>domain(async()=>{throw new ProxyDomainError('INVALID_INPUT','Từ 19/10/2026 gán proxy là xong: không còn bước Bắt đầu cài, Copy để cài hay Xác nhận đã cài. Đổi proxy ở ô Proxy của VM (vmManagement.changeProxy).');})),
+  reportFailure:protectedProcedure.input(project.extend({configurationId:id,note:z.string().min(1).max(1000),expectedVmRevision:z.number().int().nonnegative().optional()})).mutation(()=>domain(async()=>{throw new ProxyDomainError('INVALID_INPUT','Từ 19/10/2026 gán proxy là xong: không còn bước Bắt đầu cài, Copy để cài hay Xác nhận đã cài. Đổi proxy ở ô Proxy của VM (vmManagement.changeProxy).');})),
   sdkPreview:protectedProcedure.input(project.extend({text:z.string().min(1).max(200000),serverId:id.optional()})).mutation(({ctx,input})=>domain(async()=>previewSdkUpdate(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   sdkApply:protectedProcedure.input(project.extend({key,items:z.array(z.object({vmId:id,sdk:z.string().max(128).nullable(),expectedRevision:z.number().int().nonnegative(),clear:z.boolean().optional()})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>applySdkUpdate(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   copyProxies:protectedProcedure.input(project.extend({vmIds:z.array(id).min(1).max(2000),which:z.enum(['DESIRED','INSTALLED'])})).mutation(({ctx,input})=>domain(async()=>copyVmConfigurations(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
@@ -60,5 +64,5 @@ export const vmManagementRouter=router({
   sdkDetail:protectedProcedure.input(project.extend({sdkId:id})).query(({ctx,input})=>domain(async()=>readSdkDetail(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.sdkId,ctx.prisma))),
   sdkStorePreview:protectedProcedure.input(project.extend({text:z.string().min(1).max(300000)})).mutation(({ctx,input})=>domain(async()=>previewSdkStore(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   sdkStoreApply:protectedProcedure.input(project.extend({key,rows:z.array(z.object({line:z.number().int().positive(),code:z.string().max(128),expectedRevision:rev.nullable(),amount:money,note:sdkNote})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>applySdkStore(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
-  confirm:protectedProcedure.input(project.extend({configurationId:id,configurationHash:z.string().length(64),expectedVmRevision:z.number().int().nonnegative()})).mutation(({ctx,input})=>domain(async()=>confirmInstalled(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  confirm:protectedProcedure.input(project.extend({configurationId:id,configurationHash:z.string().length(64),expectedVmRevision:z.number().int().nonnegative()})).mutation(()=>domain(async()=>{throw new ProxyDomainError('INVALID_INPUT','Từ 19/10/2026 gán proxy là xong: không còn bước Bắt đầu cài, Copy để cài hay Xác nhận đã cài. Đổi proxy ở ô Proxy của VM (vmManagement.changeProxy).');})),
 });

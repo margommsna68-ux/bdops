@@ -66,10 +66,10 @@ export async function archiveManagedResource(scope:ActorScope,type:'SERVER'|'VM'
 // autofill and active count. Nothing is released to make a delete possible.
 export type BlockCause='HOLD'|'TASK'|'INSTALLED'|'SERVER'|'SDK';
 type Blocked={id:string;code:string;reason:string;cause:BlockCause};
-const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
+const ROLE:Record<string,string>={DESIRED:'đang dùng',INSTALLED:'đang dùng',UNCERTAIN:'giữ để kiểm tra'};
 async function deleteBlockers(tx:Prisma.TransactionClient,vmIds:string[]){
   const vms=await tx.virtualMachine.findMany({where:{id:{in:vmIds}},include:{allocations:{where:{releasedAt:null},include:{endpoint:{select:{host:true}}}},tasks:{where:{status:{in:['PENDING','IN_PROGRESS']}},select:{id:true}}}});
-  return new Map(vms.map(v=>[v.id,v.allocations.length?{cause:'HOLD' as const,reason:'Còn proxy '+v.allocations.map(a=>(a.endpoint.host||'')+' · '+ROLE[a.role]).join(', ')+'; bỏ gán hoặc xử lý ở Việc cài trước'}:v.tasks.length?{cause:'TASK' as const,reason:'Còn việc cài proxy chưa xong; hoàn tất hoặc huỷ ở Việc cài trước'}:v.proxyId?{cause:'INSTALLED' as const,reason:'Còn liên kết proxy đã cài; xử lý ở Server/VM trước'}:null]));
+  return new Map(vms.map(v=>[v.id,v.allocations.length?{cause:'HOLD' as const,reason:'Còn proxy '+v.allocations.map(a=>(a.endpoint.host||'')+' · '+ROLE[a.role]).join(', ')+'; bỏ gán ở Kho proxy trước'}:v.proxyId?{cause:'INSTALLED' as const,reason:'Còn liên kết proxy cũ; đổi hoặc bỏ gán proxy trước'}:null]));
 }
 const byCode=(a:{code:string},b:{code:string})=>a.code.localeCompare(b.code,undefined,{numeric:true});
 export async function archiveVMs(scope:ActorScope,vmIds:string[],db:PrismaClient=prisma){
@@ -108,7 +108,7 @@ export async function archiveServer(scope:ActorScope,serverId:string,db:PrismaCl
   return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'MANAGE',tx),server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:null},include:{vms:{where:{archivedAt:null},select:{id:true,code:true}}}});if(!server)throw new ProxyDomainError('NOT_FOUND');
     const why=await deleteBlockers(tx,server.vms.map(v=>v.id)),blocked=server.vms.filter(v=>why.get(v.id)).sort(byCode);
-    if(blocked.length)throw new ProxyDomainError('INVALID_INPUT',blocked.length+' VM còn proxy hoặc việc cài: '+blocked.slice(0,5).map(v=>v.code).join(', ')+(blocked.length>5?'…':'')+'. Xử lý các VM đó trước khi xoá server');
+    if(blocked.length)throw new ProxyDomainError('INVALID_INPUT',blocked.length+' VM còn proxy: '+blocked.slice(0,5).map(v=>v.code).join(', ')+(blocked.length>5?'…':'')+'. Xử lý các VM đó trước khi xoá server');
     const images=await snapshotCollector(tx,current),now=new Date();await images.remember('SERVER',server.id);
     for(const vm of server.vms){await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:now,revision:{increment:1}}});}
     await tx.server.update({where:{id:server.id},data:{archivedAt:now,revision:{increment:1}}});

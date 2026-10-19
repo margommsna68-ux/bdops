@@ -55,8 +55,8 @@ function shown(kind:BulkKind,vm:ActiveVM,gmails:Map<string,string>,occupant:stri
   if(kind==='SDK') return vm.sdkId;if(kind==='NOTE') return vm.notes;if(kind==='GMAIL') return vm.gmailId?gmails.get(vm.gmailId)||'(Gmail đã lưu trữ)':null;return occupant;
 }
 // Proxy lookup like the registry paste: IP, IP:port or the full proxy; current rows only (replaced/voided/retired never match).
-async function proxyEndpoints(projectId:string,db:VMReader){return await db.proxyIP.findMany({where:{projectId,identityId:{not:null},retiredAt:null,inventoryState:{notIn:['REPLACED','VOID']}},include:endpointInclude}) as EndpointRow[];}
-function matchProxy(text:string,endpoints:EndpointRow[]):{endpoint?:EndpointRow;error?:string}{
+export async function proxyEndpoints(projectId:string,db:VMReader){return await db.proxyIP.findMany({where:{projectId,identityId:{not:null},retiredAt:null,inventoryState:{notIn:['REPLACED','VOID']}},include:endpointInclude}) as EndpointRow[];}
+export function matchProxy(text:string,endpoints:EndpointRow[]):{endpoint?:EndpointRow;error?:string}{
   const ipPort=/^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(text.trim()); // IP:port as it often sits in the Sheet
   let proxy:{ip:string;port:number|null;format:string;username?:string|null;password?:string|null};
   if(ipPort) proxy={ip:ipPort[1],port:Number(ipPort[2]),format:'BARE'};else try{proxy=parseProxy(text);}catch{return {error:'Proxy không hợp lệ (dán IP, IP:port hoặc IP:port:user:pass)'};}
@@ -139,7 +139,7 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
       const m=matchProxy(raw,endpoints);if(!m.endpoint){rows.push({...found,message:m.error!});continue;}
       const e=m.endpoint,after=label(e),other=twice(e.id);if(other){rows.push({...found,after,message:'Cùng proxy với dòng '+other.join(', ')+'; mỗi proxy một VM'});continue;}
       const issue=proxyIssue(e,vm);if(issue?.skip){rows.push({...found,after,outcome:'SKIP',message:issue.skip});continue;}if(issue?.error){rows.push({...found,after,message:issue.error});continue;}
-      rows.push({...found,after,value:e.id,outcome:'READY',message:'Giao proxy; chờ cài thực tế'});
+      rows.push({...found,after,value:e.id,outcome:'READY',message:'Gán proxy; VM dùng ngay'});
     }
   }
   return {kind,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
@@ -183,7 +183,7 @@ export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:stri
         usedProxy.add(endpoint.id);await images.remember('ENDPOINT',endpoint.id);
         await placeOnVm(tx,images,current,endpoint,vm,now);
         await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await syncAssignmentState(tx,endpoint.id);
-        row('APPLIED','Đã giao '+label(endpoint)+'; chờ cài');
+        row('APPLIED','Đã gán '+label(endpoint));
       }
     }
     rows.sort((a,b)=>a.line-b.line);

@@ -2,7 +2,8 @@
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuCheckboxItem,DropdownMenuSeparator} from '@/components/ui/dropdown-menu';
 import {ChevronDown} from 'lucide-react';
 import {UNASSIGNED_SERVER,type CopyResult,type LocationRole,type RegistryRow} from '@/server/proxy-management/types';
-export const roleLabel=(role:LocationRole)=>role==='DESIRED'?'Chờ cài':role==='INSTALLED'?'Đã cài':role==='UNCERTAIN'?'Giữ để kiểm tra':'';
+// 19/10/2026: assigning is the record (no install step); an older confirmed position is just the VM's proxy too.
+export const roleLabel=(role:LocationRole)=>role==='DESIRED'||role==='INSTALLED'?'Đang dùng':role==='UNCERTAIN'?'Giữ để kiểm tra':'';
 // Server, VM and the operating note are three cells; a proxy with several positions lists each on its own line.
 export function LocationCells({row}:{row:RegistryRow}){
   if(!row.locations.length) return <><td>{row.owner==='GENJY'&&row.subgroup!=='PC_CHUNG'?<span className="pm-muted">Genjy riêng</span>:<span className="pm-badge pm-badge-purple">Chưa gán</span>}</td><td></td><td></td></>;
@@ -34,5 +35,6 @@ const skipLabel:Record<CopyResult['skipped'][number]['reason'],string>={NO_CREDE
 export function copySummary(result:CopyResult):{ok:boolean;message:string}{
   const skipped=result.skipped.map(s=>`${s.count} dòng ${skipLabel[s.reason]}`).join(', ');
   if(!result.copied) return {ok:false,message:'Không copy được dòng nào'+(skipped?' · bỏ qua '+skipped:'')};
-  return {ok:true,message:(result.skipped.length?`Đã copy ${result.copied} / ${result.total} proxy · bỏ qua ${skipped}`:`Đã copy ${result.copied} proxy`)};
+  const what=(result as CopyResult&{blocked?:boolean}).blocked?' proxy Blocked':' proxy';
+  return {ok:true,message:(result.skipped.length?`Đã copy ${result.copied} / ${result.total}${what} · bỏ qua ${skipped}`:`Đã copy ${result.copied}${what}`)};
 }

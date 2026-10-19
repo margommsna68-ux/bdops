@@ -12,7 +12,7 @@ describe('MoneyToHome menu',()=>{
   });
   it('switching a hidden module on brings its item back (central config, no settings screen)',()=>{
     const menu=visibleMenu(personalItems(false),{role:'ADMIN',modules:[]},parseModules('install_tasks, WORK ,bogus'));
-    expect(hrefs(menu)).toEqual(expect.arrayContaining(['/vm-tasks','/work']));
+    expect(hrefs(menu)).toEqual(expect.arrayContaining(['/work']));expect(hrefs(menu)).not.toContain('/vm-tasks');// 19/10/2026: no install step at all
     expect([...parseModules('WORK')]).toEqual(['WORK']);expect(parseModules(undefined).size).toBe(0);
   });
   it('a member with only the PayPal right still reaches Kho tài khoản, on its PayPal tab, and nothing more',()=>{
@@ -34,13 +34,10 @@ describe('MoneyToHome menu',()=>{
 });
 describe('old links to the hidden Việc cài proxy page',()=>{
   afterEach(()=>{vi.unstubAllEnvs();vi.resetModules();});
-  it('go to the VM install tab, the orphan filter or the pending filter in Server / VM',()=>{
-    expect(installTarget('vm1','')).toBe('/infrastructure/servers?vm=vm1&tab=install');
-    expect(installTarget(null,'#orphan')).toBe('/infrastructure/servers?view=TASK_ORPHAN');
-    expect(installTarget(null,'')).toBe('/infrastructure/servers?view=PENDING');
-  });
-  it('point at /vm-tasks again once the module is switched on',async()=>{
+  it('go to the VM (its Thay proxy tab) or Server / VM; never back to an install page, even with the old switch on',async()=>{
+    expect(installTarget('vm1','')).toBe('/infrastructure/servers?vm=vm1&tab=proxy');
+    expect(installTarget(null,'#orphan')).toBe('/infrastructure/servers');expect(installTarget(null,'')).toBe('/infrastructure/servers');
     vi.stubEnv('NEXT_PUBLIC_MTH_MODULES','INSTALL_TASKS');vi.resetModules();
-    const {links}=await import('@/lib/links');expect(links.installs({vm:'v1'})).toBe('/vm-tasks?vm=v1');
+    const {links}=await import('@/lib/links');expect(links.installs({vm:'v1'})).toBe('/infrastructure/servers?vm=v1');
   });
 });

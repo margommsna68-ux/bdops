@@ -196,10 +196,12 @@ describe('Tạo lại VM',()=>{
       await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       await db.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED'}});
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      // 19/10/2026: the BLOCKED proxy is not kept as a good proxy, but it stays the VM's position (shown Blocked) so the cell's
+      // "Thay proxy" / "Nhận replace" replaces it; no install step for the new round.
       expect(r.proxyKept).toBe(false);expect(r.proxy).toMatch(/BLOCKED/);
-      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});expect(vm.desiredConfigurationId).toBeNull();expect(vm.installedConfigurationId).toBeNull();
-      expect(await db.vMProxyAllocation.findFirst({where:{vmId:vm.id,endpointId:endpoint.id,releasedAt:null}})).toMatchObject({role:'UNCERTAIN'});expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');
-      expect(await db.vMConfiguration.count({where:{vmId:vm.id}})).toBe(1);
+      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id},include:{desiredConfiguration:true}});expect(vm.desiredConfiguration?.endpointId).toBe(endpoint.id);expect(vm.installedConfigurationId).toBeNull();
+      expect(await db.vMProxyAllocation.findFirst({where:{vmId:vm.id,endpointId:endpoint.id,releasedAt:null}})).toMatchObject({role:'DESIRED'});expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');
+      expect(await db.vMTask.count({where:{vmId:vm.id,status:{in:['PENDING','IN_PROGRESS']}}})).toBe(0);
     }finally{await f.cleanup();}
   });
   it('SUS: recreated without a payout, the PP is not closed, the pending money stays on the old request; late money does not move the new round',async()=>{
@@ -311,37 +313,30 @@ describe('Rà soát nghiệm thu 19/10',()=>{
       await undoOperation(f.scope,op2.id,'',db);expect(await db.earnAppAccount.count({where:{vmId:f.vms[0].id}})).toBe(0);
     }finally{await f.cleanup();}
   });
-  it('4a. BLOCKED proxy at recreation: the old installation is history, never current; the VM shows "Cần thay proxy" and keeps the hold for the replacement flow',async()=>{
+  it('4a. BLOCKED proxy at recreation: the old installation is history; the VM shows the Blocked proxy for the replacement (19/10/2026)',async()=>{
     const f=await setup(1);try{
-      const {statusInfo}=await import('@/components/vm-management/vm-grid/status-actions');const {vmView}=await import('@/server/vm-management/state');
+      const {proxyCellInfo}=await import('@/components/vm-management/vm-grid/ProxyCell');const {vmView}=await import('@/server/vm-management/state');
       const {endpoint,config}=await installProxy(f,0,21);await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       await db.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED'}});
       await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
       const vm=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vms[0].id)!;
-      expect(vm.installed).toBeNull();expect(vm.desired).toBeNull();
-      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,state:'BLOCKED'})]);expect(vm.holds[0].role).not.toBe('INSTALLED');
-      expect(vmView(vm as never)).toBe('REVIEW');
-      const s=statusInfo(vm as never,{assign:true,confirm:true,copy:true,sourceConnected:true});expect(s.label).toBe('Cần thay proxy');expect(s.actions.map(a=>a.kind)).toContain('CHANGE_PROXY');
+      expect(vm.installed).toBeNull();expect(vm.desired?.endpointId).toBe(endpoint.id);
+      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,state:'BLOCKED',role:'DESIRED'})]);
+      expect(vmView(vm as never)).toBe('BLOCKED');expect(proxyCellInfo(vm as never)).toMatchObject({warning:'Blocked',tone:'blocked'});
       expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');// history kept
       expect((await db.vmCycle.findFirstOrThrow({where:{vmId:f.vms[0].id}})).installedConfigurationId).toBe(config.id);
-      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
-      await expect(confirmInstalled(f.scope,{configurationId:config.id,configurationHash:config.configurationHash,expectedVmRevision:v.revision},db,source('vm-ops-21'))).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      expect((await db.vmOperation.findUniqueOrThrow({where:{vmId:f.vms[0].id}}))).toMatchObject({status:'NEW_VM',cycle:2,blockedEndpointId:null});
     }finally{await f.cleanup();}
   });
-  it('4b. a good proxy is kept for the position as a new plan of the new round (LIVE, never NEW); the old confirmation is not current',async()=>{
+  it('4b. a good proxy is kept for the position in the new round (LIVE, never NEW, no install step); the old confirmation is history',async()=>{
     const f=await setup(1);try{
       const {vmView}=await import('@/server/vm-management/state');
       const {endpoint,config}=await installProxy(f,0,22);await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
       const vm=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vms[0].id)!;
       expect(vm.installed).toBeNull();expect(vm.desired).toMatchObject({endpointId:endpoint.id,status:'PLANNED'});expect(vm.desired!.id).not.toBe(config.id);
-      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,role:'DESIRED'})]);expect(vmView(vm as never)).toBe('PENDING');
+      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,role:'DESIRED'})]);expect(vmView(vm as never)).toBe('ASSIGNED');expect(await db.vMTask.count({where:{vmId:vm.id,status:{in:['PENDING','IN_PROGRESS']}}})).toBe(0);
       expect((await db.proxyIP.findUniqueOrThrow({where:{id:endpoint.id}})).inventoryState).toBe('LIVE');
-      // The new round's install is started and confirmed through the normal flow.
-      const next=await db.vMConfiguration.findUniqueOrThrow({where:{id:vm.desired!.id}});await startInstall(f.scope,next.id,db);
-      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
-      await confirmInstalled(f.scope,{configurationId:next.id,configurationHash:next.configurationHash,expectedVmRevision:v.revision},db,source('vm-ops-22'));
-      const after=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===f.vms[0].id)!;expect(after.installed?.id).toBe(next.id);expect(vmView(after as never)).toBe('INSTALLED');
     }finally{await f.cleanup();}
   });
   it('4c. an install started in the old round cannot complete the new round: the old plan is cancelled (kept in history) and a fresh plan is made',async()=>{

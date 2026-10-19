@@ -57,8 +57,8 @@ function Operations({ops}:{ops:Ops}){
   return <>
     <div className="ov-kpis">
       <Kpi href={links.vms()} label="Server / VM" value={`${fmt(t.servers)} / ${fmt(t.vms)}`} hint="đang vận hành"/>
-      <Kpi href={links.vms({view:'INSTALLED'})} label="Đã xác nhận cài" value={t.INSTALLED} tone="green"/>
-      <Kpi href={links.vms({view:'PENDING'})} label="Chờ cài" value={t.PENDING} tone="blue"/>
+      <Kpi href={links.vms({view:'ASSIGNED'})} label="Có proxy" value={t.ASSIGNED} tone="green"/>
+      <Kpi href={links.vms({view:'BLOCKED'})} label="Proxy Blocked" value={t.BLOCKED} tone="red"/>
       <Kpi href={links.vms({view:'REVIEW'})} label="Cần kiểm tra" value={t.REVIEW} tone="amber"/>
       <Kpi href={links.vms({view:'MISSING'})} label="Thiếu proxy" value={t.MISSING} tone="red"/>
     </div>
@@ -76,15 +76,15 @@ function Row({href,label,count,tone,children}:{href:string;label:string;count:nu
 }
 // Short list of what needs handling now: broken proxies, VMs to check, packages to pay, install tasks left open at a VM.
 function Attention({ops}:{ops:Ops}){
-  const overdue=ops.packages.filter(p=>p.daysLeft<0).length,blocked=ops.stock.rows.reduce((a,r)=>a+r.BLOCKED,0),o=ops.orphanTasks;
-  const clear=!blocked&&!ops.totals.REVIEW&&!ops.packages.length&&!o.count;
+  const overdue=ops.packages.filter(p=>p.daysLeft<0).length,blocked=ops.stock.rows.reduce((a,r)=>a+r.BLOCKED,0);
+  const clear=!blocked&&!ops.totals.REVIEW&&!ops.packages.length&&!ops.totals.BLOCKED;
   return <section className="pm-surface ov-card ov-side" aria-labelledby="ov-attention"><div className="ov-card-head"><h2 id="ov-attention">Cần xử lý</h2></div>
     {clear?<p className="ov-empty">Không có việc cần xử lý.</p>:<ul className="ov-list">
       {blocked>0&&<Row href={links.proxies({state:'BLOCKED'})} label="Proxy BLOCKED" count={blocked} tone="red"><small className="ov-sub">báo nhà cung cấp hoặc nhận replace</small></Row>}
+      {ops.totals.BLOCKED>0&&<Row href={links.vms({view:'BLOCKED'})} label="VM dùng proxy Blocked" count={ops.totals.BLOCKED} tone="red"><small className="ov-sub">bấm ô Proxy để thay</small></Row>}
       {ops.totals.REVIEW>0&&<Row href={links.vms({view:'REVIEW'})} label="VM cần kiểm tra" count={ops.totals.REVIEW} tone="amber"/>}
       {ops.packages.length>0&&<Row href={links.packages()} label="Gói proxy cần thanh toán" count={ops.packages.length} tone={overdue?'red':'amber'}>{overdue?<small className="ov-sub">{overdue} quá hạn</small>:null}</Row>}
       {ops.packages.slice(0,3).map(p=><li key={p.id}><Link href={p.link} className={'ov-row ov-row-child ov-'+(p.severity==='error'?'red':p.severity==='warning'?'amber':'blue')}><span className="ov-row-label">{p.title}</span><ChevronRight size={14} className="pm-muted shrink-0"/></Link></li>)}
-      {o.count>0&&<Row href={o.link} label="Việc cài bị bỏ lại" count={o.count} tone="amber"><small className="ov-sub">còn mở, không còn cấu hình chờ cài · đóng tại VM</small></Row>}
     </ul>}</section>;
 }
 function Gaps({ops}:{ops:Ops}){
@@ -95,7 +95,7 @@ function Gaps({ops}:{ops:Ops}){
       <Row href={links.vms({view:'ACCOUNT_MISSING'})} label="Chưa có tài khoản EarnApp" count={g.noAccount} tone="amber"/>
       <Row href={links.vms({view:'PAYPAL_MISSING'})} label="Chưa có PayPal nhận" count={g.noPaypal} tone="amber"/>
     </ul>
-    <p className="pm-muted text-xs px-4 pb-3">Các nhóm có thể trùng nhau (VM chưa có tài khoản thì cũng chưa có PayPal), không cộng thành số VM lỗi. Giao proxy, xác nhận cài, ghi SDK và đăng ký EarnApp là các việc khác nhau.</p></section>;
+    <p className="pm-muted text-xs px-4 pb-3">Các nhóm có thể trùng nhau (VM chưa có tài khoản thì cũng chưa có PayPal), không cộng thành số VM lỗi. Gán proxy, ghi SDK và đăng ký EarnApp là các việc khác nhau.</p></section>;
 }
 function Finance({projectId,o,month,onMonth,fetching}:{projectId:string;o:Overview;month:string;onMonth:(m:string)=>void;fetching:boolean}){
   const utils=trpc.useUtils(),activate=trpc.businessManagement.activateCash.useMutation({onSuccess:()=>{void utils.project.myMembership.invalidate();void utils.businessManagement.invalidate();}});

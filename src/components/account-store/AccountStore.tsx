@@ -1,7 +1,7 @@
 "use client";
 import {formatMoney,roundDecimal} from '@/lib/money-input';
 import {CashDecimal} from '@/server/business-management/usdt-money';
-import {PurchaseMoneyFields} from './PurchaseMoneyFields';
+import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
 import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
 import {useBusinessKey} from '@/components/business-management/shared';
 import {useEffect,useMemo,useRef,useState} from 'react';
@@ -177,6 +177,7 @@ function BatchMoney({b}:{b:Batch}){
 function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){
   const unitWord=batch.kind==='PAYPAL'?'PP':'tài khoản';
   const [money,setMoney]=useState<PurchaseState>(()=>({...emptyPurchase(),quantity:batch.paidQuantity?String(batch.paidQuantity):''})),[date,setDate]=useState(batch.purchasedAt),save=trpc.accountStore.batchCost.useMutation(),keyFor=useBusinessKey();
+  useQuoteExpiry(money.quote);
   const m=readPurchase(money,unitWord);
   return <form className="acc-import m-3" onSubmit={e=>{e.preventDefault();if(!m.payload||save.isLoading)return;const {priceMode,amount,quantity,currency,rate,p2pQuoteToken}=m.payload;const input={projectId,batchId:batch.id,expectedRevision:batch.revision,priceMode,amount,quantity,currency,rate,p2pQuoteToken,date};save.mutate({...input,key:keyFor(input)},{onSuccess:()=>{toast.success('Đã ghi chi phí lô '+batch.code);onSaved();}});}}>
     <h3 className="text-sm font-semibold">Ghi chi phí lô {batch.code} ({batch.received}{batch.kind==='PAYPAL'?' PP':''} đã nhận)</h3>
