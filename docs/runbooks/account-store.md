@@ -289,3 +289,12 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   - The list states "Cộng các khoản được tính: X", which equals the number clicked. Pending, failed, voided and opening rows are shown as "(không cộng)" with their role. Rows after the cut-off day are only counted in a note.
 - **Not counted here:** an EarnApp withdrawal request (EarnWithdrawal) is a different moment and is never added to money received.
 - **Profit is unchanged:** USDT the team received minus costs. Money on PayPal or sent to a collector is not team income.
+
+## Ghi chú Gmail / Apple ID tại ô (20 October 2026)
+
+- Click the note cell (also an empty one) to edit. Up to three lines while not editing; the editor grows to the whole text. Column
+  about 280px by default, resizable with the header handle (kept per browser, `mth-acc-note-width`); text size unchanged.
+- Enter saves, Shift+Enter breaks the line, Esc cancels; Enter while a Vietnamese IME is composing never saves; leaving the cell keeps an
+  unsaved text open. An error stays at the cell with the typed text; "Đã lưu" only after the server saved.
+- `accountStore.setNote` (`setStockNote`): stock-write right, revision check, only `notes` changes (never password, status, batch or cost),
+  journaled (`ACCOUNT_STOCK_NOTE`, undo), same text = nothing written, a retry reuses its key.

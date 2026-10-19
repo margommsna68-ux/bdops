@@ -204,6 +204,7 @@ model VirtualMachine {
   gmailId                  String? // legacy link (before 17 Oct 2026); the current account is EarnAppAccount.vmId
   earnApp                  EarnAppAccount?
   sdkRecord                SdkRecord?               @relation("SdkPlacement")
+  sdkHeld                  SdkRecord[]              @relation("SdkHolding")
   operation                VmOperation?
   proxyHistory             ProxyAssignmentHistory[]
   tasks                    VMTask[]
@@ -1362,14 +1363,14 @@ enum VmOpsStatus {
 }
 
 model VmOperation {
-  id         String         @id @default(cuid())
-  projectId  String
-  vmId       String         @unique
-  vm         VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Restrict)
-  cycle      Int            @default(1)
-  status     VmOpsStatus?
-  statusAt   DateTime?
-  statusById String?
+  id                String         @id @default(cuid())
+  projectId         String
+  vmId              String         @unique
+  vm                VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Restrict)
+  cycle             Int            @default(1)
+  status            VmOpsStatus?
+  statusAt          DateTime?
+  statusById        String?
   // Status before "Blocked" (owner decision 19/10/2026): which proxy caused it, in which round, and the status to bring back when
   // that proxy is replaced. blockedFromKnown=false: the earlier status could not be found in this round's history (restore = Chưa ghi).
   blockedFrom       VmOpsStatus?
@@ -1377,9 +1378,9 @@ model VmOperation {
   blockedEndpointId String?
   blockedCycle      Int?
   blockedAt         DateTime?
-  revision   Int            @default(0)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  revision          Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([projectId])
 }
@@ -1486,6 +1487,12 @@ model SdkRecord {
   code            String
   vmId            String?         @unique
   vm              VirtualMachine? @relation("SdkPlacement", fields: [vmId], references: [id], onDelete: Restrict)
+  // The VM whose SDK list holds the code (owner brief 20/10/2026: one VM keeps many SDKs, to use now or later). Not unique. vmId
+  // (above) stays the one "current" code of the machine; when vmId is set, holderVmId is the same VM.
+  holderVmId      String?
+  holder          VirtualMachine? @relation("SdkHolding", fields: [holderVmId], references: [id], onDelete: Restrict)
+  heldAt          DateTime?
+  heldById        String?
   placedAt        DateTime?
   placedById      String?
   amount          Decimal?        @db.Decimal(18, 6)
@@ -1512,6 +1519,7 @@ model SdkRecord {
 
   @@unique([projectId, code])
   @@index([projectId, linkState])
+  @@index([holderVmId])
 }
 
 // What happened to an SDK code (append-only): recorded, placed / moved / removed with the VM positions as text, money / note old →

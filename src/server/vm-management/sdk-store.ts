@@ -9,6 +9,9 @@ import {normalizeSdk} from './sdk-parse';
 // sdkApply endpoint, recreating a VM and undo.
 // - A VM has at most one current SDK, an SDK at most one current VM (SdkRecord.vmId unique). VirtualMachine.sdkId is a mirror
 //   written only by syncMirror below.
+// - Owner brief 20/10/2026: a VM also keeps a LIST of codes (SdkRecord.holderVmId, many per VM; see sdk-list.ts). The current code is
+//   always in its VM's list; replacing or removing the current code, or recreating the VM, leaves the old code in the list (never
+//   lost, never sent to the store by itself). A code in another VM's list moves only by the explicit transfer below.
 // - Only an UNLINKED code may be reused or moved. LINKED codes keep their account and history and never become usable again;
 //   UNCONFIRMED (old data) is never offered until a person confirms it.
 // - Typing / pasting a code that sits on another VM never takes it: the move is a separate, explicit request naming the source VM
@@ -57,8 +60,9 @@ export async function planPlacement(db:VMReader,projectId:string,vm:SdkVM,code:s
   const target=await db.sdkRecord.findUnique({where:{projectId_code:{projectId,code}}});
   if(!target){if(await foreignHolder(db,projectId,code))return {error:FOREIGN_CODE,code:'OWNER_CONFLICT'};return {plan:{kind:'CREATE',code,current,target:null,source:null}};}
   const refused=refusalOf(target);if(refused)return {error:refused,code:'OWNER_CONFLICT'};
-  if(!target.vmId){if(from)return {error:'SDK '+code+' đang trong kho, không ở VM nguồn đã chọn; tải lại',code:'STALE_PREVIEW'};return {plan:{kind:'PLACE',code,current,target,source:null}};}
-  const source=await db.virtualMachine.findUnique({where:{id:target.vmId},select:vmSelect});
+  const holder=target.holderVmId??target.vmId;
+  if(!holder||holder===vm.id){if(from&&holder!==from.vmId)return {error:'SDK '+code+' đang trong kho, không ở VM nguồn đã chọn; tải lại',code:'STALE_PREVIEW'};return {plan:{kind:'PLACE',code,current,target,source:null}};}
+  const source=await db.virtualMachine.findUnique({where:{id:holder},select:vmSelect});
   if(!source)return {error:'Không đọc được VM đang giữ SDK; tải lại',code:'NOT_FOUND'};
   if(!from||from.vmId!==source.id)return {error:'SDK '+code+' đang ở '+placeLabel(source)+'. Dùng "Chọn SDK đã lưu" → "Dùng cho VM này" để chuyển rõ nguồn → đích; web không tự lấy mã',code:'OWNER_CONFLICT'};
   if(source.revision!==from.expectedRevision)return {error:placeLabel(source)+' vừa được thay đổi; tải lại rồi chọn lại',code:'STALE_PREVIEW'};
@@ -104,32 +108,34 @@ export async function applyPlacement(tx:Tx,ctx:WriteCtx,vm:SdkVM,plan:PlacementP
   const previous=plan.current;
   if(previous){
     await ctx.images.remember('SDK',previous.id);
-    await tx.sdkRecord.update({where:{id:previous.id},data:{vmId:null,revision:{increment:1}}});
-    await event(tx,ctx,previous.id,'REMOVE',{fromVmId:vm.id,fromLabel:here,detail:{replacedBy:plan.code,keptAs:previous.linkState==='LINKED'?'HISTORY':'STORE'}});
+    // The old current code stays in this VM's SDK list (with its money, note and state); it only stops being the current one.
+    await tx.sdkRecord.update({where:{id:previous.id},data:{vmId:null,holderVmId:vm.id,revision:{increment:1}}});
+    await event(tx,ctx,previous.id,'REMOVE',{fromVmId:vm.id,fromLabel:here,detail:{replacedBy:plan.code,keptAs:'VM_LIST'}});
   }
   let target:SdkRecord|null=plan.target;
   if(plan.kind==='CREATE'){
     const info0=checkInfo(info);
-    target=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code!,vmId:null,linkState:'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
+    target=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code!,vmId:null,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
       ...(info0.amount!=null?{amount:info0.amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),...(info0.note?{note:info0.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});
     await ctx.images.remember('SDK',target.id,true);
     await event(tx,ctx,target.id,'CREATE',{detail:{amount:info0.amount??null,note:info0.note??null}});
   }
   if(plan.kind==='MOVE'){
     const source=plan.source!;await ctx.images.remember('SDK_SLOT',source.id);await ctx.images.remember('SDK',target!.id);
-    await tx.sdkRecord.update({where:{id:target!.id},data:{vmId:null}});await syncMirror(tx,source.id,ctx.actorId,ctx.now);
+    await tx.sdkRecord.update({where:{id:target!.id},data:{vmId:null,holderVmId:null}});await syncMirror(tx,source.id,ctx.actorId,ctx.now);
     await tx.vMSdkHistory.create({data:{projectId:ctx.projectId,vmId:source.id,previousSdk:target!.code,newSdk:null,actorId:ctx.actorId,recordedAt:ctx.now,note:'Chuyển SDK sang '+here}});
   }
   if(target&&plan.kind!=='MOVE')await ctx.images.remember('SDK',target.id);
   if(target){
-    await tx.sdkRecord.update({where:{id:target.id},data:{vmId:vm.id,placedAt:ctx.now,placedById:ctx.actorId,revision:{increment:1}}});
+    const held=target.holderVmId===vm.id&&plan.kind!=='MOVE';
+    await tx.sdkRecord.update({where:{id:target.id},data:{vmId:vm.id,holderVmId:vm.id,...(held?{}:{heldAt:ctx.now,heldById:ctx.actorId}),placedAt:ctx.now,placedById:ctx.actorId,revision:{increment:1}}});
     if(plan.kind!=='CREATE')await event(tx,ctx,target.id,plan.kind==='MOVE'?'MOVE':'PLACE',{fromVmId:plan.source?.id??null,fromLabel:plan.source?placeLabel(plan.source):null,toVmId:vm.id,toLabel:here});
     else await event(tx,ctx,target.id,'PLACE',{toVmId:vm.id,toLabel:here});
     if(plan.kind!=='CREATE')await applyInfo(tx,ctx,{...target,vmId:vm.id},info);
   }
   await syncMirror(tx,vm.id,ctx.actorId,ctx.now);
   await tx.vMSdkHistory.create({data:{projectId:ctx.projectId,vmId:vm.id,previousSdk:previous?.code??null,newSdk:target?.code??null,actorId:ctx.actorId,recordedAt:ctx.now,note:plan.kind==='MOVE'?'Chuyển từ '+placeLabel(plan.source!):plan.kind==='REMOVE'?'Gỡ SDK khỏi VM (mã vẫn giữ)':ctx.via}});
-  const kept=previous?(previous.linkState==='LINKED'?'; '+previous.code+' giữ trong lịch sử':'; '+previous.code+' giữ trong kho'):'';
+  const kept=previous?'; '+previous.code+' vẫn trong danh sách SDK của VM':'';
   return {changed:true,message:(plan.kind==='REMOVE'?'Đã gỡ SDK khỏi VM':plan.kind==='MOVE'?'Đã chuyển '+plan.code+' từ '+placeLabel(plan.source!):plan.kind==='CREATE'?'Đã ghi SDK mới':'Đã dùng SDK trong kho')+kept};
 }
 async function loadVM(db:VMReader,projectId:string,vmId:string){
@@ -187,14 +193,15 @@ export async function confirmLegacySdk(scope:ActorScope,input:{key:string;sdkId:
     return {changed:true,message:input.decision==='LINKED'?'Đã ghi SDK '+sdk.code+' từng nối EarnApp (chỉ để tra cứu)':'Đã xác nhận SDK '+sdk.code+' chưa từng nối; dùng lại được'};
   },db);
 }
-/** Recreating the VM: the machine gets a new SDK for real, so the current code leaves the position (store if unlinked, history if linked). */
+/** Recreating the VM (same id / code, new round): the current code stops being current but stays in the VM's SDK list with its state.
+ *  An unused code can serve the next account; a used one keeps its mark and history and is never handed out again. */
 export async function releaseForRecreate(tx:Tx,images:BusinessCollector,projectId:string,actorId:string,vm:{id:string;code:string;server:{code:string}},cycle:number){
   const sdk=await tx.sdkRecord.findUnique({where:{vmId:vm.id}});if(!sdk)return null;const now=new Date();
   await images.remember('SDK_SLOT',vm.id);await images.remember('SDK',sdk.id);
-  await tx.sdkRecord.update({where:{id:sdk.id},data:{vmId:null,revision:{increment:1}}});
-  await event(tx,{projectId,actorId,images,now,via:'Tạo lại VM'},sdk.id,'RECREATE',{fromVmId:vm.id,fromLabel:where(vm),detail:{closedCycle:cycle,keptAs:sdk.linkState==='LINKED'?'HISTORY':sdk.linkState==='UNLINKED'?'STORE':'UNCONFIRMED'}});
+  await tx.sdkRecord.update({where:{id:sdk.id},data:{vmId:null,holderVmId:vm.id,revision:{increment:1}}});
+  await event(tx,{projectId,actorId,images,now,via:'Tạo lại VM'},sdk.id,'RECREATE',{fromVmId:vm.id,fromLabel:where(vm),detail:{closedCycle:cycle,keptAs:'VM_LIST',state:sdk.linkState}});
   await syncMirror(tx,vm.id,actorId,now);
-  await tx.vMSdkHistory.create({data:{projectId,vmId:vm.id,previousSdk:sdk.code,newSdk:null,actorId,note:'Tạo lại VM: SDK lượt '+cycle+(sdk.linkState==='LINKED'?' vào lịch sử':' về kho')}});
+  await tx.vMSdkHistory.create({data:{projectId,vmId:vm.id,previousSdk:sdk.code,newSdk:null,actorId,note:'Tạo lại VM: SDK lượt '+cycle+' vẫn trong danh sách SDK của VM'+(sdk.linkState==='LINKED'?' (đã dùng)':'')}});
   return sdk.code;
 }
 // ---- Kho SDK paste: SDK | Tiền tích luỹ USD | Ghi chú ----------------------------------------------------------------------------
@@ -221,7 +228,7 @@ export interface StoreRow {line:number;code:string;outcome:'NEW'|'UPDATE'|'SAME'
 export async function previewSdkStore(scope:ActorScope,input:{text:string},db:PrismaClient=prisma){
   await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
   const lines=parseStoreLines(input.text);if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng mỗi đợt');
-  const codes=Array.from(new Set(lines.map(l=>l.code))),records=await db.sdkRecord.findMany({where:{projectId:scope.projectId,code:{in:codes}},include:{vm:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}}}});
+  const codes=Array.from(new Set(lines.map(l=>l.code))),records=(await db.sdkRecord.findMany({where:{projectId:scope.projectId,code:{in:codes}},include:{vm:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}},holder:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}}}})).map(r=>({...r,vm:r.holder||r.vm}));
   const byCode=new Map(records.map(r=>[r.code,r])),seen=new Map<string,number[]>();for(const l of lines)seen.set(l.code,[...(seen.get(l.code)||[]),l.line]);
   const rows:StoreRow[]=[];
   for(const l of lines){
@@ -274,9 +281,11 @@ export async function updateSdkInfo(scope:ActorScope,input:{key:string;sdkId:str
 // ---- Reads -------------------------------------------------------------------------------------------------------------------------
 export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
   await authorizeVM(scope,'READ',db);
-  const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:{select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}},linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
-  return rows.map(r=>({id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,note:r.note,state:r.linkState,
-    vm:r.vm?{id:r.vm.id,code:r.vm.code,serverId:r.vm.serverId,revision:r.vm.revision,server:r.vm.server.code,deleted:!!(r.vm.archivedAt||r.vm.server.archivedAt)}:null,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()}));
+  const vmPick={select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}} as const;
+  const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
+  // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,note:r.note,state:r.linkState,
+    vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){
   await authorizeVM(scope,'READ',db);

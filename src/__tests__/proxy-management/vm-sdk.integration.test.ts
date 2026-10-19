@@ -1,3 +1,4 @@
+import {removeVmSdk} from '@/server/vm-management/sdk-list';
 import {afterAll,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {Prisma} from '@prisma/client';
@@ -80,6 +81,9 @@ it('explicit clear frees the SDK for another VM and undo restores the previous S
     expect((await readSdkHistory(f.scope,f.vm.id,db))[0]).toMatchObject({previousSdk:SDK_B,newSdk:SDK_A,note:expect.stringMatching(/Hoàn tác/)});
     await applySdkUpdate(f.scope,{key:randomUUID(),items:[{vmId:f.vm.id,sdk:null,clear:true,expectedRevision:await f.revision(f.vm.id)}]},db);
     expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).sdkId).toBeNull();
+    // Clearing the current code keeps it in the VM's SDK list (brief 20/10/2026); sending it back to the store frees it for another VM.
+    const kept=await db.sdkRecord.findFirstOrThrow({where:{code:SDK_A,projectId:f.scope.projectId}});expect(kept.holderVmId).toBe(f.vm.id);
+    await removeVmSdk(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:1,sdkId:kept.id,expectedRevision:kept.revision},db);
     const moved=await applySdkUpdate(f.scope,{key:randomUUID(),items:[{vmId:f.vm2.id,sdk:SDK_A,expectedRevision:await f.revision(f.vm2.id)}]},db);expect(moved.updated).toBe(1);
     const stale=(await listOperations(f.scope,db)).filter(o=>o.kind==='VM_SDK_RECORD').at(-1)!;await expect(undoOperation(f.scope,stale.id,'Quá muộn',db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
     const missing=(await readVMWorkspace(f.scope,db)).vms.filter(v=>!v.sdk).map(v=>v.code);expect(missing).toEqual(['VM_001','VM_001']);

@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {router,protectedProcedure} from '../trpc';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {domain} from './businessManagement';
-import {previewStockImport,commitStockImport,recordBatchCost,setStockStatus,addPaypalEmails} from '../account-store/inventory';
+import {previewStockImport,commitStockImport,recordBatchCost,setStockNote,setStockStatus,addPaypalEmails} from '../account-store/inventory';
 import {ledgerRights,readPaypalLedger,readPaypalEntries,checkReceipts,recordReceipts,recordOpening,recordTransfer} from '../business-management/paypal-ledger';
 import {previewLinks,applyLinks,planAutoLinks,markEarnAppRegistered} from '../account-store/links';
 import {readAccountStore,readVmAccounts} from '../account-store/read';
@@ -21,6 +21,7 @@ export const accountStoreRouter=router({
  importPreview:protectedProcedure.input(stockImport).mutation(({ctx,input})=>domain(async()=>previewStockImport(await scope(ctx,input.projectId),input,ctx.prisma))),
  importCommit:protectedProcedure.input(stockImport.extend({key})).mutation(({ctx,input})=>domain(async()=>commitStockImport(await scope(ctx,input.projectId),input,ctx.prisma))),
  batchCost:protectedProcedure.input(project.extend({batchId:id,expectedRevision:revision,priceMode:z.enum(['UNIT','TOTAL']),amount:money,quantity,currency:z.string().max(8),rate:money.nullish(),date:z.string().length(10).nullish(),p2pQuoteToken:z.string().max(4000).nullish(),key})).mutation(({ctx,input})=>domain(async()=>recordBatchCost(await scope(ctx,input.projectId),input,ctx.prisma))),
+ setNote:protectedProcedure.input(project.extend({id,expectedRevision:revision,notes:z.string().max(4000),key})).mutation(({ctx,input})=>domain(async()=>setStockNote(await scope(ctx,input.projectId),input,ctx.prisma))),
  setStatus:protectedProcedure.input(project.extend({kind:z.enum(['LOGIN','PAYPAL']),items:z.array(z.object({id,expectedRevision:revision})).min(1).max(1000),status:z.string().max(40),key})).mutation(({ctx,input})=>domain(async()=>setStockStatus(await scope(ctx,input.projectId),input,ctx.prisma))),
  linkPreview:protectedProcedure.input(project.extend({text:z.string().max(200000).optional(),items:z.array(link).max(1000).optional()})).mutation(({ctx,input})=>domain(async()=>previewLinks(await scope(ctx,input.projectId),input,ctx.prisma))),
  linkApply:protectedProcedure.input(project.extend({key,items:z.array(link.extend({expectedRevision:revision})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>applyLinks(await scope(ctx,input.projectId),input,ctx.prisma))),

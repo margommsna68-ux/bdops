@@ -53,7 +53,7 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   const sum=(k:VmBucket)=>perServer.reduce((a,s)=>a+s[k],0);
   const accountOf=new Map((accounts||[]).map(a=>[a.vmId,a.earnApp]));
   // Gaps overlap (a VM without an account has no PayPal either); they are never added up into one "VM lỗi" number.
-  const gaps={noSdk:vms.filter(v=>!v.sdk).length,noAccount:accounts?vms.filter(v=>!accountOf.get(v.id)).length:null,noPaypal:accounts?vms.filter(v=>!accountOf.get(v.id)?.paypal).length:null};
+  const gaps={noSdk:vms.filter(v=>!v.sdks.length&&!v.sdk).length,noAccount:accounts?vms.filter(v=>!accountOf.get(v.id)).length:null,noPaypal:accounts?vms.filter(v=>!accountOf.get(v.id)?.paypal).length:null};
   // Proxy stock: the registry's current view (Đang quản lý), grouped by "Từ nhóm" and state exactly like its filters.
   type StockRow={key:string;label:string;total:number}&Record<StockBucket,number>;
   const stock=new Map<string,StockRow>();

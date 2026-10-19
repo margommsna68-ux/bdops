@@ -240,6 +240,22 @@ export async function recordBatchCost(scope:ActorScope,input:{batchId:string;exp
 export const LOGIN_STATUS:GmailStatus[]=['ACTIVE','SUSPENDED','NEEDS_RECOVERY','NEEDS_2FA_UPDATE','BLOCKED','DISABLED'];
 export const PP_STATUS:PayPalStatus[]=['ACTIVE','LIMITED','SUSPENDED','CLOSED','PENDING_VERIFY'];
 // Status in the table cell or for many rows: same value = nothing written. Error / stopped accounts keep their links and history.
+export const STOCK_NOTE_MAX=2000;
+/** Note of one Gmail / Apple ID, edited in its cell (owner brief 20/10/2026): only the note changes (never password, status, batch
+ *  or cost), against the revision the person saw; blank text clears it; the same text writes nothing; journaled with undo. */
+export async function setStockNote(scope:ActorScope,input:{id:string;expectedRevision:number;notes:string;key:string},db:PrismaClient=prisma){
+  const next=input.notes.replace(/\r/g,'').trim()||null;if(next&&next.length>STOCK_NOTE_MAX)throw new ProxyDomainError('INVALID_INPUT','Ghi chú tối đa '+STOCK_NOTE_MAX+' ký tự');
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'ACCOUNT_STOCK_NOTE',module:area('LOGIN'),skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+    assertStockWrite(current,'LOGIN');
+    const old=await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}});
+    if(!old)throw new ProxyDomainError('NOT_FOUND','Tài khoản không còn trong kho');
+    if((old.notes??null)===next)return {changed:false,notes:old.notes,revision:old.revision,message:'Không thay đổi'};
+    if(old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','Tài khoản vừa được sửa ở nơi khác; tải lại (nội dung đang nhập được giữ)');
+    await images.remember('GMAIL',old.id);
+    const row=await tx.gmailAccount.update({where:{id:old.id},data:{notes:next,revision:{increment:1}}});
+    return {changed:true,notes:row.notes,revision:row.revision,message:'Đã lưu'};
+  },db);
+}
 export async function setStockStatus(scope:ActorScope,input:{kind:StockKind;items:{id:string;expectedRevision:number}[];status:string;key:string},db:PrismaClient=prisma){
   const list:string[]=input.kind==='LOGIN'?LOGIN_STATUS:PP_STATUS;
   if(!list.includes(input.status)||!input.items.length||input.items.length>1000)throw new ProxyDomainError('INVALID_INPUT');

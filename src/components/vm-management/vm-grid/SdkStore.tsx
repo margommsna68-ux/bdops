@@ -14,7 +14,7 @@ import {SdkTimeline,placeText,stateClass,type StoreSdk} from './SdkCell';
 type Preview=inferRouterOutputs<AppRouter>['vmManagement']['sdkStorePreview'];
 type ApplyResult=inferRouterOutputs<AppRouter>['vmManagement']['sdkStoreApply'];
 const PAGE=50;
-const STATE_CHIPS:{key:SdkStateFilter;label:string}[]=[{key:'FREE',label:'Chưa nối'},{key:'UNCONFIRMED',label:'Chưa xác nhận'},{key:'LINKED',label:'Đã nối (lịch sử)'},{key:'ALL',label:'Tất cả'}];
+const STATE_CHIPS:{key:SdkStateFilter;label:string}[]=[{key:'FREE',label:'Chưa dùng'},{key:'UNCONFIRMED',label:'Chưa xác nhận'},{key:'LINKED',label:'Đã dùng'},{key:'ALL',label:'Tất cả'}];
 const matchState=(r:StoreSdk,f:SdkStateFilter)=>f==='ALL'||(f==='FREE'?r.state==='UNLINKED':r.state===f);
 const matchPlace=(r:StoreSdk,f:SdkPlaceFilter)=>f==='ALL'||(f==='STORE'?!r.vm:!!r.vm);
 function sortRows(rows:StoreSdk[],sort:SdkSort){
@@ -39,7 +39,7 @@ export function SdkStorePanel({projectId,url,onUrl,canEdit,maxHeight,onClose,onO
   const inPlace=searched.filter(r=>matchPlace(r,url.place)),rows=useMemo(()=>sortRows(inPlace.filter(r=>matchState(r,url.state)),url.sort),[inPlace,url.state,url.sort]);
   const paged=pageOf(rows,url.page,PAGE),hasDraft=useHasPasteDraft(projectId);
   return <div className="vm-sdk-store" style={{maxHeight}}>
-    <div className="vm-sdk-store-head"><div><h2>Kho SDK</h2><p className="pm-muted text-xs">Dùng chung mọi server của dự án. Chỉ SDK chưa từng nối EarnApp mới dùng lại hoặc chuyển VM được. Tiền là số tích luỹ người vận hành ghi, không phải thu / chi.</p></div>
+    <div className="vm-sdk-store-head"><div><h2>Kho SDK</h2><p className="pm-muted text-xs">Dùng chung mọi server của dự án, cùng bản ghi với danh sách SDK ở từng VM. Chỉ SDK chưa dùng mới thêm vào VM hoặc chuyển VM được; mã đã dùng chỉ để tra cứu. Tiền là số tích luỹ người vận hành ghi, không phải thu / chi.</p></div>
       <div className="flex gap-2 items-center">{canEdit&&<button type="button" className={'pm-button'+(pasting?' pm-button-primary':'')} aria-expanded={pasting} onClick={()=>setPasting(p=>!p)}><ClipboardPaste size={15}/>Dán SDK vào kho{hasDraft&&!pasting?<span className="vm-sdk-draft">● nháp</span>:null}</button>}<button type="button" className="pm-icon-button" aria-label="Đóng Kho SDK" title="Đóng Kho SDK" onClick={onClose}><X size={16}/></button></div></div>
     {pasting&&canEdit&&<StorePaste projectId={projectId}/>}
     <div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm SDK, server, VM" placeholder="Tìm SDK, server, VM, ghi chú…" value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm SDK" onClick={()=>setQ('')}><X size={14}/></button>}</label>
@@ -58,7 +58,7 @@ function StoreRow({projectId,r,open,onToggle,canEdit,onOpenVm}:{projectId:string
   return <><tr className={open?'vm-row-active':''}>
     <td><button type="button" className="vm-sdk-store-code" aria-expanded={open} onClick={onToggle}>{open?<ChevronDown size={13}/>:<ChevronRight size={13}/>}<code className="vm-sdk">{r.code}</code></button><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+r.code} onClick={()=>void navigator.clipboard?.writeText(r.code).then(()=>toast.success('Đã copy SDK',{duration:1200}))}><Copy size={13}/></button></td>
     <td className="whitespace-nowrap">{r.amount!==null?formatSdkAmount(r.amount):<span className="pm-muted">Chưa ghi tiền</span>}{r.amountAt&&<div className="pm-muted text-xs">{localDate(r.amountAt,true)}</div>}</td>
-    <td>{r.vm?<button type="button" className="pm-link text-left" title="Mở VM trong bảng" onClick={()=>onOpenVm(r.vm!.id)}>Đang ở {placeText(r)}</button>:<span className="pm-muted">Trong kho</span>}</td>
+    <td>{r.vm?<button type="button" className="pm-link text-left" title="Mở VM trong bảng" onClick={()=>onOpenVm(r.vm!.id)}>{r.current?'Hiện hành ở ':'Trong danh sách '}{placeText(r)}</button>:<span className="pm-muted">Trong kho</span>}</td>
     <td><span className={stateClass(r.state)}>{SDK_STATE_LABEL[r.state]}</span>{r.state==='LINKED'&&r.linkedLogin&&<div className="pm-muted text-xs vm-ellipsis" title={r.linkedLogin}>{r.linkedLogin}</div>}</td>
     <td className="vm-sdk-store-note">{r.note?<span className="vm-clamp2" title={r.note}>{r.note}</span>:<span className="pm-muted">—</span>}</td></tr>
     {open&&<tr className="vm-sdk-store-detail"><td colSpan={5}><StoreDetail projectId={projectId} r={r} canEdit={canEdit}/></td></tr>}</>;
@@ -80,8 +80,8 @@ function StoreDetail({projectId,r,canEdit}:{projectId:string;r:StoreSdk;canEdit:
   const keys=(e:React.KeyboardEvent,multi=false)=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!(multi&&e.shiftKey)){e.preventDefault();save();}if(e.key==='Escape'){setTouched(false);setAmount(amountInput(r.amount));setNote(r.note||'');}};
   return <div className="vm-sdk-store-detail-body">
     <div className="space-y-2">
-      {r.state==='UNCONFIRMED'&&<div className="pm-review text-sm"><p>Dữ liệu cũ: web chưa có bằng chứng mã này đã hay chưa từng nối EarnApp, nên chưa cho dùng lại.</p>
-        {canEdit&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Xác nhận chưa từng nối</button><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'LINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Đã từng nối (chỉ để tra cứu)</button></div>}</div>}
+      {r.state==='UNCONFIRMED'&&<div className="pm-review text-sm"><p>Dữ liệu cũ: web chưa có bằng chứng mã này đã hay chưa từng dùng cho EarnApp, nên chưa cho dùng lại.</p>
+        {canEdit&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Xác nhận chưa từng dùng</button><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'LINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Đã từng dùng (chỉ để tra cứu)</button></div>}</div>}
       {canEdit?<><div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" placeholder="Chưa ghi tiền" aria-label={'Tiền tích luỹ '+r.code} value={amount} disabled={busy} onChange={edit(setAmount)} onKeyDown={e=>keys(e)}/></label>
         <label className="pm-label text-xs">Ghi chú<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú '+r.code} value={note} disabled={busy} onChange={edit(setNote)} onKeyDown={e=>keys(e,true)}/></label></div>
         {amountError&&<p className="vm-cell-error" role="alert">{amountError}</p>}

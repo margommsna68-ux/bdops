@@ -283,3 +283,24 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 @media (max-width:640px){.vm-proxy-pop{width:calc(100vw - 16px)}}
 /* SUS chip (dark red) in the light theme: its count used the page text colour (dark on dark red). Light theme only; Tối / Vàng kim already read well, Đồng ấm has its own rule. */
 html:not([data-theme]) .vm-chip.vm-ops-severe strong{color:#fff}
+/* Kho tài khoản: note cell edited in place (owner brief 20/10/2026). Width set by the header handle; three lines until opened. */
+.acc-note-th{position:relative}.acc-note-resize{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:2;touch-action:none}.acc-note-resize:hover,.acc-note-resize:focus-visible{background:var(--ds-border-strong)}
+.acc-note-td{vertical-align:top;font-size:13px;line-height:1.45}
+.acc-note-view{white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;min-height:22px;border-radius:6px;padding:2px 4px;margin:-2px -4px}
+.acc-note-view.expanded{display:block;-webkit-line-clamp:unset}
+.acc-note-view.editable{cursor:text}.acc-note-view.editable:hover{background:var(--ds-hover);box-shadow:inset 0 0 0 1px var(--ds-border)}
+.acc-note-input{resize:none;overflow:hidden;min-height:60px;font-size:13px;line-height:1.45;white-space:pre-wrap}
+.acc-note-help{display:block;margin-top:3px;font-size:11px;color:var(--ds-text-muted)}
+.acc-note-saved{display:inline-block;margin-top:3px;font-size:11px;font-weight:600;color:var(--ds-text-secondary)}
+/* SDK list of a VM (owner brief 20/10/2026): code + copy | money | note | Đã dùng; unused first. Tokens only, so every theme follows. */
+.vm-sdk-list-pop{width:620px;max-width:calc(100vw - 16px)}
+.vm-sdk-list{width:100%;border-collapse:collapse;font-size:12px;margin:4px 0}.vm-sdk-list th{position:static;font-size:11px;text-transform:none;letter-spacing:0;padding:4px 6px;text-align:left;background:var(--ds-table-header);color:var(--ds-text-secondary);border-bottom:1px solid var(--ds-border)}
+.vm-sdk-list td{padding:5px 6px;vertical-align:top;border-bottom:1px solid var(--ds-border);font-size:12px}.vm-sdk-list tbody tr:nth-child(even){background:transparent}
+.vm-sdk-list tr.vm-sdk-used td{color:var(--ds-text-muted)}.vm-sdk-list tr.vm-sdk-used .vm-sdk{text-decoration:line-through;text-decoration-color:var(--ds-border-strong)}
+.vm-sdk-full{word-break:break-all;white-space:normal}.vm-sdk-current{display:inline-block;margin-top:2px;font-size:10px;font-weight:600;padding:0 6px;border-radius:999px;border:1px solid var(--ds-border-strong);color:var(--ds-text-secondary)}
+.vm-sdk-value{display:block;width:100%;text-align:left;border-radius:5px;padding:2px 4px;margin:-2px -4px;font-size:12px;white-space:pre-wrap;word-break:break-word}.vm-sdk-value:not(:disabled):hover{background:var(--ds-hover);box-shadow:inset 0 0 0 1px var(--ds-border)}
+.vm-sdk-note{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.vm-sdk-inline{padding:3px 6px;font-size:12px;min-width:90px}
+.vm-sdk-used-check{display:inline-flex;align-items:flex-start;gap:5px}.vm-sdk-used-check input{margin-top:2px;width:15px;height:15px}
+.vm-sdk-add{display:grid;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--ds-border)}.vm-sdk-add-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,1fr) auto;gap:6px}
+@media (max-width:640px){.vm-sdk-add-grid{grid-template-columns:1fr}.vm-sdk-list{font-size:11px}.vm-sdk-list td,.vm-sdk-list th{padding:4px 3px}}
+.vm-sdk-list td:first-child{min-width:200px}.vm-sdk-list td:nth-child(2){min-width:96px}

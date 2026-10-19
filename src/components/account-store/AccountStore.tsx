@@ -16,6 +16,7 @@ import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy} from '@/components/business-management/AccountsWorkspace';
 import {viAmount,viDate} from './batch-format';
+import {NoteCell,NoteHeader,useNoteWidth} from './NoteCell';
 import {PaypalStock} from './PaypalStock';
 import {ImportPanel,appendToBatch,discardDraft,importDraft,type StockKind} from './ImportPanel';
 import {openView,readAccountUrl,sameQuery,switchKind,writeAccountUrl,type AccountKind,type AccountUrl} from './account-url';
@@ -114,8 +115,9 @@ function useSelection(rows:{id:string}[],selected:Set<string>,setSelected:(s:Set
 }
 function LoginTable({projectId,rows,store,selected,setSelected,onCopy,onBatch,onSaved}:{projectId:string;rows:Login[];store:Store|undefined;selected:Set<string>;setSelected:(s:Set<string>)=>void;onCopy:(l:Login)=>void;onBatch:(b:string)=>void;onSaved:()=>void}){
   const status=useStatus(projectId,'LOGIN',onSaved),sel=useSelection(rows,selected,setSelected),write=!!store?.rights.writeLogins,shown=rows.slice(0,500);
+  const [noteWidth,setNoteWidth]=useNoteWidth();
   return <><BulkStatus count={selected.size} options={LOGIN_STATUS} busy={status.busy} onApply={s=>void status.save(rows.filter(r=>selected.has(r.id)),s).then(()=>setSelected(new Set()))}/>
-    <div className="pm-table-scroll"><table className="pm-table"><thead><tr>{write&&<th><input type="checkbox" aria-label="Chọn tất cả" checked={sel.all} onChange={sel.toggleAll}/></th>}<th>Tài khoản</th><th>Loại</th><th>Kho / VM</th><th>PayPal của EarnApp</th><th>Tình trạng</th><th>Lô</th>{store?.rights.money&&<th>Giá phân bổ</th>}<th>Ghi chú</th></tr></thead>
+    <div className="pm-table-scroll"><table className="pm-table"><thead><tr>{write&&<th><input type="checkbox" aria-label="Chọn tất cả" checked={sel.all} onChange={sel.toggleAll}/></th>}<th>Tài khoản</th><th>Loại</th><th>Kho / VM</th><th>PayPal của EarnApp</th><th>Tình trạng</th><th>Lô</th>{store?.rights.money&&<th>Giá phân bổ</th>}<NoteHeader width={noteWidth} onWidth={setNoteWidth}/></tr></thead>
       <tbody>{shown.map(l=><tr key={l.id}>{write&&<td><input type="checkbox" aria-label={'Chọn '+l.email} checked={selected.has(l.id)} onChange={()=>sel.toggle(l.id)}/></td>}
         <td className="whitespace-nowrap"><span className="inline-flex items-center gap-1"><strong>{l.email}</strong>{store?.rights.copy&&l.credentialsAvailable&&<button type="button" className="vm-cell-icon" aria-label={'Copy đăng nhập '+l.email} title="Copy đăng nhập (cần PIN)" onClick={()=>onCopy(l)}><Copy size={13}/></button>}</span></td>
         <td>{l.type?TYPE[l.type]:<span className="text-red-600 text-xs">Chưa chọn loại</span>}</td>
@@ -124,7 +126,7 @@ function LoginTable({projectId,rows,store,selected,setSelected,onCopy,onBatch,on
         <td>{write?<select className="pm-input acc-status-select" aria-label={'Tình trạng '+l.email} value={l.status} disabled={status.busy} onChange={e=>void status.save([l],e.target.value)}>{Object.entries(LOGIN_STATUS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>:LOGIN_STATUS[l.status]}</td>
         <td className="whitespace-nowrap">{l.batch?<button className="underline text-xs" onClick={()=>onBatch(l.batch!)}>{l.batch}</button>:<span className="pm-muted">—</span>}</td>
         {store?.rights.money&&<td className="text-xs">{l.price?`${money(l.price.amount)} ${l.price.currency}`:<span className="pm-muted">{PRICE_EMPTY[l.priceState]}</span>}</td>}
-        <td className="max-w-xs text-xs whitespace-pre-wrap">{l.notes||''}</td></tr>)}
+        <NoteCell projectId={projectId} id={l.id} email={l.email} notes={l.notes} revision={l.revision} canEdit={write} width={noteWidth} onSaved={onSaved}/></tr>)}
         {!rows.length&&<tr><td colSpan={9} className="pm-empty">{store?'Chưa có tài khoản trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div>
     {rows.length>shown.length&&<p className="pm-muted text-xs p-3">Hiện 500 / {rows.length} dòng; dùng ô tìm hoặc bộ lọc để thu hẹp.</p>}
     {store?.rights.money&&<p className="pm-muted text-xs p-3">Giá phân bổ chỉ để tham khảo: tiền thực trả đã ghi một lần trong Chi phí theo lô, không cộng thêm vào lợi nhuận.</p>}</>;

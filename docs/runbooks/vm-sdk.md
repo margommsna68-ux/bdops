@@ -118,3 +118,33 @@ Migration `20261019150000_sdk_store` (chỉ thêm), đã chạy thử trên bả
 - **Mã chỉ còn trong lịch sử SDK hoặc lượt đã đóng:** vào kho, **Chưa xác nhận**.
 - **Mỗi mã** có một sự kiện MIGRATE. Không dùng tình trạng VM hay việc thiếu account làm bằng chứng chưa nối.
 - **Số trên host trước migration** (đọc 19/10): 0 VM có SDK, 0 thao tác ghi SDK, nên host không có mã nào để chuyển.
+
+## Nhiều SDK tại một VM (yêu cầu chủ dự án 20/10/2026, thay các quy tắc cũ nếu mâu thuẫn)
+
+- Một VM lưu **danh sách SDK** (`SdkRecord.holderVmId`, nhiều mã mỗi VM) để dùng ngay hoặc để sau. Thêm mã không ghi đè, không làm mất
+  mã trước, không đổi SDK hiện hành (`SdkRecord.vmId`, vẫn chỉ một mã; hiện là nhãn "hiện hành" trong danh sách). Thay / gỡ mã hiện hành
+  hoặc tạo lại VM thì mã cũ **vẫn ở danh sách của VM** (trước đây: về kho / lịch sử).
+- **Đã dùng** = mã đã đưa vào một tài khoản EarnApp (`linkState LINKED`). Tick ở danh sách là ghi ngay (một lệnh, không dialog), lưu người,
+  thời gian, lượt VM; không bỏ tick được, hoàn tác bị từ chối, không cấp lại cho VM / tài khoản khác. Không suy ra tài khoản từ tài khoản
+  hiện tại của VM: `linkedEarnAppId` để trống nếu chưa biết. Lưu, copy, thêm vào VM hay chuyển VM không bao giờ tự đánh dấu Đã dùng.
+- Ô SDK: mã chưa dùng đầu tiên + Copy, và "3 SDK · 2 chưa dùng". Bấm mở danh sách cạnh ô: Mã + Copy (+ lịch sử) | Tiền tích luỹ USD |
+  Ghi chú | Đã dùng; chưa dùng trước, đã dùng sau. Tiền / ghi chú sửa tại chỗ (Enter lưu, Esc huỷ) trên cùng bản ghi với Kho SDK.
+  Mã chưa dùng có nút đưa về kho. Ô thêm mã (Enter / Thêm) và "Chọn SDK đã lưu" (mã ở VM khác: chuyển rõ nguồn → đích).
+- Tạo lại VM sau SUS: giữ ID / mã VM; mã chưa dùng (kể cả của lượt trước) vẫn trong danh sách và dùng được cho tài khoản mới; mã đã dùng
+  giữ dấu và lịch sử; không đánh dấu hàng loạt. Bảng tài khoản chỉ hiện tài khoản hiện tại, chưa gán thì "Chưa có tài khoản".
+- "Chưa có SDK" (bộ lọc, đếm, Tổng quan) = VM chưa có mã nào trong danh sách.
+- Lệnh: `vmManagement.sdkListAdd` / `sdkUsed` / `sdkListRemove`, `sdkPastePreview` / `sdkPasteApply` (`src/server/vm-management/sdk-list.ts`):
+  quyền ASSIGN, `expectedCycle` (lệnh lượt cũ bị từ chối), phiên bản của mã (cập nhật có điều kiện: hai người cùng lấy một mã thì chỉ một
+  người được), khoá lệnh (lưu lặp = phát lại).
+
+### Dán bảng → SDK (hai cách trong một khung)
+
+- **Có mã VM**: `[Server |] VM | SDK | Tiền USD | Ghi chú`; ghép đúng server + VM, không theo thứ tự dòng; cột Server nhận ra theo giá trị;
+  nhiều SDK cùng VM được.
+- **Chỉ SDK, theo khoảng VM**: `SDK | Tiền USD | Ghi chú`; chọn server và VM bắt đầu, web hiện khoảng đích theo số dòng (10 dòng từ VM_011 →
+  VM_020). Dòng n vào VM số (bắt đầu + n), không theo thứ tự bảng đang lọc / sắp xếp hay VM đang chọn; dòng trống giữa giữ vị trí; VM không
+  có / đã xoá hoặc dòng lỗi báo tại dòng; không dồn dòng, không tự tạo VM.
+- Web tự đoán cách dán theo ô đầu (mã VM / server → Có mã VM), người dùng đổi được. Tự kiểm tra khi dán: Dòng → VM → SDK → Kết quả; một
+  nút "Áp dụng N SDK". Dán lại cùng mã cùng VM = Giữ nguyên, không bản sao / lịch sử thừa; ô tiền / ghi chú trống giữ nguyên. Mã ở VM khác
+  báo vị trí (không chuyển ngầm); mã đã dùng không cấp lại; một mã chỉ ghi một lần trong đợt.
+- Migration `20261020090000_sdk_vm_list` (thêm cột, không xoá gì): mọi mã đang ở VM vào danh sách của chính VM đó.

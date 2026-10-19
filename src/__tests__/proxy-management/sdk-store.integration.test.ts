@@ -36,17 +36,18 @@ describe('Kho SDK: tiền / ghi chú theo mã',()=>{
       const r=await f.save(f.vm.id,f.A,{amount:'12,40',note:'máy chạy tốt'},f.worker);expect(r).toMatchObject({changed:true});
       let a=await f.rec(f.A);expect(a).toMatchObject({vmId:f.vm.id,note:'máy chạy tốt',linkState:'UNLINKED',amountById:f.worker.userId});expect(a!.amount!.toString()).toBe('12.4');
       const ws=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vm.id)!;expect(ws.sdk).toMatchObject({id:f.A,amount:'12.4',note:'máy chạy tốt',state:'UNLINKED'});
-      // 2. VM_001 gets a new code B: A goes back to the store with 12,40; B has nothing of A.
+      // 2. VM_001 gets a new current code B: A stays in VM_001's SDK list (brief 20/10/2026) with 12,40; B has nothing of A.
       await f.save(f.vm.id,f.B);
-      a=await f.rec(f.A);const b=await f.rec(f.B);expect(a).toMatchObject({vmId:null,note:'máy chạy tốt'});expect(a!.amount!.toString()).toBe('12.4');expect(b).toMatchObject({vmId:f.vm.id,amount:null,note:null});
+      a=await f.rec(f.A);const b=await f.rec(f.B);expect(a).toMatchObject({vmId:null,holderVmId:f.vm.id,note:'máy chạy tốt'});expect(a!.amount!.toString()).toBe('12.4');expect(b).toMatchObject({vmId:f.vm.id,amount:null,note:null});
       expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).sdkId).toBe(f.B);
       // Not recorded ≠ 0.
       await f.save(f.vm2.id,f.C,{amount:'0'});const store=await readSdkStore(f.scope,db);
-      expect(store.find(s=>s.code===f.B)).toMatchObject({amount:null,vm:{code:'VM_001',server:'business-fixture'}});expect(store.find(s=>s.code===f.C)?.amount).toBe('0');expect(store.find(s=>s.code===f.A)).toMatchObject({vm:null,amount:'12.4'});
+      expect(store.find(s=>s.code===f.B)).toMatchObject({amount:null,vm:{code:'VM_001',server:'business-fixture'}});expect(store.find(s=>s.code===f.C)?.amount).toBe('0');expect(store.find(s=>s.code===f.A)).toMatchObject({vm:{code:'VM_001'},current:false,amount:'12.4'});
       // 3. A on a VM of another server: money, note and history follow the code.
-      await f.save(f.vm3.id,f.A);a=await f.rec(f.A);expect(a).toMatchObject({vmId:f.vm3.id,note:'máy chạy tốt'});expect(a!.amount!.toString()).toBe('12.4');
-      const detail=await readSdkDetail(f.scope,a!.id,db);expect(detail.events.map(e=>e.kind).reverse()).toEqual(['CREATE','PLACE','REMOVE','PLACE']);
-      expect(detail.events[0]).toMatchObject({kind:'PLACE',to:'second-fixture / VM_001'});
+      // (it sits in VM_001's list, so it moves only explicitly: source VM_001 → target)
+      await f.save(f.vm3.id,f.A,{from:{vmId:f.vm.id,expectedRevision:(await f.row(f.vm.id)).revision}});a=await f.rec(f.A);expect(a).toMatchObject({vmId:f.vm3.id,holderVmId:f.vm3.id,note:'máy chạy tốt'});expect(a!.amount!.toString()).toBe('12.4');
+      const detail=await readSdkDetail(f.scope,a!.id,db);expect(detail.events.map(e=>e.kind).reverse()).toEqual(['CREATE','PLACE','REMOVE','MOVE']);
+      expect(detail.events[0]).toMatchObject({kind:'MOVE',to:'second-fixture / VM_001'});
       // 8. 12,40 → 15: the latest total, not a sum; nothing in the PayPal / cost / income books.
       await f.save(f.vm3.id,f.A,{amount:'15'});a=await f.rec(f.A);expect(a!.amount!.toString()).toBe('15');
       await f.save(f.vm3.id,f.A,{amount:'15'});expect((await readSdkDetail(f.scope,a!.id,db)).events.filter(e=>e.kind==='AMOUNT')).toHaveLength(1);// same value: no new history
@@ -67,7 +68,7 @@ describe('Chuyển SDK nguồn → đích',()=>{
       const src=await f.row(f.vm.id);
       await expect(f.save(f.vm2.id,f.A,{from:{vmId:f.vm.id,expectedRevision:src.revision+3}})).rejects.toMatchObject({code:'STALE_PREVIEW'});
       expect((await f.rec(f.A))!.vmId).toBe(f.vm.id);expect((await f.rec(f.B))!.vmId).toBe(f.vm2.id);
-      const moved=await f.save(f.vm2.id,f.A,{from:{vmId:f.vm.id,expectedRevision:src.revision}});expect(moved.message).toMatch(/Đã chuyển .* từ business-fixture \/ VM_001.*giữ trong kho/);
+      const moved=await f.save(f.vm2.id,f.A,{from:{vmId:f.vm.id,expectedRevision:src.revision}});expect(moved.message).toMatch(/Đã chuyển .* từ business-fixture \/ VM_001.*vẫn trong danh sách SDK của VM/);
       expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).toMatchObject({sdkId:null});expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm2.id}})).toMatchObject({sdkId:f.A});
       expect(await f.rec(f.B)).toMatchObject({vmId:null,note:'B cũ'});expect((await f.rec(f.A))!.amount!.toString()).toBe('5');
       // Undo of the move (nothing changed since): source, target and both codes go back.
@@ -118,10 +119,10 @@ describe('Đã nối EarnApp',()=>{
       // Store paste may update money / note of a linked code (information only); it stays linked.
       const p=await previewSdkStore(f.scope,{text:f.A+'\t11'},db);expect(p.rows[0]).toMatchObject({outcome:'UPDATE',state:'LINKED'});
       await applySdkStore(f.scope,{key:randomUUID(),rows:[{line:1,code:f.A,expectedRevision:p.rows[0].expectedRevision,amount:'11'}]},db);expect(await f.rec(f.A)).toMatchObject({linkState:'LINKED',vmId:f.vm.id});
-      // Recreation (SUS): the linked code leaves the VM for history.
+      // Recreation (SUS): the linked code stops being current but stays in the VM's list, still used (brief 20/10/2026).
       await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vm.id,status:'SUSPENDED',expectedCycle:1}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:1},db);
-      expect(await f.rec(f.A)).toMatchObject({vmId:null,linkState:'LINKED'});
-      const store=await readSdkStore(f.scope,db);expect(store.find(s=>s.code===f.A)).toMatchObject({state:'LINKED',vm:null,linkedLogin:`sdk-login-1-${f.x}@example.invalid`});
+      expect(await f.rec(f.A)).toMatchObject({vmId:null,holderVmId:f.vm.id,linkState:'LINKED'});
+      const store=await readSdkStore(f.scope,db);expect(store.find(s=>s.code===f.A)).toMatchObject({state:'LINKED',vm:{code:'VM_001'},current:false,linkedLogin:`sdk-login-1-${f.x}@example.invalid`});
     }finally{await f.cleanup();}
   });
   it('5b. the link checks the current SDK, the current account and the round',async()=>{
@@ -170,10 +171,10 @@ describe('Dán vào Kho SDK',()=>{
       const p=await previewVmBulk(f.scope,{kind:'SDK',text:`business-fixture\tVM_001\t${f.B}\t7,25\tghi B\nsecond-fixture\tVM_001\t${f.C}`},db);
       expect(p.rows[0]).toMatchObject({outcome:'READY',amount:'7.25',note:'ghi B',info:expect.stringMatching(/7,25 USD/)});expect(p.rows[1]).toMatchObject({outcome:'READY'});
       const r=await applyVmBulk(f.scope,{kind:'SDK',key:randomUUID(),items:p.rows.map(x=>({line:x.line,vmId:x.vmId!,expectedRevision:x.expectedRevision!,value:x.value,amount:x.amount,note:x.note}))},db);expect(r.applied).toBe(2);
-      expect(await f.rec(f.A)).toMatchObject({vmId:null,note:'A'});expect((await f.rec(f.A))!.amount!.toString()).toBe('4');
+      expect(await f.rec(f.A)).toMatchObject({vmId:null,holderVmId:f.vm.id,note:'A'});expect((await f.rec(f.A))!.amount!.toString()).toBe('4');
       expect(await f.rec(f.B)).toMatchObject({vmId:f.vm.id,note:'ghi B'});expect((await f.rec(f.B))!.amount!.toString()).toBe('7.25');
-      // A stored code may be used by paste; same values again: nothing to do.
-      const back=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:`VM_002\t${f.A}\nVM_001\t${f.B}\t7.25`},db);expect(back.rows.map(x=>[x.outcome,x.message])).toEqual([['READY','Dùng SDK trong kho'],['SKIP','Giữ nguyên: cùng SDK hiện tại']]);
+      // A is still in VM_001's list, so pasting it on VM_002 is refused with its place (never taken); same values again: nothing to do.
+      const back=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:`VM_002\t${f.A}\nVM_001\t${f.B}\t7.25`},db);expect(back.rows.map(x=>x.outcome)).toEqual(['ERROR','SKIP']);expect(back.rows[0].message).toMatch(/business-fixture \/ VM_001/);
     }finally{await f.cleanup();}
   });
 });

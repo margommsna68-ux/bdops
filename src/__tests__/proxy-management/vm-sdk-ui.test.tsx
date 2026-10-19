@@ -12,7 +12,7 @@ import {SdkPasteForm,SdkPreviewTable} from '@/components/vm-management/SdkPasteD
 import {SdkCell} from '@/components/vm-management/SdkCell';
 import {Dialog} from '@/components/ui/dialog';
 import {ServerWorkspace} from '@/components/vm-management/ServerWorkspace';
-const vm=(code:string,sdk:null|{id:string;recordedAt:string|null;recordedBy:string|null})=>({id:'vm-'+code,code,serverId:'s1',server:'vt-01',revision:1,slotState:'FULL',archivedAt:null,health:'NEW',sdk,desired:null,installed:null,holds:[]});
+const vm=(code:string,sdk:null|{id:string;recordedAt:string|null;recordedBy:string|null})=>({id:'vm-'+code,code,serverId:'s1',server:'vt-01',revision:1,slotState:'FULL',archivedAt:null,health:'NEW',sdk,sdks:sdk?[{recordId:'r-'+code,code:sdk.id,revision:0,amount:null,note:null,state:'UNLINKED',current:true,usedAt:null,usedBy:null,heldAt:null}]:[],desired:null,installed:null,holds:[]});
 it('SDK cell shows missing state or the code with who recorded it and when',()=>{
   vi.stubGlobal('React',React);try{
     const empty=renderToStaticMarkup(<SdkCell projectId="p" vm={vm('VM_001',null) as never} canEdit onSaved={()=>{}}/>);expect(empty).toContain('Chưa có SDK');

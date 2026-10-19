@@ -195,7 +195,7 @@ function RecreateForm({projectId,vm,cycle,sus,lock,onDone}:{projectId:string;vm:
     <ul className="text-xs list-disc pl-4 space-y-0.5">
       <li>Giữ id, server và mã <strong>{vm.code}</strong>; mở lượt {cycle+1} (New VM), lưu lượt {cycle}.</li>
       <li>Đóng EarnApp cũ: tài khoản và email không về NEW, không cấp lại.</li>
-      <li>{vm.sdk?'SDK '+vm.sdk.id.slice(0,10)+'… rời VM: '+(vm.sdk.state==='LINKED'?'đã nối EarnApp nên vào lịch sử':vm.sdk.state==='UNLINKED'?'chưa nối nên về Kho SDK (giữ tiền, ghi chú)':'giữ ở Kho SDK, chưa xác nhận')+'. Máy mới có SDK mới; ghi mã thật sau khi cài.':'Chưa có SDK hiện hành.'}</li>
+      <li>{vm.sdks.length?vm.sdks.length+' SDK vẫn nằm trong danh sách của VM ('+vm.sdks.filter(s=>s.state!=='LINKED').length+' chưa dùng, dùng được cho tài khoản mới; mã đã dùng giữ dấu đã dùng, không cấp lại).':'VM chưa có SDK nào; ghi mã thật sau khi cài.'}</li>
       <li>{blocked?'Proxy đang BLOCKED: vẫn ở vị trí và vẫn phải thay (bấm ô Proxy).':installed?'Giữ proxy '+(installed.ip||'')+' cho vị trí ở lượt mới (gán là xong, không có bước cài).':'Không có proxy để giữ.'}</li>
       {sus&&<li>Yêu cầu rút và tiền chờ của lượt cũ giữ nguyên để đối chiếu; mã PP không bị đóng.</li>}
     </ul>

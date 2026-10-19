@@ -56,13 +56,13 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const allServers=useMemo(()=>[...(workspace.data?.servers||[])].sort((a,b)=>compareCodes(a.code,b.code)),[workspace.data]),servers=allServers.filter(s=>!s.archivedAt),current=allServers.find(s=>s.id===serverId),single=!!current;
   const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),inScope=useMemo(()=>allVMs.filter(v=>!serverId||v.serverId===serverId),[allVMs,serverId]);
   const active=useMemo(()=>inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),[inScope,servers]),deleted=useMemo(()=>inScope.filter(v=>v.archivedAt),[inScope]),deletedView=url.view==='DELETED';
-  const counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdk).length;
+  const counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdks.length&&!v.sdk).length;
   // EarnApp account (login + PayPal) of each VM; the search also finds VMs by login email or PayPal code.
   const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.earnApp?.paypal?.email,a.legacyGmail].filter(Boolean).join(' '):'';};
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;
-  const inView=(v:ManagedVM)=>!url.view||(url.view==='SDK_MISSING'?!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
+  const inView=(v:ManagedVM)=>!url.view||(url.view==='SDK_MISSING'?!v.sdks.length&&!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
   // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
   const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
   const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
@@ -70,10 +70,10 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const opsKey=(v:ManagedVM):OpsFilter=>opsStatus(v)??'NONE';
   const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&(!url.money||(url.money==='NONE'?!milestone(v):milestone(v)===url.money))&&(!url.warn||proxyBlocked(v));
   const priority=(v:ManagedVM)=>opsPriority({status:opsStatus(v),proxyBlocked:proxyBlocked(v),milestone:milestone(v)});
-  const needle=url.q.trim().toLowerCase();
+  const needle=url.q.trim().toLowerCase(),unusedSdk=(v:ManagedVM)=>v.sdks.filter(s=>s.state!=='LINKED').length;
   // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdk?.id||''} ${accountText(v.id)}`.toLowerCase().includes(needle)))
-    .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?Number(!!a.sdk)-Number(!!b.sdk):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
+  const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdks.map(x=>x.code).join(' ')} ${accountText(v.id)}`.toLowerCase().includes(needle)))
+    .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?unusedSdk(a)-unusedSdk(b):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,opsOfVm]);
   // Back on the page: tick the saved rows again once the whole result is known (VMs, accounts and statuses loaded), so a row still in

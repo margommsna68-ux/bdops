@@ -29,4 +29,5 @@ export function formatSdkAmount(value:string|null|undefined,currency=SDK_CURRENC
 // Text typed into the form shown back in the same style ("12.4" → "12,40").
 export function amountInput(value:string|null|undefined){if(value===null||value===undefined)return '';const n=Number(value);return Number.isFinite(n)?n.toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:6,useGrouping:false}):String(value);}
 export type SdkLinkState='UNLINKED'|'LINKED'|'UNCONFIRMED';
-export const SDK_STATE_LABEL:Record<SdkLinkState,string>={UNLINKED:'Chưa nối',LINKED:'Đã nối EarnApp',UNCONFIRMED:'Chưa xác nhận'};
+// 20/10/2026: "Đã dùng" = the code was put into an EarnApp account (final); "Chưa dùng" = still available.
+export const SDK_STATE_LABEL:Record<SdkLinkState,string>={UNLINKED:'Chưa dùng',LINKED:'Đã dùng',UNCONFIRMED:'Chưa xác nhận'};

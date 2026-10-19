@@ -1,0 +1,27 @@
+PASS N1 bấm ô trống mở ô sửa; Esc huỷ, không ghi
+PASS N2 Enter lúc đang gõ dấu (IME) không lưu; Shift+Enter xuống dòng
+PASS N3 lỗi khi lưu: báo ngay tại ô, giữ nội dung đang nhập, không báo Đã lưu — Failed to fetch
+PASS N4 Enter lưu; "Đã lưu" chỉ sau khi server lưu; nội dung có xuống dòng — revision 1
+PASS N5 bình thường hiện tối đa 3 dòng (cắt gọn), mở sửa đọc được toàn bộ — {"client":61,"scroll":174,"lh":18.85}
+PASS N6 khi sửa, ô nhập cao đủ toàn bộ nội dung
+PASS N7 cột Ghi chú mặc định khoảng 280px, kéo rộng được — 280 → 400px
+PASS B0 dán chỉ SDK: tự nhận là cách "Chỉ SDK, theo khoảng VM"
+PASS B1 hiện khoảng đích 6 dòng VM_004 → VM_009; dòng trống giữ vị trí; VM_007 đã xoá và VM_009 không có báo tại dòng — DÒNG VM SDK KẾT QUẢ 1 sdk-josg5 / VM_004 sdk-josg5-0001 Thêm mới · Thêm SDK mới 2 sdk-josg5 / VM_005 sdk-josg5-0002 Tiền chưa ghi → 7,50 USD Thêm mới · Thêm SDK mới 3 sdk-josg5 / VM_006 — Bỏ qua · Dòng trống: giữ vị trí, không ghi 4 sdk-josg5 / VM_007 sdk-josg5-0004 Lỗi · sdk-josg5 / VM_007 (đã xoá)
+PASS B2 bảng đang sắp xếp Ưu tiên nhưng ghép đúng số VM: VM_004 ← 1, VM_005 ← 2 (7,5 USD), VM_008 ← 5; VM_006 trống — {"4":1,"5":[{"code":"sdk-josg5-0002","state":"UNLINKED","amount":"7.5","note":null,"cycle":null,"earnApp":null}],"6":0,"8":1}
+PASS A1 có mã VM không theo thứ tự + cột Server: 4 dòng ghi; mã đang ở VM khác (VM_004) báo vị trí, không lấy — DÒNG VM SDK KẾT QUẢ 1 sdk-josg5 / VM_012 sdk-josg5-0010 Tiền chưa ghi → 1,25 USD · Ghi chú trống → "A" Thêm mới · Thêm SDK mới 2 sdk-josg5 / VM_002 sdk-josg5-0011 Thêm mới · Thêm SDK mới 3 sdk-josg5 / VM_012 sdk-josg5-0012 Thêm mới · Thêm SDK mới 4 sdk-josg5 /
+PASS A2 VM_012 có 2 SDK, VM_002 1, VM_011 1; SDK_1 vẫn ở VM_004
+PASS A3 dán lại cùng danh sách: Áp dụng 0 SDK, các dòng "Giữ nguyên", không nhân bản
+PASS L1 thêm 3 mã trong khung, tick Đã dùng 1 mã: ô hiện "3 SDK · 2 chưa dùng" — sdk-josg5-0020 3 SDK · 2 chưa dùng
+PASS L2 chưa dùng nằm trước, đã dùng nằm sau; mã đã dùng ghi người + thời gian, ô tick khoá
+PASS L3 dữ liệu: 3 mã ở VM_010, 1 LINKED không có account giả — [{"code":"sdk-josg5-0021","state":"LINKED","amount":null,"note":null,"cycle":1,"earnApp":null},{"code":"sdk-josg5-0020","state":"UNLINKED","amount":"3.2","note":null,"cycle":null,"earnApp":null},{"code":"sdk-josg5-0022","state":"UNLINKED","amount":null,"note":null,"cycle":null,"earnApp":null}]
+PASS L4 Kho SDK hiện cùng mã với trạng thái Đã dùng — Kho SDK
+
+Dùng chung mọi server của dự án, cùng bản ghi với danh sách SDK ở từng VM. Chỉ SDK chưa dùng mới thêm vào VM hoặc chuyển VM được; mã đã dùng chỉ để tra cứu. Tiền là số tích luỹ người vận hành
+PASS L5 cấp lại mã đã dùng cho VM khác: backend chặn tại dòng — DÒNG VM SDK KẾT QUẢ 1 sdk-josg5 / VM_003 sdk-josg5-0021 Lỗi · SDK sdk-josg5-0021 đã dùng cho một tài khoản EarnApp; chỉ giữ để tra cứu, không cấp lại
+PASS R1 tạo lại: cùng mã VM_010, lượt 2, chưa có tài khoản; 2 SDK chưa dùng + 1 đã dùng vẫn ở VM, không tự đánh dấu — {"cycle":2,"status":"NEW_VM","current":null,"account":[],"sdks":[{"code":"sdk-josg5-0021","state":"LINKED","amount":null,"note":null,"cycle":1,"earnApp":null},{"code":"sdk-josg5-0020","state":"UNLINKED","amount":"3.2","note":null,"cycle":null,"earnApp":null},{"code":"sdk-josg5-0022","state":"UNLINKED","amount":null,"note":null,"cycle":null,"earnApp":null}]}
+PASS R2 bảng hiện "Chưa có tài khoản" sau khi tạo lại — Chưa có tài khoản
+PASS R3 gán tài khoản mới: VM chỉ có một tài khoản hiện tại (mới) — ["p27-josg5-2@example.invalid"]
+PASS R4 mã chưa dùng từ lượt trước dùng được ở lượt mới (ghi Đã dùng lượt 2); mã đã dùng vẫn bị chặn — {"code":"sdk-josg5-0020","state":"LINKED","amount":"3.2","note":null,"cycle":2,"earnApp":null}
+PASS Không có lỗi JS
+
+23 PASS / 0 FAIL
