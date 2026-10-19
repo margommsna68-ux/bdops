@@ -94,9 +94,15 @@ creates, merges and deletes nothing.
   web refused its own "0,424" after switching 2,12 USDT / 5 PP to a unit price.)
 - Text the web writes into a field (the unit price after switching, a fetched rate, an edited cost) always reads back as the same
   value (`viInput`); in the rare VND case where it would look like a thousands group it gets a trailing zero ("15,6250").
-- Switching total ↔ unit keeps the total: total → unit fills the exact quotient (2,12 ÷ 5 = 0,424); a division that is not exact to
-  8 decimals leaves the unit price empty with a note at the field and the total kept for the way back (never a rounded unit price
-  that would change the total).
+- Switching total ↔ unit keeps the total: total → unit fills the exact quotient (2,12 ÷ 5 = 0,424). The total actually paid is what
+  gets recorded, so changing the view never turns an entered amount into "Chưa ghi chi phí": when the total cannot become an exact
+  unit price (no quantity, a division not exact to 8 decimals such as 10 USDT / 3 or 100.000 VND / 3, an error in the field) the form
+  stays on **Tổng tiền thực trả** with the same amount (and rate), says so at the field and shows only the reference allocation
+  (≈ 3,33 USDT / PP); a rounded unit price is never multiplied back over the total. "Chưa ghi chi phí" only when no amount was typed
+  or the person clears the visible amount (clearing also drops the other view's amount, so it never comes back on a switch). A unit
+  view left empty over a kept total blocks Nhập instead of importing without a cost. Same fields in Nhập Gmail / Apple ID, Nhập PayPal
+  and Ghi chi phí of a batch. (Independent review 19/10/2026: 10 USDT / 3 switched to "giá mỗi PP" left the unit empty and was
+  imported with priceMode NONE.)
 - The typed text and the number sent to the API are different things: `src/lib/money-input.ts` parses once and the form sends only
   canonical numbers ("420000", "25820", "16.27"). The batch endpoints (`accountStore.importPreview / importCommit / batchCost`)
   refuse anything else, so "25.820" can never be read as 25,82 again (the bug that turned 420.000 VND into 16.266 USDT). The Chi phí

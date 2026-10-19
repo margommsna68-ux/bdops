@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {parseViNumber,formatMoney,formatUsd,viInput,viNumber} from '@/lib/money-input';
-import {readPurchase,switchMode,changeCurrency,applyQuote,editRate,emptyPurchase,QUOTE_TTL_MS} from '@/components/account-store/purchase-money';
+import {readPurchase,switchMode,changeCurrency,applyQuote,editRate,emptyPurchase,editAmount,QUOTE_TTL_MS} from '@/components/account-store/purchase-money';
 // Money typed by people (owner brief 19/10/2026): Vietnamese convention, "." groups thousands and "," starts the decimals. The
 // rate "25.820" was once read as 25,82 (16.266 USDT instead of 16,27): the typed text and the canonical number sent to the API are
 // two different things, normalised once here.
@@ -59,7 +59,8 @@ describe('Purchase money: total paid or price per account',()=>{
     // Without a quantity there is no total to carry: the total stays empty (70.000 never becomes the whole purchase).
     expect(switchMode(pp({mode:'UNIT',unit:'70.000',currency:'VND'}),'TOTAL')).toMatchObject({mode:'TOTAL',total:''});
     // A changed total that is not unit × quantity drops the old unit price instead of guessing from emails or pasted lines.
-    expect(switchMode({...total,total:'400.000'},'UNIT')).toMatchObject({mode:'UNIT',unit:'',quantity:'6'});
+    // 400.000 / 6 is not an exact unit price: the view stays on the total (review 19/10, it used to become an empty unit price).
+    expect(switchMode({...total,total:'400.000'},'UNIT')).toMatchObject({mode:'TOTAL',total:'400.000',quantity:'6'});
   });
   it('2,12 USDT for 5 PP switches to 0,424 per PP and back, many times, without losing or rounding the total (review 19/10)',()=>{
     let s=pp({total:'2,12',quantity:'5'});
@@ -78,7 +79,7 @@ describe('Purchase money: total paid or price per account',()=>{
     const w=switchMode(pp({total:'62,5',quantity:'4',currency:'VND',rate:'25.820'}),'UNIT');expect(w.unit).toBe('15,6250');expect(readPurchase(w,'PP')).toMatchObject({errors:{},payload:{amount:'15.625'}});
     expect(readPurchase(pp({mode:'UNIT',unit:'15,625',quantity:'4',currency:'VND',rate:'25.820'}),'PP').errors.unit).toMatch(/15\.625/);
     // An inexact division keeps the total for the way back and says why the unit price is empty.
-    const x=switchMode(pp({total:'10',quantity:'3'}),'UNIT');expect(x.unit).toBe('');expect(readPurchase(x,'PP').unitHint).toMatch(/không chia hết/);
+    const x=switchMode(pp({total:'10',quantity:'3'}),'UNIT');expect(x).toMatchObject({mode:'TOTAL',unit:''});expect(readPurchase(x,'PP').unitHint).toMatch(/không chia hết/);
     expect(switchMode(x,'TOTAL').total).toBe('10');
   });
   it('a unit price needs the quantity actually bought; rates are required outside USDT and never default to 1',()=>{
@@ -94,5 +95,47 @@ describe('Purchase money: total paid or price per account',()=>{
     const old=readPurchase(s,'PP',t0+QUOTE_TTL_MS+1);expect(old.quoteExpired).toBe(true);expect(old.payload).toBeNull();
     const manual=editRate(s,'26.000');expect(manual.quote).toBeNull();expect(readPurchase(manual,'PP',t0).payload).toMatchObject({rate:'26000',p2pQuoteToken:null});expect(readPurchase(manual,'PP',t0).rateSource).toBe('Nhập tay');
     expect(changeCurrency(s,'USD')).toMatchObject({currency:'USD',rate:'',quote:null});
+  });
+});
+// Independent review 19/10/2026 (.runtime/review-purchase-inexact-20261019.test.ts): 10 USDT / 3 PP switched to "giá mỗi PP" left the
+// unit empty, readPurchase saw no money and the import went out with priceMode NONE ("Chưa ghi chi phí"). Changing how the money is
+// shown never drops an entered amount: the total paid is what gets recorded.
+describe('Switching the money view never discards an entered cost',()=>{
+  const pp=(o:Partial<ReturnType<typeof emptyPurchase>>={})=>({...emptyPurchase(),...o});
+  it('10 USDT / 3 stays on Tổng tiền thực trả with the same amount, many switches, one TOTAL payload of 10',()=>{
+    let s=pp({total:'10',quantity:'3'});
+    for(let i=0;i<3;i++){
+      s=switchMode(s,'UNIT');expect(s).toMatchObject({mode:'TOTAL',total:'10',unit:''});
+      const r=readPurchase(s,'PP');
+      expect(r.priced).toBe(true);
+      expect(r.payload).toEqual({priceMode:'TOTAL',amount:'10',quantity:3,currency:'USDT',rate:null,p2pQuoteToken:null});
+      expect(r.allocation).toMatch(/3,33.*tham khảo/);expect(r.unitHint).toMatch(/không chia hết.*giữ Tổng tiền thực trả/);
+      s=switchMode(s,'TOTAL');expect(readPurchase(s,'PP').payload).toMatchObject({priceMode:'TOTAL',amount:'10',quantity:3});
+    }
+  });
+  it('100.000 VND / 3 keeps the total and the rate; the conversion is of the total',()=>{
+    const s=switchMode(pp({total:'100.000',quantity:'3',currency:'VND',rate:'25.820'}),'UNIT');
+    expect(s).toMatchObject({mode:'TOTAL',total:'100.000',rate:'25.820'});
+    const r=readPurchase(s,'PP');
+    expect(r.payload).toMatchObject({priceMode:'TOTAL',amount:'100000',quantity:3,currency:'VND',rate:'25820'});
+    expect(r.usdt).toBe(readPurchase(pp({total:'100.000',currency:'VND',rate:'25.820'}),'PP').usdt);
+  });
+  it('a total without quantity, or a total with an error, stays where it is instead of becoming an empty unit price',()=>{
+    const a=switchMode(pp({total:'10'}),'UNIT');expect(a).toMatchObject({mode:'TOTAL',total:'10'});
+    expect(readPurchase(a,'PP').payload).toMatchObject({priceMode:'TOTAL',amount:'10'});expect(readPurchase(a,'PP').unitHint).toMatch(/số PP thực mua/);
+    const b=switchMode(pp({total:'25,820',quantity:'2',currency:'VND',rate:'25.820'}),'UNIT');expect(b).toMatchObject({mode:'TOTAL',total:'25,820'});
+    expect(readPurchase(b,'PP')).toMatchObject({priced:true,payload:null});expect(readPurchase(b,'PP').errors.total).toBeTruthy();
+  });
+  it('an exact division still switches (2,12 / 5 → 0,424) and an empty form still imports without a cost',()=>{
+    expect(switchMode(pp({total:'2,12',quantity:'5'}),'UNIT')).toMatchObject({mode:'UNIT',unit:'0,424'});
+    const e=switchMode(pp({quantity:'3'}),'UNIT');expect(e.mode).toBe('UNIT');expect(readPurchase(e,'PP')).toMatchObject({priced:false,payload:null});
+    expect(readPurchase(pp(),'PP')).toMatchObject({priced:false,payload:null});
+  });
+  it('only clearing the visible amount means "no cost"; a unit view left empty over a kept total blocks instead',()=>{
+    let s=switchMode(pp({total:'2,12',quantity:'5'}),'UNIT');
+    s=editAmount(s,'');expect(readPurchase(s,'PP')).toMatchObject({priced:false,payload:null});expect(switchMode(s,'TOTAL').total).toBe('');
+    const t=editAmount(pp({total:'10',unit:'3'}),' ');expect(t).toMatchObject({total:'',unit:''});
+    const stale=readPurchase(pp({mode:'UNIT',unit:'',total:'10',quantity:'3'}),'PP');
+    expect(stale.priced).toBe(true);expect(stale.payload).toBeNull();expect(stale.errors.unit).toMatch(/10 USDT/);
   });
 });

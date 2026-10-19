@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {formatMoney} from '@/lib/money-input';
-import {applyQuote,changeCurrency,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
+import {applyQuote,changeCurrency,editAmount,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
 const CURRENCIES=['USDT','VND','USD'];
 // Money of a purchase (Nhập kho, Ghi chi phí of a batch): total paid by default, or price per account × quantity bought. Vietnamese
 // number input ("70.000", "16,27"), every field checked in place; the canonical numbers are built by readPurchase. With VND the
@@ -32,8 +32,8 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
       <button type="button" role="radio" aria-checked={!unit} className={'pm-button'+(!unit?' pm-button-primary':'')} disabled={locked} onClick={()=>onChange(switchMode(value,'TOTAL'))}>Tổng tiền thực trả</button>
       <button type="button" role="radio" aria-checked={unit} className={'pm-button'+(unit?' pm-button-primary':'')} disabled={locked} onClick={()=>onChange(switchMode(value,'UNIT'))}>Tính theo giá mỗi {unitWord}</button></div>
     <div className="acc-import-grid">
-      {unit?<label className="pm-label">Giá mỗi {unitWord}<input className="pm-input" inputMode="decimal" value={value.unit} disabled={locked} placeholder="Ví dụ 70.000" aria-invalid={!!r.errors.unit} onChange={e=>onChange({...value,unit:e.target.value})}/>{err('unit',true)}</label>
-        :<label className="pm-label">Tổng tiền thực trả<input className="pm-input" inputMode="decimal" value={value.total} disabled={locked} placeholder="Để trống nếu chưa có giá" aria-invalid={!!r.errors.total} onChange={e=>onChange({...value,total:e.target.value})}/>{err('total',true)}</label>}
+      {unit?<label className="pm-label">Giá mỗi {unitWord}<input className="pm-input" inputMode="decimal" value={value.unit} disabled={locked} placeholder="Ví dụ 70.000" aria-invalid={!!r.errors.unit} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('unit',true)}</label>
+        :<label className="pm-label">Tổng tiền thực trả<input className="pm-input" inputMode="decimal" value={value.total} disabled={locked} placeholder="Để trống nếu chưa có giá" aria-invalid={!!r.errors.total} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('total',true)}</label>}
       <label className="pm-label">{unit?`Số ${unitWord} thực mua`:`Số ${unitWord} thực mua (không bắt buộc)`}<input className="pm-input" inputMode="numeric" value={value.quantity} disabled={locked} placeholder={unitWord==='PP'?'Đếm mã PP, không đếm email':'Số tài khoản đã trả tiền'} aria-invalid={!!r.errors.quantity} onChange={e=>onChange({...value,quantity:e.target.value})}/>{err('quantity',r.priced||!!value.quantity)}</label>
       <label className="pm-label">Đồng tiền<select className="pm-input" value={value.currency} disabled={locked||fetching} onChange={e=>{setFetchError('');onChange(changeCurrency(value,e.target.value));}}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select></label>
       {value.currency!=='USDT'&&<label className="pm-label">Tỷ giá thực trả: 1 USDT = ? {value.currency}<input className="pm-input" inputMode="decimal" value={value.rate} disabled={locked||fetching} placeholder={fetching?'Đang lấy giá…':value.currency==='VND'?'Ví dụ 25.820':''} aria-invalid={!!r.errors.rate&&r.priced} onChange={e=>onChange(editRate(value,e.target.value))}/>{err('rate',r.priced&&!fetching)}</label>}
