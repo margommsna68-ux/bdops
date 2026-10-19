@@ -1,0 +1,9 @@
+PASS P1 Kho proxy: chọn 2 → Thiết lập → đổi dự án A → B → A → Back: không còn dòng chọn — trước "Đã chọn 2 proxy" · sau: 0 ô tích, thanh chọn 0
+PASS P2 Server / VM: chọn 2 VM → Thiết lập → đổi dự án A → B → A → Back: không còn dòng chọn — ô tích: 0
+PASS P3 có lựa chọn ở cả hai trang (trang không mở): đổi dự án xoá cả hai; quay lại dự án cũ không phục hồi — khoá trước 2, sau 0; tích proxy 0, VM 0
+PASS P4 chỉ đổi theme (không đổi dự án): Kho proxy còn 2, Server / VM còn 2 như bản sửa trước — proxy 2, VM 2
+PASS P5 không đụng cấu hình cột, theme, PIN / đăng nhập — {"cols":"giữ","theme":"light","pin":"1"}
+PASS Không có lệnh ghi dữ liệu nào — user.verifyPin, user.heartbeat
+PASS Không có lỗi JS
+
+7 PASS / 0 FAIL

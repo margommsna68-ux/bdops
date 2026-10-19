@@ -14,6 +14,12 @@ export function readSelection(store:Store,key:string):SavedSelection|null{
 export function writeSelection(store:Store,key:string,s:SavedSelection){
   try{if(!s.ids.length)store?.removeItem(key);else store?.setItem(key,JSON.stringify(s));}catch{/* storage full or blocked: the selection just isn't kept */}
 }
+/** Drop every saved selection of one project (all surfaces and users) from this tab's session; nothing else is touched. */
+export function clearProjectSelections(projectId:string,store:Store=session()){
+  try{if(!store||!('length' in store))return;const st=store as Storage,keys:string[]=[];
+    for(let i=0;i<st.length;i++){const k=st.key(i);if(k&&k.startsWith('mth-selection:')&&k.endsWith(':'+projectId))keys.push(k);}
+    keys.forEach(k=>st.removeItem(k));}catch{/* storage blocked */}
+}
 export const restorableIds=(saved:SavedSelection|null,scope:string,valid:Set<string>)=>saved&&saved.scope===scope?saved.ids.filter(id=>valid.has(id)):[];
 const session=():Store=>{try{return typeof window==='undefined'?null:window.sessionStorage;}catch{return null;}};
 /**

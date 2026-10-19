@@ -41,7 +41,8 @@ Server / VM và Kho proxy giữ dòng đang chọn trong bộ nhớ phiên của
 URL, mất khi đóng tab), theo người dùng, dự án và phạm vi bộ lọc (Server / VM: server, bộ lọc, tìm kiếm, tình trạng; Kho proxy: bộ lọc
 và trang). Rời trang (ví dụ Thiết lập → đổi theme) rồi Back về cùng phạm vi thì đúng các dòng đó được chọn lại, trừ dòng đã xoá hoặc
 không còn trong danh sách. Chỉ tích lại ô chọn: không tự chạy thao tác hàng loạt, không hỏi lại. Quy tắc cũ giữ nguyên: đổi server, tìm
-kiếm, bộ lọc hoặc dự án thì bỏ chọn (Back về bộ lọc cũ cũng không hiện lại); Server / VM giữ lựa chọn qua các trang, Kho proxy bỏ chọn
+kiếm, bộ lọc hoặc dự án thì bỏ chọn (Back về bộ lọc cũ cũng không hiện lại). Đổi dự án (bộ chọn dự án, kể cả khi đang ở Thiết lập) xoá
+lựa chọn đã giữ của dự án vừa rời ở cả Server / VM và Kho proxy, nên quay lại dự án đó không tích lại (20/10/2026); Server / VM giữ lựa chọn qua các trang, Kho proxy bỏ chọn
 khi sang trang khác như trước.
 
 ## Kiểm khi sửa theme

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { useState, useEffect } from "react";
+import { clearProjectSelections } from "./session-selection";
 
 interface ProjectState {
   currentProjectId: string | null;
@@ -17,7 +18,7 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       currentProjectId: null,
       currentProjectCode: null,
       currentProjectName: null,
@@ -27,8 +28,10 @@ export const useProjectStore = create<ProjectState>()(
       currentModules: [],
       canManageUsers: false,
       currentMemberId: null,
+      // Actively changing project drops the row selections kept for the project being left (Server / VM and Kho proxy, even when
+      // those pages are not open), so coming back never ticks them again. Re-reading the same project keeps them.
       setCurrentProject: (id, code, name, type, role, modules, canManageUsers = false, memberId = undefined, businessMode=null) =>
-        set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null, currentBusinessMode:businessMode }),
+        { const prev = get().currentProjectId; if (prev && prev !== id) clearProjectSelections(prev); set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null, currentBusinessMode:businessMode }); },
     }),
     {
       name: "bdops-project",
