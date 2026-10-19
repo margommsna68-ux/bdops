@@ -56,8 +56,9 @@ describe('Purchase money: total paid or price per account',()=>{
     const unit=pp({mode:'UNIT',unit:'70.000',quantity:'6',currency:'VND'}),total=switchMode(unit,'TOTAL');
     expect(total).toMatchObject({mode:'TOTAL',total:'420.000',quantity:'6'});
     expect(switchMode(total,'UNIT')).toMatchObject({mode:'UNIT',unit:'70.000',quantity:'6'});
-    // Without a quantity there is no total to carry: the total stays empty (70.000 never becomes the whole purchase).
-    expect(switchMode(pp({mode:'UNIT',unit:'70.000',currency:'VND'}),'TOTAL')).toMatchObject({mode:'TOTAL',total:''});
+    // Without a quantity there is no total to carry: the view stays on the unit price with the quantity to fix (review 19/10: it used
+    // to become an empty total imported without a cost; 70.000 never becomes the whole purchase either).
+    expect(switchMode(pp({mode:'UNIT',unit:'70.000',currency:'VND'}),'TOTAL')).toMatchObject({mode:'UNIT',unit:'70.000',total:''});
     // A changed total that is not unit × quantity drops the old unit price instead of guessing from emails or pasted lines.
     // 400.000 / 6 is not an exact unit price: the view stays on the total (review 19/10, it used to become an empty unit price).
     expect(switchMode({...total,total:'400.000'},'UNIT')).toMatchObject({mode:'TOTAL',total:'400.000',quantity:'6'});
@@ -137,5 +138,52 @@ describe('Switching the money view never discards an entered cost',()=>{
     const t=editAmount(pp({total:'10',unit:'3'}),' ');expect(t).toMatchObject({total:'',unit:''});
     const stale=readPurchase(pp({mode:'UNIT',unit:'',total:'10',quantity:'3'}),'PP');
     expect(stale.priced).toBe(true);expect(stale.payload).toBeNull();expect(stale.errors.unit).toMatch(/10 USDT/);
+  });
+});
+// Independent review 19/10/2026 (.runtime/review-purchase-mode-matrix-20261019.test.ts): unit → total fell back to the older total
+// (or to an empty one) when the unit price or the quantity was missing / wrong, so a typed cost could be dropped or replaced. Both
+// directions are checked over the whole matrix: amount valid / empty / malformed, quantity valid / missing / 0, other view's old
+// amount present or not.
+describe('Switching total ↔ unit, both directions, every combination',()=>{
+  const pp=(o:Partial<ReturnType<typeof emptyPurchase>>={})=>({...emptyPurchase(),...o});
+  const other=(m:'TOTAL'|'UNIT')=>m==='TOTAL'?'UNIT':'TOTAL';
+  const cases:[string,string,string,string][]=[];
+  for(const mode of ['TOTAL','UNIT'])for(const amount of ['9','','9,'])for(const quantity of ['3','','0'])for(const old of ['','10'])cases.push([mode,amount,quantity,old]);
+  it.each(cases)('%s amount=%j quantity=%j old other amount=%j',(mode,amount,quantity,old)=>{
+    const m=mode as 'TOTAL'|'UNIT',s=pp({mode:m,quantity,...(m==='TOTAL'?{total:amount,unit:old}:{unit:amount,total:old})});
+    const before=readPurchase(s,'PP');let cur=s;
+    for(let i=0;i<4;i++){
+      cur=switchMode(cur,other(cur.mode));const r=readPurchase(cur,'PP');
+      if(amount||old){
+        // An amount that was not cleared is never "no cost".
+        expect(r.priced).toBe(true);
+        if(amount){
+          // The amount typed is kept and its total is the only total that can be saved; an older amount never comes back.
+          expect(r.payload?r.total:null).toBe(before.payload?before.total:null);
+          if(!before.payload)expect(Object.keys(r.errors).length).toBeGreaterThan(0);
+          if(!before.payload)expect(cur).toMatchObject({mode:m,[m==='TOTAL'?'total':'unit']:amount});
+        }
+      }else expect(r).toMatchObject({priced:false,payload:null});
+    }
+  });
+  it('9 USDT per PP × 3 → total 27, and back to 9; a changed unit gives the new total, never the older one',()=>{
+    let s=switchMode(pp({mode:'UNIT',unit:'9',quantity:'3',total:'10'}),'TOTAL');expect(s).toMatchObject({mode:'TOTAL',total:'27'});
+    s=switchMode(s,'UNIT');expect(s).toMatchObject({mode:'UNIT',unit:'9'});
+    s=editAmount(s,'10');s=switchMode(s,'TOTAL');expect(readPurchase(s,'PP').payload).toMatchObject({priceMode:'TOTAL',amount:'30',quantity:3});
+  });
+  it('a unit price without a usable quantity stays on the unit view with the error at the quantity, then switches once it is fixed',()=>{
+    for(const q of ['','0']){
+      let s=switchMode(pp({mode:'UNIT',unit:'9',quantity:q,total:'10'}),'TOTAL');
+      expect(s).toMatchObject({mode:'UNIT',unit:'9',total:'10'});const r=readPurchase(s,'PP');
+      expect(r).toMatchObject({priced:true,payload:null});expect(r.errors.quantity).toBeTruthy();expect(r.unitHint).toMatch(/số PP thực mua.*giữ giá mỗi PP/);
+      s=switchMode({...s,quantity:'2'},'TOTAL');expect(s).toMatchObject({mode:'TOTAL',total:'18'});
+    }
+    const bad=switchMode(pp({mode:'UNIT',unit:'9,',quantity:'3'}),'TOTAL');expect(bad).toMatchObject({mode:'UNIT',unit:'9,'});
+    expect(readPurchase(bad,'PP').errors.unit).toBeTruthy();expect(readPurchase(bad,'PP').payload).toBeNull();
+  });
+  it('clearing the visible amount drops both views; switching afterwards stays without cost',()=>{
+    let s=switchMode(pp({mode:'UNIT',unit:'9',quantity:'3'}),'TOTAL');s=switchMode(s,'UNIT');s=editAmount(s,'');
+    for(let i=0;i<3;i++){s=switchMode(s,s.mode==='UNIT'?'TOTAL':'UNIT');expect(readPurchase(s,'PP')).toMatchObject({priced:false,payload:null});expect(s.total+s.unit).toBe('');}
+    s=editAmount(switchMode(s,'TOTAL'),'12');expect(readPurchase(s,'PP').payload).toMatchObject({priceMode:'TOTAL',amount:'12'});
   });
 });

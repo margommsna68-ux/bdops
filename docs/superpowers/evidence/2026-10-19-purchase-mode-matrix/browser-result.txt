@@ -1,0 +1,39 @@
+TAG p23cx3i9
+PASS A1a bấm "Tính theo giá mỗi PP" 3 lần: vẫn ở Tổng tiền thực trả, ô vẫn 10 — true:10 · true:10 · true:10
+PASS A1b ghi chú tại chỗ: không chia hết nên giữ tổng; giá phân bổ ≈ 3,33 chỉ tham khảo; không có "Chưa ghi chi phí" — 10 USDT ÷ 3 không chia hết thành giá mỗi PP chính xác nên giữ Tổng tiền thực trả 10 USDT; giá phân bổ chỉ để tham khảo.
+PASS A1c đã lưu đúng một lô 3 PP, kiểu Tổng, một khoản chi 10 USDT — [{"code":"PP-2026-10-19-46","source":"p23 p23cx3i9 a1","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"10","currency":"USDT","usdt":"10","rate":"1"}}]
+PASS A2a Gmail 100.000 VND / 3: vẫn Tổng 100.000, tỷ giá 25.820 giữ, ghi chú giữ tổng — true:100.000 · true:100.000
+PASS A2b đã lưu một khoản 100.000 VND, tỷ giá 25.820, USDT = 100.000 ÷ 25.820 (3,8729667 → 3,872967) — [{"code":"TK-2026-10-19-31","source":"p23 p23cx3i9 a2","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"100000","currency":"VND","usdt":"3.872967","rate":"25820"}}]
+PASS A3a 2,12 / 5 vẫn chuyển sang đơn giá 0,424
+PASS A3b đã lưu đơn giá 0,424, một khoản 2,12 USDT — [{"code":"PP-2026-10-19-47","source":"p23 p23cx3i9 a3","qty":5,"mode":"UNIT","unit":"0.424","cost":{"amount":"2.12","currency":"USDT","usdt":"2.12","rate":"1"}}]
+PASS A4a chưa nhập tiền từ đầu: báo "Không nhập tiền: lô ghi Chưa ghi chi phí"
+PASS A4b gõ 9 rồi chủ động xoá: đổi chế độ không làm sống lại số cũ, lại là Chưa ghi chi phí
+PASS A4c nhập kho không kèm chi phí: lô Chưa ghi, không có khoản chi — [{"code":"PP-2026-10-19-48","source":"p23 p23cx3i9 a4","qty":null,"mode":"NONE","unit":null,"cost":null}]
+PASS A5a form Ghi chi phí của lô: 10 / 3 vẫn Tổng 10, nút Ghi chi phí sáng
+PASS A5b đã ghi đúng một khoản 10 USDT cho lô — [{"code":"PP-2026-10-19-48","source":"p23 p23cx3i9 a4","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"10","currency":"USDT","usdt":"10","rate":"1"}}]
+PASS A6a mất phản hồi: một lệnh gửi, giữ nội dung và tổng 10, có Thử lại — calls=1
+PASS A6b sau Thử lại: đúng một lô và một khoản chi 10 USDT — [{"code":"PP-2026-10-19-49","source":"p23 p23cx3i9 a6","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"10","currency":"USDT","usdt":"10","rate":"1"}}]
+PASS B1a đơn giá 9, chưa có số lượng → bấm Tổng: ở lại Đơn giá, giữ 9, báo tại ô số lượng, nút Nhập khoá
+PASS B1b trường hợp lỗi không ghi gì
+PASS B1c nhập số lượng 3 → bấm Tổng: 9 × 3 = 27
+PASS B1d lưu đúng một lô, một khoản 27 USDT — [{"code":"PP-2026-10-19-50","source":"p23 p23cx3i9 b1","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"27","currency":"USDT","usdt":"27","rate":"1"}}]
+PASS B2a đơn giá sai định dạng "9," → bấm Tổng: ở lại, giữ "9,", lỗi tại ô, nút khoá
+PASS B2b không ghi gì
+PASS B3a số lượng 0 → bấm Tổng: ở lại Đơn giá, lỗi số lượng, nút khoá
+PASS B3b không ghi gì
+PASS B3c sửa thành 2 → Tổng 18
+PASS B3d lưu một khoản 18 USDT — [{"code":"PP-2026-10-19-51","source":"p23 p23cx3i9 b3","qty":2,"mode":"TOTAL","unit":null,"cost":{"amount":"18","currency":"USDT","usdt":"18","rate":"1"}}]
+PASS B4a tổng cũ 10 → đơn giá 5 → sửa 9, bỏ số lượng → bấm Tổng: ở lại Đơn giá 9, không lấy lại 10 — u0=5
+PASS B4b không ghi gì
+PASS B4c số lượng 4 → Tổng 36
+PASS B4d lưu một khoản 36 USDT, không phải 10 — [{"code":"PP-2026-10-19-52","source":"p23 p23cx3i9 b4","qty":4,"mode":"TOTAL","unit":null,"cost":{"amount":"36","currency":"USDT","usdt":"36","rate":"1"}}]
+PASS B5a xoá tiền chủ động rồi chuyển qua lại: cả hai ô trống, báo Không nhập tiền — ["","","","","",""]
+PASS B5b lô không chi phí (do chủ động xoá) — [{"code":"PP-2026-10-19-53","source":"p23 p23cx3i9 b5","qty":null,"mode":"NONE","unit":null,"cost":null}]
+PASS B6a Ghi chi phí của lô: đơn giá 9 chưa có số lượng → ở lại, nút Ghi khoá
+PASS B6b số lượng 2 → Tổng 18
+PASS B6c lô có đúng một khoản 18 USDT — [{"code":"PP-2026-10-19-53","source":"p23 p23cx3i9 b5","qty":2,"mode":"TOTAL","unit":null,"cost":{"amount":"18","currency":"USDT","usdt":"18","rate":"1"}}]
+PASS B7a đơn giá 4 × 3 → Tổng 12, mất phản hồi: một lệnh, giữ tổng 12, có Thử lại — calls=1
+PASS B7b sau Thử lại: một lô, một khoản 12 USDT — [{"code":"PP-2026-10-19-54","source":"p23 p23cx3i9 b7","qty":3,"mode":"TOTAL","unit":null,"cost":{"amount":"12","currency":"USDT","usdt":"12","rate":"1"}}]
+PASS Không có lỗi JS trên trang
+
+36 PASS / 0 FAIL

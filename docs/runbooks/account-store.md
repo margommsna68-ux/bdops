@@ -100,7 +100,13 @@ creates, merges and deletes nothing.
   stays on **Tổng tiền thực trả** with the same amount (and rate), says so at the field and shows only the reference allocation
   (≈ 3,33 USDT / PP); a rounded unit price is never multiplied back over the total. "Chưa ghi chi phí" only when no amount was typed
   or the person clears the visible amount (clearing also drops the other view's amount, so it never comes back on a switch). A unit
-  view left empty over a kept total blocks Nhập instead of importing without a cost. Same fields in Nhập Gmail / Apple ID, Nhập PayPal
+  view left empty over a kept total blocks Nhập instead of importing without a cost.
+- The other direction follows the same rule (independent review 19/10/2026, 9 USDT per PP without a quantity used to switch to an
+  empty total imported without a cost, and a changed unit price could bring back an older total): unit → total only with a valid
+  unit price and a valid quantity, by the exact product (9 × 3 = 27). A unit price with a missing / 0 quantity, or a malformed unit
+  price ("9,"), stays on **Tính theo giá mỗi …** with its content, the error at the field to fix and a note; the older total is
+  never brought back and the amount never becomes "no cost". An empty view switches freely. Checked over every combination
+  (amount valid / empty / malformed × quantity valid / missing / 0 × other view's old amount, both directions, repeated switches). Same fields in Nhập Gmail / Apple ID, Nhập PayPal
   and Ghi chi phí of a batch. (Independent review 19/10/2026: 10 USDT / 3 switched to "giá mỗi PP" left the unit empty and was
   imported with priceMode NONE.)
 - The typed text and the number sent to the API are different things: `src/lib/money-input.ts` parses once and the form sends only
