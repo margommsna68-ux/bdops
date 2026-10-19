@@ -95,7 +95,7 @@ export async function restoreVMs(scope:ActorScope,vmIds:string[],db:PrismaClient
     for(const vm of vms.sort(byCode)){
       if(!vm.archivedAt) continue;
       if(vm.server.archivedAt){blocked.push({id:vm.id,code:vm.code,cause:'SERVER',reason:'Server '+vm.server.code+' đã xoá; khôi phục server trước'});continue;}
-      if(vm.sdkId){const other=await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},include:{server:{select:{code:true}}}});if(other){blocked.push({id:vm.id,code:vm.code,cause:'SDK',reason:'SDK '+vm.sdkId+' đang thuộc '+other.server.code+'/'+other.code+'; không giành lại'});continue;}}
+      // SDK: the code stays with its record (SdkRecord.vmId). A code moved away meanwhile is not taken back; the mirror is already empty.
       await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:null,revision:{increment:1}}});restored++;
     }
     const op=restored?await recordOperation(tx,{scope:current,kind:'VM_RESTORE',summary:{count:restored},snapshot:await images.finish()}):null;
@@ -122,7 +122,6 @@ export async function restoreServer(scope:ActorScope,serverId:string,db:PrismaCl
     const vms=await tx.virtualMachine.findMany({where:{serverId,archivedAt:server.archivedAt}}),images=await snapshotCollector(tx,current),skipped:Blocked[]=[];let restoredVMs=0;
     await images.remember('SERVER',server.id);await tx.server.update({where:{id:server.id},data:{archivedAt:null,revision:{increment:1}}});
     for(const vm of vms){
-      if(vm.sdkId&&await tx.virtualMachine.findFirst({where:{sdkId:vm.sdkId,managed:true,archivedAt:null,id:{not:vm.id}},select:{id:true}})){skipped.push({id:vm.id,code:vm.code,cause:'SDK',reason:'SDK '+vm.sdkId+' đang thuộc VM khác'});continue;}
       await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{archivedAt:null,revision:{increment:1}}});restoredVMs++;
     }
     const op=await recordOperation(tx,{scope:current,kind:'SERVER_RESTORE',summary:{server:server.code,count:restoredVMs},snapshot:await images.finish()});

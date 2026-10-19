@@ -1,3 +1,4 @@
+import {saveVmSdk} from '@/server/vm-management/sdk-store';
 import {afterAll,describe,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {encrypt} from '@/lib/encryption';
@@ -158,7 +159,8 @@ describe('Tạo lại VM',()=>{
   it('received in full → recreate keeps id / code, opens round 2 as New VM, keeps the valid proxy (new install needed), closes the old EarnApp, moves the SDK to history',async()=>{
     const f=await setup();try{
       const {endpoint,config}=await installProxy(f,0,11);
-      await f.link(0,0,f.emails[0].id);await db.virtualMachine.update({where:{id:f.vms[0].id},data:{sdkId:'sdk-old-'+f.x}});
+      await f.link(0,0,f.emails[0].id);const v0=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
+      await saveVmSdk(f.scope,{key:randomUUID(),vmId:v0.id,expectedVmRevision:v0.revision,expectedCycle:1,code:'sdk-old-'+f.x,amount:'7,5'},db);
       await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'OK',expectedCycle:1}]},db);
       const req=await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);expect(r).toMatchObject({cycle:2,proxyKept:true});
@@ -177,6 +179,8 @@ describe('Tạo lại VM',()=>{
       await f.link(0,4,f.emails[3].id);expect((await db.earnPayoutRequest.findUniqueOrThrow({where:{id:req.id}})).consumedAt).not.toBeNull();
       const h=await readVmOpsHistory(f.scope,{vmId:f.vms[0].id},db);expect(h.cycles[0]).toMatchObject({number:1,reason:'PAYOUT_RECEIVED',sdk:'sdk-old-'+f.x,status:'OK',proxyKept:true});
       expect(await db.vMSdkHistory.count({where:{vmId:f.vms[0].id,previousSdk:'sdk-old-'+f.x,newSdk:null}})).toBe(1);
+      // SDK store: the real machine got a new SDK; the old never-linked code is back in the store with its money, not on the VM.
+      expect(await db.sdkRecord.findFirstOrThrow({where:{projectId:f.scope.projectId,code:'sdk-old-'+f.x}})).toMatchObject({vmId:null,linkState:'UNLINKED'});
       // Late money on the old email belongs to the old request; the new round stays as it is. An old AI command is refused.
       await f.receive(f.pp13.id,f.emails[0].email,'3','RECEIVED','TX-LATE-'+f.x);
       expect(await db.fundTransaction.count({where:{payoutRequestId:req.id}})).toBe(2);expect((await f.ops(0)).milestone).toBe('');
@@ -362,6 +366,19 @@ describe('Rà soát nghiệm thu 19/10',()=>{
       // The first proxy, installed in the old round, is no longer an installation of this round.
       const holds=await db.vMProxyAllocation.findMany({where:{vmId:f.vms[0].id,releasedAt:null}});
       expect(holds.find(h=>h.endpointId===endpoint.id)?.role).not.toBe('INSTALLED');expect(holds.find(h=>h.endpointId===second.id)?.role).toBe('DESIRED');
+    }finally{await f.cleanup();}
+  });
+});
+describe('Rà soát độc lập 19/10: tiền trong nhật ký',()=>{
+  it('1b. a recreation journal shows the consumed payout request without its amount to staff without money rights; managers still see it',async()=>{
+    const f=await setup(1);try{
+      await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const {listOperations,inspectOperation}=await import('@/server/operation-history/journal');
+      const op=(await listOperations(f.worker,db)).find(o=>o.kind==='VM_RECREATE')!;
+      const staff=await inspectOperation(f.worker,op.id,db);expect(JSON.stringify(staff)).not.toMatch(/24(?:[.,]0+)? ?USD/);
+      expect(staff.rows.find(r=>r.resource==='Yêu cầu rút EarnApp')).toMatchObject({after:expect.stringMatching(/Yêu cầu rút · .*đã dùng để tạo lại VM/)});
+      expect(JSON.stringify(await inspectOperation(f.scope,op.id,db))).toMatch(/24(?:[.,]00)? USD/);
     }finally{await f.cleanup();}
   });
 });

@@ -92,7 +92,7 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 **Web làm gì:**
 - Giữ id, server và mã VM. Mở lượt N+1 với tình trạng **New VM** (không tự LINKED/OK). Ghi lại lượt N (`VmCycle`): EarnApp, tài khoản, email, SDK, tình trạng cuối, cấu hình.
 - Đóng EarnApp cũ: rời VM, đặt `closedAt`. Tài khoản Gmail/Apple ID thành Đã dùng, không về NEW. Email vẫn "đã dùng".
-- Chuyển SDK hiện hành vào lịch sử. SDK mới chỉ ghi khi có mã thật sau khi cài.
+- SDK hiện hành rời vị trí (Kho SDK, 19/10/2026): mã chưa nối về kho với tiền / ghi chú để dùng lại, mã đã nối EarnApp vào lịch sử. Máy mới có SDK mới; chỉ ghi mã thật người / AI cung cấp sau khi cài. Xem [SDK và Kho SDK](vm-sdk.md).
 - **Proxy:**
   - Bằng chứng cài thuộc đúng lượt (sửa 19/10): VM lượt mới không còn trỏ tới cấu hình đã cài hay đang chờ của lượt cũ (`installedConfigurationId` = trống). Các cấu hình cũ giữ nguyên trong lịch sử (Đã xác nhận / Đã huỷ) và `VmCycle` ghi lại id. VM lượt mới không bao giờ hiện "Đã cài" từ lượt trước.
   - Proxy của vị trí (cấu hình đang chờ nếu có, nếu không thì proxy đã cài) còn hợp lệ (TUT hoặc Chung mooon–Genjy; NEW/LIVE; chưa replace, ngừng quản lý hay BLOCKED) được giữ: web tạo cấu hình mới "Chờ cài" cho lượt mới; phải cài và xác nhận lại. Proxy vẫn LIVE, không thả ra kho NEW.

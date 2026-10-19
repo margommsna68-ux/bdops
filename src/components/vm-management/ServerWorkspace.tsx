@@ -3,7 +3,7 @@ import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'rea
 import Link from 'next/link';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
 import {useSession} from 'next-auth/react';
-import {Plus,RefreshCw,Search,ClipboardPaste,Trash2,RotateCcw,X,MoreHorizontal,Copy} from 'lucide-react';
+import {Plus,RefreshCw,Search,ClipboardPaste,Trash2,RotateCcw,X,MoreHorizontal,Copy,Boxes} from 'lucide-react';
 import toast from 'react-hot-toast';
 import {trpc} from '@/lib/trpc';
 import {compareCodes} from '@/server/proxy-management/package-terms';
@@ -19,11 +19,12 @@ import {vmView,summarizeVMs} from './workflow';
 import {VmGrid,type CopyWhich,type GridRights} from './vm-grid/VmGrid';
 import type {StatusActionKind} from './vm-grid/status-actions';
 import {VmSidePanel} from './vm-grid/VmSidePanel';
+import {SdkStorePanel} from './vm-grid/SdkStore';
 import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels';
 import {AccountBulkPanel} from './vm-grid/AccountPanels';
 import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
-import {DEFAULT_PREFS,OPS_FILTERS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type MoneyFilter,type OpsFilter,type PanelTab} from './vm-grid/grid-model';
+import {SDK_STORE_DEFAULT,type SdkStoreUrl,DEFAULT_PREFS,OPS_FILTERS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type MoneyFilter,type OpsFilter,type PanelTab} from './vm-grid/grid-model';
 import type {OpsRow} from './vm-grid/OpsCells';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
@@ -86,9 +87,12 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Reload with ?vm=…: bring that row into view once.
   const scrolled=useRef(false);useEffect(()=>{if(scrolled.current||!url.vm||!workspace.data) return;scrolled.current=true;requestAnimationFrame(()=>document.querySelector(`[data-row="${url.vm}"]`)?.scrollIntoView({block:'center'}));},[url.vm,workspace.data]);
   const openVm=(vmId:string,tab:PanelTab='overview',cause:string|null=null)=>{setBulk(null);go({vm:vmId,tab,cause});};
+  // Kho SDK opens in this page (no sidebar entry): the table stays mounted underneath so its scroll position survives.
+  const sdkUrl=url.sdk||SDK_STORE_DEFAULT,storeOpen=sdkUrl.open;
+  const goStore=useCallback((patch:Partial<SdkStoreUrl>,mode:'push'|'replace'='push')=>{const base=(pending.current||readGridUrl(new URLSearchParams(window.location.search))).sdk||SDK_STORE_DEFAULT;go({sdk:{...base,...patch}},mode);},[go]);
   const closePanel=useCallback(()=>{const id=new URLSearchParams(window.location.search).get('vm');setBulk(null);if(id){go({vm:null,tab:'overview',cause:null});requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-row="${id}"] .vm-id-button`)?.focus({preventScroll:true}));}},[go]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&(url.vm||bulk)&&!(e.target as HTMLElement)?.closest?.('.vm-cell-edit,.vm-popover,[role="menu"],.pm-inline-edit,textarea,input,select')) closePanel();};window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key);},[url.vm,bulk,closePanel]);
-  const copyProxies=trpc.vmManagement.copyProxies.useMutation(),copyInstall=trpc.vmManagement.copy.useMutation(),updateServer=trpc.vmManagement.updateServer.useMutation(),updateVM=trpc.vmManagement.updateVM.useMutation(),sdkApply=trpc.vmManagement.sdkApply.useMutation();
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&(url.vm||bulk)&&!(e.target as HTMLElement)?.closest?.('.vm-cell-edit,.vm-popover,.vm-status-pop,[role="menu"],.pm-inline-edit,textarea,input,select')) closePanel();};window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key);},[url.vm,bulk,closePanel]);
+  const copyProxies=trpc.vmManagement.copyProxies.useMutation(),copyInstall=trpc.vmManagement.copy.useMutation(),updateServer=trpc.vmManagement.updateServer.useMutation(),updateVM=trpc.vmManagement.updateVM.useMutation();
   const deleteVMs=trpc.vmManagement.deleteVMs.useMutation(),restoreVMs=trpc.vmManagement.restoreVMs.useMutation(),deleteServer=trpc.vmManagement.deleteServer.useMutation(),restoreServer=trpc.vmManagement.restoreServer.useMutation(),undo=trpc.proxyManagement.undo.useMutation();
   const busy=deleteVMs.isLoading||restoreVMs.isLoading||deleteServer.isLoading||restoreServer.isLoading;
   function undoToast(text:string,operationId?:string){toast.success(t=><span className="flex items-center gap-3">{text}{operationId&&<button className="pm-button pm-button-quiet" onClick={()=>{toast.dismiss(t.id);undo.mutateAsync({projectId,id:operationId,reason:''}).then(()=>{toast.success('Đã hoàn tác');void refresh();}).catch(e=>toast.error(e.message));}}>Hoàn tác</button>}</span>,{duration:8000});}
@@ -132,8 +136,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Only the edited field is sent; untouched fields (including hidden import notes) stay exactly as stored.
   const saveServer=(field:'code'|'notes'|'ipAddress')=>async(value:string)=>{if(!current)return;const r=await updateServer.mutateAsync({projectId,serverId:current.id,code:field==='code'?value:current.code,...(field==='notes'?{notes:value}:{}),...(field==='ipAddress'?{ipAddress:value}:{}),expectedRevision:current.revision});if(r.saved){toast.success('Đã lưu');await refresh();}};
   async function saveCell(vm:ManagedVM,field:EditField,value:string){
-    if(field==='sdk'){const r=await sdkApply.mutateAsync({projectId,key:crypto.randomUUID(),items:[{vmId:vm.id,sdk:value,expectedRevision:vm.revision}]});if(r.undone) throw new Error('Thao tác đã được hoàn tác; tải lại để kiểm tra');}
-    else{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,...(field==='code'?{code:value}:{notes:value||null}),expectedRevision:vm.revision});if(!r.saved){await refresh();return;}}
+    if(field==='sdk') return; // the SDK has its own frame (SdkCell → vmManagement.sdkSave)
+    {const r=await updateVM.mutateAsync({projectId,vmId:vm.id,...(field==='code'?{code:value}:{notes:value||null}),expectedRevision:vm.revision});if(!r.saved){await refresh();return;}}
     toast.success('Đã lưu '+vm.code,{duration:1500});await refresh();
   }
   // Tình trạng cell actions. Each one is the existing checked command; errors propagate so the cell keeps the old state and shows why.
@@ -158,8 +162,10 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     if(row?.outcome==='APPLIED')toast.success(vm.code+': '+row.message,{duration:1500});await board.refetch();
   }
   const [bulkOps,setBulkOps]=useState<VmOpsStatus|''>(''),[bulkOpsErrors,setBulkOpsErrors]=useState<{vm:string;message:string}[]>([]);
+  // N on the button = selected VMs whose recorded status really changes (picking the status they already have counts 0).
+  const opsChanges=bulkOps?selectedRows.filter(v=>opsStatus(v)!==bulkOps).length:0;
   async function applyBulkOps(){
-    if(!bulkOps)return;
+    if(!bulkOps||!opsChanges)return;
     try{const r=await setOps.mutateAsync({projectId,key:crypto.randomUUID(),items:selectedRows.map(v=>({vmId:v.id,status:bulkOps,expectedCycle:opsOfVm.get(v.id)?.cycle??v.cycle}))});
       setBulkOpsErrors(r.rows.filter(x=>x.outcome==='ERROR').map(x=>({vm:x.where,message:x.message})));
       toast.success(`${VM_OPS[bulkOps].label}: ${r.applied} VM`+(r.skipped?` · ${r.skipped} giữ nguyên`:'')+(r.errors?` · ${r.errors} lỗi`:''),{duration:4000});await board.refetch();}
@@ -182,7 +188,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
       <ServerPicker servers={pickerServers} value={serverId||''} onChange={id=>router.push((id?`/infrastructure/servers/${id}`:'/infrastructure/servers')+writeGridUrl({...url,q:'',page:1,vm:null,cause:null}))}/>
       <div className="vm-title min-w-0">{single?<h1><InlineText value={current!.code} label="tên server" canEdit={rights.manage} onSave={saveServer('code')}/></h1>:<h1>Server / VM</h1>}
         {single&&<div className="pm-muted text-xs flex gap-3 flex-wrap"><span>IP: <InlineText value={current!.ipAddress} label="IP server" placeholder="chưa có" canEdit={rights.manage} onSave={saveServer('ipAddress')}/></span><span className="min-w-0">Ghi chú: <InlineText value={displayNote(current!.notes)} label="ghi chú server" placeholder="thêm ghi chú" canEdit={rights.manage} onSave={saveServer('notes')}/></span></div>}</div>
-      <div className="vm-head-actions">{rights.manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{(rights.assign||rights.manage)&&<button className={'pm-button'+(bulk==='paste'?' pm-button-primary':'')} onClick={()=>openBulk('paste',true)}><ClipboardPaste size={16}/>Dán bảng</button>}<button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" onClick={()=>void refresh()}><RefreshCw size={16}/></button>
+      <div className="vm-head-actions">{rights.manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{(rights.assign||rights.manage)&&<button className={'pm-button'+(bulk==='paste'?' pm-button-primary':'')} onClick={()=>openBulk('paste',true)}><ClipboardPaste size={16}/>Dán bảng</button>}<button className={'pm-button'+(storeOpen?' pm-button-primary':'')} aria-pressed={storeOpen} onClick={()=>goStore({open:!storeOpen})}><Boxes size={16}/>Kho SDK</button><button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" onClick={()=>void refresh()}><RefreshCw size={16}/></button>
         <DropdownMenu><DropdownMenuTrigger asChild><button className="pm-icon-button" aria-label="Quản lý server" title="Quản lý server"><MoreHorizontal size={16}/></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="vm-menu">
           {rights.manage&&<DropdownMenuItem onSelect={()=>setForm('CREATE')}>Thêm server</DropdownMenuItem>}
           {moduleOn('INSTALL_TASKS')&&<DropdownMenuItem asChild><Link href={links.installs()}>Việc cài proxy</Link></DropdownMenuItem>}<DropdownMenuItem asChild><Link href={links.proxies()}>Kho proxy</Link></DropdownMenuItem>
@@ -203,15 +209,15 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
-        <div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
+        {!storeOpen&&<div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
           <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Theo tiến độ cài</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
-          <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>
+          <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>}
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
-        {hasSelection&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}
+        {hasSelection&&!storeOpen&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}
           {paged.rows.length>0&&paged.rows.every(v=>selected.has(v.id))&&selectedInFilter<filtered.length&&<button className="pm-link text-sm" onClick={()=>setSelected(new Set(filtered.map(v=>v.id)))}>Chọn tất cả {filtered.length} kết quả đang lọc</button>}
           <span className="vm-bulkbar-actions">{deletedView?(rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void restore(selectedRows.map(v=>v.id))}><RotateCcw size={15}/>Khôi phục</button>):<>
             {rights.copy&&<DropdownMenu><DropdownMenuTrigger asChild><button className="pm-button"><Copy size={15}/>Copy proxy</button></DropdownMenuTrigger><DropdownMenuContent className="vm-menu"><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'DESIRED')}>Copy proxy được giao</DropdownMenuItem><DropdownMenuItem onSelect={()=>void copyList(selectedRows,'INSTALLED')}>Copy proxy đã cài</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
-            {rights.assign&&<span className="vm-bulk-ops"><select aria-label="Tình trạng cho các VM đã chọn" className="pm-input w-auto" value={bulkOps} onChange={e=>setBulkOps(e.target.value as VmOpsStatus)}><option value="">Tình trạng…</option>{VM_OPS_STATUSES.map(st=><option key={st} value={st}>{VM_OPS[st].label}</option>)}</select><button className="pm-button" disabled={!bulkOps||setOps.isLoading} onClick={()=>void applyBulkOps()}>{setOps.isLoading?'Đang lưu…':'Áp dụng'}</button></span>}
+            {rights.assign&&<span className="vm-bulk-ops"><select aria-label="Tình trạng cho các VM đã chọn" className="pm-input w-auto" value={bulkOps} onChange={e=>setBulkOps(e.target.value as VmOpsStatus)}><option value="">Tình trạng…</option>{VM_OPS_STATUSES.map(st=><option key={st} value={st}>{VM_OPS[st].label}</option>)}</select><button className="pm-button pm-button-primary" disabled={!opsChanges||setOps.isLoading} onClick={()=>void applyBulkOps()}>{setOps.isLoading?'Đang lưu…':`Áp dụng ${opsChanges} VM`}</button></span>}
             {rights.assign&&<button className={'pm-button'+(bulk==='assign'?' pm-button-primary':'')} onClick={()=>openBulk('assign')}>Gán proxy</button>}
             {rights.assign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
             {rights.manage&&<button className={'pm-button'+(bulk==='note'?' pm-button-primary':'')} onClick={()=>openBulk('note')}>Sửa ghi chú</button>}
@@ -219,11 +225,12 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
             <button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}><X size={15}/>Bỏ chọn</button></span></div>}
         {bulkOpsErrors.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{bulkOpsErrors.length} VM chưa đổi tình trạng</strong><button className="pm-icon-button" aria-label="Đóng danh sách lỗi tình trạng" onClick={()=>setBulkOpsErrors([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{bulkOpsErrors.map((b,i)=><li key={i}><strong className="pm-code">{b.vm}</strong> — {b.message}</li>)}</ul></div>}
         {blocked.length>0&&<div className="pm-blocked" role="alert"><div className="flex justify-between gap-2"><strong className="text-sm">{blocked.length} VM chưa xử lý được</strong><button className="pm-icon-button" aria-label="Đóng danh sách bị chặn" onClick={()=>setBlocked([])}><X size={15}/></button></div><ul className="text-sm mt-2 space-y-1 max-h-28 overflow-y-auto">{blocked.map(b=><li key={b.id}><strong className="pm-code">{b.code}</strong> — {b.reason} · <button className="pm-link" onClick={()=>openVm(b.id,CAUSE_TAB[b.cause||'']||'overview',b.cause||null)}>Mở VM</button></li>)}</ul></div>}
-        {pager('top')}
-        <div ref={gridHost}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
+        {storeOpen&&<SdkStorePanel projectId={projectId} url={sdkUrl} onUrl={goStore} canEdit={rights.assign} maxHeight={maxHeight+60} onClose={()=>goStore({open:false})} onOpenVm={id=>go({sdk:{...sdkUrl,open:false},vm:id,tab:'overview',cause:null})}/>}
+        <div hidden={storeOpen}>{pager('top')}</div>
+        <div ref={gridHost} hidden={storeOpen}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
           emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onCopyToInstall={vm=>void copyToInstall(vm)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell} onStatus={statusAction}
           opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])}/></div>
-        {pager('bottom')}
+        <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>
         {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">

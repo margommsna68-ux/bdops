@@ -7,12 +7,13 @@ import {decodeEndpoint} from '../proxy-management/repository';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
 import {authorizeVM} from '../vm-management/repository';
 import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
+import {releaseForRecreate} from '../vm-management/sdk-store';
 // VM operating state and rounds (owner brief 18/10/2026).
 // - The main status is what a person / AI recorded. Recording SDK, assigning an account or confirming a proxy never sets it.
 // - Every command names the round it was meant for (expectedCycle); a command prepared for an older round is refused, so an old
 //   AI command never changes the new round.
 // - "Ghi nhận đã tạo lại VM" records a recreation that was really done: same VM id / server / code, a new round, the old round
-//   kept (VmCycle), its EarnApp closed (never back to NEW), the current SDK moved to history, a still valid proxy kept for the
+//   kept (VmCycle), its EarnApp closed (never back to NEW), the current SDK leaves the position (Kho SDK if never linked, history if linked), a still valid proxy kept for the
 //   position as a new plan (the old confirmation belongs to the old round and is never shown as current). Allowed when the payout of the
 //   current round has been received in full (and not used for a recreation yet), or when the EarnApp is permanently suspended.
 type Tx=Prisma.TransactionClient;
@@ -118,13 +119,11 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
       for(const o of await tx.earnAppPayout.findMany({where:{earnAppId:earnApp.id,endedAt:null}})){await images.remember('PAYOUT',o.id);await tx.earnAppPayout.update({where:{id:o.id},data:{endedAt:now}});}
       await images.remember('GMAIL',earnApp.loginId);await tx.gmailAccount.update({where:{id:earnApp.loginId},data:{revision:{increment:1}}});
     }
-    if(vm.sdkId){
-      await images.remember('VM_SDK',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{sdkId:null,sdkRecordedAt:null,sdkRecordedById:null}});
-      await tx.vMSdkHistory.create({data:{projectId:scope.projectId,vmId:vm.id,previousSdk:vm.sdkId,newSdk:null,actorId:current.userId,note:'Tạo lại VM: SDK lượt '+cycle+' vào lịch sử'}});
-    }
+    // The real machine gets a new SDK: the current code leaves the position (back to Kho SDK if never linked, history if linked).
+    const sdkLeft=await releaseForRecreate(tx,images,scope.projectId,current.userId,vm,cycle);
     const ops=await ensureOps(tx,images,scope.projectId,vm.id);
     await tx.vmOperation.update({where:{id:ops.id},data:{cycle:cycle+1,status:'NEW_VM',statusAt:now,statusById:current.userId,revision:{increment:1}}});
-    await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle:cycle+1,kind:'RECREATE',fromStatus:ops.status,toStatus:'NEW_VM',note:input.note?.trim().slice(0,500)||null,detail:{closedCycle:cycle,reason,proxy:proxyNote,earnAppClosed:!!earnApp,sdkMoved:!!vm.sdkId},actorId:current.userId}});
+    await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle:cycle+1,kind:'RECREATE',fromStatus:ops.status,toStatus:'NEW_VM',note:input.note?.trim().slice(0,500)||null,detail:{closedCycle:cycle,reason,proxy:proxyNote,earnAppClosed:!!earnApp,sdkMoved:!!sdkLeft},actorId:current.userId}});
     return {vmId:vm.id,where:where(vm),cycle:cycle+1,reason,proxy:proxyNote,proxyKept:!!proxyKept};
   },db);
 }

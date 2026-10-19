@@ -3,30 +3,36 @@ import {DEFAULT_PREFS,editableFields,moveColumn,nextCell,normalizePrefs,pageOf,r
 const params=(s:string)=>new URLSearchParams(s);
 describe('Server/VM grid model',()=>{
   it('default columns follow the brief and optional columns start hidden',()=>{
-    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['proxy','sdk','account','paypal','payout','status','notes']);
+    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['proxy','sdk','account','paypal','payout','notes']);// 19/10/2026: Cài proxy merged into Proxy
   });
   it('stored preferences are cleaned: unknown keys dropped, new columns put at their default place, widths bounded',()=>{
     const p=normalizePrefs({order:['notes','bogus','proxy','notes'],hidden:['paypal','gmail'],widths:{sdk:20,notes:300}});
-    expect(p.order).toEqual(['notes','version','sdkMeta','progress','proxy','sdk','account','paypal','payout','status']);expect(p.hidden).toContain('paypal');expect(p.hidden).not.toContain('gmail');expect(p.hidden).toContain('version');
+    expect(p.order).toEqual(['notes','version','sdkMeta','progress','proxy','sdk','account','paypal','payout']);expect(p.hidden).toContain('paypal');expect(p.hidden).not.toContain('gmail');expect(p.hidden).toContain('version');
     expect(p.widths).toEqual({notes:300});expect(normalizePrefs(null)).toEqual(DEFAULT_PREFS);
+  });
+  it('a stored layout from before the merge never brings the old "Cài proxy" column back and keeps the other settings',()=>{
+    const old=normalizePrefs({order:['proxy','status','sdk','notes','account','paypal','payout','version','sdkMeta','progress'],hidden:['version','sdkMeta','progress','paypal'],widths:{status:180,proxy:300,notes:260,vm:140}});
+    expect(old.order).not.toContain('status');expect(old.hidden).not.toContain('status');expect(old.widths).toEqual({proxy:300,notes:260,vm:140});
+    expect(visibleColumns(old).map(c=>c.key)).toEqual(['proxy','sdk','notes','account','payout']);
   });
   it('moves, toggles and resizes columns within limits',()=>{
     let p=moveColumn(DEFAULT_PREFS,'notes',0);expect(visibleColumns(p)[0].key).toBe('notes');
     p=toggleColumn(p,'version',true);expect(visibleColumns(p).map(c=>c.key)).toContain('version');
-    p=resizeColumn(p,'sdk',10);expect(p.widths.sdk).toBe(110);p=resizeColumn(p,'vm',150);expect(p.widths.vm).toBe(150);
+    p=resizeColumn(p,'sdk',10);expect(p.widths.sdk).toBe(130);p=resizeColumn(p,'vm',150);expect(p.widths.vm).toBe(150);
   });
   it('Tab goes to the next editable cell, wraps to the next row and stops at the edges',()=>{
-    const fields=editableFields(DEFAULT_PREFS,{manage:true,assign:true});expect(fields).toEqual(['code','sdk','notes']);
-    expect(editableFields(DEFAULT_PREFS,{manage:false,assign:true})).toEqual(['sdk']);
+    // The SDK has its own frame (code, money, note) since 19/10/2026; Tab moves between VM code and note.
+    const fields=editableFields(DEFAULT_PREFS,{manage:true,assign:true});expect(fields).toEqual(['code','notes']);
+    expect(editableFields(DEFAULT_PREFS,{manage:false,assign:true})).toEqual([]);
     const rows=['a','b'];
-    expect(nextCell(rows,fields,{vmId:'a',field:'code'})).toEqual({vmId:'a',field:'sdk'});
+    expect(nextCell(rows,fields,{vmId:'a',field:'code'})).toEqual({vmId:'a',field:'notes'});
     expect(nextCell(rows,fields,{vmId:'a',field:'notes'})).toEqual({vmId:'b',field:'code'});
     expect(nextCell(rows,fields,{vmId:'b',field:'code'},true)).toEqual({vmId:'a',field:'notes'});
     expect(nextCell(rows,fields,{vmId:'b',field:'notes'})).toBeNull();expect(nextCell(rows,fields,{vmId:'a',field:'code'},true)).toBeNull();
   });
   it('URL keeps search, filter, sort, page, size and the open VM; defaults stay out of the URL',()=>{
     const s=readGridUrl(params('q=VM_07&view=PENDING&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD'));
-    expect(s).toEqual({q:'VM_07',view:'PENDING',sort:'SDK',page:3,size:200,vm:'x',tab:'work',cause:'HOLD',st:[],money:'',warn:false});
+    expect(s).toEqual({q:'VM_07',view:'PENDING',sort:'SDK',page:3,size:200,vm:'x',tab:'work',cause:'HOLD',st:[],money:'',warn:false,sdk:{open:false,q:'',state:'FREE',place:'ALL',sort:'UPDATED',page:1}});
     expect(writeGridUrl(s)).toBe('?q=VM_07&view=PENDING&sort=SDK&page=3&size=200&vm=x&tab=work&cause=HOLD');
     expect(writeGridUrl(readGridUrl(params('view=bogus&size=7&page=-2')))).toBe('');
     // Operating status filter (several, NONE = Chưa ghi), money milestone, proxy warning and the priority sort survive reload / Back.
@@ -34,6 +40,13 @@ describe('Server/VM grid model',()=>{
     expect(o).toMatchObject({st:['SUSPENDED','NONE'],money:'RECREATE',warn:true,sort:'PRIORITY'});
     expect(writeGridUrl(o)).toBe('?st=SUSPENDED%2CNONE&money=RECREATE&warn=proxy&sort=PRIORITY');
     expect(readGridUrl(params('money=PAID&warn=1'))).toMatchObject({money:'',warn:false});
+  });
+  it('Kho SDK keeps its search, filters, sort and page in the URL next to the table state',()=>{
+    const k=readGridUrl(params('view=SDK_MISSING&sdk=1&sq=moon1&sf=UNCONFIRMED&sl=STORE&ss=AMOUNT_DESC&sp=2'));
+    expect(k.sdk).toEqual({open:true,q:'moon1',state:'UNCONFIRMED',place:'STORE',sort:'AMOUNT_DESC',page:2});
+    expect(writeGridUrl(k)).toBe('?view=SDK_MISSING&sdk=1&sq=moon1&sf=UNCONFIRMED&sl=STORE&ss=AMOUNT_DESC&sp=2');
+    expect(writeGridUrl(readGridUrl(params('sdk=1&sf=bogus&ss=x')))).toBe('?sdk=1');
+    expect(writeGridUrl({...k,sdk:{...k.sdk!,open:false}})).toBe('?view=SDK_MISSING');
   });
   it('pages the whole filtered result and clamps the page',()=>{
     const rows=Array.from({length:250},(_,i)=>i);

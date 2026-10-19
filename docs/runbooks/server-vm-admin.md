@@ -21,7 +21,7 @@ Trang: `/infrastructure/servers` (tất cả server) và `/infrastructure/server
 - **Xoá server**: nếu còn VM giữ proxy thì báo ngay, không hỏi. Không còn thì hỏi một lần "Xoá server X cùng N VM?". Server và các VM đang hoạt động được lưu trữ trong cùng một giao dịch.
 - **Khôi phục**: bộ lọc **Đã xoá** hiện máy đã xoá và dải *Server đã xoá*. Bấm *Khôi phục* ở dòng, hàng loạt, hoặc ở server.
   - Khôi phục server trả lại đúng các VM đã xoá cùng nó.
-  - Bị chặn nếu server của VM còn đang xoá, hoặc SDK của máy đã thuộc VM khác; web không giành lại.
+  - Bị chặn nếu server của VM còn đang xoá. SDK của máy (19/10/2026): nếu mã đã được chuyển sang VM khác thì máy khôi phục không có SDK; web không giành lại.
 - Máy đã xoá không xuất hiện trong *Điền VM thiếu*, ô chọn VM (bảng proxy, tài khoản, công việc) và số đếm máy hoạt động.
 
 ## Bảng

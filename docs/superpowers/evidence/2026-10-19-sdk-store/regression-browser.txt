@@ -1,0 +1,61 @@
+# Hồi quy trình duyệt 19/10/2026 (dữ liệu thử cục bộ)
+
+## ops-accept.js (luồng vận hành VM, fixture opsx-u0g2d)
+PASS Dữ liệu cũ hiện “Chưa ghi”, kể cả VM_001 có SDK, tài khoản, PayPal và proxy đã cài (không suy ra LINKED/OK) — Chưa ghi, Chưa ghi, Chưa ghi
+PASS Cột Tình trạng nằm ngay sau mã VM; tiến độ cài nằm trong ô Proxy (cột “Cài proxy” đã gộp 19/10) — VM | TÌNH TRẠNG | PROXY | SDK | TÀI KHOẢN EARNAPP | PAYPAL NHẬN | RÚT TIỀN |
+PASS Chọn LINKED tại ô: lưu ngay (không dialog), ghi người/giờ/cũ→mới; chọn lại giá trị cũ không ghi lịch sử — [{"vm":"VM_002","kind":"STATUS","from":null,"to":"LINKED","cycle":1}]
+PASS Màu theo trạng thái, kèm chữ (LINKED = xanh dương) — vm-ops vm-ops-info vm-ops-pick
+PASS Tải lại vẫn LINKED
+PASS Chọn 3 VM → OFF VM → Áp dụng một lần: 3 VM đổi, mỗi VM một dòng lịch sử
+PASS Lọc OFF VM (có số lượng 3) → đúng 3 VM, ghi vào URL — /infrastructure/servers/cmveu0g2e0001qah61jbtsrv3?st=OFF
+PASS Lọc nhiều trạng thái: OFF VM + LINKED → 4 VM — /infrastructure/servers/cmveu0g2e0001qah61jbtsrv3?st=OFF%2CLINKED
+PASS Tải lại giữ bộ lọc
+PASS Back về bộ lọc trước (chỉ OFF) — /infrastructure/servers/cmveu0g2e0001qah61jbtsrv3?st=OFF
+PASS Forward lại 4 VM
+PASS Sort “Cần xử lý trước”: SUS (VM_006), proxy BLOCKED (VM_002), Earn/VM lỗi (VM_007), OFF (VM_003–005), rồi chưa ghi theo mã tự nhiên — VM_006 VM_002 VM_007 VM_003 VM_004 VM_005 VM_001 VM_008 
+PASS Lọc riêng cảnh báo proxy BLOCKED — /infrastructure/servers/cmveu0g2e0001qah61jbtsrv3?warn=proxy&sort=PRIORITY
+PASS VM có proxy BLOCKED vẫn giữ tình trạng chính riêng (LINKED), proxy hiện ở cột proxy
+PASS Đang xem một server: không lặp tên server ở từng dòng
+PASS Chọn PP hiện gọn: tình trạng, số dư USD, còn chờ, thiếu đến 100, sau khoản này, email chưa dùng — Tình trạng Dùng được Số dư USD 0,00 Còn chờ 0,00 Thiếu đến 100 100,00 S
+PASS Ô Rút tiền: “Chờ tiền về” + PP + số tiền — Chờ tiền về pp13u0g2d · 24,00 USD
+PASS Ba EarnApp, ba email, cùng pp13: 3 yêu cầu, mỗi khoản tiền gắn đúng yêu cầu
+PASS Kho tài khoản: pp13 còn lại theo sổ 46,00 USD, nhãn “Đang gom · thiếu 54” — 46,00 USD Đang gom · thiếu 54,00
+PASS Trạng thái sức khoẻ PP giữ riêng (Dùng được), tách khỏi nhãn gom
+PASS Nhận đủ → mốc “Cần tạo lại VM” tại VM_001
+PASS PP 82: thiếu 18; sau khoản 18 dự kiến 100 — Tình trạng Dùng được Số dư USD 82,00 Còn chờ 0,00 Thiếu đến 100 18,00 Sau khoản này 100,00 Đang gom Email chưa dùng còn 1
+PASS Có 82, chờ 18: chỉ “Dự kiến đủ 100 USD”, chưa đạt — 82,00 USD Chờ về 18,00 USD Dự kiến đủ 100 USD · thiếu 18,00
+PASS Nhận đủ 18 → số dư thực 100,00 USD, “Đạt mức gom” — 100,00 USD Đạt mức gom
+PASS Dự kiến 24, nhận 10: vẫn “Chờ tiền về”, còn 14 — Chờ tiền về pp13u0g2d · 24,00 USD · còn 14,00
+PASS Chưa nhận đủ: không có nút “Ghi nhận đã tạo lại VM” — opsx-u0g2d / VM_008 · lượt 1 · opsl08-u0g2d@example.invalid Yêu cầu ngày 19/10/2026 · pp13u0g2d · ops13-5-u0g2d@example.invalid
+PASS Sổ pp13 chỉ tăng 10 (56,00), tiền chờ 14 (không cộng cả 24) — 56,00 USD Chờ về 14,00 USD Đang gom · thiếu 44,00
+PASS pp13 đã cấp hết 5 email (kể cả email đã bỏ gán): không đề xuất cho EarnApp mới — Chọn mã PP | pp82pbulz · Dùng được · 82,00 USD · 1 email trống | pp82u0cq7 · Dùng được · 
+PASS Bỏ lọc vẫn không hiện pp13 vì không còn email nào cấp được
+PASS Cùng mã PP cũ (pp82) vẫn chọn được email mới; email đã dùng cho VM_004 không hiện — ops82-2-u0g2d@example.invalid
+PASS Ghi nhận tạo lại: giữ id và mã VM_001, lượt 2, New VM; bấm hai lần chỉ một lượt mới — [{"vm":"VM_001","number":1,"reason":"PAYOUT_RECEIVED","proxyKept":true}]
+PASS SDK cũ vào lịch sử, SDK hiện hành trống
+PASS Proxy còn hợp lệ được giữ cho vị trí (cấu hình mới chờ cài; bản cài cũ thuộc lượt cũ, VM lượt mới không còn trỏ tới nó — sửa 19/10)
+PASS EarnApp cũ đã đóng: VM chưa có tài khoản ở lượt mới; không phát sinh chi phí
+PASS Yêu cầu rút cũ đánh dấu đã dùng, không cấp lượt mới lần nữa
+PASS Dòng VM_001: New VM, Chưa có SDK, proxy Giao + Chờ cài, không còn "Đã cài" của lượt 1 —  VM_001 OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail Giao 203.0.1
+PASS Lịch sử VM: lượt 1 đã đóng, yêu cầu rút và tiền về, tình trạng đã ghi — opsx-u0g2d VM_001 Chờ cài Tổng quan Proxy Cài proxy Tài khoản Lịch sử Các phiên bản cấu hình pro
+PASS Tài khoản Gmail của lượt cũ không trở lại NEW (Đã dùng) — opsl01-u0g2d@example.invalid Gmail Đã dùng 
+PASS Lệnh cũ (lượt 1) gửi sau khi tạo lại bị từ chối, không đổi lượt mới — {"result":{"data":{"json":{"rows":[{"vmId":"cmveu0g2f0003qah60lujxc9k","where":"opsx-u0g2d / VM_001","outcome":"ERRO
+PASS SUS: tạo lại cùng mã không cần tiền về; không đóng PP mẹ; yêu cầu và tiền chờ của lượt cũ còn nguyên
+PASS Tiền chờ của lượt SUS vẫn tính chờ ở pp13 (14 + 15 = 29) — 56,00 USD Chờ về 29,00 USD Đang gom · thiếu 44,00
+PASS Ghi tiền ở Kho tài khoản: số dư và nhãn gom tính lại ngay, không cần tải lại trang (56 + 15 = 71, chờ 14) — 71,00 USD Chờ về 14,00 USD Đang gom · thiếu 29,00
+PASS Tiền về muộn của lượt cũ gắn vào yêu cầu cũ
+PASS Lượt mới của VM_010 không chuyển sang “Cần tạo lại”
+PASS Hai người cùng gán một email: chỉ một yêu cầu thành công, người kia thấy lý do tại chỗ — VM_005 ops82-2-u0g2d@example.invalid · Email pp82u0g2d · ops82-2-u0g2d@example.invalid đang nh�
+PASS Nhân viên chỉ có Server / VM: thấy mốc tiền nhưng không thấy số tiền — Cần tạo lại VM pp82u0g2d
+PASS Nhân viên đổi được Tình trạng tại ô (cùng endpoint)
+PASS Gọi thẳng endpoint tiền: không trả số tiền, ghi yêu cầu bị từ chối — {"result":{"data":{"json":{"rights":{"money":false,"balance":false},"paypals":[]}}}} · {"error":{"json":{"message":"Bạn
+PASS Laptop 1280: trang không tràn ngang, bảng cuộn ngang trong khung, cột Tình trạng cố định khi cuộn — {"page":true,"inner":true}
+PASS Không có lỗi JavaScript trên trang
+TOTAL 50 pass / 0 fail
+
+## ops-fix-accept.js (bốn lỗi 19/10, fixture opsx-u32rp)
+PASS Lỗi 3 · lần gán có cấp email lần đầu chỉ có "Xem"; lần gán chỉ tài khoản (không cấp email) vẫn hoàn tác được — 15 chỉ xem · mẫu hoàn tác được: Gán tài khoản / ema
+PASS Lỗi 3 · lý do rõ và chỉ cách Bỏ gán — Email PayPal ops13-4-u32rp@example.invalid Đã lưu Đã lưu Hoàn tác: Khôi phục ghi nhận trước nếu chưa được sửa tiếp Email nhận của Ea
+PASS Lỗi 3 · email đã cấp vẫn giữ dấu đã dùng — [{"email":"ops13-5-u32rp@example.invalid","used":false},{"email":"ops82-2-u32rp@example.invalid","used":false},{"email":"ops82-1-u32rp@example.invalid","u
+PASS Không có lỗi JavaScript
+Tổng: 4 đạt, 0 lỗi

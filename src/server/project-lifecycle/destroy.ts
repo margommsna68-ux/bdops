@@ -12,6 +12,7 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.virtualMachine.updateMany({where:vmWhere,data:{desiredConfigurationId:null,installedConfigurationId:null,proxyId:null,gmailId:null}});
     await tx.vMConfiguration.deleteMany({where});
     await tx.vMSdkHistory.deleteMany({where});
+    await tx.sdkEvent.deleteMany({where});await tx.sdkRecord.deleteMany({where});
     await tx.proxyAssignmentHistory.deleteMany({where:{OR:[{proxy:{projectId}},{vm:vmWhere}]}});
     await tx.businessWorkItem.deleteMany({where});
     await tx.earnWithdrawal.deleteMany({where});

@@ -4,6 +4,7 @@ import {encrypt} from '@/lib/encryption';
 import {parseVmRange,addManagedVMs,updateManagedVM,updateManagedServer,archiveVMs,restoreVMs,archiveServer,restoreServer} from '@/server/vm-management/metadata';
 import {createVMService} from '@/server/vm-management/allocation';
 import {undoOperation} from '@/server/operation-history/undo';
+import {saveVmSdk} from '@/server/vm-management/sdk-store';
 import type {ActorScope} from '@/server/proxy-management/types';
 import {testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
@@ -23,7 +24,7 @@ async function fixture(role:'ADMIN'|'USER'='ADMIN'){
   await db.project.create({data:{id:projectId,code:projectId,name:'VM admin fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role,allowedModules:['INFRASTRUCTURE'],capabilities:['PROXY_IMPORT']}});
   const s7=await db.server.create({data:{projectId,code:'moon7',managed:true}}),s8=await db.server.create({data:{projectId,code:'moon8',managed:true}});
-  const vm=(serverId:string,code:string,o:{archived?:boolean;sdk?:string}={})=>db.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL',archivedAt:o.archived?new Date():null,sdkId:o.sdk||null}});
+  const vm=async(serverId:string,code:string,o:{archived?:boolean;sdk?:string}={})=>{const row=await db.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL',archivedAt:o.archived?new Date():null,sdkId:o.sdk||null}});if(o.sdk)await db.sdkRecord.create({data:{projectId,code:o.sdk,vmId:row.id,linkState:'UNLINKED'}});return row;};
   const v1=await vm(s7.id,'VM_001',{sdk:'sdk-'+projectId.slice(0,8)}),v2=await vm(s7.id,'VM_002'),v3=await vm(s7.id,'VM_003'),v4=await vm(s7.id,'VM_004',{archived:true,sdk:'sdk-old-'+projectId.slice(0,8)});
   const net='203.5.'+(1+Math.floor(Math.random()*250))+'.',identity=await db.proxyIdentity.create({data:{ip:net+'1',owner:'SELF'}});ids.push(identity.id);
   const ep=await db.proxyIP.create({data:{projectId,identityId:identity.id,address:net+'1:80',host:net+'1',port:80,credentialCipher:encrypt(JSON.stringify({username:'u',password:'p'})),packageCode:'p',inventoryState:'LIVE',inventoryKey:identity.id}});
@@ -33,7 +34,7 @@ async function fixture(role:'ADMIN'|'USER'='ADMIN'){
   await db.vMTask.create({data:{vmId:v3.id,type:'PROXY_INSTALL',title:'Cài proxy',scheduledAt:new Date(),status:'IN_PROGRESS'}});
   const snapshot=await db.proxySourceSnapshot.create({data:{projectId,sourceKey:'GENJY',hash:'vm-admin',scanSucceeded:true}});
   const scope:ActorScope={projectId,userId,role,capabilities:['PROXY_IMPORT']};
-  const cleanup=async()=>{await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:ids}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
+  const cleanup=async()=>{await db.sdkEvent.deleteMany({where:{projectId}});await db.sdkRecord.deleteMany({where:{projectId}});await db.vMSdkHistory.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.vMTask.deleteMany({where:{vm:{server:{projectId}}}});await db.vMProxyAllocation.deleteMany({where:{projectId}});await db.virtualMachine.updateMany({where:{server:{projectId}},data:{proxyId:null,desiredConfigurationId:null,installedConfigurationId:null}});await db.vMConfiguration.deleteMany({where:{projectId}});await db.virtualMachine.deleteMany({where:{server:{projectId}}});await db.server.deleteMany({where:{projectId}});await db.auditLog.deleteMany({where:{projectId}});await db.operationJournal.deleteMany({where:{projectId}});await db.proxyBatch.deleteMany({where:{projectId}});await db.proxySourceSnapshot.deleteMany({where:{projectId}});await db.proxyIP.deleteMany({where:{projectId}});await db.proxyIdentity.deleteMany({where:{id:{in:ids}}});await db.projectMember.deleteMany({where:{projectId}});await db.project.deleteMany({where:{id:projectId}});await db.user.deleteMany({where:{id:userId}});};
   return {projectId,userId,scope,s7,s8,v1,v2,v3,v4,snapshot,cleanup};
 }
 const codes=async(serverId:string,archived=false)=>(await db.virtualMachine.findMany({where:{serverId,archivedAt:archived?{not:null}:null},orderBy:{code:'asc'}})).map(v=>v.code);
@@ -77,10 +78,14 @@ it('deletes VMs that hold nothing (single and bulk), reports blocked rows, undoe
     // a deleted VM is never autofilled
     const vm=createVMService(db,{refreshSource:async()=>({id:f.snapshot.id,sourceKey:'GENJY',hash:'vm-admin',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
     const p=await vm.preview(f.scope,{mode:'AUTO',vmIds:[f.v1.id,f.v2.id,f.v3.id],idempotencyKey:randomUUID()});expect(p.rows.find(r=>r.vm==='VM_001')?.message).toMatch(/ẩn|xoá/i);
-    // restore: VM_001 fine; VM_004 refused because its SDK now belongs to an active VM
-    await db.virtualMachine.update({where:{id:f.v3.id},data:{sdkId:'sdk-old-'+f.projectId.slice(0,8)}});
-    const back=await restoreVMs(f.scope,[f.v1.id,f.v4.id],db);expect(back.restored).toBe(1);expect(back.blocked.map(b=>b.code)).toEqual(['VM_004']);expect(back.blocked[0].reason).toMatch(/SDK/);
+    // restore (SDK store 19/10/2026): the never-linked SDK of deleted VM_004 was moved to VM_003 explicitly (source → target). Restoring
+    // VM_004 brings the machine back without that SDK: it is never taken back, and VM_003 keeps it.
+    const old='sdk-old-'+f.projectId.slice(0,8),v4=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v4.id}}),v3=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v3.id}});
+    await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.v3.id,expectedVmRevision:v3.revision,expectedCycle:1,code:old,from:{vmId:f.v4.id,expectedRevision:v4.revision}},db);
+    const back=await restoreVMs(f.scope,[f.v1.id,f.v4.id],db);expect(back.restored).toBe(2);expect(back.blocked).toEqual([]);
     expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v1.id}})).archivedAt).toBeNull();
+    expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.v4.id}})).toMatchObject({archivedAt:null,sdkId:null});
+    expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v3.id}})).sdkId).toBe(old);expect((await db.sdkRecord.findFirstOrThrow({where:{projectId:f.projectId,code:old}})).vmId).toBe(f.v3.id);
   }finally{await f.cleanup();}
 });
 it('deletes a server with its VMs in one transaction only when nothing is held, restores them together; a VM of a deleted server waits for the server',async()=>{

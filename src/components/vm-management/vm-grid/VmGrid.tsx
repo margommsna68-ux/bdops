@@ -3,7 +3,6 @@ import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import {links} from '@/lib/links';
 import {Check,Copy,MoreHorizontal,X,Server} from 'lucide-react';
-import toast from 'react-hot-toast';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from '@/components/ui/dropdown-menu';
 import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {displayNote} from '@/server/vm-management/vm-codes';
@@ -11,10 +10,11 @@ import {vmView,proxyAddress} from '../workflow';
 import type {ManagedVM} from '../shared';
 import {AccountCell,type VmAccount} from './AccountCell';
 import {StatusCell} from './StatusCell';
+import {SdkCell,type SdkDraft} from './SdkCell';
 import {OpsStatusCell,PayoutCell,type OpsRow,type OpsRights} from './OpsCells';
 import type {VmOpsStatus} from '@/lib/vm-ops';
 import type {StatusActionKind} from './status-actions';
-import {FIXED,editableFields,nextCell,resizeColumn,shortCode,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
+import {FIXED,editableFields,nextCell,resizeColumn,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
 export interface GridRights {manage:boolean;assign:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean}
 export type CopyWhich='DESIRED'|'INSTALLED';
 type Draft=Record<string,string>;
@@ -30,13 +30,14 @@ export function useDrafts(projectId:string){
 }
 export function reviewReason(v:ManagedVM){const blocked=v.holds.some(h=>h.state==='BLOCKED');return v.desired?.failureNote||(blocked?'Proxy BLOCKED':v.holds.some(h=>h.owner!=='SELF'&&!h.shared)?'Proxy Genjy / chưa rõ sở hữu':v.holds.some(h=>h.role==='UNCERTAIN')?'Proxy cần kiểm tra thực tế':'Ô cũ có công thức / nội dung chưa rõ');}
 function currentValue(v:ManagedVM,field:EditField){return field==='code'?v.code:field==='sdk'?v.sdk?.id||'':displayNote(v.notes)||'';}
-// Proxy cell: assigned and installed side by side only when they differ; the same configuration is one line with "Đã cài".
-function ProxyCell({v,canCopy,onCopy}:{v:ManagedVM;canCopy:boolean;onCopy:(which:CopyWhich)=>void}){
+// Proxy cell: assigned and installed side by side only when they differ (never one IP covering a difference); the same configuration
+// is one line. The install progress sits under the lines and the whole content opens the install actions (StatusCell).
+function ProxyLines({v,canCopy,onCopy}:{v:ManagedVM;canCopy:boolean;onCopy:(which:CopyWhich)=>void}){
   const d=v.desired,i=v.installed,same=d&&i&&d.id===i.id,extra=v.holds.filter(h=>h.role==='UNCERTAIN'&&h.endpointId!==d?.endpointId&&h.endpointId!==i?.endpointId);
-  const copy=(which:CopyWhich,label:string)=>canCopy&&<button type="button" className="vm-cell-icon" aria-label={label+' '+v.code} title={label} onClick={e=>{e.stopPropagation();onCopy(which);}}><Copy size={13}/></button>;
-  if(!d&&!i&&!extra.length) return <span className="pm-muted">—</span>;
+  const copy=(which:CopyWhich,label:string)=>canCopy&&<button type="button" className="vm-cell-icon" aria-label={label+' '+v.code} title={label+' (chỉ copy, không bắt đầu cài)'} onClick={e=>{e.stopPropagation();onCopy(which);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button>;
+  if(!d&&!i&&!extra.length) return <span className="pm-muted vm-proxy-line">—</span>;
   return <div className={'vm-proxy'+(d&&i&&!same?' vm-proxy-diff':'')}>
-    {same?<div className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={proxyAddress(i)}>{proxyAddress(i)}</span><span className="vm-tag vm-tag-ok">Đã cài</span>{copy('INSTALLED','Copy đã cài')}</div>:<>
+    {same?<div className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={proxyAddress(i)}>{proxyAddress(i)}</span>{copy('INSTALLED','Copy đã cài')}</div>:<>
       {d&&<div className="vm-proxy-line"><span className="vm-tag vm-tag-plan">Giao</span><span className="pm-ip vm-ellipsis" title={proxyAddress(d)}>{proxyAddress(d)}</span>{copy('DESIRED','Copy được giao')}</div>}
       {i&&<div className="vm-proxy-line"><span className="vm-tag vm-tag-ok">Cài</span><span className="pm-ip vm-ellipsis" title={proxyAddress(i)}>{proxyAddress(i)}</span>{copy('INSTALLED','Copy đã cài')}</div>}</>}
     {extra.length>0&&<div className="vm-proxy-line pm-muted text-xs vm-ellipsis" title={extra.map(h=>h.ip).join(', ')}>Giữ kiểm tra: {extra.map(h=>h.ip).join(', ')}</div>}
@@ -72,6 +73,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
   const allOnPage=rows.length>0&&rows.every(v=>selected.has(v.id)),someOnPage=rows.some(v=>selected.has(v.id));
   const headCheck=useRef<HTMLInputElement>(null);useEffect(()=>{if(headCheck.current) headCheck.current.indeterminate=someOnPage&&!allOnPage;},[someOnPage,allOnPage]);
   const canEdit=(field:EditField)=>fields.includes(field);
+  const sdkDraft=(vmId:string):SdkDraft|null=>{const raw=drafts.drafts[draftKey(vmId,'sdk')];if(!raw)return null;try{const d=JSON.parse(raw) as SdkDraft;return typeof d?.code==='string'?d:null;}catch{return null;}};
   const start=(v:ManagedVM,field:EditField)=>{if(!canEdit(field)) return;drafts.open(v.id,field,currentValue(v,field));setActive({vmId:v.id,field});};
   const cancel=(v:ManagedVM,field:EditField)=>{drafts.drop(v.id,field);setErrors(e=>{const n={...e};delete n[draftKey(v.id,field)];return n;});setActive(null);focusCell(v.id,field);};
   function focusCell(vmId:string,field:EditField){requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-cell="${vmId}|${field}"]`)?.focus());}
@@ -98,11 +100,10 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
   const left=(n:number)=>({position:'sticky' as const,left:n});
   const cell=(v:ManagedVM,key:ColumnKey)=>{
 
-    if(key==='proxy') return <ProxyCell v={v} canCopy={rights.copy} onCopy={w=>props.onCopy(v,w)}/>;
-    if(key==='sdk'){const view=v.sdk?<span className="vm-sdk-short"><code className="vm-sdk vm-ellipsis" title={v.sdk.id}>{shortCode(v.sdk.id)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+v.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();navigator.clipboard?.writeText(v.sdk!.id).then(()=>toast.success('Đã copy SDK '+v.code)).catch(()=>toast.error('Trình duyệt chặn copy; mở chi tiết để chọn mã'));}}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>;return deletedView?view:editable(v,'sdk','SDK '+v.code,view);}
+    if(key==='proxy'){const lines=<ProxyLines v={v} canCopy={rights.copy} onCopy={w=>props.onCopy(v,w)}/>;return deletedView?lines:<StatusCell vm={v} rights={rights} onAction={props.onStatus} onBusy={markBusy}>{lines}</StatusCell>;}
+    if(key==='sdk') return <SdkCell projectId={props.projectId} vm={v} account={props.accountOf(v.id)} canEdit={rights.assign&&!deletedView} draft={sdkDraft(v.id)} onDraft={d=>d?drafts.set(v.id,'sdk',JSON.stringify(d)):drafts.drop(v.id,'sdk')} onBusy={markBusy}/>;
     if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={rights.assign&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
     if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone}/>;
-    if(key==='status') return <StatusCell vm={v} rights={rights} onAction={props.onStatus} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version') return <span className="text-xs">{v.desired?'Giao #'+v.desired.version:''}{v.desired&&v.installed&&v.desired.id!==v.installed.id?' · ':''}{v.installed&&v.installed.id!==v.desired?.id?'Cài #'+v.installed.version:v.installed?' (đã cài)':''}{!v.desired&&!v.installed&&<span className="pm-muted">—</span>}</span>;
     if(key==='sdkMeta') return v.sdk?<span className="text-xs vm-ellipsis" title={(v.sdk.recordedBy||'')+' · '+localDate(v.sdk.recordedAt)}>{v.sdk.recordedBy||'—'} · {v.sdk.recordedAt?localDate(v.sdk.recordedAt,true):'chưa rõ ngày'}</span>:<span className="pm-muted">—</span>;

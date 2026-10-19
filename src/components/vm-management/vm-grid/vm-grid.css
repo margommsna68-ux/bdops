@@ -204,3 +204,69 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .acc-gather{display:inline-block;font-size:11px;font-weight:650;padding:0 6px;border-radius:4px;line-height:17px;margin-top:2px}
 .acc-gather-gathering{background:rgba(100,116,139,.12);color:var(--ds-text-secondary)}.acc-gather-projected{background:rgba(37,99,235,.12);color:#1d4ed8}.acc-gather-reached{background:rgba(22,163,74,.15);color:#15803d}
 [data-theme="dark"] .acc-gather-projected{color:#93c5fd}[data-theme="dark"] .acc-gather-reached{color:#4ade80}
+
+/* ── SDK store, SDK cell and the merged Proxy cell (19/10/2026) ─────────────────────────────────────────────────────────── */
+.vm-cell-trigger{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0;width:100%;min-height:36px;margin:-2px -4px;padding:2px 4px;border-radius:6px;cursor:pointer;text-align:left}
+.vm-cell-trigger:hover{background:var(--ds-hover)}
+.vm-cell-trigger:focus-visible{outline:2px solid #3b82f6;outline-offset:-2px}
+.vm-sdk-cell2{display:flex;flex-direction:column;gap:1px;min-width:0}
+.vm-sdk-line{display:flex;align-items:center;gap:4px;min-width:0;line-height:18px}
+.vm-sdk-sub{font-size:11px;line-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-sdk-draft{font-size:10.5px;font-weight:650;color:#b45309;line-height:14px;margin-left:4px}
+.vm-has-draft{box-shadow:inset 3px 0 0 #f59e0b}
+.vm-sdk-state-free{color:#047857;font-weight:600}.vm-sdk-state-linked{color:#1d4ed8;font-weight:600}.vm-sdk-state-unconfirmed{color:#b45309;font-weight:600}
+[data-theme="dark"] .vm-sdk-state-free{color:#34d399}[data-theme="dark"] .vm-sdk-state-linked{color:#93c5fd}[data-theme="dark"] .vm-sdk-state-unconfirmed,[data-theme="dark"] .vm-sdk-draft{color:#fbbf24}
+.vm-proxy-trigger{gap:2px}
+.vm-proxy-state{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:650;line-height:15px;width:fit-content;border-radius:4px;padding:0 5px}
+.vm-proxy-state-missing,.vm-proxy-state-deleted{color:var(--ds-text-secondary);background:var(--ds-hover)}
+.vm-proxy-state-pending{color:#92400e;background:rgba(245,158,11,.16)}
+.vm-proxy-state-progress{color:#6d28d9;background:rgba(124,58,237,.14)}
+.vm-proxy-state-failed,.vm-proxy-state-review{color:#b91c1c;background:rgba(220,38,38,.12)}
+.vm-proxy-state-installed{color:#047857;background:rgba(16,185,129,.14)}
+[data-theme="dark"] .vm-proxy-state-pending{color:#fbbf24}[data-theme="dark"] .vm-proxy-state-progress{color:#c4b5fd}[data-theme="dark"] .vm-proxy-state-failed,[data-theme="dark"] .vm-proxy-state-review{color:#fca5a5}[data-theme="dark"] .vm-proxy-state-installed{color:#34d399}
+.vm-grid td.vm-col-proxy,.vm-grid td.vm-col-sdk{height:48px}
+/* SDK frame: body scrolls, the footer with the save button always stays reachable. */
+.vm-sdk-pop{width:380px;max-width:calc(100vw - 16px);padding:0;overflow:hidden}
+.vm-sdk-editor{display:flex;flex-direction:column;min-height:0;max-height:inherit}
+.vm-sdk-pop .vm-sdk-editor{max-height:inherit}
+.vm-sdk-editor-body{display:flex;flex-direction:column;gap:8px;padding:10px 12px;overflow-y:auto;min-height:0;flex:1 1 auto}
+.vm-sdk-editor-foot{display:flex;flex-direction:column;gap:6px;padding:8px 12px 10px;border-top:1px solid var(--ds-border);background:var(--ds-card);flex:none}
+.vm-panel-card .vm-sdk-editor-body,.vm-panel-card .vm-sdk-editor-foot{padding-left:0;padding-right:0}
+.vm-sdk-route{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;padding:5px 8px;border-radius:6px;background:rgba(29,78,216,.08);border:1px solid rgba(29,78,216,.25)}
+.vm-sdk-link{border-top:1px dashed var(--ds-border);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.vm-sdk-pick{display:flex;flex-direction:column;gap:6px;border:1px solid var(--ds-border);border-radius:8px;padding:8px}
+.vm-sdk-pick ul{max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.vm-sdk-pick li button{display:grid;grid-template-columns:minmax(0,1.3fr) auto;gap:1px 8px;width:100%;text-align:left;font-size:12px;padding:5px 7px;border-radius:6px}
+.vm-sdk-pick li button:hover,.vm-sdk-pick li button.active{background:var(--ds-hover)}
+.vm-sdk-pick li button.active{box-shadow:inset 3px 0 0 #1d4ed8}
+.vm-sdk-pick li button>:nth-child(3),.vm-sdk-pick li button>:nth-child(4){grid-column:1/-1;font-size:11px}
+.vm-sdk-timeline{display:flex;flex-direction:column;gap:4px;font-size:12px;max-height:220px;overflow-y:auto}
+.vm-sdk-timeline li{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--ds-border);padding-left:8px}
+/* Kho SDK, opened in the page over the VM table. */
+.vm-sdk-store{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden}
+.vm-sdk-store-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.vm-sdk-store-head h2{font-size:16px;font-weight:650}
+.vm-sdk-store-table{overflow:auto;min-height:120px;flex:1 1 auto;border:1px solid var(--ds-border);border-radius:8px}
+.vm-sdk-store-table table{width:100%;min-width:720px}
+.vm-sdk-store-table thead th{position:sticky;top:0;background:var(--ds-card);z-index:1}
+.vm-sdk-store-code{display:inline-flex;align-items:center;gap:4px;text-align:left;max-width:320px}
+.vm-sdk-store-code code{word-break:break-all}
+.vm-sdk-store-note{max-width:260px}
+.vm-sdk-store-detail>td{background:var(--ds-hover)}
+.vm-sdk-store-detail-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:6px 2px}
+.vm-sdk-paste{display:flex;flex-direction:column;gap:8px;border:1px solid var(--ds-border);border-radius:8px;padding:10px}
+.vm-pager{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.vm-pager .pm-button.active{background:var(--ds-hover);font-weight:700}
+@media(max-width:900px){.vm-sdk-store-detail-body{grid-template-columns:1fr}.vm-sdk-store-head{flex-direction:column}}
+/* Save / apply buttons in Server / VM: nothing to save = muted and inert; something to save = the primary blue. */
+.vm-workspace .pm-button-primary:disabled,.vm-status-pop .pm-button-primary:disabled,.vm-panel .pm-button-primary:disabled{background:var(--ds-card);color:var(--ds-text-secondary);border-color:var(--ds-border-strong);opacity:.55}
+.vm-sdk-store{padding:12px 14px}
+.vm-sdk-store .vm-toolbar{padding:0}
+.vm-sdk-store .vm-toolbar select{width:auto;flex:none}
+.vm-sdk-store .vm-chips{padding:0}
+@media(max-width:640px){.vm-sdk-store .vm-toolbar select{flex:1 1 140px}}
+/* Phones: only select + VM stay fixed, so the Proxy / SDK cells are not hidden under the fixed columns while scrolling sideways. */
+@media(max-width:640px){.vm-grid .vm-sticky-last{position:static!important}.vm-grid th.vm-sticky-last{position:sticky!important;left:auto!important}}
+/* Kho SDK scrolls as a whole, so the paste results and "Lưu N SDK" are always reachable with the mouse wheel / touch. */
+.vm-sdk-store{overflow-y:auto;overscroll-behavior:contain}
+.vm-sdk-store-table{flex:none;overflow-x:auto;overflow-y:visible}

@@ -8,11 +8,15 @@ import {syncAssignmentState} from '../proxy-management/assignment-state';
 import {assignableReason,endpointInclude,occupantOf,placeOnVm,vmInclude,type EndpointRow,type VMRow} from '../proxy-management/edits';
 import {authorizeVM,type VMReader} from './repository';
 import {normalizeSdk} from './sdk-parse';
+import {planPlacement,applyPlacement,checkInfo,infoChanges,type SdkInfo} from './sdk-store';
+import {parseSdkAmount,formatSdkAmount,SDK_NOTE_MAX} from '@/lib/sdk-money';
 // "Dán bảng" and the bulk bar on Server/VM: one kind of update per batch (SDK, proxy, existing Gmail or note), matched by server + VM
 // code (never by line order). Preview reports every line; apply re-checks every row inside one transaction, saves the rows that are
 // still valid and reports the rest one by one. A retry of the same list finds the saved rows unchanged ("giữ nguyên") and writes nothing.
 export type BulkKind='SDK'|'PROXY'|'GMAIL'|'NOTE';
-export interface BulkRow {line:number;server:string|null;vm:string;vmId:string|null;before:string|null;after:string|null;value:string|null;outcome:'READY'|'SKIP'|'ERROR';message:string;expectedRevision:number|null}
+export interface BulkRow {line:number;server:string|null;vm:string;vmId:string|null;before:string|null;after:string|null;value:string|null;outcome:'READY'|'SKIP'|'ERROR';message:string;expectedRevision:number|null;
+  /** SDK only: money / note of the target code (undefined = keep, null = clear with "-") and the old → new text shown at the line. */
+  amount?:string|null;note?:string|null;info?:string|null}
 export interface BulkPreview {kind:BulkKind;rows:BulkRow[];ready:number;skipped:number;errors:number}
 export interface BulkApplyRow {line:number;vmId:string;server:string;vm:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string}
 export const CLEAR_TOKEN='-';
@@ -20,7 +24,7 @@ export const CLEAR_TOKEN='-';
 function refuseGmail(kind:BulkKind){if(kind==='GMAIL') throw new ProxyDomainError('INVALID_INPUT','Gán tài khoản dùng Dán bảng → Tài khoản (Server | VM | Tài khoản | Mã PP)');}
 const MAX_ROWS=1000,NOTE_MAX=1000;
 const RIGHT:Record<BulkKind,'ASSIGN'|'MANAGE'>={SDK:'ASSIGN',PROXY:'ASSIGN',GMAIL:'ASSIGN',NOTE:'MANAGE'};
-type Line={line:number;server:string|null;vm:string;value:string;extra:boolean};
+type Line={line:number;server:string|null;vm:string;value:string;extra:boolean;amount?:string;note?:string};
 const HEADER=/^(server|vm|máy|mã vm|sdk|proxy|gmail|email|ghi chú|note|giá trị)$/i;
 // Cells split on tab or "|". With a server chosen: VM | value (a leading server cell equal to that server is accepted too); without: Server | VM | value.
 // Notes may contain "|": everything after the key cells is the value. SDK also accepts spaces between cells like the SDK paste.
@@ -35,6 +39,8 @@ export function parseBulkLines(kind:BulkKind,text:string,serverCode:string|null)
     const server=serverCode?(keyed?cells[0]:serverCode):cells[0]??'';
     const vm=cells[keyed]??'',rest=cells.slice(keyed+1);
     const value=kind==='NOTE'?rest.join(' | ').trim():rest[0]??'';
+    // SDK lines may carry the code's money and note: VM | SDK | Tiền tích luỹ USD | Ghi chú (the note may contain "|").
+    if(kind==='SDK'){const sep=raw.includes('	')||raw.includes('|')?' | ':' ';out.push({line:index+1,server:server||null,vm,value,extra:false,amount:rest[1]??'',note:rest.slice(2).join(sep).trim()});return;}
     out.push({line:index+1,server:server||null,vm,value,extra:kind!=='NOTE'&&rest.length>1});
   });
   return out;
@@ -45,10 +51,6 @@ const at=(vm:{code:string;server:{code:string}})=>vm.server.code+'/'+vm.code;
 // Current value of a VM for the chosen kind, shown as "cũ".
 function shown(kind:BulkKind,vm:ActiveVM,gmails:Map<string,string>,occupant:string|null){
   if(kind==='SDK') return vm.sdkId;if(kind==='NOTE') return vm.notes;if(kind==='GMAIL') return vm.gmailId?gmails.get(vm.gmailId)||'(Gmail đã lưu trữ)':null;return occupant;
-}
-async function sdkHolder(sdk:string,exceptVmId:string,projectId:string,db:VMReader){
-  const vm=await db.virtualMachine.findFirst({where:{sdkId:sdk,managed:true,archivedAt:null,id:{not:exceptVmId}},include:{server:{select:{code:true,projectId:true}}}});
-  if(!vm) return null;return vm.server.projectId===projectId?'SDK đang thuộc '+at(vm)+'; không chuyển SDK từ máy khác':'SDK đang thuộc một VM ở dự án khác';
 }
 // Proxy lookup like the registry paste: IP, IP:port or the full proxy; current rows only (replaced/voided/retired never match).
 async function proxyEndpoints(projectId:string,db:VMReader){return await db.proxyIP.findMany({where:{projectId,identityId:{not:null},retiredAt:null,inventoryState:{notIn:['REPLACED','VOID']}},include:endpointInclude}) as EndpointRow[];}
@@ -68,6 +70,17 @@ function proxyIssue(e:EndpointRow,vm:VMRow):{skip?:string;error?:string}|null{
   if(elsewhere) return {error:'Proxy đang ở '+elsewhere+'; bỏ gán ở đó trước, web không tự chuyển'};
   const who=occupantOf(vm,e.id);if(who) return {error:'VM đang có proxy '+who+'; đổi proxy ở menu ⋯ của VM'};
   return null;
+}
+// Money / note cells of an SDK line: blank keeps, "-" clears, anything else is checked like the SDK cell.
+function sdkCells(l:Line):{info:SdkInfo}|{error:string}{
+  const a=(l.amount||'').trim(),n=(l.note||'').trim(),info:SdkInfo={};
+  if(a){if(a===CLEAR_TOKEN)info.amount=null;else{const r=parseSdkAmount(a);if('error' in r)return {error:'Tiền tích luỹ: '+r.error};info.amount=r.value;}}
+  if(n){if(n.length>SDK_NOTE_MAX)return {error:'Ghi chú SDK tối đa '+SDK_NOTE_MAX+' ký tự'};info.note=n===CLEAR_TOKEN?null:n;}
+  return {info};
+}
+function infoText(ch:ReturnType<typeof infoChanges>){
+  const parts:string[]=[];if(ch.amount)parts.push('Tiền '+(formatSdkAmount(ch.amount.from)||'chưa ghi')+' → '+(formatSdkAmount(ch.amount.to)||'xoá'));if(ch.note)parts.push('Ghi chú '+(ch.note.from?'"'+ch.note.from.slice(0,40)+'"':'trống')+' → '+(ch.note.to?'"'+ch.note.to.slice(0,40)+'"':'xoá'));
+  return parts.join(' · ')||null;
 }
 export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]},db:PrismaClient=prisma):Promise<BulkPreview>{
   const kind=input.kind;if(!RIGHT[kind]||(input.text===undefined)===(input.items===undefined)) throw new ProxyDomainError('INVALID_INPUT');
@@ -101,15 +114,17 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
     if(clear){
       if(kind==='PROXY'){rows.push({...found,message:'Bỏ gán proxy ở menu ⋯ của VM; Dán bảng chỉ giao proxy'});continue;}
       if(found.before===null){rows.push({...found,after:null,outcome:'SKIP',message:'Đang trống; giữ nguyên'});continue;}
-      rows.push({...found,after:null,value:null,outcome:'READY',message:'Xoá giá trị'});continue;
+      rows.push({...found,after:null,value:null,outcome:'READY',message:kind==='SDK'?'Gỡ SDK khỏi VM (mã vẫn giữ trong kho / lịch sử)':'Xoá giá trị'});continue;
     }
     const twice=(k:string|null)=>{const n=k?valueLines.get(k):undefined;return n&&n.length>1?n.filter(x=>x!==l.line):null;};
     if(kind==='SDK'){
       const sdk=normalizeSdk(raw);if(!sdk){rows.push({...found,message:'Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)'});continue;}
       const other=twice(sdk);if(other){rows.push({...found,after:sdk,message:'Cùng SDK với dòng '+other.join(', ')+'; mỗi SDK một VM'});continue;}
-      if(sdk===vm.sdkId){rows.push({...found,after:sdk,outcome:'SKIP',message:'Giữ nguyên: cùng SDK hiện tại'});continue;}
-      const taken=await sdkHolder(sdk,vm.id,scope.projectId,db);if(taken){rows.push({...found,after:sdk,message:taken});continue;}
-      rows.push({...found,after:sdk,value:sdk,outcome:'READY',message:vm.sdkId?'Đổi SDK':'Ghi SDK mới'});
+      const cell=sdkCells(l);if('error' in cell){rows.push({...found,after:sdk,message:cell.error});continue;}
+      const planned=await planPlacement(db,scope.projectId,{...vm,operation:null},sdk);if('error' in planned){rows.push({...found,after:sdk,message:planned.error});continue;}
+      const {plan}=planned,record=plan.kind==='SAME'?plan.current:plan.target,ch=infoChanges(record,cell.info),info=infoText(ch);
+      if(plan.kind==='SAME'&&!ch.amount&&!ch.note){rows.push({...found,after:sdk,outcome:'SKIP',message:'Giữ nguyên: cùng SDK hiện tại'});continue;}
+      rows.push({...found,after:sdk,value:sdk,outcome:'READY',...cell.info,info,message:plan.kind==='SAME'?'Cập nhật tiền / ghi chú SDK':plan.kind==='PLACE'?'Dùng SDK trong kho':vm.sdkId?'Đổi SDK (mã cũ giữ lại)':'Ghi SDK mới'});
     }else if(kind==='NOTE'){
       if(raw.length>NOTE_MAX){rows.push({...found,message:'Ghi chú tối đa '+NOTE_MAX+' ký tự'});continue;}
       if(raw===(vm.notes||'').trim()){rows.push({...found,after:raw,outcome:'SKIP',message:'Giữ nguyên: cùng ghi chú'});continue;}
@@ -127,7 +142,7 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
   }
   return {kind,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
-export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;value:string|null}[]},db:PrismaClient=prisma){
+export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;value:string|null;amount?:string|null;note?:string|null}[]},db:PrismaClient=prisma){
   refuseGmail(input.kind);
   const kind=input.kind;if(!RIGHT[kind]||!input.items.length||input.items.length>MAX_ROWS||new Set(input.items.map(i=>i.vmId)).size!==input.items.length) throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM mỗi đợt');
   for(const i of input.items){
@@ -144,12 +159,11 @@ export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:stri
       if(!vm){row('ERROR','VM không còn hoạt động (đã xoá hoặc không thuộc dự án)');continue;}
       if(vm.revision!==item.expectedRevision){row('ERROR','VM vừa được thay đổi sau khi xem trước; kiểm tra lại dòng này');continue;}
       if(kind==='SDK'){
-        if(item.value===vm.sdkId){row('SKIP','Giữ nguyên');continue;}
-        if(item.value){const dup=usedSdk.get(item.value);if(dup){row('ERROR','Cùng SDK với '+dup);continue;}const taken=await sdkHolder(item.value,vm.id,scope.projectId,tx);if(taken){row('ERROR',taken);continue;}usedSdk.set(item.value,at(vm));}
-        await images.remember('VM_SDK',vm.id);
-        await tx.virtualMachine.update({where:{id:vm.id},data:{sdkId:item.value,sdkRecordedAt:now,sdkRecordedById:current.userId,revision:{increment:1}}});
-        await tx.vMSdkHistory.create({data:{projectId:scope.projectId,vmId:vm.id,previousSdk:vm.sdkId,newSdk:item.value,actorId:current.userId,recordedAt:now,note:item.value?'Dán bảng':'Xóa SDK (dán bảng)'}});
-        row('APPLIED',item.value?'Đã ghi SDK':'Đã xoá SDK');
+        if(item.value){const dup=usedSdk.get(item.value);if(dup){row('ERROR','Cùng SDK với '+dup);continue;}usedSdk.set(item.value,at(vm));}
+        let info:SdkInfo;try{info=checkInfo({amount:item.amount,note:item.note});}catch(e){row('ERROR',e instanceof Error?e.message.replace(/^[A-Z_]+: /,''):'Tiền / ghi chú không hợp lệ');continue;}
+        const planned=await planPlacement(tx,scope.projectId,{...vm,operation:null},item.value);if('error' in planned){row('ERROR',planned.error);continue;}
+        const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'},{...vm,operation:null},planned.plan,info);
+        row(r.changed?'APPLIED':'SKIP',r.message);
       }else if(kind==='NOTE'){
         const next=item.value?.trim()||null;if(next===(vm.notes?.trim()||null)){row('SKIP','Giữ nguyên');continue;}
         await images.remember('VM',vm.id);await tx.virtualMachine.update({where:{id:vm.id},data:{notes:next,revision:{increment:1}}});row('APPLIED',next?'Đã lưu ghi chú':'Đã xoá ghi chú');

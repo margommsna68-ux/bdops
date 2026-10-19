@@ -1,5 +1,4 @@
 "use client";
-import {useState} from 'react';
 import Link from 'next/link';
 import {Copy,X} from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -10,9 +9,10 @@ import {displayNote} from '@/server/vm-management/vm-codes';
 import {AllocationForm} from '../AllocationDialog';
 import {InstallDialog} from '../InstallWorkspace';
 import {SdkHistoryTable} from '../SdkCell';
+import {SdkEditor} from './SdkCell';
 import {InlineText} from '../InlineText';
 import {vmView,viewLabels,proxyAddress} from '../workflow';
-import {errorMessage,type ManagedVM} from '../shared';
+import type {ManagedVM} from '../shared';
 import {reviewReason,type CopyWhich,type GridRights} from './VmGrid';
 import type {PanelTab} from './grid-model';
 import {links} from '@/lib/links';
@@ -24,7 +24,7 @@ const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Chưa bắt đầu',IN_PROGRESS:'Đang cài',FAILED:'Cài chưa xong',CONFIRMED:'Đã xác nhận',CANCELLED:'Đã huỷ'};
 const TASK_STATUS:Record<string,string>={PENDING:'Chưa bắt đầu',IN_PROGRESS:'Đang làm',COMPLETED:'Xong',CANCELLED:'Đã huỷ'};
-const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy (chờ cài, đã cài hoặc giữ để kiểm tra). Bỏ gán ở Kho proxy hoặc hoàn tất ở tab Cài proxy trước khi xoá.',TASK:'VM còn việc cài proxy chưa xong. Hoàn tất hoặc đóng việc ở tab Cài proxy.',INSTALLED:'VM còn liên kết proxy đã cài. Đổi hoặc gỡ proxy rồi xác nhận trước khi xoá.',SDK:'SDK của máy đang thuộc VM khác; web không giành lại. Xoá SDK ở máy kia hoặc giữ máy này ở trạng thái đã xoá.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
+const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy (chờ cài, đã cài hoặc giữ để kiểm tra). Bỏ gán ở Kho proxy hoặc hoàn tất ở tab Cài proxy trước khi xoá.',TASK:'VM còn việc cài proxy chưa xong. Hoàn tất hoặc đóng việc ở tab Cài proxy.',INSTALLED:'VM còn liên kết proxy đã cài. Đổi hoặc gỡ proxy rồi xác nhận trước khi xoá.',SDK:'SDK cũ của máy đã được chuyển sang VM khác; web không giành lại. Ghi SDK mới cho máy này nếu cần.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
 export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose,onSaved,onCopy}:{projectId:string;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const deleted=!!vm.archivedAt,status=vmView(vm);
   return <aside className="vm-panel" aria-label={'Chi tiết '+vm.server+' / '+vm.code}>
@@ -43,10 +43,9 @@ export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose
   </aside>;
 }
 function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:string;vm:ManagedVM;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
-  const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),updateVM=trpc.vmManagement.updateVM.useMutation(),sdk=trpc.vmManagement.sdkApply.useMutation(),[confirmClear,setConfirmClear]=useState(false);
+  const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),updateVM=trpc.vmManagement.updateVM.useMutation();
   const deleted=!!vm.archivedAt,cfg=(id?:string)=>detail.data?.configurations.find(c=>c.id===id),d=cfg(vm.desired?.id),i=cfg(vm.installed?.id),status=vmView(vm);
   const saveNotes=async(value:string)=>{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,notes:value||null,expectedRevision:vm.revision});if(r.saved){toast.success('Đã lưu');onSaved();}};
-  const clearSdk=async()=>{try{await sdk.mutateAsync({projectId,key:crypto.randomUUID(),items:[{vmId:vm.id,sdk:null,expectedRevision:vm.revision,clear:true}]});toast.success('Đã xoá SDK; mã cũ còn trong lịch sử');setConfirmClear(false);onSaved();}catch(e){toast.error(errorMessage(e));}};
   return <div className="space-y-4 text-sm">
     {status==='REVIEW'&&!deleted&&<p className="pm-review">{reviewReason(vm)}</p>}
     <section className="vm-panel-card"><h3>Proxy</h3>
@@ -56,9 +55,8 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
       {vm.holds.filter(h=>h.endpointId!==vm.desired?.endpointId&&h.endpointId!==vm.installed?.endpointId).map(h=><p key={h.id} className={h.state==='BLOCKED'?'text-xs text-amber-600':'pm-muted text-xs'}>{h.state==='BLOCKED'?<>Cần thay proxy: <span className="pm-ip">{h.ip}</span> · BLOCKED</>:<>Giữ thêm: <span className="pm-ip">{h.ip}</span> · {ROLE[h.role]||h.role} · {h.state}</>}</p>)}
       {!deleted&&rights.assign&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={!rights.sourceConnected} onClick={()=>onTab('proxy')}>{status==='MISSING'?'Gán proxy':'Đổi proxy'}</button>{vm.desired&&vm.desired.id!==vm.installed?.id&&<button className="pm-button" onClick={()=>onTab('install')}>Cài / xác nhận</button>}</div>}
     </section>
-    <section className="vm-panel-card"><h3>SDK EarnApp</h3>{vm.sdk?<><code className="vm-sdk vm-sdk-full">{vm.sdk.id}</code><p className="pm-muted text-xs mt-1">{vm.sdk.recordedBy||'—'} · {localDate(vm.sdk.recordedAt)}</p></>:<p className="vm-sdk-missing">Chưa có SDK</p>}
-      <div className="flex gap-2 flex-wrap mt-2">{vm.sdk&&<button className="pm-button pm-button-quiet" onClick={()=>void navigator.clipboard?.writeText(vm.sdk!.id).then(()=>toast.success('Đã copy SDK'))}><Copy size={14}/>Copy SDK</button>}{vm.sdk&&rights.assign&&!deleted&&(confirmClear?<span className="flex gap-2 items-center"><span>Xoá SDK của {vm.code}?</span><button className="pm-button" disabled={sdk.isLoading} onClick={()=>void clearSdk()}>Xoá</button><button className="pm-button pm-button-quiet" onClick={()=>setConfirmClear(false)}>Huỷ</button></span>:<button className="pm-button pm-button-quiet" onClick={()=>setConfirmClear(true)}>Xoá SDK</button>)}</div>
-      <p className="pm-muted text-xs mt-1">Sửa SDK ngay tại ô SDK trong bảng (Enter/F2). Ghi SDK không chứng minh app đang chạy.</p></section>
+    <section className="vm-panel-card"><h3>SDK EarnApp</h3>
+      <SdkEditor key={vm.id} embedded projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} draft={null} onDraft={()=>undefined}/></section>
     <section className="vm-panel-card"><h3>Tài khoản EarnApp</h3><p>{account?.earnApp?<>{account.earnApp.login.email} <span className="pm-muted">({TYPE_LABEL[account.earnApp.login.type||'']||'chưa chọn loại'})</span> · PayPal {account.earnApp.paypal?account.earnApp.paypal.code+' · '+(account.earnApp.paypal.email||'chưa xác định email'):'chưa có'}</>:account?.legacyGmail?<span className="pm-muted">Gmail cũ: {account.legacyGmail} (chưa có tài khoản EarnApp)</span>:<span className="pm-muted">Chưa gán</span>}</p><p className="pm-muted text-xs">{account?.earnApp?.registeredAt?'Đã ghi đăng ký EarnApp':'Chưa ghi đăng ký EarnApp'}. Sửa ngay tại ô Tài khoản EarnApp trong bảng.</p>{!deleted&&rights.assign&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi tài khoản / PayPal</button>}</section>
     <section className="vm-panel-card"><h3>Ghi chú</h3><InlineText value={displayNote(vm.notes)} label={'ghi chú '+vm.code} placeholder="thêm ghi chú" canEdit={rights.manage&&!deleted} multiline className="vm-panel-note" onSave={saveNotes}/></section>
   </div>;

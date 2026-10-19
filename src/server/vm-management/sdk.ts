@@ -4,6 +4,7 @@ import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand} from '../business-management/idempotency';
 import {authorizeVM,type VMReader} from './repository';
 import {parseSdkPaste,normalizeSdk} from './sdk-parse';
+import {planPlacement,applyPlacement} from './sdk-store';
 export interface SdkPreviewRow {line:number;server:string|null;vm:string;vmId:string|null;current:string|null;next:string|null;outcome:'READY'|'SKIP'|'ERROR';message:string;expectedRevision:number|null}
 export interface SdkPreview {rows:SdkPreviewRow[];ready:number;skipped:number;errors:number}
 export interface SdkItem {vmId:string;sdk:string|null;expectedRevision:number;clear?:boolean}
@@ -11,10 +12,10 @@ const MAX_ROWS=1000;
 type ManagedVM=Prisma.VirtualMachineGetPayload<{include:{server:true}}>;
 async function activeVMs(projectId:string,db:VMReader){return db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null}},include:{server:true}});}
 const location=(vm:{code:string;server:{code:string}})=>vm.server.code+' / '+vm.code;
-/** Another active managed VM already holds this SDK. Cross-project holders are reported without naming them. */
-async function holder(sdk:string,exceptVmId:string,projectId:string,db:VMReader){
-  const vm=await db.virtualMachine.findFirst({where:{sdkId:sdk,managed:true,archivedAt:null,id:{not:exceptVmId}},include:{server:{select:{code:true,projectId:true}}}});
-  if(!vm)return null;return vm.server.projectId===projectId?`SDK đang thuộc ${location(vm)}`:'SDK đang thuộc một VM ở dự án khác';
+// Older paste endpoints (sdkPreview / sdkApply): same rule as the SDK cell and Kho SDK (sdk-store.ts). A code on another VM is
+// never taken; a stored, never-linked code may be used; linked / unconfirmed codes are refused.
+async function holder(sdk:string,vm:ManagedVM,projectId:string,db:VMReader){
+  const r=await planPlacement(db,projectId,{...vm,operation:null},sdk);return 'error' in r?r.error:null;
 }
 export async function previewSdkUpdate(scope:ActorScope,input:{text:string;serverId?:string},db:PrismaClient=prisma):Promise<SdkPreview>{
   await authorizeVM(scope,'ASSIGN',db);if(input.text.length>200000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
@@ -37,7 +38,7 @@ export async function previewSdkUpdate(scope:ActorScope,input:{text:string;serve
     if(row.issue==='INVALID_SDK'){rows.push({...found,message:'Mã SDK không hợp lệ'});continue;}
     if((counts.get(row.sdk!)||0)>1){rows.push({...found,message:'Trùng trong danh sách dán'});continue;}
     if(row.sdk===vm.sdkId){rows.push({...found,outcome:'SKIP',message:'Giữ nguyên: cùng SDK hiện tại'});continue;}
-    const taken=await holder(row.sdk!,vm.id,scope.projectId,db);if(taken){rows.push({...found,message:taken});continue;}
+    const taken=await holder(row.sdk!,vm,scope.projectId,db);if(taken){rows.push({...found,message:taken});continue;}
     rows.push({...found,outcome:'READY',message:vm.sdkId?'Đổi SDK':'Ghi SDK mới'});
   }
   return {rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
@@ -50,17 +51,16 @@ export async function applySdkUpdate(scope:ActorScope,input:{key:string;items:Sd
   }
   const sdks=input.items.filter(i=>i.sdk).map(i=>i.sdk!);if(new Set(sdks).size!==sdks.length)throw new ProxyDomainError('DUPLICATE_INPUT','Một SDK xuất hiện ở nhiều dòng');
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_RECORD',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+    await authorizeVM(current,'ASSIGN',tx);
     const rows:{vmId:string;location:string;previous:string|null;next:string|null}[]=[];const now=new Date();
     for(const item of input.items){
       const vm=await tx.virtualMachine.findFirst({where:{id:item.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:{server:true}});
       if(!vm)throw new ProxyDomainError('NOT_FOUND','VM không thuộc dự án này hoặc đã ẩn');
       if(vm.revision!==item.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW',`${location(vm)} vừa được thay đổi; kiểm tra lại trước khi lưu`);
-      if(item.sdk===vm.sdkId)continue;
-      if(item.sdk){const taken=await holder(item.sdk,vm.id,scope.projectId,tx);if(taken)throw new ProxyDomainError('OWNER_CONFLICT',`${taken}; xóa ở máy cũ trước khi ghi cho ${location(vm)}`);}
-      await images.remember('VM_SDK',vm.id);
-      await tx.virtualMachine.update({where:{id:vm.id},data:{sdkId:item.sdk,sdkRecordedAt:now,sdkRecordedById:current.userId,revision:{increment:1}}});
-      await tx.vMSdkHistory.create({data:{projectId:scope.projectId,vmId:vm.id,previousSdk:vm.sdkId,newSdk:item.sdk,actorId:current.userId,recordedAt:now,note:item.clear?'Xóa SDK':null}});
-      rows.push({vmId:vm.id,location:location(vm),previous:vm.sdkId,next:item.sdk});
+      const planned=await planPlacement(tx,scope.projectId,{...vm,operation:null},item.clear?null:item.sdk);
+      if('error' in planned)throw new ProxyDomainError(planned.code,planned.error+' ('+location(vm)+')');
+      const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:item.clear?'Gỡ SDK':'Dán SDK'},{...vm,operation:null},planned.plan,{});
+      if(r.changed)rows.push({vmId:vm.id,location:location(vm),previous:vm.sdkId,next:item.clear?null:item.sdk});
     }
     return {updated:rows.length,rows};
   },db);

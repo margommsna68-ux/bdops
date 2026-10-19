@@ -1,0 +1,99 @@
+Fixture sdkx-uelnl / sdky-uelnl · finance at start {"fund":116,"cost":27,"withdrawal":23,"receipt":3,"payout":69}
+PASS 1a. chưa sửa gì: nút Lưu mờ, không bấm được
+PASS 1b. có thay đổi hợp lệ: nút Lưu xanh, bấm được
+PASS 1c. sau tải lại ô SDK hai dòng: mã + "12,40 USD · Chưa nối" — sdk-A123…nl-00001 / 12,40 USD · Chưa nối
+PASS 1d. đọc lại DB: A ở sdkx/VM_001, 12.4, ghi chú — {"id":"cmveuew2900ek11jk71swhwo8","vm":"sdkx-uelnl/VM_001","amount":"12.4","note":"máy moon1 ổn định","state":"UNLINKED","linked":null,"revision":1,"events":2}
+PASS 2a. mã mới không kế thừa tiền / ghi chú của A
+PASS 2b. khung báo A được giữ trong kho, không bắt backup
+PASS 2c. A còn trong kho với 12.4 + ghi chú; B ở VM1 chưa có tiền / ghi chú — {"A":{"id":"cmveuew2900ek11jk71swhwo8","vm":null,"amount":"12.4","note":"máy moon1 ổn định","state":"UNLINKED","linked":null,"revision":2,"events":3},"B":{"id":"cmveuewzr00ez11jkwoki6wxv","vm":"sdkx-uelnl/VM_001","amount":null,"note":null,"state":"UNLINKED","linked":null,"revision":1,"events":2}}
+PASS 2d. ô hiện "Chưa ghi tiền · Chưa nối" (khác 0) — sdk-B456…nl-00001 / Chưa ghi tiền · Chưa nối
+PASS 3a. chọn lại mã trong kho: đọc đúng tiền / ghi chú đang lưu
+PASS 3b. nút là "Dùng cho VM này" và xanh
+PASS 3c. A ở sdky/VM_001, tiền 12.4 và ghi chú giữ nguyên, lịch sử theo mã — {"id":"cmveuew2900ek11jk71swhwo8","vm":"sdky-uelnl/VM_001","amount":"12.4","note":"máy moon1 ổn định","state":"UNLINKED","linked":null,"revision":3,"events":4}
+PASS 4a. gõ mã đang ở VM khác: không lấy ngầm, hiện nguồn → đích ngay cạnh nút — sdkx-uelnl / VM_001 sdkx-uelnl / VM_004
+PASS 4b. một giao dịch: VM1 hết B, VM4 có B; mirror khớp — {"v1":null,"v4":"sdk-B456-uelnl-00001"}
+PASS 4c. Dán bảng mã đang ở VM khác: lỗi tại dòng, không lấy — DÒNG	VM	CŨ → MỚI	KẾT QUẢ 1	sdkx-uelnl / VM_007	trống → sdk-B456-uelnl-00001	Lỗi · SDK sdk-B456-uelnl-00001 đang ở sdkx-uelnl / VM_004. Dùng "Chọn SDK đã lưu" → "Dùng cho VM này" để chuyển rõ nguồn → đ
+PASS 4d. Dán bảng tự kiểm tra khi dán (không có nút Xem trước)
+PASS 5a. VM chưa có tài khoản: báo ngay tại khung
+PASS 5b. khung hiện rõ SDK + tài khoản sẽ ghi nhận
+PASS 5c. chỉ vì có tài khoản + SDK: chưa tự đánh dấu đã nối
+PASS 5d. ghi LINKED với account, một lần bấm — {"id":"cmveuf3k300g911jk407v96kj","vm":"sdkx-uelnl/VM_005","amount":null,"note":null,"state":"LINKED","linked":"sdkl1-uelnl@example.invalid","revision":2,"events":3}
+PASS 5e. gõ lại C ở VM khác: báo đã nối, nút Lưu mờ
+PASS 5f. C không có trong danh sách chọn
+PASS 5g. gọi endpoint trực tiếp cũng bị từ chối — SDK sdk-C789-uelnl-00001 đã nối EarnApp; chỉ giữ để tra cứu, không dùng lại hay chuyển VM
+PASS 5h. C vẫn LINKED, không ở VM nào
+PASS 6a. người thứ hai: báo lỗi trong khung, giữ lựa chọn — SDK sdk-F678-uelnl-00001 đang ở sdkx-uelnl / VM_006. Dùng "Chọn SDK đã lưu" → "Dùng cho VM này" để chuyển rõ nguồn → đích; web không tự lấy mã
+PASS 6b. chỉ một VM có F
+PASS 6c. lệnh soạn trước khi VM đổi: từ chối, giữ nháp — sdkx-uelnl / VM_008 vừa được thay đổi; tải lại để kiểm tra (nội dung đang nhập được giữ)
+PASS 6d. không lưu nửa chừng: VM_008 = H, G chưa tồn tại
+PASS 7a. tự kiểm tra từng dòng: mới / cập nhật (cũ → mới) / lỗi / trùng ở mọi dòng / ô trống giữ nguyên — DÒNG	SDK	CŨ → MỚI	KẾT QUẢ 2	sdk-G901-uelnl-00001	2,50 USD · "mới"	Thêm mới · Thêm vào kho 3	sdk-A123-uelnl-00001 sdky-uelnl / VM_001 	12,40 USD → 13,00 USD	Cập nhật · Cập nhật mã đã có 4	bad sdk!	1,00 USD	Lỗi · Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-) 5	sdk-K567-uelnl-00001	1,00 USD	Lỗi · Mã lặ
+PASS 7b. một nút Lưu 2 SDK, xanh
+PASS 7b2. cuộn chuột trong Kho SDK tới được nút Lưu (không bị cắt) — {"bb":{"x":1128.6875,"y":484.015625,"width":93.3125,"height":38.796875},"storeBox":{"x":289,"y":219.375,"width":958,"height":447}}
+PASS 7c. mất phản hồi: báo lỗi, giữ nội dung — Failed to fetch Nội dung được giữ; bấm Lưu lại sẽ không ghi trùng.
+PASS 7d. thử lại: không ghi thêm (G một bản ghi, A = 13, một lần sửa tiền) — {"G":{"id":"cmveufgje00i611jkr03g94ce","vm":null,"amount":"2.5","note":"mới","state":"UNLINKED","linked":null,"revision":0,"events":1},"A":{"id":"cmveuew2900ek11jk71swhwo8","vm":"sdky-uelnl/VM_001","amount":"13","note":"máy moon1 ổn định","state":"UNLINKED","linked":null,"revision":4,"events":5}}
+PASS 7e. ô dán chỉ còn các dòng lỗi — bad sdk!	1 / sdk-K567-uelnl-00001	1 / sdk-K567-uelnl-00001	2
+PASS 7f. dán lại nguyên dữ liệu: Giữ nguyên, nút Lưu 0 SDK mờ
+PASS 7g. không tạo lịch sử giả
+PASS 8a. lưu đúng 15 (số gần nhất, không cộng dồn) — 15
+PASS 8b. sổ tiền không đổi — {"fund":116,"cost":27,"withdrawal":23,"receipt":3,"payout":69}
+PASS 9a. mã "Chưa xác nhận" không có trong danh sách chọn
+PASS 9b. gõ mã cũ: báo chưa xác nhận, nút mờ
+PASS 9c. Kho SDK hiện "Chưa xác nhận" ngay trong bảng, không ghi tiền 0
+PASS 9d. xác nhận tại dòng → Chưa nối, dùng lại được
+PASS 10a. xoá VM giữ SDK tại vị trí đã xoá
+PASS 10b. lấy mã chưa nối từ VM đã xoá: nguồn ghi "(đã xoá)"
+PASS 10c. khôi phục VM không giành lại SDK đã chuyển
+PASS 10d. khung tạo lại nói rõ SDK chưa nối về Kho SDK
+PASS 10e. tạo lại: F rời VM, về kho, vẫn Chưa nối, giữ 3.5 — {"id":"cmveuf79o00h911jke4h7t2m3","vm":null,"amount":"3.5","note":"dự phòng","state":"UNLINKED","linked":null,"revision":3,"events":4}
+PASS 10f. tạo lại với mã đã nối: E vào lịch sử, vẫn LINKED (không thành chưa nối) — {"id":"cmveuf52v00gv11jkq5qbhpre","vm":null,"amount":null,"note":null,"state":"LINKED","linked":"sdkl1-uelnl@example.invalid","revision":3,"events":4}
+PASS 11a. giao khác đã cài: hai dòng Giao / Cài, không gộp một IP — Giao 198.51.100.44:8080 Cài 198.51.100.43:8080 Chờ cài
+PASS 11b. không còn cột Cài proxy riêng
+PASS 11c. copy thường chỉ copy, không bắt đầu cài — 198.51.100.42:8080:… (user:pass ẩn) 1:PLANNED
+PASS 11d. bấm nội dung ô mở thẳng các hành động hợp lệ
+PASS 11e. bắt đầu cài ghi đúng cấu hình — 1:IN_PROGRESS:started
+PASS 11f. xác nhận nêu đúng VM, IP:port và cấu hình #1
+PASS 11g. xác nhận đúng cấu hình; Tình trạng VM không tự đổi — {"id":"cmveuelnt0007gqhvbf2di41e","sdk":null,"revision":3,"archived":false,"cycle":1,"status":null,"configs":["1:CONFIRMED:started"],"holds":["198.51.100.42:INSTALLED"]}
+PASS 11h. lọc Chờ cài còn chạy (VM_003)
+PASS 11i. link cũ ?tab=install mở phần cài
+PASS 11j. cuộn ngang, bấm Proxy sát cột cố định: mở đúng khung Proxy, không mở menu khác — {"onTop":"proxy","xClick":577,"ipLeft":551}
+PASS 11k. phần Proxy nằm dưới cột cố định không nhận click — vm-sticky vm-sticky-last vm-col-ops
+PASS 12a. đổi mới: xanh, đúng số VM sẽ đổi (3)
+PASS 12b. lưu xong: nút về bình thường (0 VM, mờ)
+PASS 12c. N theo VM thực sự đổi khi bỏ tick
+PASS 12d. chọn lại giá trị cũ: mờ
+PASS 12e. Sửa ghi chú: Áp dụng 2 VM
+PASS 12f. lưu lỗi: báo lỗi, giữ nháp
+PASS 12g. thử lại thành công rồi nút mờ (0 VM)
+PASS 12h. ô SDK lưu lỗi: báo tại khung, giữ nội dung
+PASS 12i. bấm ra ngoài: nháp giữ ở ô (đánh dấu)
+PASS 12j. tải lại vẫn còn nháp
+PASS 12k. mở lại: nội dung nháp còn
+PASS 12l. Huỷ: bỏ nháp
+PASS 13a. bộ lọc + sort trong URL
+PASS 13b. tiền cao → thấp, chưa ghi tiền xếp sau (không coi là 0) — 15,00 USD
+19/10/2026 | 15,00 USD
+19/10/2026 | 15,00 USD
+19/10/2026 | 15,00 USD
+19/10/2026 | 15,00 USD
+19/10/2026 | 15,00 USD
+19/10/2026
+PASS 13c. Back: về sort trước
+PASS 13d. Back tiếp: đóng kho, bảng VM còn
+PASS 13e. Forward: mở lại kho
+PASS 13f. đổi server: kho giữ mở với bộ lọc đang chọn — http://localhost:3010/infrastructure/servers/cmveuelno0003gqhvggmhisii?sdk=1
+PASS 13g. đóng / mở kho: nháp dán còn, có dấu nháp
+PASS 13h. nội dung nháp còn nguyên
+PASS 13i. nháp lưu theo từng dự án — mth.sdk-store.paste.cmv7pimw70000yrdhxav0bln9
+PASS 14a. chỉ xem: khung không có nút Lưu, ô chỉ đọc
+PASS 14b. chỉ xem: Kho SDK không có Dán
+PASS 14c. chỉ xem gọi thẳng sdkSave: FORBIDDEN — {"status":403,"code":"FORBIDDEN","message":"Bạn chưa có quyền thao tác này","ok":false}
+PASS 14d. chỉ xem gọi thẳng sdkStoreApply: FORBIDDEN
+PASS 14e. người ngoài: không đọc được kho, không ghi được — {"oread":{"status":403,"code":"FORBIDDEN","message":"Không có quyền truy cập dự án","ok":false},"osave":{"status":403,"code":"FORBIDDEN","message":"Không có quyền truy cập dự án","ok":false}}
+PASS 14f. mã của dự án khác: từ chối, không lộ server / VM / tiền — [{"result":{"data":{"json":{"rows":[{"line":1,"code":"sdk-A123-uelnl-00001","outcome":"ERROR","message":"Mã SDK này đã được ghi ở nơi khác ngoài dự án; không nhận vào dự án này","sdkId":null,"expected
+PASS 14g. nhân viên Server/VM ghi được tiền SDK (0 khác chưa ghi)
+PASS 15a. 1280: nút lưu trong màn hình
+PASS 15b. màn hẹp: khung không bị cắt, nút lưu tiếp cận được — {"nb":{"x":326.9375,"y":559.96875,"width":50.0625,"height":38.796875},"fb":{"x":16,"y":189.765625,"width":374,"height":458}}
+PASS 15c. màn hẹp: bảng cuộn ngang, cột VM cố định vẫn thấy — {"left":300,"vmBox":{"x":67,"y":302.265625,"width":45,"height":20}}
+PASS 15d. Kho SDK màn hẹp: trang không tràn ngang — 390
+PASS Không có lỗi JavaScript trên trang
+TỔNG: 91 đạt, 0 lỗi

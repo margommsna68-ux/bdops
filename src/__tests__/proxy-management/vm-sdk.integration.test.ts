@@ -44,7 +44,7 @@ it('preview maps pasted rows by server+VM identity and reports unknown, blank, d
     const multi=await previewSdkUpdate(f.worker,{text:['Business-Fixture\tVM_002\t'+SDK_B,'second-fixture\tVM_001\t'+SDK_A,'nope\tVM_001\t'+SDK_C,'VM_001\t'+SDK_C].join('\n')},db);
     expect(multi.rows.map(r=>r.outcome)).toEqual(['READY','ERROR','ERROR','ERROR']);
     expect(multi.rows[0]).toMatchObject({vmId:f.vm2.id,current:null,next:SDK_B,server:'business-fixture'});
-    expect(multi.rows[1].message).toMatch(/đang thuộc business-fixture \/ VM_001/);expect(multi.rows[2].message).toMatch(/Không tìm thấy server/);expect(multi.rows[3].message).toMatch(/Chọn server/);
+    expect(multi.rows[1].message).toMatch(/đang ở business-fixture \/ VM_001.*Dùng cho VM này/);expect(multi.rows[2].message).toMatch(/Không tìm thấy server/);expect(multi.rows[3].message).toMatch(/Chọn server/);
     expect(multi).toMatchObject({ready:1,errors:3,skipped:0});
   }finally{await f.cleanup();}
 });

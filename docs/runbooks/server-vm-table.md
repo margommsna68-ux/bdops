@@ -1,13 +1,13 @@
 # Bảng vận hành Server / VM
 
-Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Triển khai 17/10/2026, nối tiếp phần [quản trị Server / VM](server-vm-admin.md) (tạo theo khoảng, sửa tại chỗ, xoá có khôi phục). Bằng chứng: `../superpowers/evidence/2026-10-17-server-vm-table.md`.
+Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Cập nhật 19/10/2026: cột *Cài proxy* gộp vào ô **Proxy**, ô **SDK** hai dòng có khung riêng và nút **Kho SDK** (xem [SDK và Kho SDK](vm-sdk.md)), nút Lưu / Áp dụng thống nhất (mục cuối). Triển khai 17/10/2026, nối tiếp phần [quản trị Server / VM](server-vm-admin.md) (tạo theo khoảng, sửa tại chỗ, xoá có khôi phục). Bằng chứng: `../superpowers/evidence/2026-10-17-server-vm-table.md`.
 
 ## Bố cục
 
 - **Đầu trang**
   - *Ô chọn server*: có ở mọi trang Server/VM, kể cả `/servers/<id>`. Gõ tên hoặc IP để lọc, ↑↓ rồi Enter để chọn; chọn xong chuyển thẳng sang server đó.
   - Tên server sửa tại chỗ; IP và ghi chú server nằm ngay dưới tên.
-  - Các nút: **Thêm VM**, **Dán bảng**, Tải lại, menu **⋯** (Thêm server, Việc cài proxy, Kho proxy, **Xoá server**).
+  - Các nút: **Thêm VM**, **Dán bảng**, **Kho SDK**, Tải lại, menu **⋯** (Thêm server, Việc cài proxy, Kho proxy, **Xoá server**).
 - **Dải đếm**: Tất cả · Thiếu proxy · Chờ cài · Đã cài · Cần kiểm tra · Chưa SDK · Đã xoá. Bấm vào số để lọc, bấm lần nữa để bỏ lọc.
 - **Thanh công cụ**: ô tìm (VM, IP, SDK, Gmail, ghi chú), sắp xếp (mã VM, cần xử lý trước, thiếu proxy trước, chưa SDK trước) và mục **Cột**.
 - **Bảng** có vùng cuộn riêng, cao vừa màn hình nên trang không phải cuộn.
@@ -15,17 +15,16 @@ Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers
   - Bên trái luôn thấy ô chọn + Server (chỉ khi xem tất cả) + VM; bên phải luôn thấy **⋯**.
   - Thanh cuộn ngang nằm ngay đáy vùng bảng.
   - Số dòng và nút trang có ở cả đầu và cuối bảng; chọn 50/100/200 dòng mỗi trang.
-- **Cột mặc định**: VM · Proxy · SDK · Gmail của VM · Tình trạng · Ghi chú · ⋯.
-  - *Proxy*:
-    - Giao và đã cài cùng một cấu hình thì hiện một dòng có nhãn *Đã cài*.
-    - Khác nhau thì hiện hai dòng *Giao* / *Cài*, có vạch vàng bên trái.
+- **Cột cố định**: ô chọn · (Server) · VM · **Tình trạng** (trạng thái vận hành do người / AI ghi, xem [vận hành VM](vm-ops-cycle.md)) · … · ⋯. Trên điện thoại (≤ 640 px) chỉ ô chọn và VM cố định, để ô Proxy / SDK không bị che khi cuộn ngang.
+- **Cột mặc định**: Proxy · SDK · Tài khoản EarnApp · PayPal nhận · Rút tiền · Ghi chú.
+  - *Proxy* (gộp cột *Cài proxy* cũ, 19/10/2026):
+    - Dòng trên là IP:port và nút copy. Giao và đã cài cùng một cấu hình thì một dòng. Khác nhau thì hai dòng *Giao* / *Cài* có vạch vàng, không gộp thành một IP.
+    - Dòng phụ ngắn theo dữ liệu thật: Thiếu proxy / Chờ cài / Đang cài / Cài chưa xong / Cần kiểm tra / Cần thay proxy / Đã cài.
     - Proxy giữ để kiểm tra hiện thêm một dòng nhỏ.
-    - Mỗi dòng có nút copy riêng.
-  - *SDK*: rút gọn kiểu `sdk-1234…cdef`. Rê chuột xem đủ, có nút copy mã đầy đủ.
-  - *Gmail của VM*: Gmail đang liên kết với máy, không phải tài khoản EarnApp. Bấm vào để đổi.
-  - *Tình trạng*: chỉ có nhãn; *Cần kiểm tra* kèm lý do một dòng.
+    - Bấm phần nội dung ô mở thẳng các hành động hợp lệ (mục dưới). Nút copy chỉ copy.
+  - *SDK*: dòng trên là mã rút gọn + nút copy; dòng dưới là `12,40 USD · Chưa nối` (hoặc *Chưa ghi tiền*, *Đã nối EarnApp*, *Chưa xác nhận*). Bấm ô mở khung SDK. Xem [SDK và Kho SDK](vm-sdk.md).
   - *Ghi chú*: tối đa 2 dòng; xem đủ khi rê chuột hoặc trong khung chi tiết.
-  - Hàng cao khoảng 44–46 px, kể cả khi ghi chú 950 ký tự hay SDK 124 ký tự.
+  - **Cấu hình cột đã lưu** trên trình duyệt: cột *Cài proxy* cũ tự bỏ (cả thứ tự, ẩn / hiện, độ rộng); các tuỳ chỉnh khác giữ nguyên.
 - **Cột** cho bật thêm *Cấu hình* (Giao #n / Cài #m), *SDK ghi bởi* và *Tiến độ cài*. Kéo để đổi thứ tự (hoặc dùng ↑↓), kéo mép tiêu đề cột để đổi độ rộng, có *Khôi phục mặc định*. Lựa chọn lưu theo tài khoản trên trình duyệt đang dùng.
 - **Khung bên phải** (không phải hộp thoại chồng lên nhau)
   - Chi tiết VM gồm 6 tab:
@@ -39,9 +38,9 @@ Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers
   - Đóng bằng ✕, Esc hoặc nút Back. Khi đóng, bảng giữ nguyên vị trí cuộn và focus trở về dòng đang làm.
 - **URL** giữ server (đường dẫn), ô tìm `q`, bộ lọc `view`, sắp xếp `sort`, trang `page`, số dòng `size`, VM đang mở `vm` và tab `tab`. Tải lại hoặc Back/Forward đều về đúng chỗ.
 
-## Tình trạng: thao tác ngay tại ô
+## Ô Proxy: tiến độ cài và thao tác ngay tại ô
 
-Nhãn Tình trạng là nút (có mũi tên ▾). Bấm vào sẽ mở một popover nhỏ ngay cạnh ô, không qua ⋯ hay khung chi tiết. Nhãn phản ánh cấu hình và tiến độ cài, không phải trường tự do.
+Bấm phần nội dung ô Proxy (IP hoặc dòng phụ ▾; Enter/F2 khi ô đang được chọn) mở một popover nhỏ ngay cạnh ô, không qua ⋯ hay khung chi tiết. Dòng phụ phản ánh cấu hình và tiến độ cài, không phải trường tự do. (Trước 19/10 đây là cột riêng *Cài proxy*.)
 
 | Nhãn | Popover đưa ra |
 |---|---|
@@ -69,28 +68,29 @@ Nhãn Tình trạng là nút (có mũi tên ▾). Bấm vào sẽ mở một pop
   - Vướng mắc trùng nội dung cũ: không ghi.
   - Xác nhận lặp: trả về như cũ, không ghi lịch sử.
   - Bấm đúp chỉ gửi một lệnh.
-- Menu ⋯ chỉ còn hành động ít dùng; *Copy để cài* đã chuyển vào ô Tình trạng.
+- Menu ⋯ chỉ còn hành động ít dùng; *Copy để cài* nằm trong popover của ô Proxy. Liên kết cũ `?tab=install` vẫn mở phần Cài proxy của khung chi tiết; bộ lọc Thiếu proxy / Chờ cài / Đã cài / Cần kiểm tra không đổi.
+- Tình trạng vận hành (cột cố định *Tình trạng*) không tự đổi khi xử lý proxy.
 
 ## Sửa ô bằng bàn phím
 
-- Ô sửa được: **mã VM**, **SDK**, **ghi chú**.
+- Ô sửa được: **mã VM**, **ghi chú**. SDK có khung riêng (bấm ô hoặc Enter/F2), không nằm trong vòng Tab.
   - Mở sửa: Enter, F2 hoặc bấm đúp.
   - **Enter** lưu; với ghi chú, Shift+Enter xuống dòng.
   - **Tab / Shift+Tab** lưu rồi mở ô sửa được kế tiếp, hết hàng thì sang hàng sau.
   - **Esc** huỷ.
 - Chỉ chuyển ô khi lưu thành công. Lỗi (trùng mã, VM vừa bị sửa ở nơi khác…) hiện ngay dưới ô, chữ và focus giữ nguyên.
 - Đang gõ dấu tiếng Việt (bộ gõ chưa chốt chữ) thì Enter không lưu. Rời ô cũng không tự lưu.
-- Giới hạn: mã VM 64 ký tự, SDK 8–128 ký tự, ghi chú 1000 ký tự.
+- Giới hạn: mã VM 64 ký tự, ghi chú 1000 ký tự (SDK 8–128 ký tự, ghi chú SDK 1000).
 - Giữ nguyên giá trị cũ thì không ghi gì, không có lịch sử.
 - **Bản nháp** còn sau khi tải lại trang, đổi bộ lọc hay đóng khung. Ô còn nháp vẫn mở sẵn ở chế độ sửa, chỉ mất khi lưu hoặc huỷ.
-- Xoá SDK là thao tác riêng: nút *Xoá SDK* trong chi tiết VM, hoặc gõ `-` trong Dán bảng. Để trống ô SDK không bao giờ xoá SDK.
+- Gỡ SDK là thao tác riêng: nút *Gỡ khỏi VM* trong khung SDK, hoặc gõ `-` trong Dán bảng. Gỡ không xoá mã (mã về kho hoặc lịch sử).
 
 ## Dán bảng
 
 1. Bấm **Dán bảng**, chọn một loại: **SDK**, **Proxy**, **Gmail hiện có** hoặc **Ghi chú**. Mỗi đợt chỉ một loại.
 2. Chọn server rồi dán `VM | giá trị`, hoặc chọn *Nhiều server* rồi dán `Server | VM | giá trị`. Cột phân cách bằng tab (dán từ Sheet) hoặc `|`.
-3. Bấm **Xem trước**. Ngay trong khung hiện từng dòng gồm VM, *cũ → mới* và kết quả *Hợp lệ / Giữ nguyên / Lỗi*.
-4. Bấm **Áp dụng N dòng hợp lệ**. Không có hộp xác nhận thêm.
+3. Dán là tự kiểm tra (không có nút Xem trước). Ngay trong khung hiện từng dòng gồm VM, *cũ → mới* và kết quả *Hợp lệ / Giữ nguyên / Lỗi*.
+4. Bấm **Áp dụng N dòng** (N = số dòng sẽ thật sự đổi; 0 thì nút mờ). Không có hộp xác nhận thêm.
 
 Quy tắc:
 - **Cách ghép dòng**
@@ -99,7 +99,7 @@ Quy tắc:
   - Máy đã xoá không nhận cập nhật.
 - **Ô trống và xoá**: ô trống giữ nguyên. Gõ `-` để xoá giá trị (SDK, Gmail, ghi chú).
 - **Từng loại**
-  - **SDK**: mỗi SDK một VM. Không lấy SDK đang thuộc máy khác.
+  - **SDK**: `VM | SDK | Tiền tích luỹ USD | Ghi chú SDK` (hai cột cuối tuỳ chọn, là của mã SDK đích). Mỗi SDK một VM. Không lấy SDK đang thuộc máy khác, mã đã nối hay mã chưa xác nhận; mã trong kho dùng được. Xem [SDK và Kho SDK](vm-sdk.md).
   - **Proxy**
     - Dán IP, IP:port hoặc đủ IP:port:user:pass.
     - Chỉ TUT hoặc Chung mooon–Genjy, chỉ vào VM đang trống.
@@ -136,6 +136,23 @@ Quy tắc:
   - Máy còn proxy, việc cài mở hoặc liên kết proxy đã cài bị chặn và nêu lý do.
   - *Mở VM* mở đúng máy, đúng tab, kèm dòng **Lý do bị chặn**, kể cả máy đã xoá hoặc máy không có cấu hình chờ cài.
 - Không có thao tác ghi cùng một SDK cho nhiều VM.
+
+## Nút Lưu / Áp dụng (19/10/2026)
+
+Áp dụng giống nhau cho các form và thanh hàng loạt của Server / VM:
+- **Trạng thái nút**
+  - Chưa thay đổi, hoặc chọn lại đúng giá trị cũ: nút mờ, không bấm được.
+  - Có thay đổi hợp lệ: nút xanh (màu chủ đạo).
+  - Đang lưu: hiện *Đang lưu…* và chặn bấm lặp.
+  - Lưu xong: dữ liệu cập nhật, nút về trạng thái thường (0 thay đổi).
+- **Hàng loạt** ghi **Áp dụng N VM**, trong đó N là số VM thực sự đổi, không phải số dòng được tick:
+  - Tình trạng ở thanh chọn nhiều.
+  - Sửa ghi chú.
+  - Chọn tay proxy.
+  - Dán bảng: *Áp dụng N dòng*.
+  - Kho SDK: *Lưu N SDK*.
+- **Khi lỗi**: dữ liệu nhập giữ nguyên, lý do hiện tại đúng ô hoặc dòng. Nếu chỉ lưu được một phần thì chỉ các dòng đã lưu được đánh dấu xong, phần lỗi giữ lại để sửa.
+- **Ô chọn tự lưu** (Tình trạng tại ô, trạng thái proxy ở Kho proxy) giữ nguyên, không có nút Áp dụng. Trang không có nút "Lưu tất cả".
 
 ## Copy
 
