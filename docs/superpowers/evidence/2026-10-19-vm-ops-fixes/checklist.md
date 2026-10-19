@@ -41,6 +41,18 @@ Kết quả: 19/19 đạt.
 - Typecheck và build: qua.
 - Lint: chỉ còn cảnh báo cũ ở `agent-pp`.
 
+## Phát hành
+
+- **Commit:** `a3be877`.
+- **Backup host trước deploy:** `51e28aeb`.
+- **Deploy:** `a95c6714`, SUCCESS. Không có migration.
+- **Host verify chỉ đọc:** 10 server / 576 VM.
+- **Host xem đọc** (`host-result.txt`):
+  - Cột và lọc đúng.
+  - Chủ dự án đã tự ghi "Chưa nối" cho 70 VM; 506 VM còn "Chưa ghi". Không đụng vào.
+  - Chưa có EarnApp.
+  - Chỉ có `user.verifyPin` và `user.heartbeat`, không ghi dữ liệu.
+
 ## Chưa kiểm / giới hạn
 
 - Host không có PayPal, EarnApp hay lượt tạo lại nào, nên không có dữ liệu cũ cần chuyển. Bốn lỗi chỉ kiểm trên database test và dữ liệu thử cục bộ. Trên host chỉ xem đọc.
