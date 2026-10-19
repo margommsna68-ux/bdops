@@ -1,0 +1,15 @@
+Tổng quan có "Có proxy" / "Proxy Blocked", không còn "Chờ cài"/"Đã xác nhận cài": true
+Dải đếm: Tất cả 576 Thiếu proxy 0 Có proxy 553 Proxy Blocked 0 Cần kiểm tra 23 Chưa SDK 571 Chưa tài khoản 576 Chưa PayPal 576 Đã xoá 0
+Nút Server/VM: Copy proxy Blocked (0)
+Server/VM không còn nhãn cài: true
+Ô Proxy dòng đầu: 84.32.138.211:5432
+Khung Thay proxy: An-01 / VM_001 · Thay proxy Đang dùng: 84.32.138.211:5432 Tìm hoặc dán proxy (IP, IP:port, IP:port:user:pass) Kho không còn proxy NEW đủ điều kiện. Huỷ Áp dụng
+Nút Áp dụng khi chưa chọn: mờ, không bấm được
+Lọc Cần kiểm tra, dòng đầu:  An-01 VM_063 Chưa ghi OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail 178.94.227.163:5432 Cần kiểm tra Chưa có SDK Chọn tài khoản — Chưa có EarnApp — 
+Kho PayPal: có "$0,00": true · có "Đang gom · thiếu $100,00": true · còn "thiếu 100,00" không đơn vị: false
+Lịch sử nhập kho PP-2026-10-19-1: PP-2026-10-19-1 19/10/2026 TÚ 6 6 PP 30 email 420.000 VND ≈ 16,27 USDT Chi tiết Đã ghi Nhập bổ sung
+Nút Kho proxy: Copy proxy Blocked (3)
+/vm-tasks mở: /infrastructure/servers
+POST tRPC: ["user.verifyPin","user.heartbeat"]
+Chỉ đọc (không có POST ghi): true
+Lỗi JavaScript: không có
