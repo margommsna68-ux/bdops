@@ -20,6 +20,7 @@ Quyết định của chủ dự án ngày 19/10/2026. **Thay thế** quy trình
 - Dữ liệu cài cũ (cấu hình CONFIRMED, việc cài, sự kiện INSTALL_STARTED / INSTALLED) giữ nguyên làm lịch sử. Không tạo bản ghi "đã cài" hay "đã kiểm tra mạng" để thay.
 - Proxy hiện hành của một VM: cấu hình được gán (desired), hoặc nếu chỉ có một cấu hình đã xác nhận cũ thì dùng nó. Hàm `currentProxyOf` (server) và `currentOf` (`src/server/vm-management/state.ts`, giao diện).
 - VM vừa có "đã giao B" vừa có "đã cài A" khác nhau, hoặc còn bản "Giữ để kiểm tra": **Cần kiểm tra**, hiện mọi proxy liên quan; web không đoán. Trong khung Thay proxy bấm "Dùng <IP>" cho proxy đang dùng thật rồi Áp dụng; các proxy kia rời VM.
+  - Có cả khi VM chỉ có **một** proxy "Giữ để kiểm tra" (sửa sau kiểm tra độc lập 19/10/2026: trước đó khung ghi "chưa có proxy", không có nút Dùng, và chọn đúng proxy đó trả "đã đổi" nhưng liên kết vẫn UNCERTAIN). Nay chọn proxy đó (đủ điều kiện) thì liên kết thành liên kết sử dụng rõ ràng (DESIRED), proxy LIVE, VM sang **Có proxy**; cấu hình cũ và lịch sử giữ nguyên, không ghi "đã cài". Chọn lại lần nữa là không đổi, không thêm lịch sử. Proxy đó đang BLOCKED / không đủ điều kiện: báo lỗi tại chỗ, VM vẫn Cần kiểm tra. Không có thao tác hàng loạt cho các VM Cần kiểm tra trên host.
 - Proxy từng bắt đầu cài ở máy khác (sự kiện cũ) vẫn không vào kho tự điền (như trước).
 - Việc cài cũ còn mở không chặn xoá VM nữa và không hiện ở đâu; vẫn có trong dữ liệu.
 - Host 19/10/2026: 576 VM trước đây đều "Chờ cài" (cấu hình giao, chưa xác nhận) nay hiện **Có proxy** với đúng proxy đó; không ghi dữ liệu nào để chuyển.
@@ -47,7 +48,7 @@ Quyết định của chủ dự án ngày 19/10/2026. **Thay thế** quy trình
   - Báo lặp lại không ghi đè mốc ban đầu.
   - VM đang SUS / OFF VM / Earn-VM lỗi / VM deleted giữ tình trạng đó; ô Proxy vẫn báo Blocked.
   - Chọn Blocked tại VM khi VM chưa có proxy rõ ràng bị từ chối tại dòng; không có quyền Báo BLOCKED cũng bị từ chối.
-  - Dữ liệu cũ đang Blocked mà thiếu mốc: tìm sự kiện chuyển sang Blocked trong lịch sử lượt hiện tại; không thấy thì khi thay proxy để **Chưa ghi** và ghi rõ trong lịch sử. Không đoán thành OK.
+  - Dữ liệu cũ đang Blocked mà thiếu mốc (hoặc mốc của lượt khác): xử lý ngay trong lần thay proxy, không cần đánh dấu Blocked lại. Lịch sử tình trạng của **lượt hiện tại** còn kết thúc ở Blocked → trở về tình trạng ngay trước lần chuyển sang Blocked gần nhất (ghi "theo lịch sử lượt này"); không xác định được → **Chưa ghi**, ghi rõ lý do trong lịch sử. Không đoán thành OK, không dùng lịch sử lượt trước. Đúng cho cả thay tại ô Proxy và Nhận replace ở Kho proxy; khung Thay proxy báo trước tình trạng sẽ trở về. (Sửa sau kiểm tra độc lập 19/10/2026: trước đó các VM này giữ nguyên Blocked sau khi thay.) Hàm `blockedSource` (`proxy-change.ts`) dùng chung cho kiểm tra và lưu.
 - Thay proxy (ô Proxy hoặc replace ở Kho) → nếu VM **vẫn** đang Blocked của đúng proxy và lượt đó thì trở về tình trạng đã nhớ (OK → OK, Chưa nối → Chưa nối, LINKED → LINKED, Chưa ghi → Chưa ghi). Người vận hành đã đổi sang tình trạng khác trong lúc chờ (SUS, OFF…) thì giữ quyết định mới hơn. Mốc của lượt cũ không dùng cho lượt mới.
 - Ghi nhận tạo lại VM: proxy hợp lệ được giữ cho vị trí ở lượt mới (gán là xong); proxy BLOCKED vẫn ở vị trí, ô Proxy báo Blocked và vẫn phải thay; mốc Blocked bị xoá vì sang lượt mới.
 
@@ -66,5 +67,5 @@ Quyết định của chủ dự án ngày 19/10/2026. **Thay thế** quy trình
 
 ## Kiểm tra
 
-- Test: `proxy-change.integration.test.ts` (7 ca) cùng các test cũ đã cập nhật (`vm-management`, `vm-ops` 4a / 4b, `proxy-edit`, `vm-admin`, `vm-workflow`, `links`, `menu-modules`, `dashboard-overview`).
-- Nghiệm thu trình duyệt: `docs/superpowers/evidence/2026-10-19-money-proxy/`.
+- Test: `proxy-change.integration.test.ts` (12 ca, gồm Blocked kiểu cũ có / không lịch sử, lượt khác, OFF trong lúc chờ, Nhận replace, chọn proxy Cần kiểm tra) cùng các test cũ đã cập nhật (`vm-management`, `vm-ops` 4a / 4b, `proxy-edit`, `vm-admin`, `vm-workflow`, `links`, `menu-modules`, `dashboard-overview`).
+- Nghiệm thu trình duyệt: `docs/superpowers/evidence/2026-10-19-money-proxy/`; bản sửa sau kiểm tra độc lập: `docs/superpowers/evidence/2026-10-19-review-fixes/`.

@@ -51,7 +51,12 @@ export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:
   // Keep the chosen proxy's assigned configuration when it already is the VM's one (an older confirmed copy is released).
   const keep=vm.desiredConfiguration?.endpointId===endpointId?vm.desiredConfiguration:null;
   for(const hold of vm.allocations){
-    if(keep&&hold.configurationId===keep.id)continue;
+    if(keep&&hold.configurationId===keep.id){
+      // The person chose this proxy for a VM under review: its "Giữ để kiểm tra" hold becomes the clear assignment (the old
+      // configuration and its history stay; nothing is recorded as installed).
+      if(hold.role!=='DESIRED'){await images.remember('VM_ALLOCATION',hold.id);await tx.vMProxyAllocation.update({where:{id:hold.id},data:{role:'DESIRED',revision:{increment:1}}});}
+      continue;
+    }
     await images.remember('VM_ALLOCATION',hold.id);await images.remember('ENDPOINT',hold.endpointId);
     await tx.vMProxyAllocation.update({where:{id:hold.id},data:{releasedAt:ctx.now,releaseReason:'Thay proxy · '+ctx.via,revision:{increment:1}}});
     await tx.proxyIP.update({where:{id:hold.endpointId},data:{revision:{increment:1}}});
@@ -63,6 +68,10 @@ export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:
   if(old&&!keep&&old.id!==vm.installedConfigurationId){await images.remember('VM_CONFIG',old.id);await tx.vMConfiguration.update({where:{id:old.id},data:{status:'CANCELLED',revision:{increment:1}}});}
   for(const task of await tx.vMTask.findMany({where:{vmId:vm.id,status:{in:['PENDING','IN_PROGRESS']}}})){await images.remember('VM_TASK',task.id);await tx.vMTask.update({where:{id:task.id},data:{status:'CANCELLED'}});}
   let configId=keep?.id??null;
+  if(keep&&!vm.allocations.some(h=>h.configurationId===keep.id)){
+    const hold=await tx.vMProxyAllocation.create({data:{projectId:ctx.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:keep.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:ctx.actorId}});
+    await images.remember('VM_ALLOCATION',hold.id,true);
+  }
   if(!keep){
     const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
     const config=await tx.vMConfiguration.create({data:{projectId:ctx.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:ctx.actorId}});
@@ -94,8 +103,8 @@ export async function markVmBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:st
   if(ops.status==='PROXY_BLOCKED'){
     if(ops.blockedEndpointId&&ops.blockedCycle===cycle)return 'REPEAT' as const; // a repeated report never overwrites the first mark
     // Blocked chosen before this rule: the status before it comes from this round's history, never guessed as OK.
-    const last=await tx.vmOpsEvent.findFirst({where:{vmId,cycle,kind:{in:['STATUS','RECREATE','UNDO']},toStatus:'PROXY_BLOCKED'},orderBy:{createdAt:'desc'}});
-    await tx.vmOperation.update({where:{id:ops.id},data:{blockedFrom:last?.fromStatus??null,blockedFromKnown:!!last,blockedEndpointId:endpointId,blockedCycle:cycle,blockedAt:ctx.now,revision:{increment:1}}});
+    const last=await blockedSource(tx,vmId,{...ops,blockedEndpointId:null},[endpointId]);
+    await tx.vmOperation.update({where:{id:ops.id},data:{blockedFrom:last?.from??null,blockedFromKnown:!!last?.known,blockedEndpointId:endpointId,blockedCycle:cycle,blockedAt:ctx.now,revision:{increment:1}}});
     return 'REPEAT' as const;
   }
   await tx.vmOperation.update({where:{id:ops.id},data:{status:'PROXY_BLOCKED',statusAt:ctx.now,statusById:ctx.actorId,blockedFrom:ops.status,blockedFromKnown:true,blockedEndpointId:endpointId,blockedCycle:cycle,blockedAt:ctx.now,revision:{increment:1}}});
@@ -109,14 +118,42 @@ export async function markUsersBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,endp
   for(const vmId of Array.from(new Set(holds.map(h=>h.vmId)))){const vm=await loadChangeVM(tx,vmId);if(currentProxyOf(vm).endpointId!==endpointId)continue;out.push({vmId,result:await markVmBlocked(tx,images,ctx,vmId,endpointId,note)});}
   return out;
 }
+type OpsRow={id:string;vmId?:string;cycle:number;status:VmOpsStatus|null;blockedFrom?:VmOpsStatus|null;blockedFromKnown?:boolean;blockedEndpointId:string|null;blockedCycle:number|null};
+/**
+ * The status a VM goes back to when the proxies `leaving` leave it, or null when nothing is restored. A Blocked marked by this rule
+ * belongs to its proxy and round. A Blocked from before the marker columns (status PROXY_BLOCKED, no marker of this round) is resolved from this
+ * round's history: the status before the latest switch to Blocked, provided the history still ends in Blocked; otherwise unknown
+ * (Chưa ghi), never OK. Another round's mark or history is never used; a status chosen after Blocked is not Blocked, so it is kept.
+ */
+export async function blockedSource(db:Pick<Tx,'vmOpsEvent'>,vmId:string,ops:OpsRow|null|undefined,leaving:string[]):Promise<{known:boolean;from:VmOpsStatus|null;legacy:boolean}|null>{
+  if(!ops||ops.status!=='PROXY_BLOCKED'||!leaving.length)return null;
+  // A mark of another round is never used: such a Blocked is resolved like an unmarked one, from this round's history.
+  if(ops.blockedEndpointId&&ops.blockedCycle===ops.cycle){
+    if(!leaving.includes(ops.blockedEndpointId))return null;
+    return {known:!!ops.blockedFromKnown,from:ops.blockedFromKnown?ops.blockedFrom??null:null,legacy:false};
+  }
+  const events=await db.vmOpsEvent.findMany({where:{vmId,cycle:ops.cycle,kind:{in:['STATUS','RECREATE','UNDO']}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:50,select:{fromStatus:true,toStatus:true}});
+  for(const e of events){
+    if(e.toStatus!=='PROXY_BLOCKED')break;
+    if(e.fromStatus==='PROXY_BLOCKED')continue;
+    return {known:true,from:e.fromStatus,legacy:true};
+  }
+  return {known:false,from:null,legacy:true};
+}
 /** After the proxies `oldIds` left the VM: bring back the status before Blocked when the VM still carries that Blocked. */
-export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vm:{id:string;operation:{id:string;cycle:number;status:VmOpsStatus|null;blockedEndpointId:string|null;blockedCycle:number|null}|null},oldIds:string[]){
-  const ops=vm.operation;if(!ops?.blockedEndpointId||!oldIds.includes(ops.blockedEndpointId))return null;
-  const row=await tx.vmOperation.findUniqueOrThrow({where:{id:ops.id}});await images.remember('VM_OPS',row.id);
+export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vm:{id:string;operation:OpsRow|null},oldIds:string[]){
+  const ops=vm.operation;if(!ops)return null;
+  const row=await tx.vmOperation.findUniqueOrThrow({where:{id:ops.id}});
   const clear={blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null};
-  if(row.status!=='PROXY_BLOCKED'||row.blockedCycle!==row.cycle){await tx.vmOperation.update({where:{id:row.id},data:{...clear,revision:{increment:1}}});return {kept:row.status};}
-  const to=row.blockedFromKnown?row.blockedFrom:null;
+  const source=await blockedSource(tx,vm.id,row,oldIds);
+  if(!source){
+    // A mark of one of these proxies that no longer applies (status chosen meanwhile, older round) is cleared; the status is kept.
+    if(row.blockedEndpointId&&oldIds.includes(row.blockedEndpointId)){await images.remember('VM_OPS',row.id);await tx.vmOperation.update({where:{id:row.id},data:{...clear,revision:{increment:1}}});return {kept:row.status};}
+    return null;
+  }
+  await images.remember('VM_OPS',row.id);
+  const to=source.known?source.from:null,where=source.legacy?' (theo lịch sử lượt này)':'';
   await tx.vmOperation.update({where:{id:row.id},data:{...clear,status:to,statusAt:ctx.now,statusById:ctx.actorId,revision:{increment:1}}});
-  await tx.vmOpsEvent.create({data:{projectId:ctx.projectId,vmId:vm.id,cycle:row.cycle,kind:'STATUS',fromStatus:'PROXY_BLOCKED',toStatus:to,note:row.blockedFromKnown?'Đã thay proxy · trở về '+opsLabel(to)+' (tình trạng trước Blocked)':'Đã thay proxy · không xác định được tình trạng trước Blocked trong lịch sử lượt này nên để Chưa ghi',actorId:ctx.actorId}});
+  await tx.vmOpsEvent.create({data:{projectId:ctx.projectId,vmId:vm.id,cycle:row.cycle,kind:'STATUS',fromStatus:'PROXY_BLOCKED',toStatus:to,note:source.known?'Đã thay proxy · trở về '+opsLabel(to)+' (tình trạng trước Blocked'+where+')':'Đã thay proxy · không xác định được tình trạng trước Blocked trong lịch sử lượt này nên để Chưa ghi',actorId:ctx.actorId}});
   return {restored:to};
 }

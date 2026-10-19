@@ -1,0 +1,31 @@
+PASS M1a 2,12 USDT / 5 PP → "Tính theo giá mỗi PP" điền 0,424, không báo lỗi, đổi qua lại 3 lần vẫn 0,424 ↔ 2,12 — 0,424 → 2,12 → 0,424 → 2,12 → 0,424 → 2,12
+PASS M1b nút Nhập sáng khi đơn giá 0,424
+PASS M1c đã lưu: 5 PP, đơn giá 0,424, một khoản chi 2,12 USDT — {"code":"PP-2026-10-19-28","qty":5,"mode":"UNIT","unit":"0.424","cost":{"amount":"2.12","currency":"USDT","usdt":"2.12","rate":"1"}}
+PASS M2a tổng 16,125 USDT nhận được (không báo nhầm hàng nghìn)
+PASS M2b đơn giá 16,125 × 2 = 32,25 USDT
+PASS M2c đổi sang tổng mang theo 32,25
+PASS M2d đổi ngược giữ 16,125
+PASS M2e đã lưu một khoản 32,25 USDT, đơn giá 16,125 — {"code":"PP-2026-10-19-29","qty":2,"mode":"UNIT","unit":"16.125","cost":{"amount":"32.25","currency":"USDT","usdt":"32.25","rate":"1"}}
+PASS M3a VND vẫn cảnh báo "25,820" dễ hiểu nhầm, nút Nhập khoá
+PASS M3b tỷ giá có phần lẻ 25.820,5 nhận được, ghi Nhập tay — 1 USDT = ? VND
+PASS M3c đã lưu 100.000 VND, tỷ giá 25820,5, USDT = 100000 ÷ 25820,5 — {"code":"PP-2026-10-19-30","qty":null,"mode":"TOTAL","unit":null,"cost":{"amount":"100000","currency":"VND","usdt":"3.872892","rate":"25820.5"}}
+PASS M4a Chi phí: 16,125 USDT không báo lỗi
+PASS M4b Chi phí: 0,424 USDT không báo lỗi
+PASS M4c Chi phí: 420.000 VND, tỷ giá 25.820,5 nhận được
+PASS M4d đã lưu đúng ba khoản: 16,125 / 0,424 USDT; 420.000 VND @ 25820,5 — ["0.424 USDT @1 = 0.424","16.125 USDT @1 = 16.125","420000 VND @25820.5 = 16.266145"]
+PASS P1 Blocked kiểu cũ có lịch sử OK: khung báo "trở về OK", Áp dụng → proxy mới, tình trạng OK, lịch sử ghi lý do — 100.80.205.18:8080 Thay proxy; tình trạng VM trở về OK | {"status":"OK","mark":false,"desired":"100.80.205.18","installed":null,"configs":2,"holds":["100.80.205.18@DESIRED:LIVE"],"last":"PROXY_BLOCKED>OK Đã thay proxy · trở về OK (tình trạng trước Blocked (theo lịch sử lượt này))","events":3}
+PASS P1b ô Tình trạng VM_001 hiện OK sau khi thay (đọc lại trang) — OK
+PASS P2 Blocked kiểu cũ không có lịch sử: báo "trở về Chưa ghi", lưu Chưa ghi (không tự OK), lịch sử ghi rõ lý do — {"status":null,"mark":false,"desired":"100.80.205.19","installed":null,"configs":2,"holds":["100.80.205.19@DESIRED:LIVE"],"last":"PROXY_BLOCKED>- Đã thay proxy · không xác định được tình trạng trước Blocked trong lịch sử lượt này nên để Chưa ghi","events":2}
+PASS P3 Blocked có mốc (chọn tại VM, từ OK): thay → OK, xoá mốc — {"status":"OK","mark":false,"desired":"100.80.205.20","installed":null,"configs":2,"holds":["100.80.205.20@DESIRED:LIVE"],"last":"PROXY_BLOCKED>OK Đã thay proxy · trở về OK (tình trạng trước Blocked)","events":3}
+PASS P4 đã chọn OFF VM trong lúc chờ: thay proxy giữ OFF — {"status":"OFF","mark":false,"desired":"100.80.205.21","installed":null,"configs":2,"holds":["100.80.205.21@DESIRED:LIVE"],"last":"PROXY_BLOCKED>OFF null","events":3}
+PASS P4b đổi sang proxy dự phòng: proxy cũ vẫn BLOCKED, proxy mới LIVE — {"100.80.205.11":"BLOCKED","100.80.205.16":"LIVE","100.80.205.12":"BLOCKED","100.80.205.13":"BLOCKED","100.80.205.14":"BLOCKED","100.80.205.15":"BLOCKED","100.80.205.17":"BLOCKED","100.80.205.18":"LIVE","100.80.205.19":"LIVE","100.80.205.20":"LIVE","100.80.205.21":"LIVE"}
+PASS P5 Nhận replace ở Kho proxy (Blocked kiểu cũ, lịch sử LINKED): VM dùng proxy mới, trở về LINKED, proxy cũ Đã replace — {"status":"LINKED","mark":false,"desired":"100.80.205.201","installed":null,"configs":2,"holds":["100.80.205.201@DESIRED:LIVE"],"last":"PROXY_BLOCKED>LINKED Đã thay proxy · trở về LINKED (tình trạng trước Blocked (theo lịch sử lượt này))","events":3} REPLACED
+PASS P6a VM_006 hiện Cần kiểm tra trước khi chọn
+PASS P6b chưa chọn: Áp dụng mờ; khung nêu proxy cần đối chiếu và nút Dùng
+PASS P6c chọn đúng proxy "Giữ để kiểm tra" → liên kết rõ ràng DESIRED, LIVE, giữ cấu hình cũ, không ghi đã cài — {"status":null,"mark":false,"desired":"100.80.205.16","installed":null,"configs":1,"holds":["100.80.205.16@DESIRED:LIVE"],"last":null,"events":0}
+PASS P6d dòng VM_006 hết Cần kiểm tra
+PASS P6e chọn lại lần nữa: "Đang là proxy hiện tại", Áp dụng mờ — 100.80.205.16:8080 Đang là proxy hiện tại của VM; không đổi
+PASS P7 proxy "Giữ để kiểm tra" đang BLOCKED: báo lỗi tại chỗ, Áp dụng mờ, VM vẫn Cần kiểm tra — 100.80.205.17:8080 Proxy đang BLOCKED; chọn proxy khác
+PASS Không có lỗi JavaScript trên trang
+
+KẾT QUẢ: 29 PASS / 0 FAIL

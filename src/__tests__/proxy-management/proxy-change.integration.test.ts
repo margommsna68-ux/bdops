@@ -11,6 +11,7 @@ import {previewVmBulk,applyVmBulk} from '@/server/vm-management/bulk';
 import {undoOperation} from '@/server/operation-history/undo';
 import {readVMWorkspace} from '@/server/vm-management/repository';
 import type {VmOpsStatus} from '@prisma/client';
+import {vmView} from '@/server/vm-management/state';
 afterAll(()=>db.$disconnect());
 // Owner decision 19/10/2026: assigning a proxy is recording the proxy the VM uses (no install step); the proxy can be changed from
 // the VM cell or from Kho proxy with the same rules; a VM Blocked by its proxy goes back to its status before Blocked when the proxy
@@ -103,10 +104,12 @@ describe('Blocked và khôi phục tình trạng VM',()=>{
       await f.change(0,b.id);expect((await f.ops(0))?.status).toBe('OFF');
       await f.change(1,c.id);await f.status(1,'SUSPENDED');await f.batch({kind:'BLOCKED',text:c.host});
       expect((await f.ops(1))?.status).toBe('SUSPENDED');expect((await f.current(1)).holds[0].state).toBe('BLOCKED');
-      // A mark left from round 1 on a VM now in round 2 (recreation clears it; this covers older rows): never used for round 2.
+      // A mark left from round 1 on a VM now in round 2 (recreation clears it; this covers older rows): never used for round 2. Round 2
+      // has no history of the Blocked either, so the replacement leaves Chưa ghi with the reason, never OK (independent review 19/10).
       await f.change(2,d.id);await f.status(2,'OK');await f.batch({kind:'BLOCKED',text:d.host});
       const o=await f.ops(2);await db.vmOperation.update({where:{id:o!.id},data:{cycle:2}});
-      await f.change(2,e.id);expect(await f.ops(2)).toMatchObject({status:'PROXY_BLOCKED',blockedEndpointId:null});
+      await f.change(2,e.id);expect(await f.ops(2)).toMatchObject({status:null,blockedEndpointId:null});
+      expect((await db.vmOpsEvent.findFirstOrThrow({where:{vmId:f.vms[2].id,cycle:2},orderBy:[{createdAt:'desc'},{id:'desc'}]})).note).toMatch(/không xác định/);
     }finally{await f.cleanup();}
   });
   it('a provider replacement in Kho proxy changes the VM in the same save, restores its status, leaves the Blocked list; undo puts everything back',async()=>{
@@ -125,6 +128,88 @@ describe('Blocked và khôi phục tình trạng VM',()=>{
       const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'REPLACE'}});
       await undoOperation(f.scope,op.id,'',db);
       expect(await f.state(a.id)).toBe('BLOCKED');expect((await f.current(0)).desired?.ip).toBe(a.host);expect((await f.ops(0))?.status).toBe('PROXY_BLOCKED');
+    }finally{await f.cleanup();}
+  });
+});
+// Independent review 19/10/2026: rows Blocked before the marker columns existed (status PROXY_BLOCKED, every blocked* column empty).
+describe('Blocked cũ (chưa có mốc) khi thay proxy',()=>{
+  const legacy=async(f:Awaited<ReturnType<typeof setup>>,i:number,proxyId:string,history:VmOpsStatus|null|'none',cycle=1)=>{
+    await db.proxyIP.update({where:{id:proxyId},data:{inventoryState:'BLOCKED',status:'BLOCKED'}});
+    const old={status:'PROXY_BLOCKED' as const,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null};
+    await db.vmOperation.upsert({where:{vmId:f.vms[i].id},update:old,create:{...old,projectId:f.scope.projectId,vmId:f.vms[i].id}});
+    if(history!=='none')await db.vmOpsEvent.create({data:{projectId:f.scope.projectId,vmId:f.vms[i].id,cycle,kind:'STATUS',fromStatus:history,toStatus:'PROXY_BLOCKED',note:'Lịch sử cũ (thử)',actorId:f.scope.userId}});
+  };
+  const lastNote=async(f:Awaited<ReturnType<typeof setup>>,i:number)=>(await db.vmOpsEvent.findFirstOrThrow({where:{vmId:f.vms[i].id},orderBy:[{createdAt:'desc'},{id:'desc'}]})).note;
+  it('this round says OK before Blocked → OK after the change at the cell; no usable history → Chưa ghi with the reason, never OK',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy(),b=await f.proxy(),s1=await f.proxy(),s2=await f.proxy();
+      await f.change(0,a.id);await f.status(0,'OK');await legacy(f,0,a.id,'OK');
+      await f.change(1,b.id);await f.status(1,'OK');await legacy(f,1,b.id,'none');
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:s1.id},db)).toMatchObject({outcome:'READY',restore:'OK'});
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[1].id,endpointId:s2.id},db)).toMatchObject({outcome:'READY',restore:'Chưa ghi'});
+      expect(await f.change(0,s1.id)).toMatchObject({changed:true});await f.change(1,s2.id);
+      expect([(await f.current(0)).desired?.ip,(await f.current(1)).desired?.ip]).toEqual([s1.host,s2.host]);
+      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['OK',null]);
+      expect(await lastNote(f,0)).toMatch(/trở về OK .*theo lịch sử lượt này/);expect(await lastNote(f,1)).toMatch(/không xác định/);
+      // Switching to a spare keeps the old proxies BLOCKED; the new ones are LIVE.
+      expect([await f.state(a.id),await f.state(s1.id)]).toEqual(['BLOCKED','LIVE']);
+      // The change and the restored status are one journal entry: undo puts the proxy and Blocked back together.
+      const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_PROXY_CHANGE'},orderBy:{createdAt:'desc'}});
+      await undoOperation(f.scope,op.id,'',db);expect((await f.current(1)).desired?.ip).toBe(b.host);expect((await f.ops(1))?.status).toBe('PROXY_BLOCKED');
+    }finally{await f.cleanup();}
+  });
+  it('history of another round is never used; a status chosen after Blocked is kept',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy(),b=await f.proxy(),s1=await f.proxy(),s2=await f.proxy();
+      await f.change(0,a.id);await f.status(0,'OK');await legacy(f,0,a.id,'OK');await db.vmOperation.update({where:{vmId:f.vms[0].id},data:{cycle:2}});
+      await f.change(0,s1.id);expect((await f.ops(0))?.status).toBeNull();
+      // Old Blocked, then the operator chose OFF VM while waiting for the provider: the change keeps OFF.
+      await f.change(1,b.id);await f.status(1,'OK');await legacy(f,1,b.id,'OK');await f.status(1,'OFF');
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[1].id,endpointId:s2.id},db)).toMatchObject({outcome:'READY',restore:null});
+      await f.change(1,s2.id);expect((await f.ops(1))?.status).toBe('OFF');
+    }finally{await f.cleanup();}
+  });
+  it('a provider replacement received in Kho proxy restores an old Blocked from this round history in the same save',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy(),b=await f.proxy();await f.change(0,a.id);await f.change(1,b.id);await f.status(0,'LINKED');
+      await legacy(f,0,a.id,'LINKED');await legacy(f,1,b.id,'none');
+      const n1=f.net+'211',n2=f.net+'212',{result}=await f.batch({kind:'REPLACE',removedText:a.host+'\n'+b.host,addedText:n1+'\n'+n2});expect(result?.applied).toBe(2);
+      expect([(await f.current(0)).desired?.ip,(await f.current(1)).desired?.ip]).toEqual([n1,n2]);
+      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['LINKED',null]);expect(await lastNote(f,1)).toMatch(/không xác định/);
+      expect(await f.state(a.id)).toBe('REPLACED');
+    }finally{await f.cleanup();}
+  });
+});
+describe('Chọn proxy cho VM Cần kiểm tra',()=>{
+  it('choosing the single "Giữ để kiểm tra" proxy makes it the clear assignment once; again is no change; undo puts the review back',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy();await f.change(0,a.id);
+      await db.vMProxyAllocation.updateMany({where:{vmId:f.vms[0].id,releasedAt:null},data:{role:'UNCERTAIN'}});
+      expect(vmView(await f.current(0) as never)).toBe('REVIEW');
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:a.id},db)).toMatchObject({outcome:'READY'});
+      const configs=await db.vMConfiguration.count({where:{vmId:f.vms[0].id}});
+      expect(await f.change(0,a.id)).toMatchObject({changed:true});
+      expect((await db.vMProxyAllocation.findMany({where:{vmId:f.vms[0].id,releasedAt:null}})).map(h=>[h.endpointId,h.role])).toEqual([[a.id,'DESIRED']]);
+      expect(vmView(await f.current(0) as never)).toBe('ASSIGNED');expect(await f.state(a.id)).toBe('LIVE');
+      // Same configuration kept (its history stays), nothing recorded as installed.
+      expect(await db.vMConfiguration.count({where:{vmId:f.vms[0].id}})).toBe(configs);expect((await f.vm(0)).installedConfigurationId).toBeNull();
+      const journals=await db.operationJournal.count({where:{projectId:f.scope.projectId}}),events=await db.proxyStatusEvent.count({where:{projectId:f.scope.projectId}});
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:a.id},db)).toMatchObject({outcome:'SKIP'});
+      expect(await f.change(0,a.id)).toMatchObject({changed:false});
+      expect([await db.operationJournal.count({where:{projectId:f.scope.projectId}}),await db.proxyStatusEvent.count({where:{projectId:f.scope.projectId}})]).toEqual([journals,events]);
+      const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_PROXY_CHANGE'},orderBy:{createdAt:'desc'}});
+      await undoOperation(f.scope,op.id,'',db);expect(vmView(await f.current(0) as never)).toBe('REVIEW');
+    }finally{await f.cleanup();}
+  });
+  it('without a choice, or with a proxy that may not be placed (BLOCKED), the VM stays Cần kiểm tra',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy();await f.change(0,a.id);
+      await db.vMProxyAllocation.updateMany({where:{vmId:f.vms[0].id,releasedAt:null},data:{role:'UNCERTAIN'}});
+      await db.proxyIP.update({where:{id:a.id},data:{inventoryState:'BLOCKED',status:'BLOCKED'}});
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:a.id},db)).toMatchObject({outcome:'ERROR'});
+      await expect(f.change(0,a.id)).rejects.toThrow(/BLOCKED/);
+      expect((await db.vMProxyAllocation.findMany({where:{vmId:f.vms[0].id,releasedAt:null}})).map(h=>h.role)).toEqual(['UNCERTAIN']);
+      expect(vmView(await f.current(0) as never)).toBe('REVIEW');
     }finally{await f.cleanup();}
   });
 });

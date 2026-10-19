@@ -85,8 +85,18 @@ creates, merges and deletes nothing.
 ### Money input and VND → USDT (owner brief 19 October 2026, replaces the free-text money fields)
 
 - Fields use the Vietnamese convention: "." groups thousands, "," starts the decimals. With VND "70000" and "70.000" are seventy
-  thousand, "420.000" is four hundred twenty thousand, "16,27" is sixteen point twenty-seven. Ambiguous text ("70,000", "25,820")
-  and malformed groups ("25.82") are errors at the field; nothing is multiplied or divided by 1.000 silently.
+  thousand, "420.000" is four hundred twenty thousand, "16,27" is sixteen point twenty-seven. Malformed groups ("25.82") are errors
+  at the field; nothing is multiplied or divided by 1.000 silently.
+- Exact decimals are valid in every money field, up to 8 decimals for amounts and 12 for rates: "0,424", "16,125 USDT", a rate
+  "1 USDT = 25.820,5 VND". Only a **VND** field (a VND amount or a "1 USDT = N VND" rate) warns about the English thousands comma:
+  "25,820" or "70,000" there is refused with both readings ("nếu là 25.820 thì ghi 25.820; nếu thật sự có phần lẻ thì ghi 25,82");
+  "0,xxx" is never taken for a thousands group. (Independent review 19/10/2026: the warning used to apply to every field, so the
+  web refused its own "0,424" after switching 2,12 USDT / 5 PP to a unit price.)
+- Text the web writes into a field (the unit price after switching, a fetched rate, an edited cost) always reads back as the same
+  value (`viInput`); in the rare VND case where it would look like a thousands group it gets a trailing zero ("15,6250").
+- Switching total ↔ unit keeps the total: total → unit fills the exact quotient (2,12 ÷ 5 = 0,424); a division that is not exact to
+  8 decimals leaves the unit price empty with a note at the field and the total kept for the way back (never a rounded unit price
+  that would change the total).
 - The typed text and the number sent to the API are different things: `src/lib/money-input.ts` parses once and the form sends only
   canonical numbers ("420000", "25820", "16.27"). The batch endpoints (`accountStore.importPreview / importCommit / batchCost`)
   refuse anything else, so "25.820" can never be read as 25,82 again (the bug that turned 420.000 VND into 16.266 USDT). The Chi phí

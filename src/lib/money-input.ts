@@ -2,11 +2,13 @@
 // "70000" and "70.000" are seventy thousand; "16,27" is sixteen point twenty-seven. The text a person types and the canonical
 // number sent to the API ("70000", "16.27") are different things: forms parse once here and send only the canonical value, so the
 // browser and the server can never read the same text differently (a rate "25.820" was once read as 25,82).
-// Ambiguous text ("70,000": seventy thousand in English, seventy in Vietnamese) or a malformed group is an error at the field;
-// nothing is multiplied or divided by 1.000 silently.
+// A malformed group is an error at the field; nothing is multiplied or divided by 1.000 silently. Exact decimals are valid
+// everywhere ("0,424", "16,125 USDT"), up to `fraction` digits. Only a VND field (`vnd`, amounts and "1 USDT = N VND" rates, where
+// prices have no real decimals) warns about the English thousands comma: "25,820" there is refused with both readings; "0,xxx" is
+// never a thousands group. Text the web writes into a field goes through viInput, so it always reads back as the same value.
 export type ParsedNumber={value:string|null;error:string|null};
 const UNIT=/^(\$|₫|đ|vnd|usdt|usd)|(\$|₫|đ|vnd|usdt|usd)$/i;
-export function parseViNumber(text:string,opts:{fraction?:number;integer?:boolean}={}):ParsedNumber{
+export function parseViNumber(text:string,opts:{fraction?:number;integer?:boolean;vnd?:boolean}={}):ParsedNumber{
   const fraction=opts.fraction??8;let t=text.trim().replace(/\s+/g,'');
   for(let i=0;i<2;i++)t=t.replace(UNIT,'');
   if(!t)return {value:null,error:null};
@@ -18,9 +20,9 @@ export function parseViNumber(text:string,opts:{fraction?:number;integer?:boolea
   const [int,frac='']=t.split(',');
   if(!int)return {value:null,error:'Thiếu phần nguyên trước dấu phẩy (ví dụ 0,5)'};
   if(int.includes('.')&&!/^\d{1,3}(\.\d{3})+$/.test(int))return {value:null,error:'Dấu chấm chỉ để tách hàng nghìn (70.000). Phần lẻ dùng dấu phẩy, ví dụ 25,82'};
-  if(commas&&!int.includes('.')&&frac.length===3&&/^\d{1,3}$/.test(int)){
-    const whole=(int+frac).replace(/^0+(?=\d)/,'');
-    return {value:null,error:`"${t}" dễ hiểu nhầm: nếu là ${group(whole)} thì ghi ${group(whole)}; nếu có phần lẻ thì ghi ${int},${frac.replace(/0+$/,'')||'0'}`};
+  if(opts.vnd&&commas&&frac.length===3&&/^[1-9]\d{0,2}$/.test(int)){
+    const whole=int+frac,short=frac.replace(/0+$/,'');
+    return {value:null,error:`"${t}" dễ hiểu nhầm: nếu là ${group(whole)} thì ghi ${group(whole)}; nếu thật sự có phần lẻ thì ghi ${int},${short.length<3?short||'0':frac+'0'}`};
   }
   if(commas&&!frac)return {value:null,error:'Thiếu phần lẻ sau dấu phẩy'};
   if(!/^\d*$/.test(frac))return {value:null,error:'Phần lẻ chỉ gồm chữ số'};
@@ -34,6 +36,11 @@ const group=(int:string)=>(int.replace(/^0+(?=\d)/,'')||'0').replace(/\B(?=(\d{3
 export function viNumber(value:string|null|undefined):string{
   if(!value)return '';const neg=value.startsWith('-'),[int,dec='']=value.replace(/^-/,'').split('.'),frac=dec.replace(/0+$/,'');
   return (neg?'-':'')+group(int)+(frac?','+frac:'');
+}
+/** Canonical decimal → text for an input that parseViNumber(·, opts) reads back as the same value: viNumber, plus a trailing zero only
+ *  where a VND field would otherwise take it for a thousands group ("15.625" VND → "15,6250"). */
+export function viInput(value:string|null|undefined,opts:{vnd?:boolean}={}):string{
+  const t=viNumber(value);return t&&opts.vnd&&parseViNumber(t,{vnd:true}).error?t+'0':t;
 }
 /** Round a canonical decimal half up to `places` decimals, on the digits (never through a float). */
 export function roundDecimal(value:string,places:number):string{

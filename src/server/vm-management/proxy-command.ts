@@ -6,7 +6,7 @@ import {getManualInventory} from '../proxy-management/repository';
 import {assignableReason,endpointInclude,type EndpointRow} from '../proxy-management/edits';
 import {authorizeVM,type VMReader} from './repository';
 import {matchProxy,proxyEndpoints} from './bulk';
-import {assignProxyToVm,currentProxyOf,loadChangeVM} from './proxy-change';
+import {assignProxyToVm,blockedSource,currentProxyOf,loadChangeVM} from './proxy-change';
 import {VM_OPS} from '@/lib/vm-ops';
 // "Thay proxy" at the Server/VM Proxy cell (owner decision 19/10/2026): pick a proxy of the stock or paste one, checked while choosing,
 // one Áp dụng. The same core as the registry and Dán bảng; the same eligibility as a hand-picked allocation (TUT or Chung
@@ -35,7 +35,7 @@ async function judge(db:VMReader,projectId:string,vmId:string,pick:{endpointId?:
     const pool=await getManualInventory(projectId,db as PrismaClient);
     if(!pool.some(p=>p.endpointId===endpoint!.id))return {...base,outcome:'ERROR',message:endpoint.inventoryState==='LIVE'?'Proxy đang LIVE (ghi là đang dùng); chọn proxy NEW trong kho':'Proxy chưa đủ điều kiện cấp VM (cần NEW, có gói, chưa từng cài ở máy khác, không phải Genjy riêng)'};
   }
-  const ops=vm.operation,restore=ops?.status==='PROXY_BLOCKED'&&ops.blockedEndpointId&&cur.candidates.includes(ops.blockedEndpointId)&&ops.blockedCycle===ops.cycle?(ops.blockedFromKnown&&ops.blockedFrom?VM_OPS[ops.blockedFrom].label:'Chưa ghi'):null;
+  const back=await blockedSource(db,vm.id,vm.operation,cur.candidates.filter(id=>id!==endpoint!.id)),restore=back?(back.known&&back.from?VM_OPS[back.from].label:'Chưa ghi'):null;
   return {...base,restore,outcome:'READY',message:(cur.review?'Chọn proxy này làm proxy đang dùng; các proxy cần đối chiếu rời VM':cur.endpointId?'Thay proxy':'Gán proxy')+(restore?'; tình trạng VM trở về '+restore:'')};
 }
 export async function checkVmProxyChange(scope:ActorScope,input:{vmId:string;endpointId?:string;text?:string},db:PrismaClient=prisma){

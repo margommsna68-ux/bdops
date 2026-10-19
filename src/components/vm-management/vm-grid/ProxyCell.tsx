@@ -24,7 +24,7 @@ export function proxyCellInfo(v:ManagedVM){
   const candidates=Array.from(seen.values());
   const tone:ProxyTone=view==='BLOCKED'?'blocked':view==='REVIEW'?'review':config?'ok':'none';
   const warning=view==='BLOCKED'?'Blocked':view==='REVIEW'?'Cần kiểm tra':null;
-  const reason=view==='REVIEW'?(cur.review?'Có nhiều proxy cũ trên VM ('+candidates.map(c=>proxyAddress(c)).join(', ')+'); chọn proxy đang dùng':hold&&hold.owner!=='SELF'&&!hold.shared?'Proxy Genjy / chưa rõ sở hữu':hold?'Proxy đang '+hold.state+'; thay proxy':'Ô cũ chưa đọc được; chọn proxy'):view==='BLOCKED'?'Proxy BLOCKED: thay bằng proxy dự phòng hoặc nhận replace từ nhà cung cấp':null;
+  const reason=view==='REVIEW'?(cur.review?(candidates.length>1?'Có nhiều proxy cũ trên VM ('+candidates.map(c=>proxyAddress(c)).join(', ')+'); chọn proxy đang dùng':'Chưa rõ VM có dùng '+proxyAddress(candidates[0])+' không; bấm Dùng nếu đúng là proxy đang dùng, hoặc chọn proxy khác'):hold&&hold.owner!=='SELF'&&!hold.shared?'Proxy Genjy / chưa rõ sở hữu':hold?'Proxy đang '+hold.state+'; thay proxy':'Ô cũ chưa đọc được; chọn proxy'):view==='BLOCKED'?'Proxy BLOCKED: thay bằng proxy dự phòng hoặc nhận replace từ nhà cung cấp':null;
   return {view,tone,current:config?{endpointId:config.endpointId,ip:config.ip,port:config.port,state:hold?.state??null}:null,warning,reason,candidates};
 }
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
@@ -66,12 +66,12 @@ export function ChangeProxy({projectId,vm,info,rights,onBusy,onDone,onCancel}:{p
   }
   return <div className="space-y-2 text-sm">
     <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · Thay proxy</p>
-    <p className="text-xs">Đang dùng: {info.current?<><strong className="pm-ip">{proxyAddress(info.current)}</strong>{info.warning?<span className={'vm-proxy-state vm-proxy-state-'+(blocked?'review':'failed')}> {info.warning}</span>:null}</>:info.candidates.length>1?<span className="text-amber-700">cần đối chiếu: {info.candidates.map(c=>proxyAddress(c)+' ('+c.label+')').join(', ')}</span>:<span className="pm-muted">chưa có proxy</span>}</p>
+    <p className="text-xs">Đang dùng: {info.current?<><strong className="pm-ip">{proxyAddress(info.current)}</strong>{info.warning?<span className={'vm-proxy-state vm-proxy-state-'+(blocked?'review':'failed')}> {info.warning}</span>:null}</>:info.candidates.length?<span className="text-amber-700">cần đối chiếu: {info.candidates.map(c=>proxyAddress(c)+' ('+c.label+')').join(', ')}</span>:<span className="pm-muted">chưa có proxy</span>}</p>
     {info.reason&&<p className="text-xs pm-muted">{info.reason}</p>}
     {!rights.assign?<p className="text-xs pm-muted">Chỉ xem: tài khoản chưa có quyền gán proxy.</p>:<>
     {blocked&&<div className="vm-kind-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab==='stock'} className={tab==='stock'?'active':''} onClick={()=>setTab('stock')}>Proxy trong kho</button><button type="button" role="tab" aria-selected={tab==='replace'} className={tab==='replace'?'active':''} onClick={()=>setTab('replace')}>Nhận replace</button></div>}
     {tab==='stock'?<>
-      {info.candidates.length>1&&<div className="flex flex-wrap gap-1">{info.candidates.map(c=><button key={c.endpointId} type="button" className={'pm-button pm-button-quiet'+(picked===c.endpointId?' active':'')} onClick={()=>{setPicked(c.endpointId);setQ('');}}>Dùng {proxyAddress(c)}</button>)}</div>}
+      {!info.current&&info.candidates.length>0&&<div className="flex flex-wrap gap-1">{info.candidates.map(c=><button key={c.endpointId} type="button" className={'pm-button pm-button-quiet'+(picked===c.endpointId?' active':'')} onClick={()=>{setPicked(c.endpointId);setQ('');}}>Dùng {proxyAddress(c)}</button>)}</div>}
       <label className="pm-label text-xs">Tìm hoặc dán proxy (IP, IP:port, IP:port:user:pass)<span className="relative"><Search size={13} className="absolute left-2 top-2.5 pm-muted"/><input autoFocus className="pm-input pl-7" value={q} onChange={e=>{setQ(e.target.value);setPicked(null);}} placeholder="Ví dụ 84.32.138.211" spellCheck={false}/></span></label>
       <ul role="listbox" aria-label="Proxy NEW trong kho" className="vm-proxy-pick">{eligible.isLoading&&<li className="pm-muted text-xs"><Loader2 size={12} className="inline animate-spin"/> Đang tải kho…</li>}
         {list.map(p=><li key={p.endpointId}><button type="button" role="option" aria-selected={picked===p.endpointId} className={picked===p.endpointId?'active':''} onClick={()=>setPicked(p.endpointId)}><span className="pm-ip">{p.ip}:{p.port}</span><span className="pm-muted text-xs">{p.shared?'Chung mooon–Genjy':'TUT'} · NEW</span></button></li>)}
