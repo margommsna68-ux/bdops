@@ -1,0 +1,7 @@
+Trước: An-01/VM_001, An-01/VM_002, An-01/VM_003
+Sau Thiết lập → Đồng ấm → Back: An-01/VM_001, An-01/VM_002, An-01/VM_003 · Đã chọn 3 VM
+Bỏ chọn: còn 0
+Kho proxy 2 dòng → Thiết lập → Sáng → Back: Đã chọn 2 proxy · ô đang tích 2
+Chip SUS trên host (Sáng): không có VM SUS nên không hiện chip
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không

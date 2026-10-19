@@ -29,8 +29,17 @@ không đổi (quy tắc không áp cho chúng). Ảnh `s9-sus-light.png`, `s9-s
 
 104 file / 513 test qua; typecheck, lint (không cảnh báo mới), build qua.
 
+## Phát hành và host
+
+Commit 52e43fc, backup host 7e031704-8d9b-4d57-bf1d-38623d7d3418 trước khi deploy, deploy 06fcde66 SUCCESS, không migration. Log build
+Railway có bước `RUN node scripts/build-bronze-theme.cjs` → "unchanged (utilities 254, component rules 119)": bản sinh trên Linux giống
+hệt bản trong source. Host, chỉ thao tác trình duyệt (không ghi): chọn An-01/VM_001–003 → Thiết lập → Đồng ấm → Back: còn đúng 3, "Đã chọn
+3 VM"; Kho proxy chọn 2 → Thiết lập → Sáng → Back: còn 2; sau đó Bỏ chọn. Chỉ POST user.verifyPin / user.heartbeat, không lỗi JS. Host
+không có VM SUS nên chip SUS không hiện ở đó. Số liệu host trước / sau giống hệt.
+
 ## Chưa kiểm / giới hạn
 
 - Không chạy lại so điểm ảnh toàn trang theme cũ: dữ liệu cục bộ đã đổi do chính lượt kiểm (server, VM xoá, lịch sử), nên ảnh khác ở mọi
   theme như nhau. Thay đổi CSS của theme cũ chỉ là đúng một quy tắc chip SUS cho Sáng (git diff).
 - Lựa chọn giữ trong tab: mở tab mới hoặc đóng tab thì không giữ (đúng yêu cầu bộ nhớ phiên).
+- Chip SUS chưa xem trên host (host chưa có VM SUS); đã kiểm ở dữ liệu thử cục bộ.
