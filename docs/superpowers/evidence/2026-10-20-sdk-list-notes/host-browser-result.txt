@@ -1,0 +1,7 @@
+Ô SDK có mã: 5 · ví dụ: 1 SDK · 1 chưa dùng
+Khung danh sách: moon1 / M-001 · SDK EarnApp · 1 SDK · 1 chưa dùng MÃ SDK TIỀN TÍCH LUỸ USD GHI CHÚ ĐÃ DÙNG sdk-win-9352d707fe029c48aed2ca01056f3856 hiện hành Ghi tiền Thêm ghi chú Chưa dùng Thêm SDK vào VM (không thay mã đang có) Thêm C
+Chưa có SDK (chip): Chưa SDK 571
+Dán bảng → SDK: Có mã VM Chỉ SDK, theo khoảng VM
+Cột Ghi chú: 280px
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không

@@ -32,6 +32,14 @@ Lượt đầu có lỗi kịch bản (nút "Thêm" trùng tên "Thêm ghi chú"
 đúng; sửa kịch bản, chạy lại trên dữ liệu mới. Thấy và sửa một chỗ lệch yêu cầu: ô tài khoản trống hiện "Chọn tài khoản" → "Chưa có tài
 khoản".
 
+## Phát hành và host
+
+Commit 91c38a3, backup host 7d0261a8-f662-485e-812f-467abd6d62d8 trước khi deploy, deploy 22b505d1 SUCCESS; pre-deploy áp migration
+`20261020090000_sdk_vm_list` ("All migrations have been successfully applied"). Host chỉ đọc: số liệu trước / sau giống hệt (10 server /
+576 VM, 553 Có proxy, 23 Cần kiểm tra); 5 SDK của host (moon1 / M-001 … M-005) đều nằm trong danh sách đúng VM và đánh dấu hiện hành,
+"Chưa có SDK" vẫn 571. Trình duyệt: ô "1 SDK · 1 chưa dùng", khung danh sách, Dán bảng → SDK (hai cách), cột Ghi chú 280px; chỉ POST
+verifyPin / heartbeat, không lỗi JS; không nhập ví dụ nào.
+
 ## Chưa kiểm / giới hạn
 
 - Hai người cùng thao tác chỉ kiểm bằng test tích hợp (lấy cùng một mã, sửa tiền cùng phiên bản), không kiểm hai trình duyệt song song.
