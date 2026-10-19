@@ -22,7 +22,14 @@ type Tx=Prisma.TransactionClient;
 const D=(v:Prisma.Decimal.Value)=>new Prisma.Decimal(v);
 const currencyOf=(c:string)=>{const v=c.trim().toUpperCase();if(!LEDGER_CURRENCY.test(v))throw new ProxyDomainError('INVALID_INPUT','Đồng tiền là mã 3–5 chữ cái (USD, USDT, VND…)');return v;};
 const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
-const historyEntry=(by:string,what:string)=>({at:new Date().toISOString(),by,what});
+// A history line keeps its kind next to the full text: the full text (amounts, corrections, shortfall, notes) is shown only with the
+// money rights; everyone else gets the operating milestone of the kind.
+export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED';
+export const historyEntry=(by:string,kind:PayoutHistoryKind,what:string)=>({at:new Date().toISOString(),by,kind,what});
+const NEUTRAL:Record<PayoutHistoryKind,string>={REQUESTED:'Ghi yêu cầu rút',CORRECT:'Sửa yêu cầu rút',FAILED:'Đánh dấu thất bại',CANCELLED:'Đánh dấu huỷ',RETRY:'Gửi lại (cùng lượt rút)',SETTLE:'Chốt nhận thiếu',CONSUMED:'Dùng để ghi tạo lại VM'};
+// Lines written before 19/10/2026 carry no kind: it is read from the fixed start of the text (never from the amounts).
+const LEGACY:[string,PayoutHistoryKind][]=[['Ghi yêu cầu rút','REQUESTED'],['Sửa','CORRECT'],['Thất bại','FAILED'],['Huỷ','CANCELLED'],['Gửi lại','RETRY'],['Chốt nhận','SETTLE'],['Dùng để ghi tạo lại VM','CONSUMED']];
+export function neutralHistory(h:{kind?:string;what:string}){const kind=(h.kind&&h.kind in NEUTRAL?h.kind:LEGACY.find(([p])=>h.what.startsWith(p))?.[1]) as PayoutHistoryKind|undefined;return kind?NEUTRAL[kind]:'Cập nhật yêu cầu rút';}
 // Who may do what with payouts. Money (amounts, balances) needs the PayPal money rights; recording a request needs the right to
 // record money in (FUNDS write, managers); choosing a new receiving email also needs the right to assign on Server / VM.
 export async function payoutRights(scope:ActorScope,db:PrismaClient|Tx=prisma){
@@ -90,7 +97,7 @@ export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestIn
     if(!emailId)throw new ProxyDomainError('INVALID_INPUT','Chọn Mã PP → Email nhận tiền');
     const email=await tx.payPalEmail.findFirstOrThrow({where:{id:emailId,projectId:scope.projectId}});
     let row;
-    try{row=await tx.earnPayoutRequest.create({data:{projectId:scope.projectId,earnAppId:earnApp.id,vmId:vm.id,cycle,paypalId:email.paypalId,paypalEmailId:email.id,currency,amount,reference:input.reference?.trim().slice(0,200)||null,requestedAt:date,requestedById:current.userId,history:[historyEntry(current.userId,'Ghi yêu cầu rút '+amount.toFixed(2)+' '+currency)]}});}
+    try{row=await tx.earnPayoutRequest.create({data:{projectId:scope.projectId,earnAppId:earnApp.id,vmId:vm.id,cycle,paypalId:email.paypalId,paypalEmailId:email.id,currency,amount,reference:input.reference?.trim().slice(0,200)||null,requestedAt:date,requestedById:current.userId,history:[historyEntry(current.userId,'REQUESTED','Ghi yêu cầu rút '+amount.toFixed(2)+' '+currency)]}});}
     catch(e){if((e as {code?:string}).code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','EarnApp này vừa được ghi yêu cầu rút; tải lại');throw e;}
     await images.remember('PAYOUT_REQUEST',row.id,true);
     return {id:row.id,where:vm.server.code+' / '+vm.code,cycle};
@@ -103,7 +110,7 @@ export async function updatePayoutRequest(scope:ActorScope,input:{key:string;req
     if(r.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','Yêu cầu rút vừa được sửa; tải lại');
     const note=input.note?.trim().slice(0,500)||null,m=moneyOfRequest(r);
     if(r.consumedAt)throw new ProxyDomainError('INVALID_INPUT','Yêu cầu này đã dùng để ghi tạo lại VM; chỉ đối chiếu, không đổi trạng thái');
-    const data:Prisma.EarnPayoutRequestUncheckedUpdateInput={};let what='';
+    const data:Prisma.EarnPayoutRequestUncheckedUpdateInput={};let what='';const kind:PayoutHistoryKind=input.action;
     if(input.action==='FAILED'||input.action==='CANCELLED'){
       if(!note)throw new ProxyDomainError('INVALID_INPUT','Ghi căn cứ (lý do) khi đánh dấu '+(input.action==='FAILED'?'thất bại':'huỷ'));
       if(r.state===input.action&&r.stateNote===note)return {id:r.id,changed:false};
@@ -123,7 +130,7 @@ export async function updatePayoutRequest(scope:ActorScope,input:{key:string;req
       const shortfall=D(m.remaining);Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall});what='Chốt nhận '+m.received+' '+r.currency+', thiếu '+shortfall.toFixed(2)+': '+note;
     }
     await images.remember('PAYOUT_REQUEST',r.id);
-    await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,revision:{increment:1},history:[...(r.history as Prisma.JsonArray),historyEntry(current.userId,what)]}});
+    await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,revision:{increment:1},history:[...(r.history as Prisma.JsonArray),historyEntry(current.userId,kind,what)]}});
     return {id:r.id,changed:true};
   },db);
 }
@@ -137,7 +144,7 @@ export async function readVmOps(scope:ActorScope,db:PrismaClient=prisma){
   return {rights:{money,writeMoney,assign},vms:vms.map(v=>{
     const cycle=v.operation?.cycle??1,r=v.earnApp?.payoutRequest&&v.earnApp.payoutRequest.cycle===cycle&&v.earnApp.payoutRequest.vmId===v.id?v.earnApp.payoutRequest:null,m=r?moneyOfRequest(r):null;
     return {vmId:v.id,cycle,status:v.operation?.status??null,statusAt:v.operation?.statusAt?.toISOString()??null,statusBy:who(v.operation?.statusById),milestone:milestoneOf(m&&{phase:m.phase,consumed:!!r!.consumedAt}),
-      request:r?{id:r.id,revision:r.revision,state:r.state,stateNote:r.stateNote,phase:m!.phase,paypalId:r.paypal.id,paypal:r.paypal.code,email:r.paypalEmail.email,emailId:r.paypalEmail.id,requestedAt:dayText(r.requestedAt),reference:r.reference,settled:!!r.settledAt,
+      request:r?{id:r.id,revision:r.revision,state:r.state,stateNote:money?r.stateNote:null,phase:m!.phase,paypalId:r.paypal.id,paypal:r.paypal.code,email:r.paypalEmail.email,emailId:r.paypalEmail.id,requestedAt:dayText(r.requestedAt),reference:money?r.reference:null,settled:!!r.settledAt,
         money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m!.received,pendingLinked:m!.pendingLinked,remaining:m!.remaining,shortfall:r.shortfall?.toFixed(2)??null,settleNote:r.settleNote}:null}:null};
   })};
 }
@@ -153,6 +160,6 @@ export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:P
     events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:e.note,detail:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
     cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
     requests:requests.map(r=>{const m=moneyOfRequest(r);return {id:r.id,cycle:r.cycle,login:r.earnApp.login.email,paypal:r.paypal.code,email:r.paypalEmail.email,requestedAt:dayText(r.requestedAt),state:r.state,phase:m.phase,consumed:!!r.consumedAt,reviewAfterRecreate:m.reviewAfterRecreate,
-      history:(r.history as {at:string;by:string;what:string}[]).map(h=>({...h,by:who(h.by)})),money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,remaining:m.remaining,receipts:r.receipts.map(x=>({date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,status:x.voidedAt?'Đã thu hồi':x.failed?'Không về':x.confirmed?'Đã nhận':'Chờ nhận'}))}:null};}),
+      history:(r.history as {at:string;by:string;kind?:string;what:string}[]).map(h=>({at:h.at,by:who(h.by),what:money?h.what:neutralHistory(h)})),money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,remaining:m.remaining,receipts:r.receipts.map(x=>({date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,status:x.voidedAt?'Đã thu hồi':x.failed?'Không về':x.confirmed?'Đã nhận':'Chờ nhận'}))}:null};}),
   };
 }

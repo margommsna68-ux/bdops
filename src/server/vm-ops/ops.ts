@@ -13,7 +13,7 @@ import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
 //   AI command never changes the new round.
 // - "Ghi nhận đã tạo lại VM" records a recreation that was really done: same VM id / server / code, a new round, the old round
 //   kept (VmCycle), its EarnApp closed (never back to NEW), the current SDK moved to history, a still valid proxy kept for the
-//   position (it needs a new install confirmation; the old confirmation belongs to the old round). Allowed when the payout of the
+//   position as a new plan (the old confirmation belongs to the old round and is never shown as current). Allowed when the payout of the
 //   current round has been received in full (and not used for a recreation yet), or when the EarnApp is permanently suspended.
 type Tx=Prisma.TransactionClient;
 export const opsInclude={server:{select:{code:true,archivedAt:true}},operation:true} as const;
@@ -65,9 +65,9 @@ export function keepable(endpoint:{retiredAt:Date|null;inventoryState:string;inv
   return null;
 }
 export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:string;expectedCycle:number;note?:string|null},db:PrismaClient=prisma){
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_RECREATE',module:'INFRASTRUCTURE'},async(tx,images,current)=>{
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_RECREATE',module:'INFRASTRUCTURE',reversible:false},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
-    const vm=await tx.virtualMachine.findFirst({where:{id:input.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},include:{...opsInclude,installedConfiguration:{include:{endpoint:{include:{identity:true}}}}}});
+    const vm=await tx.virtualMachine.findFirst({where:{id:input.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},include:{...opsInclude,installedConfiguration:{include:{endpoint:{include:{identity:true}}}},desiredConfiguration:{include:{endpoint:{include:{identity:true}},task:true}}}});
     if(!vm)throw new ProxyDomainError('NOT_FOUND');
     if(vm.archivedAt||vm.server.archivedAt)throw new ProxyDomainError('INVALID_INPUT','Bản ghi VM đã xoá khỏi web; khôi phục trước');
     const cycle=vm.operation?.cycle??1;if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
@@ -78,30 +78,41 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
       throw new ProxyDomainError('INVALID_INPUT',why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp bị SUS');
     }
     const reason=paid?'PAYOUT_RECEIVED':'SUSPENDED',now=new Date();
-    // Proxy for the next round.
-    let proxyKept:string|null=null,proxyNote:string;
-    const installed=vm.installedConfiguration,pendingPlan=!!vm.desiredConfigurationId&&vm.desiredConfigurationId!==vm.installedConfigurationId;
+    // Proxy for the next round. Install evidence belongs to its round (review 19/10/2026): the old round's configurations stay as
+    // history (CONFIRMED / CANCELLED rows, ids kept in VmCycle), the VM no longer points at them, and nothing planned or started on
+    // the old machine can be confirmed for the new one. The proxy of the position (the pending plan, else the installed one) is kept
+    // as a NEW plan of the new round when still valid; otherwise it stays on the VM as "giữ để kiểm tra" for the replacement flow.
+    let proxyKept:string|null=null,proxyNote:string,keptHold:string|null=null,keptConfig:string|null=null;
+    const installed=vm.installedConfiguration,pending=vm.desiredConfiguration&&vm.desiredConfiguration.id!==vm.installedConfigurationId?vm.desiredConfiguration:null,position=pending??installed;
+    const holds=await tx.vMProxyAllocation.findMany({where:{vmId:vm.id,releasedAt:null}});
     await images.remember('VM',vm.id);
-    if(pendingPlan)proxyNote='Giữ cấu hình chờ cài hiện có';
-    else if(!installed)proxyNote='VM chưa có proxy đã cài';
+    if(pending){
+      await images.remember('VM_CONFIG',pending.id);await tx.vMConfiguration.update({where:{id:pending.id},data:{status:'CANCELLED',revision:{increment:1}}});
+      if(pending.task&&['PENDING','IN_PROGRESS'].includes(pending.task.status)){await images.remember('VM_TASK',pending.task.id);await tx.vMTask.update({where:{id:pending.task.id},data:{status:'CANCELLED'}});}
+    }
+    if(!position)proxyNote='VM chưa có proxy được giao';
     else{
-      const endpoint=installed.endpoint,why=keepable(endpoint),hold=endpoint?await tx.vMProxyAllocation.findFirst({where:{vmId:vm.id,endpointId:endpoint.id,releasedAt:null,role:'INSTALLED'}}):null,proxy=endpoint?decodeEndpoint(endpoint):null;
-      if(why||!endpoint||!hold||!proxy||proxy.format!=='FULL')proxyNote=(why||'Proxy không còn được giữ đúng máy')+'; chưa giao lại';
+      const endpoint=position.endpoint,why=keepable(endpoint),hold=endpoint?holds.find(h=>h.endpointId===endpoint.id&&h.role!=='UNCERTAIN'):undefined,proxy=endpoint?decodeEndpoint(endpoint):null;
+      if(why||!endpoint||!hold||!proxy||proxy.format!=='FULL')proxyNote=(why||'Proxy không còn được giữ đúng máy')+'; giữ trên VM để kiểm tra / thay, chưa giao lại';
       else{
         const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identity!.id,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
         await images.remember('ENDPOINT',endpoint.id);
         const config=await tx.vMConfiguration.create({data:{projectId:scope.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:current.userId}});await images.remember('VM_CONFIG',config.id,true);
         const task=await tx.vMTask.create({data:{vmId:vm.id,configurationId:config.id,type:'PROXY_INSTALL',title:`Cài proxy ${proxy.ip} · cấu hình #${config.version} (lượt ${cycle+1})`,scheduledAt:now}});await images.remember('VM_TASK',task.id,true);
+        await images.remember('VM_ALLOCATION',hold.id);await tx.vMProxyAllocation.update({where:{id:hold.id},data:{role:'DESIRED',configurationId:config.id,revision:{increment:1}}});
         await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});
-        await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:config.id,configurationSequence:{increment:1}}});
-        proxyKept=endpoint.id;proxyNote='Giữ proxy '+proxy.ip+' cho vị trí; cần cài và xác nhận lại ở lượt mới';
+        keptHold=hold.id;keptConfig=config.id;proxyKept=endpoint.id;proxyNote='Giữ proxy '+proxy.ip+' cho vị trí; cần cài và xác nhận lại ở lượt mới';
       }
     }
+    // Whatever else was installed or started on the old machine is not an installation of the new round: it stays on the VM as
+    // "giữ để kiểm tra" (a BLOCKED proxy then goes through the replacement flow); nothing is returned to NEW here.
+    for(const h of holds)if(h.id!==keptHold&&h.role!=='UNCERTAIN'){await images.remember('VM_ALLOCATION',h.id);await tx.vMProxyAllocation.update({where:{id:h.id},data:{role:'UNCERTAIN',revision:{increment:1}}});}
+    await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:keptConfig,installedConfigurationId:null,...(keptConfig?{configurationSequence:{increment:1}}:{})}});
     await tx.virtualMachine.update({where:{id:vm.id},data:{revision:{increment:1}}});
     // The old round.
     const closed=await tx.vmCycle.create({data:{projectId:scope.projectId,vmId:vm.id,number:cycle,reason,earnAppId:earnApp?.id??null,loginId:earnApp?.loginId??null,paypalEmailId:earnApp?.paypalEmailId??null,sdkId:vm.sdkId,status:vm.operation?.status??null,desiredConfigurationId:vm.desiredConfigurationId,installedConfigurationId:vm.installedConfigurationId,proxyKept,payoutRequestId:paid?request!.id:null,note:input.note?.trim().slice(0,500)||null,closedById:current.userId}});
     await images.remember('VM_CYCLE',closed.id,true);
-    if(paid){await images.remember('PAYOUT_REQUEST',request!.id);await tx.earnPayoutRequest.update({where:{id:request!.id},data:{consumedAt:now,revision:{increment:1},history:[...(request!.history as Prisma.JsonArray),{at:now.toISOString(),by:current.userId,what:'Dùng để ghi tạo lại VM (đóng lượt '+cycle+')'}]}});}
+    if(paid){await images.remember('PAYOUT_REQUEST',request!.id);await tx.earnPayoutRequest.update({where:{id:request!.id},data:{consumedAt:now,revision:{increment:1},history:[...(request!.history as Prisma.JsonArray),{at:now.toISOString(),by:current.userId,kind:'CONSUMED',what:'Dùng để ghi tạo lại VM (đóng lượt '+cycle+')'}]}});}
     if(earnApp){
       await images.remember('EARNAPP',earnApp.id);await tx.earnAppAccount.update({where:{id:earnApp.id},data:{vmId:null,closedAt:now,closedReason:paid?'RECREATED':'SUSPENDED',revision:{increment:1}}});
       for(const o of await tx.earnAppPayout.findMany({where:{earnAppId:earnApp.id,endedAt:null}})){await images.remember('PAYOUT',o.id);await tx.earnAppPayout.update({where:{id:o.id},data:{endedAt:now}});}

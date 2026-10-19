@@ -56,8 +56,10 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(['COST','FUND','WITHDRAWAL'].includes(image.resource))for(const state of [image.after,image.before])if(state?.date)await assertPeriodOpen(tx,projectId,new Date(String(state.date)),String(state.currency));
  if(['TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))for(const state of [image.after,image.before]){const date=state?.receivedAt||state?.date;if(date)await assertPeriodOpen(tx,projectId,new Date(String(date)),'USDT');}
  if(image.resource==='PROFIT'&&image.after.settled)throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt; không hoàn tác thông thường');
- // An email given to its first EarnApp returns to unused only while nothing depends on that use (no payment recorded on it).
- if(image.resource==='PAYPAL_EMAIL'&&image.after.usedEarnAppId&&!image.before?.usedEarnAppId&&await tx.fundTransaction.findFirst({where:{paypalEmailId:image.id,voidedAt:null},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Email đã có tiền nhận; giữ bằng chứng sử dụng, không hoàn tác lần gán đầu');
+ // Facts that never go back (19/10/2026): an email given to its first EarnApp stays used forever, with or without money on it; a
+ // recorded recreation keeps its closed round, its closed EarnApp and the used receipt (see operation-history/undo-rules.ts).
+ if(image.resource==='PAYPAL_EMAIL'&&image.after.usedEarnAppId&&!image.before?.usedEarnAppId)throw new ProxyDomainError('INVALID_INPUT','Email PayPal đã cấp cho EarnApp giữ dấu đã dùng vĩnh viễn; dùng Bỏ gán thay vì hoàn tác');
+ if((image.resource==='VM_CYCLE'&&!image.before)||(image.resource==='EARNAPP'&&image.after.closedAt&&!image.before?.closedAt)||(image.resource==='PAYOUT_REQUEST'&&image.after.consumedAt&&!image.before?.consumedAt))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận tạo lại VM chỉ để xem; không hoàn tác');
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
  if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt'].includes(key)?new Date(String(value)):value;}}
@@ -65,7 +67,6 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  else if(image.resource==='EARNAPP'){await tx.earnAppPayout.deleteMany({where:{earnAppId:image.id}});await tx.earnAppAccount.delete({where:{id:image.id}});return;} // created by the undone operation
  else if(image.resource==='PAYOUT'){await tx.earnAppPayout.deleteMany({where:{id:image.id}});return;} // history period opened by the undone operation
  else if(image.resource==='VM_OPS'){await tx.vmOperation.delete({where:{id:image.id}});return;} // first record of this VM: back to "Chưa ghi"
- else if(image.resource==='VM_CYCLE'){await tx.vmCycle.delete({where:{id:image.id}});return;} // the closed round written by the undone recreation
  else if(image.resource==='PAYOUT_REQUEST'){if(await tx.fundTransaction.findFirst({where:{payoutRequestId:image.id},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Yêu cầu rút đã có khoản tiền về liên kết; giữ yêu cầu để đối chiếu');await tx.earnPayoutRequest.delete({where:{id:image.id}});return;}
  else if(['COST','FUND','WITHDRAWAL','PROFIT','TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))data.voidedAt=new Date();
  else throw new ProxyDomainError('INVALID_INPUT');

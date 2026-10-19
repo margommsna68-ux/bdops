@@ -29,13 +29,15 @@ export function statusInfo(vm:StatusVM,r:StatusRights):StatusInfo{
     const ownerIssue=!!pending&&!targetOk,failed=pending?.status==='FAILED'&&!ownerIssue,started=!!pending?.startedAt;
     if(pending&&targetOk&&!started){add(r.confirm,'START','Bắt đầu cài');add(r.confirm&&r.copy,'COPY_INSTALL','Copy proxy để cài (bắt đầu cài)');}
     if(pending&&targetOk&&started){add(r.confirm&&r.sourceConnected,'CONFIRM','Xác nhận đã cài');add(r.confirm,'FAIL',failed?'Sửa vướng mắc':'Cài chưa xong…');}
-    if(vm.holds.some(h=>h.role==='UNCERTAIN')) add(true,'OPEN_INSTALL','Kiểm tra trên máy (Việc cài)');
+    if(vm.holds.some(h=>h.role==='UNCERTAIN'&&h.state!=='BLOCKED')) add(true,'OPEN_INSTALL','Kiểm tra trên máy (Việc cài)');
     if(ownerIssue||vm.holds.some(h=>h.state==='BLOCKED')) add(true,'OPEN_REGISTRY','Xem proxy ở bảng proxy');
     add(canAssign,pending||vm.installed||vm.holds.length?'CHANGE_PROXY':'ASSIGN',pending||vm.installed||vm.holds.length?'Đổi proxy…':'Chọn proxy (TUT hoặc nhóm chung)…');
     const reason=failed?'Vướng mắc: '+(pending!.failureNote||'chưa ghi'):ownerIssue?(pending!.failureNote?pending!.failureNote+' — ':'')+'Proxy giao '+proxy(pending!)+' '+(target?(['NEW','LIVE'].includes(target.state)?'chưa rõ sở hữu / không thuộc TUT hay nhóm chung':'đang '+target.state):'không còn được giữ cho VM')+'; không cài được, đổi proxy hoặc xử lý ở bảng proxy.'
-      :vm.holds.some(h=>h.state==='BLOCKED')?'Có proxy BLOCKED trên VM.':vm.holds.some(h=>h.role==='UNCERTAIN')?'Có proxy giữ để kiểm tra: '+vm.holds.filter(h=>h.role==='UNCERTAIN').map(h=>h.ip).join(', ')+'. Kiểm tra thực tế trên máy.'
+      :vm.holds.some(h=>h.state==='BLOCKED')?'Proxy '+vm.holds.filter(h=>h.state==='BLOCKED').map(h=>h.ip).join(', ')+' đang BLOCKED: thay proxy (Kho proxy → Thay proxy) rồi giao proxy mới cho VM.':vm.holds.some(h=>h.role==='UNCERTAIN')?'Có proxy giữ để kiểm tra: '+vm.holds.filter(h=>h.role==='UNCERTAIN').map(h=>h.ip).join(', ')+'. Kiểm tra thực tế trên máy.'
       :view==='REVIEW'&&!pending?'Ô proxy cũ có công thức hoặc nội dung chưa rõ; chọn proxy để giao.':started?'Đang cài '+proxy(pending!)+' (cấu hình #'+pending!.version+').':pending?'Chờ cài '+proxy(pending)+' (cấu hình #'+pending.version+').':null;
-    out=info(failed?'Cài chưa xong':view==='REVIEW'?'Cần kiểm tra':started?'Đang cài':'Chờ cài',failed?'failed':view==='REVIEW'?'review':started?'progress':'pending',reason);
+    // A BLOCKED proxy on the VM is named as what has to be done (19/10/2026): replace it.
+    const blocked=vm.holds.some(h=>h.state==='BLOCKED');
+    out=info(blocked?'Cần thay proxy':failed?'Cài chưa xong':view==='REVIEW'?'Cần kiểm tra':started?'Đang cài':'Chờ cài',blocked?'review':failed?'failed':view==='REVIEW'?'review':started?'progress':'pending',reason);
   }
   if(!(r.assign||r.confirm)) out.readOnlyNote='Chỉ xem: tài khoản này chưa có quyền giao proxy hay xác nhận cài.';
   else if(!r.sourceConnected&&(view==='MISSING'||out.actions.length===0)) out.readOnlyNote='Cần kết nối nguồn Genjy trước khi giao proxy hoặc xác nhận cài.';

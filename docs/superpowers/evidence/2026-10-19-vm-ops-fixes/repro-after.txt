@@ -1,0 +1,6 @@
+INDEPENDENT_HISTORY {"money":null,"history":[{"at":"2026-10-19T03:30:30.602Z","by":"Tài khoản cũ","what":"Ghi yêu cầu rút"}]}
+INDEPENDENT_UNDO {"cycle":2,"milestone":"","closedCycles":1,"oldEarnAppReactivated":false,"closedAt":"2026-10-19T03:30:30.729Z","consumedAt":"2026-10-19T03:30:30.729Z"}
+INDEPENDENT_INSTALL {"cycle":2,"ops":"NEW_VM","oldInstallationStillCurrent":false}
+INDEPENDENT_EMAIL_UNDO {"usedEarnAppId":"cmvep5e55008vzmbsdm79s6gz","usedAt":"2026-10-19T03:30:31.004Z"}
+ ✓ .runtime/review-vm-ops-20261019.test.ts (4 tests) 622ms
+      Tests  4 passed (4)

@@ -163,7 +163,8 @@ describe('Tạo lại VM',()=>{
       const req=await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);expect(r).toMatchObject({cycle:2,proxyKept:true});
       const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id},include:{desiredConfiguration:true}});
-      expect(vm).toMatchObject({code:'VM_001',serverId:f.server.id,sdkId:null,installedConfigurationId:config.id});
+      expect(vm).toMatchObject({code:'VM_001',serverId:f.server.id,sdkId:null,installedConfigurationId:null});// the old confirmation is history of round 1
+      expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');
       expect(vm.desiredConfiguration).toMatchObject({endpointId:endpoint.id,status:'PLANNED'});expect(vm.desiredConfigurationId).not.toBe(config.id);
       expect(await db.vMProxyAllocation.count({where:{endpointId:endpoint.id,releasedAt:null}})).toBe(1);// never released to the free stock
       expect((await db.proxyIP.findUniqueOrThrow({where:{id:endpoint.id}})).inventoryState).toBe('LIVE');
@@ -192,7 +193,8 @@ describe('Tạo lại VM',()=>{
       await db.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED'}});
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
       expect(r.proxyKept).toBe(false);expect(r.proxy).toMatch(/BLOCKED/);
-      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});expect(vm.desiredConfigurationId).toBe(config.id);
+      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});expect(vm.desiredConfigurationId).toBeNull();expect(vm.installedConfigurationId).toBeNull();
+      expect(await db.vMProxyAllocation.findFirst({where:{vmId:vm.id,endpointId:endpoint.id,releasedAt:null}})).toMatchObject({role:'UNCERTAIN'});expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');
       expect(await db.vMConfiguration.count({where:{vmId:vm.id}})).toBe(1);
     }finally{await f.cleanup();}
   });
@@ -210,7 +212,7 @@ describe('Tạo lại VM',()=>{
       expect((await f.ops(0))).toMatchObject({cycle:2,milestone:'',status:'NEW_VM'});
     }finally{await f.cleanup();}
   });
-  it('two recreations of the same round at once: only one new round; voiding the receipt afterwards is flagged, the VM stays in its new round; undo is a web record only',async()=>{
+  it('two recreations of the same round at once: only one new round; voiding the receipt afterwards is flagged, the VM stays in its new round; the recreation cannot be undone',async()=>{
     const f=await setup(1);try{
       await f.link(0,0,f.emails[0].id);const req=await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       const res=await Promise.allSettled([recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db),recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db)]);
@@ -219,9 +221,9 @@ describe('Tạo lại VM',()=>{
       const h=await readVmOpsHistory(f.scope,{vmId:f.vms[0].id},db);expect(h.requests[0]).toMatchObject({consumed:true,reviewAfterRecreate:true});expect((await f.ops(0)).cycle).toBe(2);
       await db.fundTransaction.updateMany({where:{payoutRequestId:req.id},data:{voidedAt:null}});
       const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_RECREATE'}});
-      await undoOperation(f.scope,op.id,'',db);
-      expect((await f.ops(0))).toMatchObject({cycle:1,milestone:'RECREATE'});expect((await db.earnAppAccount.findFirstOrThrow({where:{loginId:f.logins[0].id}})).vmId).toBe(f.vms[0].id);
-      expect(await db.vmCycle.count({where:{vmId:f.vms[0].id}})).toBe(0);
+      await expect(undoOperation(f.scope,op.id,'',db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      expect((await f.ops(0))).toMatchObject({cycle:2,milestone:''});expect((await db.earnAppAccount.findFirstOrThrow({where:{loginId:f.logins[0].id}})).vmId).toBeNull();
+      expect(await db.vmCycle.count({where:{vmId:f.vms[0].id}})).toBe(1);
       expect((await db.payPalEmail.findUniqueOrThrow({where:{id:f.emails[0].id}})).usedEarnAppId).not.toBeNull();// the email stays used
     }finally{await f.cleanup();}
   });
@@ -234,6 +236,132 @@ describe('Tạo lại VM',()=>{
       const service=createVMService(db,{refreshSource:async()=>({id:snapshot.id,sourceKey:'GENJY',hash:'af',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
       const p=await service.preview(f.scope,{mode:'AUTO',vmIds:f.vms.map(v=>v.id),idempotencyKey:randomUUID()});
       expect(p.rows.find(r=>r.vmId===f.vms[0].id)!.message).toMatch(/VM deleted/);expect(p.rows.find(r=>r.vmId===f.vms[1].id)!.message).toMatch(/tạo lại/);
+    }finally{await f.cleanup();}
+  });
+});
+// Independent acceptance review 19/10/2026: four defects reproduced in .runtime/review-vm-ops-20261019.test.ts.
+describe('Rà soát nghiệm thu 19/10',()=>{
+  const source=(hash:string)=>({refreshSource:async()=>({id:'x',sourceKey:'GENJY',hash,fetchedAt:new Date().toISOString(),scanSucceeded:true})});
+  it('1. without money rights the history carries operating milestones only: no amount, correction, shortfall, note or reference',async()=>{
+    const f=await setup(1);try{
+      await f.link(0,0,f.emails[0].id);
+      const req=await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1,paypalEmailId:f.emails[0].id,amount:'24',reference:'REF-777',date:today},db);
+      const fresh=()=>db.earnPayoutRequest.findUniqueOrThrow({where:{id:req.id}});
+      let r=await fresh();
+      await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:r.revision,action:'CORRECT',amount:'31',note:'nhập nhầm 31.50 thành 24'},db);
+      r=await fresh();await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:r.revision,action:'FAILED',note:'PayPal giữ 31 USD'},db);
+      r=await fresh();await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:r.revision,action:'RETRY'},db);
+      await f.receive(f.pp13.id,f.emails[0].email,'29');r=await fresh();
+      await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:r.revision,action:'SETTLE',note:'phí 2 USD'},db);
+      const w=await readVmOpsHistory(f.worker,{vmId:f.vms[0].id},db),text=JSON.stringify(w,(k,v)=>k==='at'||k==='closedAt'?undefined:v);// times are not money
+      expect(w.requests[0].money).toBeNull();
+      expect(text).not.toMatch(/24[.,]00|31[.,]\d|29[.,]\d|31 USD|phí 2|REF-777|nhập nhầm|thiếu \d/);
+      expect(w.requests[0].history.map(h=>h.what)).toEqual(['Ghi yêu cầu rút','Sửa yêu cầu rút','Đánh dấu thất bại','Gửi lại (cùng lượt rút)','Chốt nhận thiếu']);
+      const board=JSON.stringify((await readVmOps(f.worker,db)).vms[0]);expect(board).not.toMatch(/REF-777|phí 2|giữ 31/);
+      // With the money rights everything is shown.
+      const full=JSON.stringify(await readVmOpsHistory(f.scope,{vmId:f.vms[0].id},db));
+      expect(full).toMatch(/Ghi yêu cầu rút 24\.00 USD/);expect(full).toMatch(/24\.00 → 31\.00/);expect(full).toMatch(/PayPal giữ 31 USD/);expect(full).toMatch(/phí 2 USD/);
+      // Rows written before the fix (no kind) are reduced to the same neutral words.
+      await db.earnPayoutRequest.update({where:{id:req.id},data:{history:[{at:new Date().toISOString(),by:f.scope.userId,what:'Ghi yêu cầu rút 24.00 USD'},{at:new Date().toISOString(),by:f.scope.userId,what:'Chốt nhận 22.00 USD, thiếu 2.00: phí'}]}});
+      expect((await readVmOpsHistory(f.worker,{vmId:f.vms[0].id},db)).requests[0].history.map(h=>h.what)).toEqual(['Ghi yêu cầu rút','Chốt nhận thiếu']);
+    }finally{await f.cleanup();}
+  });
+  it('2. a recorded recreation is view-only: undo is refused (also for journals written before the fix); the closed round, closed EarnApp and used receipt stay',async()=>{
+    const f=await setup(1);try{
+      const {listOperations,inspectOperation}=await import('@/server/operation-history/journal');
+      await f.link(0,0,f.emails[0].id);const req=await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_RECREATE'}});
+      expect(op.reversible).toBe(false);
+      await db.operationJournal.update({where:{id:op.id},data:{reversible:true}});// a journal written before the fix
+      await expect(undoOperation(f.scope,op.id,'',db)).rejects.toMatchObject({code:'INVALID_INPUT',message:expect.stringMatching(/tạo lại VM/)});
+      expect((await listOperations(f.scope,db)).find(o=>o.id===op.id)!.canUndo).toBe(false);
+      const ins=await inspectOperation(f.scope,op.id,db);expect(ins.canUndo).toBe(false);expect(ins.blockedReason).toMatch(/tạo lại VM/);
+      expect((await f.ops(0))).toMatchObject({cycle:2,status:'NEW_VM'});expect(await db.vmCycle.count({where:{vmId:f.vms[0].id}})).toBe(1);
+      const ea=await db.earnAppAccount.findUniqueOrThrow({where:{loginId:f.logins[0].id}});expect(ea.vmId).toBeNull();expect(ea.closedAt).not.toBeNull();
+      expect((await db.earnPayoutRequest.findUniqueOrThrow({where:{id:req.id}})).consumedAt).not.toBeNull();
+      await expect(recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      // A normal status change in the new round can still be undone.
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'OK',expectedCycle:2}]},db);
+      const st=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_STATUS'},orderBy:{createdAt:'desc'}});
+      await undoOperation(f.scope,st.id,'',db);expect((await f.ops(0))).toMatchObject({cycle:2,status:'NEW_VM'});
+    }finally{await f.cleanup();}
+  });
+  it('3. undoing the first grant of a receiving email is refused with a reason; the email stays used, the EarnApp row stays; unassign still works',async()=>{
+    const f=await setup(1);try{
+      const {inspectOperation}=await import('@/server/operation-history/journal');
+      await f.link(0,0,f.emails[0].id);
+      const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_ACCOUNT_LINK'}});
+      await expect(undoOperation(f.scope,op.id,'',db)).rejects.toMatchObject({code:'INVALID_INPUT',message:expect.stringMatching(/Bỏ gán/)});
+      expect((await inspectOperation(f.scope,op.id,db)).canUndo).toBe(false);
+      const ea=await db.earnAppAccount.findUniqueOrThrow({where:{loginId:f.logins[0].id}});
+      const e=await db.payPalEmail.findUniqueOrThrow({where:{id:f.emails[0].id}});expect(e.usedEarnAppId).toBe(ea.id);expect(e.usedAt).not.toBeNull();
+      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
+      expect((await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:vm.id,expectedRevision:vm.revision,login:null}]},db)).errors).toBe(0);
+      expect((await db.payPalEmail.findUniqueOrThrow({where:{id:f.emails[0].id}})).usedEarnAppId).toBe(ea.id);
+      expect((await readPayoutPick(f.scope,{vmId:f.vms[0].id},db)).paypals.flatMap(p=>p.emails).some(x=>x.id===f.emails[0].id)).toBe(false);
+      // A link that grants no new email (login only) can still be undone.
+      const v2=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
+      await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:v2.id,expectedRevision:v2.revision,login:f.logins[1].id}]},db);
+      const op2=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'VM_ACCOUNT_LINK'},orderBy:{createdAt:'desc'}});
+      await undoOperation(f.scope,op2.id,'',db);expect(await db.earnAppAccount.count({where:{vmId:f.vms[0].id}})).toBe(0);
+    }finally{await f.cleanup();}
+  });
+  it('4a. BLOCKED proxy at recreation: the old installation is history, never current; the VM shows "Cần thay proxy" and keeps the hold for the replacement flow',async()=>{
+    const f=await setup(1);try{
+      const {statusInfo}=await import('@/components/vm-management/vm-grid/status-actions');const {vmView}=await import('@/server/vm-management/state');
+      const {endpoint,config}=await installProxy(f,0,21);await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
+      await db.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED'}});
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const vm=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vms[0].id)!;
+      expect(vm.installed).toBeNull();expect(vm.desired).toBeNull();
+      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,state:'BLOCKED'})]);expect(vm.holds[0].role).not.toBe('INSTALLED');
+      expect(vmView(vm as never)).toBe('REVIEW');
+      const s=statusInfo(vm as never,{assign:true,confirm:true,copy:true,sourceConnected:true});expect(s.label).toBe('Cần thay proxy');expect(s.actions.map(a=>a.kind)).toContain('CHANGE_PROXY');
+      expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');// history kept
+      expect((await db.vmCycle.findFirstOrThrow({where:{vmId:f.vms[0].id}})).installedConfigurationId).toBe(config.id);
+      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
+      await expect(confirmInstalled(f.scope,{configurationId:config.id,configurationHash:config.configurationHash,expectedVmRevision:v.revision},db,source('vm-ops-21'))).rejects.toMatchObject({code:'STALE_PREVIEW'});
+    }finally{await f.cleanup();}
+  });
+  it('4b. a good proxy is kept for the position as a new plan of the new round (LIVE, never NEW); the old confirmation is not current',async()=>{
+    const f=await setup(1);try{
+      const {vmView}=await import('@/server/vm-management/state');
+      const {endpoint,config}=await installProxy(f,0,22);await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const vm=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vms[0].id)!;
+      expect(vm.installed).toBeNull();expect(vm.desired).toMatchObject({endpointId:endpoint.id,status:'PLANNED'});expect(vm.desired!.id).not.toBe(config.id);
+      expect(vm.holds).toEqual([expect.objectContaining({endpointId:endpoint.id,role:'DESIRED'})]);expect(vmView(vm as never)).toBe('PENDING');
+      expect((await db.proxyIP.findUniqueOrThrow({where:{id:endpoint.id}})).inventoryState).toBe('LIVE');
+      // The new round's install is started and confirmed through the normal flow.
+      const next=await db.vMConfiguration.findUniqueOrThrow({where:{id:vm.desired!.id}});await startInstall(f.scope,next.id,db);
+      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
+      await confirmInstalled(f.scope,{configurationId:next.id,configurationHash:next.configurationHash,expectedVmRevision:v.revision},db,source('vm-ops-22'));
+      const after=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===f.vms[0].id)!;expect(after.installed?.id).toBe(next.id);expect(vmView(after as never)).toBe('INSTALLED');
+    }finally{await f.cleanup();}
+  });
+  it('4c. an install started in the old round cannot complete the new round: the old plan is cancelled (kept in history) and a fresh plan is made',async()=>{
+    const f=await setup(1);try{
+      const {endpoint,config}=await installProxy(f,0,23);
+      // A second proxy planned and started on the old machine, not confirmed yet.
+      const ip='203.8.'+(1+Math.floor(Math.random()*250))+'.23',identity=await db.proxyIdentity.create({data:{ip,owner:'SELF'}});
+      const second=await db.proxyIP.create({data:{projectId:f.scope.projectId,identityId:identity.id,address:ip+':8080',host:ip,port:8080,credentialCipher:encrypt(JSON.stringify({username:'u',password:'p'})),packageCode:'pkg',inventoryState:'NEW',inventoryKey:identity.id}});
+      const {createVMService}=await import('@/server/vm-management/allocation');
+      const service=createVMService(db,source('vm-ops-23'));
+      const key=randomUUID(),p=await service.preview(f.scope,{mode:'MANUAL',vmIds:[f.vms[0].id],endpointId:second.id,idempotencyKey:key});expect(p.ready).toBe(1);
+      await service.commit(f.scope,p.token,key);
+      const old=await db.vMConfiguration.findFirstOrThrow({where:{vmId:f.vms[0].id,endpointId:second.id}});await startInstall(f.scope,old.id,db);
+      await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id},include:{desiredConfiguration:true}});
+      expect(vm.installedConfigurationId).toBeNull();expect(vm.desiredConfiguration).toMatchObject({endpointId:second.id,status:'PLANNED',startedAt:null});expect(vm.desiredConfigurationId).not.toBe(old.id);
+      expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:old.id}})).status).toBe('CANCELLED');
+      expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:config.id}})).status).toBe('CONFIRMED');
+      await expect(confirmInstalled(f.scope,{configurationId:old.id,configurationHash:old.configurationHash,expectedVmRevision:vm.revision},db,source('vm-ops-23'))).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      await expect(startInstall(f.scope,old.id,db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      // The first proxy, installed in the old round, is no longer an installation of this round.
+      const holds=await db.vMProxyAllocation.findMany({where:{vmId:f.vms[0].id,releasedAt:null}});
+      expect(holds.find(h=>h.endpointId===endpoint.id)?.role).not.toBe('INSTALLED');expect(holds.find(h=>h.endpointId===second.id)?.role).toBe('DESIRED');
     }finally{await f.cleanup();}
   });
 });

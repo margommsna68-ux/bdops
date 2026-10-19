@@ -89,13 +89,15 @@ it('five emails of one PayPal go to five EarnApp / VMs; an email serves one Earn
     expect(p.rows[0].message).toMatch(/Cần email PayPal/);expect(p.rows[1].message).toMatch(/thuộc PP pp-13, không phải pp-99/);
   }finally{await f.cleanup();}
 });
-it('undo of a first assignment returns the email to unused only while no payment depends on it',async()=>{
+// Review 19/10/2026: an email given to its first EarnApp stays used forever; undo of that grant is refused, with or without money.
+it('undo of a first email assignment is refused even before any payment; the email stays used; unassign is the way out',async()=>{
   const f=await setup(2);try{
     const x=f.x;await commitStockImport(f.scope,{kind:'PAYPAL',text:`pp-13 ${mail(x,1)} ${mail(x,2)}`,batch:{purchasedAt:'2026-10-18',priceMode:'NONE'},key:randomUUID()},db);
     const [e1,e2]=await Promise.all([emailId(f.scope.projectId,mail(x,1)),emailId(f.scope.projectId,mail(x,2))]);
     await link(f,0,{login:f.loginIds[0],paypalEmail:e1});
-    let op=(await listOperations(f.scope,db)).find(o=>o.kind==='VM_ACCOUNT_LINK')!;await undoOperation(f.scope,op.id,'gán nhầm',db);
-    expect(await db.payPalEmail.findUniqueOrThrow({where:{id:e1}})).toMatchObject({usedEarnAppId:null});expect(await db.earnAppPayout.count({where:{paypalEmailId:e1}})).toBe(0);
+    let op=(await listOperations(f.scope,db)).find(o=>o.kind==='VM_ACCOUNT_LINK')!;expect(op.canUndo).toBe(false);
+    await expect(undoOperation(f.scope,op.id,'gán nhầm',db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    expect((await db.payPalEmail.findUniqueOrThrow({where:{id:e1}})).usedEarnAppId).not.toBeNull();expect(await db.earnAppPayout.count({where:{paypalEmailId:e1}})).toBe(1);
     await link(f,1,{login:f.loginIds[1],paypalEmail:e2});
     const pp=(await db.payPalAccount.findFirstOrThrow({where:{projectId:f.scope.projectId}})).id;
     await recordReceipts(f.scope,{paypalId:pp,date:'2026-10-18',currency:'USD',status:'RECEIVED',text:`${mail(x,2)} | 5`,key:randomUUID()},db);

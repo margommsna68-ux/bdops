@@ -1,0 +1,4 @@
+ops-accept.js (luồng vận hành 19/10, dữ liệu thử opsx-piv52): TOTAL 50 pass / 0 fail
+  - 2 kỳ vọng cũ đổi theo lỗi 4: VM lượt mới không còn trỏ bản cài lượt 1; dòng hiện "Chờ cài", không "Đã cài".
+pp-accept.js (PayPal email / sổ, dữ liệu thử ppx-*): TOTAL 30 pass / 0 fail
+sdk-ui-check.js (15/10, giao diện trước bảng Server/VM): lỗi thời, không chạy được (chờ selector cũ); không tính.

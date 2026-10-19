@@ -1,0 +1,6 @@
+PASS Lỗi 3 · lần gán có cấp email lần đầu chỉ có "Xem"; lần gán chỉ tài khoản (không cấp email) vẫn hoàn tác được — 17 chỉ xem · mẫu hoàn tác được: Gán tài khoản / email PP cho VM · 10:35 19/10/2026 DỮ LIỆU TRƯỚC SAU Tài khoản VM opsx-pbulz / VM_009 VM VM Hoàn tác: Khôi phục ghi nhận trước nếu chưa được sửa tiếp Gmail o
+PASS Lỗi 3 · lý do rõ và chỉ cách Bỏ gán — Email PayPal ops13-1-37csk@example.invalid Đã lưu Đã lưu Hoàn tác: Khôi phục ghi nhận trước nếu chưa được sửa tiếp Email nhận của EarnApp cmve37cv7002hkor24d3krnes Chưa có Đã lưu Hoàn tác: Ẩn 
+PASS Lỗi 3 · email đã cấp vẫn giữ dấu đã dùng — [{"email":"ops13-5-pbulz@example.invalid","used":false},{"email":"ops82-1-pbulz@example.invalid","used":true},{"email":"ops13-4-pbulz@example.invalid","used":true},{"email":"ops13-1-pbulz@example.invalid","used":true},{"email":"ops13-2-pbulz@example.invalid","used":true},{"email":"ops13-3-pbulz@example.invalid","used":true},{"email":"ops82-2-pbulz@example.invalid","used":false}]
+PASS Không có lỗi JavaScript
+
+Tổng: 4 đạt, 0 lỗi

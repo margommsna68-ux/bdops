@@ -1,0 +1,21 @@
+PASS Lỗi 4 · proxy hợp lệ: lượt 2 hiện "Chờ cài", không hiện "Đã cài" từ lượt 1 —  VM_001 OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail Giao 203.0.113.67:8080 Chưa có SDK Chọn tài khoản — Chưa có EarnApp Ch
+PASS Lỗi 4 · proxy hợp lệ: không còn trỏ cấu hình đã cài cũ; cấu hình mới chờ cài; proxy LIVE giữ cho vị trí — {"id":"cmvepbuma0003pm8h8gs377hh","cycle":2,"status":"NEW_VM","desired":{"id":"cmvepdwdw000g32rccygrkv52","version":2,"status":"PLANNED"},"installed":null,"configs":["1:CONFIRMED","2:PLANNED"],"holds":[{"ip":"203.0.113.67","role":"DESIRED","state":"LIVE"}]}
+PASS Lỗi 4 · proxy BLOCKED: ô hiện "Cần thay proxy", không "Đã cài" —  VM_002 OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail Giữ kiểm tra: 203.0.113.68 Chưa có SDK Chọn tài khoản — Chưa có EarnAp
+PASS Lỗi 4 · proxy BLOCKED: không cấu hình hiện hành; cấu hình cũ giữ trong lịch sử; bản giữ còn trên VM (Giữ để kiểm tra, BLOCKED) — {"id":"cmvepbume0005pm8hauqyynf6","cycle":2,"status":"NEW_VM","desired":null,"installed":null,"configs":["1:CONFIRMED"],"holds":[{"ip":"203.0.113.68","role":"UNCERTAIN","state":"BLOCKED"}]}
+PASS Lỗi 4 · chi tiết VM: "Cần thay proxy", không có mục "Đã cài" — Proxy Cài proxy Tài khoản Lịch sử Proxy BLOCKED Proxy Cần thay proxy: 203.0.113.68 · BLOCKED Đổi proxy SDK EarnApp Chưa có SDK Sửa SDK ngay tại ô SDK trong bảng (Enter/F2). Ghi SDK không chứng minh app đan
+PASS Lỗi 4 · bộ lọc "Đã cài" không còn VM_001 / VM_002 của lượt mới
+PASS Lỗi 1 · người có quyền tiền vẫn thấy đủ lịch sử tiền — Yêu cầu rút EarnApp Lượt 1 · opsl03-pbulz@example.invalid · pp13pbulz · ops13-3-pbulz@example.invalid · ngày 19/10/2026 · Đã nhận đủ Yêu cầu 24,00 USD · đã về 20,00 · 19/10/2026 20,00 (Đã nhận) 10:37 19/10/2026 · Bản thử: Ghi yêu cầu rút 24.00 USD 10:37 19/10/2026 · Bản thử: Thất bại: PayPal giữ 24 USD pbulz 1
+PASS Lỗi 2 · Lịch sử thao tác: ghi nhận tạo lại VM chỉ có nút "Xem" — Xem
+PASS Lỗi 2 · mở ra thấy lý do, không có nút Hoàn tác — Ghi nhận tạo lại VM chỉ để xem: lượt cũ, EarnApp cũ đã đóng và khoản nhận đã dùng được giữ nguyên, không hoàn 
+PASS Lỗi 2 · dữ liệu giữ nguyên: lượt 2, 2 lượt đã đóng, khoản nhận đã dùng, EarnApp cũ đóng — [{"vm":"VM_001","number":1,"installedConfigurationId":"cmvepburp004ppm8hfgsg16xb"},{"vm":"VM_002","number":1,"installedConfigurationId":"cmvepburv004wpm8hh9h3dia4"}]
+FAIL Lỗi 3 · các lần gán có cấp email lần đầu không có nút hoàn tác — Xem,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem,Xem,Xem,Xem,Xem,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem,Xem,Xem,Xem,Xem / hoàn tác,Xem,Xem,Xem,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem / hoàn tác,Xem,Xem,Xem,Xem
+PASS Lỗi 3 · lý do rõ và chỉ cách Bỏ gán — Email PayPal ops13-1-37csk@example.invalid Đã lưu Đã lưu Hoàn tác: Khôi phục ghi nhận trước nếu chưa được sửa tiếp Email nhận của EarnApp cmve37cv7002hkor24d3krnes Chưa có Đã lưu Hoàn tác: Ẩn 
+PASS Lỗi 3 · email đã cấp vẫn giữ dấu đã dùng — [{"email":"ops13-5-pbulz@example.invalid","used":false},{"email":"ops82-1-pbulz@example.invalid","used":true},{"email":"ops13-4-pbulz@example.invalid","used":true},{"email":"ops13-1-pbulz@example.invalid","used":true},{"email":"ops13-2-pbulz@example.invalid","used":true},{"email":"ops13-3-pbulz@example.invalid","used":true},{"email":"ops82-2-pbulz@example.invalid","used":false}]
+PASS Đổi tình trạng: vẫn có "Xem / hoàn tác"
+PASS Đổi tình trạng: hoàn tác đưa VM_005 về "Chưa ghi" — null
+PASS Lỗi 1 · nhân viên chỉ thấy mốc trung tính trong lịch sử VM — Yêu cầu rút EarnApp Lượt 1 · opsl03-pbulz@example.invalid · pp13pbulz · ops13-3-pbulz@example.invalid · ngày 19/10/2026 · Đã nhận đủ 10:37 19/10/2026 · Bản thử: Ghi yêu cầu rút 10:37 19/10/2026 · Bản thử: Đánh dấu thất bại 10:37 19/10/2026 · Bản thử: Gửi lại (cùng lượt rút) 10:37 19/10/2026 · Bản thử: Chốt nhậ
+PASS Lỗi 1 · dữ liệu API trả cho nhân viên không chứa số tiền, ghi chú tiền hay mã tham chiếu — 2 phản hồi vmOps
+PASS Nhân viên: VM_002 cũng hiện "Cần thay proxy" —  VM_002 OK Chưa nối OFF VM Blocked LINKED Earn/VM lỗi SUS VM deleted New VM Đã login mail Giữ kiểm tra: 203.0.113.68 Chư
+PASS Không có lỗi JavaScript
+
+Tổng: 18 đạt, 1 lỗi

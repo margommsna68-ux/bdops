@@ -5,6 +5,7 @@ import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {withProxyTransaction} from '../proxy-management/transaction';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {openSnapshot,recordOperation} from './journal';
+import {undoRefusal} from './undo-rules';
 import {assertImagesUnchanged,readImage,type OperationSnapshot,type ResourceImage} from './snapshot';
 import {restoreVMImage} from '../vm-management/operation-images';
 import {isBusinessResource,restoreBusinessImage} from '../business-management/operation-images';
@@ -21,7 +22,8 @@ export async function undoOperation(scope:ActorScope,id:string,reason:string,db:
     const original=await tx.operationJournal.findFirst({where:{id,projectId:scope.projectId}});if(!original)throw new ProxyDomainError('NOT_FOUND');
     const prior=await tx.operationJournal.findUnique({where:{undoOfId:id}});if(prior)return {id:prior.id,replay:true};
     if(original.kind==='UNDO'||!original.reversible)throw new ProxyDomainError('INVALID_INPUT','Thao tác này chỉ để xem; cần cấu hình và xác nhận mới');
-    const snapshot=openSnapshot(original.snapshotCipher),now=new Date();
+    const snapshot=openSnapshot(original.snapshotCipher),now=new Date(),refusal=undoRefusal(original.kind,snapshot);
+    if(refusal)throw new ProxyDomainError('INVALID_INPUT',refusal);
     if(current.businessMode!=='PROXY_VM'&&(!['FUNDS','WITHDRAWALS','COSTS','PROFIT'].includes(original.accessModule)||snapshot.resources.some(r=>!cashFinancialResources.has(r.resource))))throw new ProxyDomainError('FORBIDDEN');
     // Validate ALL resources before changing any of them. No client before-image accepted.
     await assertImagesUnchanged(tx,scope.projectId,snapshot);

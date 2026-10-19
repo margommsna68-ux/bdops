@@ -79,6 +79,7 @@ Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, kh
 - Ghi yêu cầu và tiền cần quyền ghi Tiền vào PayPal (quản lý).
 - Chọn email mới cần thêm quyền gán ở Server/VM.
 - Người không có quyền tiền chỉ thấy mốc ("Chờ tiền về", "Cần tạo lại VM"), không thấy số tiền. Gọi thẳng endpoint tiền cũng bị chặn.
+- Lịch sử yêu cầu rút được lọc ở backend (sửa 19/10): người không có quyền tiền chỉ nhận mốc trung tính (Ghi yêu cầu rút, Sửa yêu cầu rút, Đánh dấu thất bại / huỷ, Gửi lại, Chốt nhận thiếu, Dùng để ghi tạo lại VM). Số tiền, số cũ → mới, phần thiếu, ghi chú thất bại / huỷ / chốt và mã tham chiếu chỉ trả cho người có quyền tiền. Dòng lịch sử ghi trước bản sửa được đọc theo phần đầu cố định của câu, không theo số.
 
 ## Ghi nhận đã tạo lại VM
 
@@ -93,9 +94,11 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 - Đóng EarnApp cũ: rời VM, đặt `closedAt`. Tài khoản Gmail/Apple ID thành Đã dùng, không về NEW. Email vẫn "đã dùng".
 - Chuyển SDK hiện hành vào lịch sử. SDK mới chỉ ghi khi có mã thật sau khi cài.
 - **Proxy:**
-  - Proxy đã cài còn hợp lệ (TUT hoặc Chung mooon–Genjy; NEW/LIVE; chưa replace, ngừng quản lý hay BLOCKED) được giữ cho vị trí. Web tạo cấu hình mới chờ cài, nên phải cài và xác nhận lại; bằng chứng cài cũ thuộc lượt cũ.
-  - Proxy không bị thả ra kho.
-  - Proxy BLOCKED hoặc không đủ điều kiện để nguyên cho luồng thay proxy.
+  - Bằng chứng cài thuộc đúng lượt (sửa 19/10): VM lượt mới không còn trỏ tới cấu hình đã cài hay đang chờ của lượt cũ (`installedConfigurationId` = trống). Các cấu hình cũ giữ nguyên trong lịch sử (Đã xác nhận / Đã huỷ) và `VmCycle` ghi lại id. VM lượt mới không bao giờ hiện "Đã cài" từ lượt trước.
+  - Proxy của vị trí (cấu hình đang chờ nếu có, nếu không thì proxy đã cài) còn hợp lệ (TUT hoặc Chung mooon–Genjy; NEW/LIVE; chưa replace, ngừng quản lý hay BLOCKED) được giữ: web tạo cấu hình mới "Chờ cài" cho lượt mới; phải cài và xác nhận lại. Proxy vẫn LIVE, không thả ra kho NEW.
+  - Cấu hình đang chờ / đang cài của lượt cũ bị huỷ (giữ trong lịch sử): bắt đầu cài hay xác nhận gửi theo cấu hình cũ bị từ chối, không hoàn tất việc của lượt mới.
+  - Proxy BLOCKED hoặc không đủ điều kiện vẫn ở trên VM dạng "Giữ để kiểm tra"; ô Cài proxy hiện **Cần thay proxy**. Thay ở Kho proxy → Thay proxy, rồi Đổi proxy cho VM; xác nhận cài mới sẽ gỡ bản giữ cũ.
+  - Proxy khác đã cài / đã bắt đầu trên máy cũ cũng thành "Giữ để kiểm tra", không về NEW.
 - Không phát sinh chi phí mua tài khoản.
 - Đánh dấu yêu cầu rút đã dùng (`consumedAt`; `VmCycle.payoutRequestId` unique), nên một khoản nhận chỉ mở được một lượt.
 
@@ -113,7 +116,10 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 - Yêu cầu hiện "cần đối chiếu (khoản nhận đổi sau khi tạo lại)".
 - VM giữ lượt mới, không bị quay lại.
 
-**Hoàn tác** (Lịch sử thao tác) chỉ huỷ ghi nhận trên web: không đảo ngược việc rút tiền, không xoá hay cài lại máy. Chỉ hoàn tác được khi chưa có gì sửa tiếp. Email đã dùng vẫn là đã dùng.
+**Hoàn tác** (Lịch sử thao tác) chỉ huỷ ghi nhận trên web: không đảo ngược việc rút tiền, không xoá hay cài lại máy. Chỉ hoàn tác được khi chưa có gì sửa tiếp.
+- **Ghi nhận tạo lại VM chỉ để xem, không hoàn tác** (sửa 19/10). Hoàn tác sẽ lùi lượt, mở lại EarnApp đã đóng và cho dùng lại cùng khoản nhận. Backend từ chối theo nội dung bản ghi, nên cả nhật ký `VM_RECREATE` ghi trước bản sửa cũng bị chặn; thao tác nào khác có đóng lượt, đóng EarnApp hay đánh dấu khoản nhận đã dùng cũng vậy.
+- **Lần cấp đầu một email PayPal không hoàn tác được** (gán ở Server/VM, dán liên kết, hay ghi yêu cầu rút với email mới), kể cả khi email chưa có tiền. Email giữ dấu đã dùng vĩnh viễn; muốn gỡ khỏi VM thì dùng **Bỏ gán**. Liên kết không cấp email mới (chỉ tài khoản) vẫn hoàn tác được.
+- Đổi tình trạng vẫn hoàn tác được khi chưa có gì sửa tiếp (trong cùng lượt).
 
 ## Dữ liệu và kiểm tra
 
@@ -122,7 +128,7 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
   - cột `FundTransaction.payoutRequestId`, `EarnAppAccount.closedAt` / `closedReason`.
   - Dữ liệu cũ không bị đổi; mọi VM bắt đầu ở lượt 1, "Chưa ghi". Không ghép khoản thu cũ vào EarnApp.
 - **Test:**
-  - `src/__tests__/proxy-management/vm-ops.integration.test.ts` (13): trạng thái, 24 + 10 + 12, 82 + 18, nhận từng phần, một lượt rút, email, quyền, tạo lại, BLOCKED, SUS, đồng thời, hoàn tác, autofill.
+  - `src/__tests__/proxy-management/vm-ops.integration.test.ts` (19): trạng thái, 24 + 10 + 12, 82 + 18, nhận từng phần, một lượt rút, email, quyền, tạo lại, BLOCKED, SUS, đồng thời, hoàn tác, autofill; nhóm "Rà soát nghiệm thu 19/10" (6) cho bốn lỗi đã sửa.
   - `vm-ops-rules.test.ts` (5).
   - `vm-grid-model.test.ts`: URL.
-- **Bằng chứng:** `docs/superpowers/evidence/2026-10-19-vm-ops-cycle/`.
+- **Bằng chứng:** `docs/superpowers/evidence/2026-10-19-vm-ops-cycle/`; bản sửa sau rà soát: `docs/superpowers/evidence/2026-10-19-vm-ops-fixes/`.

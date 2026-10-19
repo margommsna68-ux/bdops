@@ -1,0 +1,12 @@
+INDEPENDENT_HISTORY {"money":null,"history":[{"at":"2026-10-19T03:26:24.898Z","by":"Tài khoản cũ","what":"Ghi yêu cầu rút 24.00 USD"}]}
+INDEPENDENT_UNDO {"cycle":1,"milestone":"RECREATE","closedCycles":0,"oldEarnAppReactivated":true,"closedAt":null,"consumedAt":null}
+INDEPENDENT_INSTALL {"cycle":2,"ops":"NEW_VM","desiredStatus":"CONFIRMED","installedStatus":"CONFIRMED","oldInstallationStillCurrent":true}
+INDEPENDENT_EMAIL_UNDO {"usedEarnAppId":null,"usedAt":null}
+     × does not expose generated payout amounts through VM history to infrastructure-only staff 139ms
+     × does not reopen the closed cycle or regrant recreation after undo 136ms
+     × does not present the previous installation as current after recreating with a blocked proxy 180ms
+     × keeps email lifetime reservation even when the first assignment is undone before money arrives 81ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+     51|       console.log('INDEPENDENT_HISTORY',JSON.stringify({money:h.reques…
+     83|       console.log('INDEPENDENT_EMAIL_UNDO',JSON.stringify({usedEarnApp…
+      Tests  4 failed (4)
