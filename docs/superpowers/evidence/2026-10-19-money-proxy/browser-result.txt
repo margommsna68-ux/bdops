@@ -1,0 +1,65 @@
+PASS M1a tự lấy tỷ giá Binance P2P BUY cho VND, hiện 25.820
+PASS M1b nhãn tỷ giá đầy đủ và nguồn, thời điểm — 1 USDT = ? VND
+PASS M1c phép tính 6 PP × 70.000 ₫ = 420.000 ₫ ≈ 16,27 USDT — 6 PP × 70.000 ₫ = 420.000 ₫ · ≈ 16,27 USDT · ghi một lần vào Chi phí.
+PASS M1d đổi sang tổng tiền mang theo 420.000 (không biến 70.000 thành tổng)
+PASS M1e tổng tiền + số lượng: phân bổ tham khảo 70.000 ₫ / PP
+PASS M1f đổi ngược giữ đơn giá 70.000 và số lượng 6
+PASS M2a "25,820" báo dễ hiểu nhầm tại ô, nút Nhập khoá — "25,820" dễ hiểu nhầm: nếu là 25.820 thì ghi 25.820; nếu có phần lẻ thì ghi 25,82
+PASS M2b "25.82" báo sai định dạng (không đọc thành 25,82 hay 25.820)
+PASS M2c sửa tay thành tỷ giá thực trả: nguồn "Nhập tay"
+PASS M2d đổi sang USD bỏ tỷ giá VND, không tự lấy, không mặc định 1
+PASS M2e nguồn giá lỗi: báo lỗi, nút Thử lại, giữ nội dung, không giá giả
+PASS M2f Thử lại lấy được 25.820
+PASS M3a giá Binance quá 10 phút hiện rõ trên form, khoá Nhập (không âm thầm đổi tiền lúc bấm) — Sửa ô tiền mua
+PASS M3b giữ số đó như tỷ giá nhập tay thì mở lại
+PASS M4a mất phản hồi: bấm đúp chỉ gửi 1 lệnh, giữ nội dung, có Thử lại — calls=1
+PASS M4b chỉ một lô 6 PP và một khoản chi 420.000 VND = 16,26646 USDT, tỷ giá 25.820, nguồn Binance P2P BUY — [{"code":"PP-2026-10-19-19","qty":6,"total":"420000","cost":{"amount":"420000","currency":"VND","usdt":"16.26646","rate":"25820","fx":"BINANCE_P2P_BUY","voided":false}}]
+PASS M5a Lịch sử nhập kho: 420.000 VND ≈ 16,27 USDT — PP-2026-10-19-19 19/10/2026 p20 zusmk 6 6 PP 30 email 420.000 VND ≈ 16,27 USDT Chi tiết Đã ghi Nhập bổ sung
+PASS M5b chi tiết đọc được độ chính xác đã lưu và phân bổ tham khảo — Khoản chi hiện hành: 420.000 VND (6 × 70.000) · 1 USDT = 25.820 VND · ≈ 16,26646 USDT (lưu chính xác) Phân bổ ≈ 70.000 VND / PP (tham khảo, không ghi thêm chi phí) Dán lần đầu 6 dòng.
+PASS M5c nhập bổ sung không phát sinh lô hay khoản chi mới — {"batches":1,"costs":1}
+PASS M6a form Chi phí hiện tiền và tỷ giá đúng quy ước (420.000 / 25.820)
+PASS M6b sửa Chi phí → Kho cập nhật tổng 450.000 và phân bổ 75.000, giữ giá ban đầu — PP-2026-10-19-19 19/10/2026 p20 zusmk 6 7 PP 31 email 450.000 VND ≈ 17,43 USDT Ẩn chi tiết Đã ghi Nhập bổ sungKhoản chi hiện hành: 450.000 VND · 1 USDT = 25.820 VND · ≈ 17,42835 USDT (lưu chính xác) Phân bổ ≈ 75.000 VND / PP (tham khảo, không ghi thêm chi phí) Đã điều chỉnh ở Chi phí · ban đầu 420.0
+PASS M6c vẫn một khoản chi, tiền gốc 450.000, tỷ giá giữ 25.820 — {"amount":"450000","currency":"VND","usdt":"17.42835","rate":"25820","fx":"BINANCE_P2P_BUY","voided":false}
+PASS D1a số dư 0 hiện "$0,00" và "Đang gom · thiếu $100,00" — 00,00 Dùng được Bị limit Bị suspend Đã đóng Chờ xác minh Còn email chưa dùng Ghi tiền vào Ghi chuyển / rút Bổ sung email
+PASS D1b chờ về: "Chờ về $18,00", "Dự kiến đủ $100,00" — $18,00 Dự kiến đủ $100,00 Dùng được Bị limit Bị suspend Đã đóng Chờ xác minh Còn email chưa dùng Ghi tiền vào Ghi chuyển / rút Bổ sung email
+PASS D1c đạt: "Đạt mức gom $100,00" khi số dư USD thực tế đạt — 00,00 Dùng được Bị limit Bị suspend Đã đóng Chờ xác minh Còn email chưa dùng Ghi tiền vào Ghi chuyển / rút Bổ sung email
+PASS D1d khung chọn PP khi yêu cầu rút: số dư có $ — Chọn mã PP | pz-zusmk · Dùng được · số dư $0,00 · 1 email trống · đang dùng | pw-z3q57 · Dùng được · số dư $82,00 · 1 email trống | pw-zusmk · Dùng được · số dư $82,00 · 1 email trống | pp82pbulz · Dùng được · số dư $82,00 · 1 email trống |
+PASS D1e thông tin PP: Số dư USD $0,00 · Đang gom · thiếu $100,00 — Tình trạng Dùng được Số dư USD $0,00 Chờ về $0,00 Thiếu đến $100,00 $100,00 Sau khoản này $0,00 Đang gom · thiếu $100,00 Email chưa dùng còn 1
+PASS S1a hai màn hình: bản cũ bị chặn, giữ 20 USD trên server, báo tại khung, giữ chữ 15 — {"amount":"20","revision":2,"events":3} · pxb-zusmk / VM_001 · SDK EarnApp Mã SDK Tiền tích luỹ (USD) Đang lưu 12,40 USD Ghi chú SDK Chọn SDK đã lưu Lịch sử SDK p20-sdk-zusmk vừa được người khác thay đổ
+PASS S2a bấm ra ngoài giữ nháp
+PASS S2b nháp lượt cũ không lưu vào lượt mới: báo trong khung, nút Lưu khoá, giữ chữ — pxb-zusmk / VM_002 · SDK EarnApp Mã SDK Mã mới: chưa có tiền / ghi chú riêng. Tiền tích luỹ (USD) Chưa ghi Ghi chú SDK Chọn SDK đã lưu VM đã sang lượt 2; nháp này bắt đầu ở lượt 1 nên không được lưu v
+PASS S2c Kiểm tra lại (thao tác rõ ràng) mới cho lưu
+PASS S3a xoá nội dung khi kiểm tra chưa xong: kết quả cũ về muộn không bật nút Lưu
+PASS S3b đổi nội dung khi đang kiểm tra: nút khoá giữa chừng, kết quả cuối là danh sách mới (C), không phải B
+PASS S4 mất phản hồi khi lưu SDK: gửi lại cùng khoá, chỉ một lần ghi — calls=1
+PASS P1a chọn lại đúng proxy hiện tại: không đổi, nút Áp dụng mờ
+PASS P1b chưa chọn thì nút Áp dụng mờ
+PASS P1c gán proxy vào VM hoàn tất ngay: proxy hiện hành, LIVE, không có việc cài — {"revision":1,"cycle":1,"status":null,"blockedFrom":null,"blockedEp":false,"desired":"100.80.70.22:8080","installed":null,"holds":["100.80.70.22:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P1d ô Proxy cập nhật ngay, không có nhãn cài
+PASS P2a báo BLOCKED ở Kho → VM đang dùng chuyển Blocked, nhớ mốc OK — {"revision":1,"cycle":1,"status":"PROXY_BLOCKED","blockedFrom":"OK","blockedEp":true,"desired":"100.80.70.12:8080","installed":null,"holds":["100.80.70.12:8080@DESIRED:BLOCKED"],"openTasks":0,"sdk":null}
+PASS P2b Server/VM: ô Proxy báo Blocked, Tình trạng Blocked
+PASS P2c chọn Blocked tại VM → proxy hiện hành BLOCKED trong Kho, nhớ mốc LINKED — {"revision":1,"cycle":1,"status":"PROXY_BLOCKED","blockedFrom":"LINKED","blockedEp":true,"desired":"100.80.70.13:8080","installed":null,"holds":["100.80.70.13:8080@DESIRED:BLOCKED"],"openTasks":0,"sdk":null}
+PASS P2d báo Blocked lặp lại không ghi đè mốc ban đầu (vẫn OK)
+PASS P3a thay từ VM: đúng proxy mới, tình trạng trở về OK, proxy cũ vẫn BLOCKED — {"revision":2,"cycle":1,"status":"OK","blockedFrom":null,"blockedEp":false,"desired":"100.80.70.23:8080","installed":null,"holds":["100.80.70.23:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P4a nhận replace ở Kho → VM đang dùng đổi sang proxy mới cùng lần lưu, LINKED trở lại, proxy cũ Đã replace — {"revision":2,"cycle":1,"status":"LINKED","blockedFrom":null,"blockedEp":false,"desired":"100.64.176.11:8080","installed":null,"holds":["100.64.176.11:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null} REPLACED(retired)
+PASS P4b nhận replace ngay tại ô Proxy: IP viết tắt kế thừa port, Chưa nối trở lại — {"revision":2,"cycle":1,"status":"NOT_LINKED","blockedFrom":null,"blockedEp":false,"desired":"100.64.176.12:8080","installed":null,"holds":["100.64.176.12:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P5a VM đang SUS giữ SUS khi proxy Blocked; ô Proxy vẫn báo Blocked
+PASS P5b Chưa ghi → Blocked
+PASS P5c đang Blocked rồi đổi sang OFF VM: thay proxy giữ OFF VM (quyết định mới hơn)
+PASS P5d lượt VM mới: không khôi phục tình trạng từ mốc của lượt cũ — {"revision":3,"cycle":2,"status":"PROXY_BLOCKED","blockedFrom":null,"blockedEp":false,"desired":"100.80.70.25:8080","installed":null,"holds":["100.80.70.25:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P6a Server/VM: Copy proxy Blocked (N) theo bộ lọc, đủ IP:port:user:pass, cổng port-stream riêng — Copy proxy Blocked (3) · ["100.80.70.16:8080:<user>:<pass>","100.80.70.20:10001:<user>:<pass>","100.80.70.20:10002:<user>:<pass>"]
+PASS P6b có chọn dòng: chỉ proxy Blocked của dòng đã chọn — Copy proxy Blocked (1) · 100.80.70.20:10001:<user>:<pass>
+PASS P6c Kho proxy: không chọn dòng → mọi trang của bộ lọc (N > số dòng của trang), mỗi endpoint một lần, chỉ proxy BLOCKED hiện hành — Copy proxy Blocked (112) · trang 101 dòng · copy 112
+PASS P6d proxy Blocked cũ (đã đổi sang proxy dự phòng) vẫn copy được để yêu cầu replace; proxy đã replace thì không
+PASS P7a hai người cùng thay một VM: người sau bị chặn, chỉ một proxy hiện hành, không cập nhật nửa chừng — {"revision":2,"cycle":1,"status":null,"blockedFrom":null,"blockedEp":false,"desired":"100.80.70.26:8080","installed":null,"holds":["100.80.70.26:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P7b mất phản hồi rồi thử lại: cùng khoá, một lần đổi, một lịch sử — calls=1
+PASS P8a dữ liệu cũ có hai proxy: giữ để đối chiếu, không đoán (Cần kiểm tra, hiện cả hai) — 100.80.70.18:8080 100.80.70.17:8080 Cần kiểm tra
+PASS P8b chọn rõ proxy đang dùng: còn một vị trí, lịch sử cài cũ giữ nguyên — {"revision":3,"cycle":1,"status":null,"blockedFrom":null,"blockedEp":false,"desired":"100.80.70.18:8080","installed":null,"holds":["100.80.70.18:8080@DESIRED:LIVE"],"openTasks":0,"sdk":null}
+PASS P9a Server/VM: không còn nhãn, bộ lọc, thẻ đếm của bước cài
+PASS P9b menu ⋯ của VM không còn "Cài proxy"
+PASS P9c Tổng quan không còn Chờ cài / Đã xác nhận cài / Việc cài
+PASS P9d link cũ /vm-tasks mở Server / VM
+PASS P9e menu không còn Việc cài proxy
+PASS Không lỗi JavaScript trên trang
+
+Tổng: 63 PASS, 0 FAIL

@@ -1,5 +1,7 @@
 # Bảng vận hành Server / VM
 
+> **Cập nhật 19/10/2026 (quyết định chủ dự án, thay quy trình xác nhận cài):** gán proxy là xong, không còn Chờ cài / Đang cài / Đã cài, Copy để cài, Bắt đầu cài, Xác nhận đã cài, Việc cài proxy. Ô Proxy chỉ có IP:port, copy và cảnh báo Blocked / Cần kiểm tra; bấm ô mở **Thay proxy**. Dải đếm: Tất cả · Thiếu proxy · Có proxy · Proxy Blocked · Cần kiểm tra · Chưa SDK · Chưa tài khoản · Chưa PayPal · Đã xoá; thêm nút **Copy proxy Blocked (N)**. Các đoạn bên dưới nói về bước cài là lịch sử. Xem [proxy-change.md](proxy-change.md).
+
 Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Cập nhật 19/10/2026: cột *Cài proxy* gộp vào ô **Proxy**, ô **SDK** hai dòng có khung riêng và nút **Kho SDK** (xem [SDK và Kho SDK](vm-sdk.md)), nút Lưu / Áp dụng thống nhất (mục cuối). Triển khai 17/10/2026, nối tiếp phần [quản trị Server / VM](server-vm-admin.md) (tạo theo khoảng, sửa tại chỗ, xoá có khôi phục). Bằng chứng: `../superpowers/evidence/2026-10-17-server-vm-table.md`.
 
 ## Bố cục

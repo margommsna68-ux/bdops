@@ -97,6 +97,9 @@ Nút **Kho SDK** ở đầu trang Server / VM (không có mục ở sidebar). Kh
 - **Kiểm tra khi ghi:** mọi lệnh kiểm revision của VM (và VM nguồn khi chuyển), revision của mã khi có, và lượt VM hiện hành (`expectedCycle`). Lệnh soạn cho lượt cũ bị từ chối.
   - Giao dịch serializable: hai người cùng lấy một mã thì chỉ một người thành công; người kia thấy lý do trong khung.
   - Mỗi lệnh có khoá: bấm lặp hoặc gửi lại sau khi mất phản hồi không ghi thêm.
+- **Phiên bản SDK (review độc lập 19/10/2026):** sửa tiền / ghi chú tăng revision của mã, không tăng revision VM. Vì vậy mọi đường ghi kiểm thêm revision của chính mã đó: `sdkSave` (bắt buộc `expectedSdkRevision`; `null` = "tôi không thấy mã này trong kho", bị từ chối nếu mã đã có), Dán bảng (`bulkPreview` trả `expectedSdkRevision` theo dòng, `bulkApply` từ chối dòng khi mã đổi), Kho SDK (`sdkInfo`, `sdkStoreApply`). Mã đổi sau khi kiểm tra thì giá trị mới trên server được giữ, dòng / khung báo lỗi, nội dung đang nhập được giữ. Test chính thức `sdk-stale.integration.test.ts` (chuyển từ hai ca tái hiện `.runtime/review-sdk-stale-20261019.test.ts`).
+- **Nháp khung SDK** ghi người, dự án, VM, lượt, revision VM, revision SDK hiện tại và revision của mã đang đặt lúc bắt đầu sửa. Sau khi VM tạo lại, mã chuyển máy hoặc người khác sửa, khung báo ngay và chờ "Kiểm tra lại" (lấy phiên bản mới, giữ chữ đang nhập); không tự lấy revision / lượt mới. Lưu mất phản hồi giữ khoá yêu cầu trong nháp; lưu lại cùng nội dung dùng lại khoá đó.
+- **Kiểm tra bản dán** (Kho SDK, Dán bảng): kết quả chỉ dùng cho đúng nội dung đã kiểm; đổi / xoá nội dung khi đang kiểm tra thì kết quả cũ về muộn bị bỏ, nút Lưu / Áp dụng không bật cho danh sách cũ.
 - **Hoàn tác** (Lịch sử thao tác):
   - Sửa tiền / ghi chú, ghi mã mới, thay mã và chuyển mã hoàn tác được khi các mã và vị trí VM liên quan chưa bị đổi tiếp.
   - Hoàn tác lần ghi một mã mới thì gỡ mã đó.

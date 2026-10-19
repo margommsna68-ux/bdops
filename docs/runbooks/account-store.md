@@ -82,6 +82,33 @@ creates, merges and deletes nothing.
   the accounts received, or when accounts were added later under the same code (possibly another purchase without its own
   cost). Their money is never recomputed or changed. Migration `20261017180000_account_batch_quantity` is additive.
 
+### Money input and VND → USDT (owner brief 19 October 2026, replaces the free-text money fields)
+
+- Fields use the Vietnamese convention: "." groups thousands, "," starts the decimals. With VND "70000" and "70.000" are seventy
+  thousand, "420.000" is four hundred twenty thousand, "16,27" is sixteen point twenty-seven. Ambiguous text ("70,000", "25,820")
+  and malformed groups ("25.82") are errors at the field; nothing is multiplied or divided by 1.000 silently.
+- The typed text and the number sent to the API are different things: `src/lib/money-input.ts` parses once and the form sends only
+  canonical numbers ("420000", "25820", "16.27"). The batch endpoints (`accountStore.importPreview / importCommit / batchCost`)
+  refuse anything else, so "25.820" can never be read as 25,82 again (the bug that turned 420.000 VND into 16.266 USDT). The Chi phí
+  form parses the same way; its API keeps its older contract.
+- USDT = original amount ÷ rate, with the existing Decimal arithmetic; the label reads "1 USDT = 25.820 VND". USDT shows with two
+  decimals (≈ 16,27 USDT); the stored precision (16,26646) shows on hover and in the batch details.
+- VND fetches the Binance P2P BUY USDT reference through the existing `businessManagement.p2pQuote` (sealed token, 10 minutes). The
+  line shows source and time; editing the number makes it "Nhập tay". A failed fetch keeps the form and offers Thử lại or a manual
+  rate; there is no fake price, no default 1 and no USD = USDT. An expired quote blocks Nhập with "Lấy giá mới" or "Giữ … ghi là
+  nhập tay": the converted amount never changes at the click. The server refuses an expired quote too. Changing the currency drops
+  the rate and the quote.
+- The cost record keeps amount, currency, rate, USDT and the rate source (`fxSource` BINANCE_P2P_BUY with the quote time, or
+  MANUAL). A new market price never changes a recorded cost.
+- Total vs unit price: *Tổng tiền thực trả* is the default and the source of truth; *Tính theo giá mỗi PP / tài khoản* needs the
+  quantity actually bought (a PayPal purchase counts PP codes: 6 PP with 30 emails is 6). The form shows "6 PP × 70.000 ₫ = 420.000 ₫".
+  Switching unit → total carries the total (420.000); without a quantity the total stays empty, so 70.000 never becomes the whole
+  purchase. Switching back keeps a unit price only while unit × quantity still equals the total. An optional quantity with a total
+  shows the reference allocation (≈ 70.000 ₫ / PP), never a second cost.
+- Retries: one command key per content (Nhập kho, Ghi chi phí); a retry after a lost answer re-sends the first attempt's content.
+- Batch PP-2026-10-19-1 on the host (6 PP / 30 emails, 420.000 VND ≈ 16,26646 USDT) was recorded correctly and is left unchanged; no
+  cost is recomputed with today's rate.
+
 ## Assigning to VMs (Server / VM)
 
 - Columns *Tài khoản EarnApp* (login and Gmail / Apple ID badge) and *PayPal nhận*. Click either cell to open a popover that

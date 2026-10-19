@@ -48,9 +48,10 @@ Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, kh
 
 - **Sức khoẻ PP giữ như cũ:** Dùng được, Chờ xác minh, Bị limit, Bị suspend, Đã đóng. Đổi tại ô hoặc hàng loạt ở Kho tài khoản.
 - **Nhãn gom tiền** (chỉ tính USD; dưới cột "Còn lại theo sổ"):
-  - Đạt mức gom: số dư thực ≥ 100.
-  - Dự kiến đủ 100 USD: số dư thực chưa đủ, nhưng cộng tiền còn chờ thì đủ.
-  - Đang gom: cộng cả tiền chờ vẫn dưới 100.
+  - "Đạt mức gom $100,00": số dư thực ≥ $100,00.
+  - "Dự kiến đủ $100,00": số dư thực chưa đủ, nhưng cộng tiền còn chờ ("Chờ về $18,00") thì đủ.
+  - "Đang gom · thiếu $100,00": cộng cả tiền chờ vẫn dưới $100,00.
+  - Có đơn vị từ 19/10/2026: USD ghi "$0,00"; USDT ghi USDT, VND ghi ₫; các đồng tiền không cộng với nhau. Đang tải, lỗi hoặc thiếu quyền không bao giờ hiện thành 0. Áp dụng cả ở khung chọn PP khi yêu cầu rút.
   - Số dư thực là số dư theo sổ (mở đầu + vào − ra) đến hôm nay, không phải doanh thu tháng. Rút/chuyển ra thì nhãn tính lại.
   - Nhãn chỉ hiện cho người xem được cả tiền vào và tiền ra.
 - **100 USD** là mục tiêu gom tối thiểu của một mã PP, không phải mức tối đa, cũng không phải số mỗi EarnApp phải rút.
@@ -82,6 +83,8 @@ Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, kh
 - Lịch sử yêu cầu rút được lọc ở backend (sửa 19/10): người không có quyền tiền chỉ nhận mốc trung tính (Ghi yêu cầu rút, Sửa yêu cầu rút, Đánh dấu thất bại / huỷ, Gửi lại, Chốt nhận thiếu, Dùng để ghi tạo lại VM). Số tiền, số cũ → mới, phần thiếu, ghi chú thất bại / huỷ / chốt và mã tham chiếu chỉ trả cho người có quyền tiền. Dòng lịch sử ghi trước bản sửa được đọc theo phần đầu cố định của câu, không theo số.
 
 ## Ghi nhận đã tạo lại VM
+
+> **19/10/2026 (sau đó):** không còn bước cài. Proxy hợp lệ được giữ cho vị trí ở lượt mới và là proxy đang dùng ngay; proxy BLOCKED vẫn ở vị trí, ô Proxy báo Blocked và phải thay. Các ý "cần cài và xác nhận lại", "Giữ để kiểm tra" cho proxy BLOCKED dưới đây đã được thay; xem [proxy-change.md](proxy-change.md). Tình trạng Blocked nay gắn với proxy: thay proxy đưa VM về tình trạng trước Blocked.
 
 Chỉ bấm khi máy thật **đã được tạo lại**.
 
