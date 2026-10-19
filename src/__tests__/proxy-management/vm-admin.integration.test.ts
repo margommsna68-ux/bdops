@@ -81,7 +81,7 @@ it('deletes VMs that hold nothing (single and bulk), reports blocked rows, undoe
     // restore (SDK store 19/10/2026): the never-linked SDK of deleted VM_004 was moved to VM_003 explicitly (source → target). Restoring
     // VM_004 brings the machine back without that SDK: it is never taken back, and VM_003 keeps it.
     const old='sdk-old-'+f.projectId.slice(0,8),v4=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v4.id}}),v3=await db.virtualMachine.findUniqueOrThrow({where:{id:f.v3.id}});
-    await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.v3.id,expectedVmRevision:v3.revision,expectedCycle:1,code:old,from:{vmId:f.v4.id,expectedRevision:v4.revision}},db);
+    await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.v3.id,expectedVmRevision:v3.revision,expectedCycle:1,code:old,expectedSdkRevision:(await db.sdkRecord.findFirstOrThrow({where:{code:old}})).revision,from:{vmId:f.v4.id,expectedRevision:v4.revision}},db);
     const back=await restoreVMs(f.scope,[f.v1.id,f.v4.id],db);expect(back.restored).toBe(2);expect(back.blocked).toEqual([]);
     expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.v1.id}})).archivedAt).toBeNull();
     expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.v4.id}})).toMatchObject({archivedAt:null,sdkId:null});

@@ -5,26 +5,33 @@ import {trpc} from '@/lib/trpc';
 import type {BulkKind,BulkPreview,BulkApplyResult} from '@/server/vm-management/bulk';
 import {AllocationForm} from '../AllocationDialog';
 import {errorMessage,type ManagedVM} from '../shared';
+import {useBusinessKey} from '@/components/business-management/shared';
 import {AccountPasteBody} from './AccountPanels';
 type PasteKind=Exclude<BulkKind,'GMAIL'>|'ACCOUNT';
 const KIND_LABEL:Record<PasteKind,string>={SDK:'SDK',PROXY:'Proxy',ACCOUNT:'Tài khoản + PP',NOTE:'Ghi chú'};
 const HINT:Record<Exclude<BulkKind,'GMAIL'>,string>={SDK:'Mã SDK, có thể thêm Tiền tích luỹ USD | Ghi chú SDK (của chính mã đó). Mã đang ở VM khác không bị lấy: dùng Chọn SDK đã lưu ở ô SDK để chuyển.',PROXY:'IP, IP:port hoặc IP:port:user:pass (TUT hoặc Chung mooon–Genjy). Chỉ giao vào VM đang trống.',NOTE:'Ghi chú tối đa 1000 ký tự; phần sau cột VM là ghi chú.'};
 type Input={kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]};
-const itemsOf=(p:BulkPreview)=>p.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,value:r.value,amount:r.amount,note:r.note}));
+const itemsOf=(p:BulkPreview)=>p.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,expectedSdkRevision:r.expectedSdkRevision,value:r.value,amount:r.amount,note:r.note}));
+/** The exact content a check was made for: a result is used only while the panel still shows that content. */
+export const inputSig=(input:Input)=>JSON.stringify(input);
 // The server re-checks every row on save; rows changed since the check or in conflict stay unchanged and are listed at their line.
+// - A check answer that arrives after the content changed (or was cleared) is dropped: only the latest request may set the result,
+//   and the result carries the content it was made for (a late answer once could enable "Áp dụng" for the old list).
+// - One command key per list of rows: a save whose answer was lost is retried with the same key, so it replays instead of writing again.
 function useBulk(projectId:string,onSaved:()=>void){
-  const preview=trpc.vmManagement.bulkPreview.useMutation(),apply=trpc.vmManagement.bulkApply.useMutation();
-  const [result,setResult]=useState<BulkPreview|null>(null),[applied,setApplied]=useState<BulkApplyResult|null>(null),[error,setError]=useState('');
+  const preview=trpc.vmManagement.bulkPreview.useMutation(),apply=trpc.vmManagement.bulkApply.useMutation(),keyFor=useBusinessKey(),seq=useRef(0);
+  const [result,setResult]=useState<(BulkPreview&{sig:string})|null>(null),[applied,setApplied]=useState<BulkApplyResult|null>(null),[error,setError]=useState('');
+  const latest=async(input:Input)=>{const n=++seq.current,r=await preview.mutateAsync({projectId,...input});return n===seq.current?{...r,sig:inputSig(input)}:null;};
   const store=async(kind:BulkKind,items:ReturnType<typeof itemsOf>,unit:string)=>{
-    setError('');try{const r=await apply.mutateAsync({projectId,kind,key:crypto.randomUUID(),items});setApplied(r);onSaved();
+    setError('');try{const r=await apply.mutateAsync({projectId,kind,key:keyFor({kind,items}),items});setApplied(r);onSaved();
       if(r.applied) toast.success(`Đã lưu ${r.applied} ${unit}`+(r.errors?` · ${r.errors} ${unit} chưa lưu`:''));else toast.error('Không '+unit+' nào được lưu; xem lý do từng dòng');return r;}
     catch(e){setError(errorMessage(e));return null;}}; // the input stays for a fix / retry
   return {result,applied,error,busy:preview.isLoading||apply.isLoading,saving:apply.isLoading,
-    reset:()=>{setResult(null);setApplied(null);setError('');},
-    check:async(input:Input)=>{setError('');setApplied(null);try{setResult(await preview.mutateAsync({projectId,...input}));}catch(e){setError(errorMessage(e));setResult(null);}},
+    reset:()=>{seq.current++;setResult(null);setApplied(null);setError('');},
+    check:async(input:Input)=>{setError('');setApplied(null);const n=seq.current+1;try{const r=await latest(input);if(r)setResult(r);}catch(e){if(n===seq.current){setError(errorMessage(e));setResult(null);}}},
     save:async()=>{if(!result) return null;const items=itemsOf(result);if(!items.length) return null;return store(result.kind,items,'dòng');},
     // One click for the selected-VM panels: check, then save the rows that really change (that number is on the button).
-    checkAndSave:async(input:Input)=>{setError('');setApplied(null);let p:BulkPreview;try{p=await preview.mutateAsync({projectId,...input});setResult(p);}catch(e){setError(errorMessage(e));setResult(null);return null;}
+    checkAndSave:async(input:Input)=>{setError('');setApplied(null);let p:(BulkPreview&{sig:string})|null;try{p=await latest(input);if(!p)return null;setResult(p);}catch(e){setError(errorMessage(e));setResult(null);return null;}
       const items=itemsOf(p);if(!items.length){toast('Không có VM nào cần đổi');return null;}return store(p.kind,items,'VM');}};
 }
 function ResultTable({preview,applied}:{preview:BulkPreview;applied:BulkApplyResult|null}){
@@ -47,14 +54,15 @@ export function PasteTablePanel({projectId,servers,serverId,onSaved}:{projectId:
     return ()=>clearTimeout(t);
   },[kind,server,text]);// eslint-disable-line react-hooks/exhaustive-deps
   async function apply(){
-    const r=await bulk.save();if(!r||!bulk.result) return;
+    if(!ready) return;const r=await bulk.save();if(!r||!bulk.result) return;
     // Keep only the lines that still need work (refused at the check or at the save) so a retry never re-sends saved rows.
     const failed=new Set([...bulk.result.rows.filter(x=>x.outcome==='ERROR').map(x=>x.line),...r.rows.filter(x=>x.outcome==='ERROR').map(x=>x.line)]);
     const keep=text.replace(/\r/g,'').split('\n').filter((_,i)=>failed.has(i+1)).join('\n');
     setSaved(`Đã lưu ${r.applied} · giữ nguyên ${r.skipped} · lỗi ${r.errors}.`+(keep.trim()?' Ô dán chỉ còn các dòng lỗi để sửa và thử lại.':''));
     if(keep!==text){keepResult.current=true;setText(keep);}
   }
-  const ready=bulk.result&&!bulk.applied?bulk.result.ready:0,locked=bulk.saving;
+  // Áp dụng only for the result of exactly the content on screen (changed or cleared while checking = no button).
+  const current=kind!=='ACCOUNT'&&!!text.trim()&&bulk.result?.sig===inputSig({kind,serverId:server||undefined,text}),ready=current&&!bulk.applied?bulk.result!.ready:0,locked=bulk.saving;
   return <div className="space-y-3">
     <div className="vm-kind-tabs" role="tablist" aria-label="Loại cập nhật">{(Object.keys(KIND_LABEL) as PasteKind[]).map(k=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} disabled={locked} onClick={()=>change(()=>setKind(k))}>{KIND_LABEL[k]}</button>)}</div>
     <label className="pm-label">Server<select className="pm-input" aria-label="Server của danh sách" disabled={locked} value={server} onChange={e=>change(()=>setServer(e.target.value))}><option value="">Nhiều server (dán kèm cột Server)</option>{servers.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>

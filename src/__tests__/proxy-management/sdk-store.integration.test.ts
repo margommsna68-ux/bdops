@@ -20,7 +20,9 @@ async function setup(){
   const vm3=await db.virtualMachine.create({data:{serverId:server2.id,code:'VM_001',managed:true,proxySlotState:'BLANK'}});
   const A='sdk-A123-'+x,B='sdk-B456-'+x,C='sdk-C789-'+x;
   const row=async(id:string)=>db.virtualMachine.findUniqueOrThrow({where:{id},include:{operation:true}});
-  const save=async(vmId:string,code:string|null,extra:{amount?:string|null;note?:string|null;from?:{vmId:string;expectedRevision:number}|null;expectedCycle?:number}={},scope=f.scope)=>{const v=await row(vmId);return saveVmSdk(scope,{key:randomUUID(),vmId,expectedVmRevision:v.revision,expectedCycle:extra.expectedCycle??v.operation?.cycle??1,code,amount:extra.amount,note:extra.note,from:extra.from},db);};
+  // The revision a client that just read the store sees for this code (null = not stored).
+  const seen=async(code:string|null)=>code?(await db.sdkRecord.findUnique({where:{projectId_code:{projectId:f.scope.projectId,code}}}))?.revision??null:null;
+  const save=async(vmId:string,code:string|null,extra:{amount?:string|null;note?:string|null;from?:{vmId:string;expectedRevision:number}|null;expectedCycle?:number}={},scope=f.scope)=>{const v=await row(vmId);return saveVmSdk(scope,{key:randomUUID(),vmId,expectedVmRevision:v.revision,expectedCycle:extra.expectedCycle??v.operation?.cycle??1,code,expectedSdkRevision:await seen(code),amount:extra.amount,note:extra.note,from:extra.from},db);};
   const rec=(code:string)=>db.sdkRecord.findFirst({where:{projectId:f.scope.projectId,code}});
   const account=async(vmId:string,n:number)=>{const login=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:`sdk-login-${n}-${x}@example.invalid`,loginType:'GMAIL',businessManaged:true}});return db.earnAppAccount.create({data:{projectId:f.scope.projectId,loginId:login.id,vmId}});};
   const cleanup=async()=>{await db.vMSdkHistory.deleteMany({where:{projectId:f.scope.projectId}});await db.operationJournal.deleteMany({where:{projectId:f.scope.projectId}});await f.cleanup();};
@@ -78,8 +80,8 @@ describe('Chuyển SDK nguồn → đích',()=>{
   it('6. two people taking the same stored SDK at once: one wins; a failure inside the transaction saves nothing; a command prepared for the old round is refused',async()=>{
     const f=await setup();try{
       await applySdkStore(f.scope,{key:randomUUID(),rows:[{line:1,code:f.A,expectedRevision:null,amount:'3'}]},db);
-      const [v1,v2]=await Promise.all([f.row(f.vm.id),f.row(f.vm2.id)]);
-      const results=await Promise.allSettled([saveVmSdk(f.scope,{key:randomUUID(),vmId:v1.id,expectedVmRevision:v1.revision,expectedCycle:1,code:f.A},db),saveVmSdk(f.worker,{key:randomUUID(),vmId:v2.id,expectedVmRevision:v2.revision,expectedCycle:1,code:f.A},db)]);
+      const [v1,v2]=await Promise.all([f.row(f.vm.id),f.row(f.vm2.id)]),revA=(await db.sdkRecord.findUniqueOrThrow({where:{projectId_code:{projectId:f.scope.projectId,code:f.A}}})).revision;
+      const results=await Promise.allSettled([saveVmSdk(f.scope,{key:randomUUID(),vmId:v1.id,expectedVmRevision:v1.revision,expectedCycle:1,code:f.A,expectedSdkRevision:revA},db),saveVmSdk(f.worker,{key:randomUUID(),vmId:v2.id,expectedVmRevision:v2.revision,expectedCycle:1,code:f.A,expectedSdkRevision:revA},db)]);
       expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
       expect(await db.virtualMachine.count({where:{sdkId:f.A}})).toBe(1);expect(await db.sdkRecord.count({where:{code:f.A}})).toBe(1);
       // Second item fails (code on another VM): the first item of the same command is not saved either.
@@ -225,7 +227,7 @@ describe('Quyền',()=>{
   it('14. viewer reads but cannot write; people outside the project cannot read or write; a code of another project is refused without naming it; the router uses the same checks',async()=>{
     const f=await setup(),other=await businessFixture();try{
       const foreignVm=await db.virtualMachine.findUniqueOrThrow({where:{id:other.vm.id}});
-      await saveVmSdk(other.scope,{key:randomUUID(),vmId:other.vm.id,expectedVmRevision:foreignVm.revision,expectedCycle:1,code:f.C,amount:'99',note:'bí mật'},db);
+      await saveVmSdk(other.scope,{key:randomUUID(),vmId:other.vm.id,expectedVmRevision:foreignVm.revision,expectedCycle:1,code:f.C,expectedSdkRevision:null,amount:'99',note:'bí mật'},db);
       await expect(f.save(f.vm.id,f.C)).rejects.toMatchObject({code:'OWNER_CONFLICT',message:expect.not.stringMatching(/business-fixture|VM_001|99|bí mật/)});
       const p=await previewSdkStore(f.scope,{text:f.C+'\t1'},db);expect(p.rows[0]).toMatchObject({outcome:'ERROR',location:null,before:null});
       await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{role:'VIEWER'}});
@@ -237,9 +239,9 @@ describe('Quyền',()=>{
       const api=appRouter.createCaller({prisma:db,session:{user:{id:other.scope.userId},expires:'2099-01-01'}} as unknown as Context);
       await expect(api.vmManagement.sdkStore({projectId:f.scope.projectId})).rejects.toMatchObject({code:'FORBIDDEN'});
       const v=await f.row(f.vm.id);
-      await expect(api.vmManagement.sdkSave({projectId:f.scope.projectId,key:randomUUID(),vmId:f.vm.id,expectedVmRevision:v.revision,expectedCycle:1,code:f.A})).rejects.toMatchObject({code:'FORBIDDEN'});
+      await expect(api.vmManagement.sdkSave({projectId:f.scope.projectId,key:randomUUID(),vmId:f.vm.id,expectedVmRevision:v.revision,expectedCycle:1,code:f.A,expectedSdkRevision:null})).rejects.toMatchObject({code:'FORBIDDEN'});
       const viewer=appRouter.createCaller({prisma:db,session:{user:{id:f.worker.userId},expires:'2099-01-01'}} as unknown as Context);
-      await expect(viewer.vmManagement.sdkSave({projectId:f.scope.projectId,key:randomUUID(),vmId:f.vm.id,expectedVmRevision:v.revision,expectedCycle:1,code:f.A})).rejects.toMatchObject({code:'FORBIDDEN'});
+      await expect(viewer.vmManagement.sdkSave({projectId:f.scope.projectId,key:randomUUID(),vmId:f.vm.id,expectedVmRevision:v.revision,expectedCycle:1,code:f.A,expectedSdkRevision:null})).rejects.toMatchObject({code:'FORBIDDEN'});
       expect(await f.rec(f.A)).toBeNull();
     }finally{await f.cleanup();await db.vMSdkHistory.deleteMany({where:{projectId:other.scope.projectId}});await db.operationJournal.deleteMany({where:{projectId:other.scope.projectId}});await other.cleanup();}
   });

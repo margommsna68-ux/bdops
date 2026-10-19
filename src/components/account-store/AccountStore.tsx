@@ -1,4 +1,9 @@
 "use client";
+import {formatMoney,roundDecimal} from '@/lib/money-input';
+import {CashDecimal} from '@/server/business-management/usdt-money';
+import {PurchaseMoneyFields} from './PurchaseMoneyFields';
+import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
+import {useBusinessKey} from '@/components/business-management/shared';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import Link from 'next/link';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
@@ -149,7 +154,7 @@ function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSa
         <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?viAmount(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
         <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}{b.kind==='PAYPAL'?' PP':''}</button>{b.kind==='PAYPAL'&&b.emails!=null?<span className="acc-batch-sub">{viAmount(String(b.emails))} email</span>:null}</td>
         {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{viAmount(m.total)} {m.currency}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
-          {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<>≈ {viAmount(m.usdt)} USDT</>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
+          {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<span title={'Lưu chính xác: '+formatMoney(m.usdt,'USDT',{exact:true})}>≈ {formatMoney(m.usdt,'USDT')}</span>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
         <td data-label="Chi phí">{b.cost==='RECORDED'?(b.costLink?<Link className="acc-state NEW" href={links.costs({cost:b.costLink.id,month:b.costLink.month})} title="Mở khoản chi ở Chi phí">Đã ghi</Link>:<span className="acc-state NEW">Đã ghi</span>):b.cost==='VOIDED'?<span className="acc-state BLOCKED" title="Khoản chi đã thu hồi ở Chi phí">Đã thu hồi</span>:<span className="acc-state USED" title="Chưa ghi khoản chi trên web; không có nghĩa là chưa thanh toán">Chưa ghi</span>}</td>
         <td data-label="Thao tác"><div className="acc-batch-actions">{canAppend&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}</div></td></tr>,
         isOpen&&m?<tr key={b.id+':d'} className="acc-batch-detail"><td colSpan={cols}><BatchMoney b={b}/>{b.notes?<div>Ghi chú: {b.notes}</div>:null}<div className="pm-muted">Dán lần đầu {b.lineCount} dòng.</div></td></tr>:null];})}
@@ -162,22 +167,22 @@ function BatchMoney({b}:{b:Batch}){
   const m=b.money;if(!m)return <>—</>;
   const first=m.original?`${viAmount(m.original.total)} ${m.original.currency||''}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${viAmount(m.original.unit)})`:''}`:'';
   return <>{m.total?<div>Khoản chi hiện hành: {viAmount(m.total)} {m.currency}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${viAmount(m.unit)})`:''}
-    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {viAmount(m.usdt)} USDT</>:null}</div>:null}
+    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {viAmount(m.usdt)} USDT (lưu chính xác)</>:null}</div>:null}
+    {m.total&&b.paidQuantity?<div className="pm-muted">Phân bổ ≈ {viAmount(roundDecimal(new CashDecimal(m.total).div(b.paidQuantity).toFixed(8),2))} {m.currency} / {b.kind==='PAYPAL'?'PP':'tài khoản'} (tham khảo, không ghi thêm chi phí)</div>:null}
     {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':b.cost==='VOIDED'?'Khoản chi đã thu hồi · giá ban đầu ':'Giá ban đầu '}{first}</div>}</>;
 }
-// Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought).
+// Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought), with
+// the same money fields as Nhập kho (Vietnamese numbers, rate source, expiry). One command key per content: a retry after a lost
+// answer replays instead of recording a second cost.
 function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){
-  const [mode,setMode]=useState<'UNIT'|'TOTAL'>('TOTAL'),[amount,setAmount]=useState(''),[quantity,setQuantity]=useState(batch.paidQuantity?String(batch.paidQuantity):''),[currency,setCurrency]=useState('USDT'),[rate,setRate]=useState(''),[date,setDate]=useState(batch.purchasedAt),save=trpc.accountStore.batchCost.useMutation();
-  return <form className="acc-import m-3" onSubmit={e=>{e.preventDefault();save.mutate({projectId,batchId:batch.id,expectedRevision:batch.revision,priceMode:mode,amount,quantity:mode==='UNIT'&&quantity?Number(quantity):null,currency,rate:currency==='USDT'?null:rate,date,key:crypto.randomUUID()},{onSuccess:()=>{toast.success('Đã ghi chi phí lô '+batch.code);onSaved();}});}}>
-    <h3 className="text-sm font-semibold">Ghi chi phí lô {batch.code} ({batch.received} đã nhận)</h3>
-    <div className="acc-import-grid"><label className="pm-label">Cách tính<select className="pm-input" value={mode} onChange={e=>setMode(e.target.value as typeof mode)}><option value="TOTAL">Tổng tiền thực trả</option><option value="UNIT">Giá mỗi tài khoản</option></select></label>
-      {mode==='UNIT'&&<label className="pm-label">Số lượng thực mua<input className="pm-input" required inputMode="numeric" value={quantity} onChange={e=>setQuantity(e.target.value.replace(/\D/g,''))}/></label>}
-      <label className="pm-label">{mode==='UNIT'?'Giá / tài khoản':'Tổng đã trả'}<input className="pm-input" required inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value.replace(',','.'))}/></label>
-      <label className="pm-label">Đồng tiền<select className="pm-input" value={currency} onChange={e=>setCurrency(e.target.value)}>{['USDT','VND','USD'].map(c=><option key={c}>{c}</option>)}</select></label>
-      {currency!=='USDT'&&<label className="pm-label">1 USDT = ? {currency}<input className="pm-input" required inputMode="decimal" value={rate} onChange={e=>setRate(e.target.value.replace(',','.'))}/></label>}
-      <label className="pm-label">Ngày chi<input type="date" className="pm-input" value={date} onChange={e=>setDate(e.target.value)}/></label></div>
-    {mode==='UNIT'&&Number(quantity)>0&&Number(amount)>0&&<p className="text-xs" aria-live="polite"><strong>{quantity} × {amount} = {(Number(quantity)*Number(amount)).toFixed(8).replace(/\.?0+$/,'')} {currency}</strong></p>}
-    {save.error&&<p role="alert" className="pm-error text-sm">{save.error.message}</p>}
-    <div className="flex gap-2 justify-end"><button type="button" className="pm-button pm-button-quiet" onClick={onClose}>Đóng</button><button className="pm-button pm-button-primary" disabled={save.isLoading}>{save.isLoading?'Đang ghi…':'Ghi chi phí một lần'}</button></div>
+  const unitWord=batch.kind==='PAYPAL'?'PP':'tài khoản';
+  const [money,setMoney]=useState<PurchaseState>(()=>({...emptyPurchase(),quantity:batch.paidQuantity?String(batch.paidQuantity):''})),[date,setDate]=useState(batch.purchasedAt),save=trpc.accountStore.batchCost.useMutation(),keyFor=useBusinessKey();
+  const m=readPurchase(money,unitWord);
+  return <form className="acc-import m-3" onSubmit={e=>{e.preventDefault();if(!m.payload||save.isLoading)return;const {priceMode,amount,quantity,currency,rate,p2pQuoteToken}=m.payload;const input={projectId,batchId:batch.id,expectedRevision:batch.revision,priceMode,amount,quantity,currency,rate,p2pQuoteToken,date};save.mutate({...input,key:keyFor(input)},{onSuccess:()=>{toast.success('Đã ghi chi phí lô '+batch.code);onSaved();}});}}>
+    <h3 className="text-sm font-semibold">Ghi chi phí lô {batch.code} ({batch.received}{batch.kind==='PAYPAL'?' PP':''} đã nhận)</h3>
+    <PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} locked={save.isLoading} onChange={setMoney}/>
+    <div className="acc-import-grid"><label className="pm-label">Ngày chi<input type="date" className="pm-input" value={date} onChange={e=>setDate(e.target.value)}/></label></div>
+    {save.error&&<p role="alert" className="pm-error text-sm">{save.error.message}{' '}Nội dung được giữ; bấm lại sẽ gửi đúng yêu cầu này (không ghi hai khoản).</p>}
+    <div className="flex gap-2 justify-end"><button type="button" className="pm-button pm-button-quiet" onClick={onClose}>Đóng</button><button className="pm-button pm-button-primary" disabled={save.isLoading||!m.payload}>{save.isLoading?'Đang ghi…':'Ghi chi phí một lần'}</button></div>
   </form>;
 }

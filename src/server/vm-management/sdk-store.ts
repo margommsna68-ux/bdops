@@ -64,6 +64,19 @@ export async function planPlacement(db:VMReader,projectId:string,vm:SdkVM,code:s
   if(source.revision!==from.expectedRevision)return {error:placeLabel(source)+' vừa được thay đổi; tải lại rồi chọn lại',code:'STALE_PREVIEW'};
   return {plan:{kind:'MOVE',code,current,target,source}};
 }
+/**
+ * The SDK a write touches must still be the version the person saw (money / note edits bump the SDK revision, not the VM revision).
+ * `expected` null (or missing) means "I saw no stored code": refused when the code is stored, so a missing revision never skips the
+ * check; a number for a code that is not stored is refused too. Removing a code only needs the VM revision.
+ */
+export function staleSdk(plan:PlacementPlan,expected:number|null|undefined):string|null{
+  if(plan.kind==='NONE'||plan.kind==='REMOVE')return null;
+  const rec=plan.kind==='SAME'?plan.current:plan.target,exp=expected??null;
+  if(!rec)return exp===null?null:'SDK '+plan.code+' không còn trong kho như lúc kiểm tra; kiểm tra lại';
+  if(exp===null)return 'SDK '+rec.code+' đã có trong kho với tiền / ghi chú riêng (có thể vừa được thêm); kiểm tra lại để xem trước khi lưu';
+  if(rec.revision!==exp)return 'SDK '+rec.code+' vừa được người khác thay đổi; giá trị mới trên server được giữ. Kiểm tra lại (nội dung đang nhập được giữ)';
+  return null;
+}
 interface WriteCtx {projectId:string;actorId:string;images:BusinessCollector;now:Date;via:string}
 async function event(tx:Tx,ctx:WriteCtx,sdkId:string,kind:string,data:{fromVmId?:string|null;toVmId?:string|null;fromLabel?:string|null;toLabel?:string|null;detail?:Prisma.InputJsonValue}={}){
   await tx.sdkEvent.create({data:{projectId:ctx.projectId,sdkId,kind,actorId:ctx.actorId,createdAt:ctx.now,...data,detail:{via:ctx.via,...(data.detail as object||{})}}});
@@ -123,7 +136,7 @@ async function loadVM(db:VMReader,projectId:string,vmId:string){
   const vm=await db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)throw new ProxyDomainError('NOT_FOUND','VM không thuộc dự án này');return vm;
 }
 // ---- Commands ----------------------------------------------------------------------------------------------------------------------
-export interface SdkSaveInput {key:string;vmId:string;expectedVmRevision:number;expectedCycle:number;code:string|null;expectedSdkRevision?:number|null;amount?:string|null;note?:string|null;from?:{vmId:string;expectedRevision:number}|null}
+export interface SdkSaveInput {key:string;vmId:string;expectedVmRevision:number;expectedCycle:number;code:string|null;/** Revision of the stored code being saved as the person saw it; null = a code not stored yet. */expectedSdkRevision?:number|null;amount?:string|null;note?:string|null;from?:{vmId:string;expectedRevision:number}|null}
 /** The SDK cell and "Dùng cho VM này": record / replace / remove / move the current SDK of one VM, with its money and note. */
 export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaClient=prisma){
   const code=input.code===null?null:normalizeSdk(input.code);if(input.code!==null&&!code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
@@ -135,7 +148,7 @@ export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaCli
     if(vm.revision!==input.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW',where(vm)+' vừa được thay đổi; tải lại để kiểm tra (nội dung đang nhập được giữ)');
     const planned=await planPlacement(tx,scope.projectId,vm,code,input.from??null);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
     const {plan}=planned;
-    if(input.expectedSdkRevision!=null&&plan.target&&plan.target.revision!==input.expectedSdkRevision)throw new ProxyDomainError('STALE_PREVIEW','SDK '+plan.target.code+' vừa được người khác thay đổi; tải lại để xem tiền / ghi chú mới');
+    const stale=staleSdk(plan,input.expectedSdkRevision);if(stale)throw new ProxyDomainError('STALE_PREVIEW',stale);
     const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:input.from?'Chuyển SDK':'Ô SDK'},vm,plan,info);
     const after=await tx.sdkRecord.findUnique({where:{vmId:vm.id}});
     return {changed:r.changed,message:r.message,sdk:after?{id:after.id,code:after.code,revision:after.revision}:null};

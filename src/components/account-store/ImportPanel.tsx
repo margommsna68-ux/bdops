@@ -5,12 +5,14 @@ import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
+import {PurchaseMoneyFields} from './PurchaseMoneyFields';
+import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
+import {formatMoney} from '@/lib/money-input';
 type Preview=inferRouterOutputs<AppRouter>['accountStore']['importPreview'];
 type Committed=inferRouterOutputs<AppRouter>['accountStore']['importCommit'];
 export type StockKind='LOGIN'|'PAYPAL';
 export type AppendTarget={id:string;code:string;type?:'GMAIL'|'APPLE_ID'|null};
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-const CURRENCIES=['USDT','VND','USD'];
 // Drafts per project and account kind, in this tab's memory only (never the URL, localStorage or sessionStorage: a draft can hold
 // passwords and 2FA). Switching Gmail ↔ PayPal, opening Lịch sử nhập kho or leaving the page and coming back keeps each kind's own
 // draft (text, money, preview); another project has its own. A full reload or closing the tab drops them.
@@ -25,9 +27,6 @@ function useDraft<T>(d:ImportDraft,name:string,initial:T):[T,(v:T)=>void]{
   const set=useCallback((v:T)=>{d.values[name]=v;setValue(v);},[d,name]);
   return [value,set];
 }
-const trim=(n:string)=>n.includes('.')?n.replace(/\.?0+$/,''):n;
-// Display only (the server computes the recorded total exactly).
-const product=(qty:string,unit:string)=>{const q=Number(qty),u=Number(unit);return q>0&&Number.isInteger(q)&&u>0?trim((q*u).toFixed(8)):null;};
 // Nhập kho in place (no dialog per account): paste many lines or fill one, choose the type explicitly. The lines are checked
 // automatically while typing (the check writes nothing; a result that no longer matches the text is never used), every line shows
 // valid / already there / error, then one "Nhập". The server checks everything again when saving.
@@ -43,37 +42,40 @@ export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{p
   const d=importDraft(projectId,kind);
   const [target,setTarget]=useDraft<AppendTarget|null>(d,'target',null);
   const [type,setType]=useDraft<'GMAIL'|'APPLE_ID'|''>(d,'type',''),[mode,setMode]=useDraft<'paste'|'one'>(d,'mode','paste'),[text,setText]=useDraft(d,'text',''),[one,setOne]=useDraft(d,'one',{email:'',password:'',twoFa:'',recovery:'',notes:'',code:''});
-  const [source,setSource]=useDraft(d,'source',''),[date,setDate]=useDraft(d,'date',today()),[unitMode,setUnitMode]=useDraft(d,'unitMode',false),[amount,setAmount]=useDraft(d,'amount',''),[quantity,setQuantity]=useDraft(d,'quantity',''),[currency,setCurrency]=useDraft(d,'currency','USDT'),[rate,setRate]=useDraft(d,'rate',''),[notes,setNotes]=useDraft(d,'notes','');
+  const [source,setSource]=useDraft(d,'source',''),[date,setDate]=useDraft(d,'date',today()),[money,setMoney]=useDraft<PurchaseState>(d,'money',emptyPurchase()),[notes,setNotes]=useDraft(d,'notes','');
   const [preview,setPreview]=useDraft<Preview|null>(d,'preview',null),[done,setDone]=useDraft<Committed|null>(d,'done',null),[error,setError]=useDraft(d,'error',''),[key,setKey]=useDraft<string|null>(d,'key',null);
   const [checkedSig,setCheckedSig]=useDraft(d,'checkedSig',''),[keySig,setKeySig]=useDraft(d,'keySig',''),[uncertain,setUncertain]=useDraft(d,'uncertain',false),[recheck,setRecheck]=useState(0),[checkError,setCheckError]=useState('');
   const check=trpc.accountStore.importPreview.useMutation(),commit=trpc.accountStore.importCommit.useMutation(),addEmails=trpc.accountStore.addEmails.useMutation(),busy=commit.isLoading,locked=commit.isLoading||uncertain;
   const lineText=()=>mode==='paste'?text:kind==='PAYPAL'?`${one.code.trim()}\t${one.email.trim()}`:[one.email,one.password,one.twoFa,one.recovery,one.notes].map(s=>s.replace(/\t/g,' ')).join('\t').replace(/\t+$/,'');
-  const priced=canCost&&!!amount.trim();
+  // Money: canonical numbers only (the typed Vietnamese text is parsed once in readPurchase); a money field with an error blocks the
+  // check and Nhập instead of sending something the server could read differently.
+  const unitWord=kind==='PAYPAL'?'PP':'tài khoản',m=readPurchase(money,unitWord),priced=canCost&&m.priced,moneyBlocked=priced&&!m.payload;
   const input=()=>({projectId,kind,loginType:kind==='LOGIN'?(type||null):null,text:lineText(),
-    ...(target?{append:{batchId:target.id}}:{batch:{source:source||null,purchasedAt:date,priceMode:priced?(unitMode?'UNIT' as const:'TOTAL' as const):'NONE' as const,amount:priced?amount:null,quantity:unitMode&&quantity.trim()?Number(quantity):null,currency:priced?currency:null,rate:priced&&currency!=='USDT'?rate||null:null,notes:notes||null}})});
+    ...(target?{append:{batchId:target.id}}:{batch:{source:source||null,purchasedAt:date,...(priced&&m.payload?m.payload:{priceMode:'NONE' as const,amount:null,quantity:canCost?m.payload?.quantity??null:null,currency:null,rate:null,p2pQuoteToken:null}),notes:notes||null}})});
   // What would be sent now. The check result and the request key belong to exactly this content.
-  const sig=JSON.stringify(input()),empty=!lineText().trim()||kind==='LOGIN'&&!type,fresh=!!preview&&checkedSig===sig,seq=useRef(0);
+  const sig=JSON.stringify(input()),empty=!lineText().trim()||kind==='LOGIN'&&!type,fresh=!!preview&&checkedSig===sig&&!moneyBlocked,seq=useRef(0);
   useEffect(()=>{
     if(uncertain)return;setCheckError('');
-    if(empty){if(preview)setPreview(null);return;}
+    if(empty||moneyBlocked){if(preview)setPreview(null);seq.current++;return;}
     const n=++seq.current,timer=setTimeout(async()=>{
       try{const r=await check.mutateAsync(JSON.parse(sig));if(n!==seq.current)return;setPreview(r);setCheckedSig(sig);if(keySig!==sig){setKey(crypto.randomUUID());setKeySig(sig);}}
       catch(e){if(n===seq.current){setPreview(null);setCheckError(errorMessage(e));}}
     },400);
     return ()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[sig,recheck,uncertain]);
+  },[sig,recheck,uncertain,moneyBlocked]);
   const reset=()=>{setDone(null);setError('');};
   async function runCommit(){
-    if(!fresh||!key||commit.isLoading)return;setError('');
-    try{const r=await commit.mutateAsync({...JSON.parse(sig),key});setDone(r);setPreview(null);setKey(null);setKeySig('');setUncertain(false);onDone();
+    // A retry after a lost answer sends exactly the content of the first attempt with its key (never re-read from the fields).
+    const body=uncertain?keySig:sig;if(!uncertain&&!fresh||!key||!body||commit.isLoading)return;setError('');
+    try{const r=await commit.mutateAsync({...JSON.parse(body),key});setDone(r);setPreview(null);setKey(null);setKeySig('');setUncertain(false);onDone();
       toast.success(kind==='PAYPAL'?`Đã nhập ${r.applied} PP (${r.emails} email) vào lô ${r.batch.code}`+(r.errors?` · ${r.errors} dòng cần sửa`:''):`Đã nhập ${r.applied} dòng vào lô ${r.batch.code}`+(r.errors?` · ${r.errors} dòng lỗi`:''));
       // The editor keeps only what is not saved: lines to fix, and codes that wait for "Bổ sung email".
       const keep=new Set(r.rows.filter(x=>x.outcome==='ERROR'||x.outcome==='ADD').map(x=>x.line));
       if(mode==='paste')setText(text.replace(/\r/g,'').split('\n').filter((_,i)=>keep.has(i+1)).join('\n'));else if(!keep.size)setOne({email:'',password:'',twoFa:'',recovery:'',notes:'',code:''});
       // Error lines left: the purchase is recorded, fixing them continues this batch (no money fields, no second cost).
       if(r.errors&&!target)setTarget({id:r.batch.id,code:r.batch.code,type:type||null});
-      setAmount('');setQuantity('');setRate('');
+      setMoney(emptyPurchase());
     }catch(e){setUncertain(true);setError(errorMessage(e)+' · Chưa rõ đã lưu hay chưa. Bấm "Thử lại" (cùng yêu cầu, không nhập hay ghi chi phí hai lần) hoặc "Kiểm tra lại" để xem kho trước.');}
   }
   async function addTo(row:{existingId:string|null;account:string;newEmails?:string[]}){
@@ -81,7 +83,7 @@ export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{p
     try{const r=await addEmails.mutateAsync({projectId,paypalId:row.existingId,emails:row.newEmails,key:crypto.randomUUID()});toast.success(`Đã bổ sung ${r.applied} email vào ${r.code}`+(r.errors?` · ${r.errors} email bị chặn`:''));onDone();setRecheck(n=>n+1);}
     catch(e){toast.error(errorMessage(e));}
   }
-  const ready=preview?.ready||0,total=unitMode?product(quantity,amount):null;
+  const ready=preview?.ready||0;
   const field=(set:(v:string)=>void)=>(e:{target:{value:string}})=>{set(e.target.value);reset();};
   const counts=preview as (Preview&{add?:number;emails?:number})|null;
   return <section className="acc-import" aria-label={kind==='PAYPAL'?'Nhập PayPal':'Nhập Gmail / Apple ID'} data-kind={kind}>
@@ -96,21 +98,15 @@ export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{p
     {!target&&<div className="acc-import-grid">
       <label className="pm-label">Nguồn mua<input className="pm-input" value={source} maxLength={200} disabled={locked} placeholder="Shop / người bán" onChange={field(setSource)}/></label>
       <label className="pm-label">Ngày mua<input type="date" className="pm-input" value={date} disabled={locked} onChange={field(setDate)}/></label>
-      {canCost&&(unitMode?<>
-        <label className="pm-label">Số lượng thực mua<input className="pm-input" inputMode="numeric" value={quantity} disabled={locked} placeholder="Số tài khoản đã trả tiền" onChange={e=>{setQuantity(e.target.value.replace(/\D/g,''));reset();}}/></label>
-        <label className="pm-label">Giá / tài khoản<input className="pm-input" inputMode="decimal" value={amount} disabled={locked} onChange={e=>{setAmount(e.target.value.replace(',','.'));reset();}}/></label></>
-        :<label className="pm-label">Tổng tiền thực trả<input className="pm-input" inputMode="decimal" value={amount} disabled={locked} placeholder="Để trống nếu chưa có giá" onChange={e=>{setAmount(e.target.value.replace(',','.'));reset();}}/></label>)}
-      {priced&&<label className="pm-label">Đồng tiền<select className="pm-input" value={currency} disabled={locked} onChange={field(setCurrency)}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select></label>}
-      {priced&&currency!=='USDT'&&<label className="pm-label">Tỷ giá: 1 USDT = ? {currency}<input className="pm-input" inputMode="decimal" value={rate} disabled={locked} onChange={e=>{setRate(e.target.value.replace(',','.'));reset();}}/></label>}
       <label className="pm-label">Ghi chú lô<input className="pm-input" value={notes} maxLength={1000} disabled={locked} onChange={field(setNotes)}/></label>
     </div>}
-    {!target&&canCost&&<p className="text-xs pm-muted">{unitMode?<><span aria-live="polite">{total?<><strong>{quantity} × {trim(amount)} = {total} {currency}</strong> ghi một lần vào Chi phí. </>:'Nhập số lượng thực mua và giá mỗi tài khoản. '}</span><button type="button" className="underline" disabled={locked} onClick={()=>{setUnitMode(false);setQuantity('');reset();}}>Nhập tổng tiền</button></>
-      :<>{priced?'Ghi một lần vào Chi phí, không đổi theo số dòng nhập được. ':'Không nhập tiền: lô ghi Chưa ghi chi phí. '}<button type="button" className="underline" disabled={locked} onClick={()=>{setUnitMode(true);reset();}}>Tính theo giá mỗi tài khoản</button></>}</p>}
+    {!target&&canCost&&<PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} locked={locked} onChange={v=>{setMoney(v);reset();}}/>}
+    {!target&&canCost&&!m.priced&&<p className="text-xs pm-muted">Không nhập tiền: lô ghi Chưa ghi chi phí (ghi sau ở Lịch sử nhập kho, một lần).</p>}
     {!target&&!canCost&&<p className="pm-muted text-xs">Lô nhập ghi Chưa ghi chi phí. Người có quyền Chi phí ghi tiền thực trả sau ở tab Lô nhập (một lần).</p>}
-    {!empty&&!fresh&&!uncertain&&<p className="text-sm pm-muted" role="status">Đang kiểm tra…{checkError?'':' (chưa nhập gì)'}</p>}
+    {!empty&&!fresh&&!uncertain&&!moneyBlocked&&<p className="text-sm pm-muted" role="status">Đang kiểm tra…{checkError?'':' (chưa nhập gì)'}</p>}
     {checkError&&<p role="alert" className="pm-error text-sm">{checkError}</p>}
     {preview&&fresh&&<>
-      <p className="text-sm" role="status">{kind==='PAYPAL'?<><strong>{preview.ready}</strong> PP mới ({counts?.emails??0} email) · {preview.exists} đã có{counts?.add?<> · <strong>{counts.add}</strong> mã đã có kèm email mới</>:null}</>:<><strong>{preview.ready}</strong> hợp lệ · {preview.exists} đã có</>} · <span className={preview.errors?'text-red-600':''}>{preview.errors} dòng cần sửa</span> · {preview.batch.existing?<>Vào lô <strong>{preview.batch.code}</strong>, {preview.batch.cost==='RECORDED'?'chi phí đã ghi, không ghi thêm':'chưa ghi chi phí (ghi ở tab Lô nhập)'}.</>:<>Lô mới <strong>{preview.batch.code}</strong>{preview.batch.total?<> · chi phí ghi một lần: <strong>{trim(preview.batch.total.amount)} {preview.batch.total.currency}</strong> ≈ {trim(preview.batch.total.usdt)} USDT{preview.batch.total.unit&&preview.batch.total.quantity?` (${preview.batch.total.quantity} × ${trim(preview.batch.total.unit)})`:''}.</>:preview.batch.cost==='WILL_RECORD'?' · chi phí ghi một lần.':' · Chưa ghi chi phí.'}</>}</p>
+      <p className="text-sm" role="status">{kind==='PAYPAL'?<><strong>{preview.ready}</strong> PP mới ({counts?.emails??0} email) · {preview.exists} đã có{counts?.add?<> · <strong>{counts.add}</strong> mã đã có kèm email mới</>:null}</>:<><strong>{preview.ready}</strong> hợp lệ · {preview.exists} đã có</>} · <span className={preview.errors?'text-red-600':''}>{preview.errors} dòng cần sửa</span> · {preview.batch.existing?<>Vào lô <strong>{preview.batch.code}</strong>, {preview.batch.cost==='RECORDED'?'chi phí đã ghi, không ghi thêm':'chưa ghi chi phí (ghi ở tab Lô nhập)'}.</>:<>Lô mới <strong>{preview.batch.code}</strong>{preview.batch.total?<> · chi phí ghi một lần: <strong>{formatMoney(preview.batch.total.amount,preview.batch.total.currency,{exact:true})}</strong>{preview.batch.total.currency!=='USDT'?<> ≈ <span title={'Lưu chính xác: '+formatMoney(preview.batch.total.usdt,'USDT',{exact:true})}>{formatMoney(preview.batch.total.usdt,'USDT')}</span></>:null}{preview.batch.total.unit&&preview.batch.total.quantity?` (${preview.batch.total.quantity} ${unitWord} × ${formatMoney(preview.batch.total.unit,preview.batch.total.currency,{exact:true})})`:''}.</>:preview.batch.cost==='WILL_RECORD'?' · chi phí ghi một lần.':' · Chưa ghi chi phí.'}</>}</p>
       <div className="vm-bulk-table"><table className="pm-table"><thead><tr><th>Dòng</th><th>{kind==='PAYPAL'?'Mã PP · Email':'Tài khoản'}</th>{kind==='LOGIN'&&<th>Có</th>}<th>Kết quả</th></tr></thead><tbody>{preview.rows.map(r=><tr key={r.line} className={r.outcome==='ERROR'?'pm-row-blocked':''}><td className="pm-muted">{r.line}</td><td className="whitespace-nowrap">{r.account}{kind==='PAYPAL'&&<span className="pm-muted"> · {r.email}</span>}</td>
         {kind==='LOGIN'&&<td className="text-xs pm-muted whitespace-nowrap">{[r.hasPassword&&'mật khẩu',r.has2fa&&'2FA',r.hasRecovery&&'khôi phục'].filter(Boolean).join(', ')||'—'}</td>}
         <td className={r.outcome==='ERROR'?'text-red-600':r.outcome==='EXISTS'?'pm-muted':r.outcome==='ADD'?'':'text-green-700'}>{r.outcome==='READY'?'Hợp lệ':r.outcome==='EXISTS'?'Đã có':r.outcome==='ADD'?'Mã đã có':'Cần sửa'} · {r.message}{r.outcome==='ADD'&&r.newEmails?.length?<> <button type="button" className="pm-button pm-button-quiet" disabled={locked||addEmails.isLoading} onClick={()=>void addTo(r)}>Bổ sung {r.newEmails.length} email vào {r.account}</button></>:null}</td></tr>)}</tbody></table></div></>}
@@ -118,6 +114,6 @@ export function ImportPanel({projectId,kind,canCost,onDone,onClose,onDiscard}:{p
     {error&&<p role="alert" className="pm-error text-sm">{error}</p>}
     <div className="flex gap-2 justify-end flex-wrap">{(text||one.email||one.code||preview)&&<button type="button" className="pm-button pm-button-quiet mr-auto" disabled={locked} onClick={onDiscard}>Bỏ nháp</button>}<button type="button" className="pm-button pm-button-quiet" disabled={locked} title="Nội dung đang nhập được giữ trong phiên này" onClick={onClose}>Đóng</button>
       {uncertain?<><button type="button" className="pm-button" disabled={busy} onClick={()=>{setUncertain(false);setError('');setRecheck(n=>n+1);onDone();}}>Kiểm tra lại</button><button type="button" className="pm-button pm-button-primary" disabled={busy} onClick={()=>void runCommit()}>{busy?'Đang gửi lại…':'Thử lại'}</button></>
-        :<button type="button" className="pm-button pm-button-primary" disabled={busy||!fresh||!ready} onClick={()=>void runCommit()}>{busy?'Đang nhập…':kind==='LOGIN'&&!type?'Chọn Gmail hoặc Apple ID':!fresh?'Đang kiểm tra…':!ready?'Không có dòng mới để nhập':kind==='PAYPAL'?`Nhập ${ready} PP (${counts?.emails??0} email)`:`Nhập ${ready} dòng hợp lệ`}</button>}</div>
+        :<button type="button" className="pm-button pm-button-primary" disabled={busy||!fresh||!ready} onClick={()=>void runCommit()}>{busy?'Đang nhập…':kind==='LOGIN'&&!type?'Chọn Gmail hoặc Apple ID':moneyBlocked?'Sửa ô tiền mua':!fresh?'Đang kiểm tra…':!ready?'Không có dòng mới để nhập':kind==='PAYPAL'?`Nhập ${ready} PP (${counts?.emails??0} email)`:`Nhập ${ready} dòng hợp lệ`}</button>}</div>
   </section>;
 }

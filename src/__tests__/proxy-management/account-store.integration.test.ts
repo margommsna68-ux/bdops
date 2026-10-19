@@ -286,3 +286,38 @@ it('Kho tài khoản serves a PayPal-only member its PayPal part (no logins, no 
     await expect(readAccountStore({...f.scope,userId:none,role:'USER'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
   }finally{await db.projectMember.deleteMany({where:{userId:{in:[pp,none]}}});await db.user.deleteMany({where:{id:{in:[pp,none]}}});await f.cleanup();}
 });
+// Owner brief 19/10/2026: 6 PP × 70.000 VND at 1 USDT = 25.820 VND. The rate "25.820" typed in the old form reached the server as
+// 25.82 (16.266 USDT). Forms now send canonical numbers only, and the batch endpoints refuse Vietnamese-formatted text instead of
+// reading it a second way. A Binance P2P quote keeps its source and time on the cost; an expired one is refused, never re-priced.
+it('6 PP / 30 emails × 70.000 VND at 25.820: one cost of 420.000 VND = 16,266460 USDT with the quote source, retries write once',async()=>{
+  const f=await setup();try{
+    const {sealP2PQuote}=await import('@/server/business-management/binance-p2p');
+    const tag=u(),text=Array.from({length:6},(_,i)=>`pp-${tag}-${i+1} `+Array.from({length:5},(_,j)=>`m${j}-${i}-${tag}@example.invalid`).join(' ')).join('\n');
+    const fetchedAt=new Date(Date.now()-60000).toISOString(),token=sealP2PQuote({fiat:'VND',side:'BUY',rate:'25820.000000000000',fetchedAt,source:'BINANCE_P2P'},f.scope);
+    const batch={source:'Shop PP',purchasedAt:'2026-10-19',priceMode:'UNIT' as const,amount:'70000',quantity:6,currency:'VND',rate:'25820',p2pQuoteToken:token};
+    for(const wrong of [{amount:'70.000'},{rate:'25.820'},{rate:'25,82'}])
+      await expect(previewStockImport(f.scope,{kind:'PAYPAL',text,batch:{...batch,...wrong}},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    const preview=await previewStockImport(f.scope,{kind:'PAYPAL',text,batch},db);
+    expect(preview.batch.total).toMatchObject({amount:'420000.00000000',currency:'VND',usdt:'16.266460',quantity:6,unit:'70000.00000000'});
+    const key=randomUUID(),done=await commitStockImport(f.scope,{kind:'PAYPAL',text,batch,key},db),again=await commitStockImport(f.scope,{kind:'PAYPAL',text,batch,key},db);
+    expect(done).toMatchObject({applied:6,emails:30});expect(again.batch.id).toBe(done.batch.id);expect(await costs(f.scope.projectId)).toBe(1);
+    const b=await db.accountPurchaseBatch.findUniqueOrThrow({where:{id:done.batch.id},include:{costRecord:true}});
+    expect(b.paidQuantity).toBe(6);expect(b.totalPaid?.toString()).toBe('420000');
+    expect(b.costRecord).toMatchObject({currency:'VND',fxSource:'BINANCE_P2P_BUY'});expect(b.costRecord!.usdtAmount!.toString()).toBe('16.26646');expect(b.costRecord!.usdtRate!.toString()).toBe('25820');expect(b.costRecord!.fxAppliedAt!.toISOString()).toBe(fetchedAt);
+    // A manual rate is recorded as such; an expired quote is refused at the line, nothing is written.
+    const manual=await previewStockImport(f.scope,{kind:'PAYPAL',text:`pp-${tag}-m a@${tag}.example.invalid`,batch:{...batch,rate:'26000',p2pQuoteToken:null}},db);expect(manual.batch.total?.usdt).toBe('16.153846');
+    const stale=sealP2PQuote({fiat:'VND',side:'BUY',rate:'25820',fetchedAt:new Date(Date.now()-11*60000).toISOString(),source:'BINANCE_P2P'},f.scope);
+    await expect(commitStockImport(f.scope,{kind:'PAYPAL',text:`pp-${tag}-x x@${tag}.example.invalid`,batch:{...batch,p2pQuoteToken:stale},key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    expect(await costs(f.scope.projectId)).toBe(1);
+  }finally{await f.cleanup();}
+});
+it('Ghi chi phí of a batch received without price: canonical numbers only, one cost, same key replays',async()=>{
+  const f=await setup();try{
+    const tag=u(),done=await commitStockImport(f.scope,{kind:'PAYPAL',text:`pp-${tag} a@${tag}.example.invalid b@${tag}.example.invalid`,batch:{purchasedAt:'2026-10-19',priceMode:'NONE'},key:randomUUID()},db);
+    const b=await db.accountPurchaseBatch.findUniqueOrThrow({where:{id:done.batch.id}}),input={batchId:b.id,expectedRevision:b.revision,priceMode:'TOTAL' as const,amount:'420000',currency:'VND',rate:'25820'};
+    await expect(recordBatchCost(f.scope,{...input,rate:'25.820',key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    const key=randomUUID();await recordBatchCost(f.scope,{...input,key},db);await recordBatchCost(f.scope,{...input,key},db);
+    const after=await db.accountPurchaseBatch.findUniqueOrThrow({where:{id:b.id},include:{costRecord:true}});
+    expect(await costs(f.scope.projectId)).toBe(1);expect(after.costRecord!.usdtAmount!.toString()).toBe('16.26646');expect(after.costRecord!.fxSource).toBe('MANUAL');
+  }finally{await f.cleanup();}
+});

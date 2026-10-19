@@ -1,3 +1,4 @@
+import {formatUsd} from './money-input';
 // VM operation cycle (owner brief 18/10/2026), shared by the Server/VM grid, Kho tài khoản and the server so labels, priority and
 // money states are computed the same way everywhere. Pure functions, exact cents (no floating point).
 export const VM_OPS_STATUSES=['OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED'] as const;
@@ -59,7 +60,10 @@ export function milestoneOf(m:{phase:RequestPhase;consumed:boolean}|null):Milest
 // ─── PayPal gathering label (USD only; 100 USD is the minimum target of a PP code, not a cap) ─────────────────────────────────
 export const GATHER_TARGET_CENTS=10000;
 export type Gather='GATHERING'|'PROJECTED'|'REACHED';
-export const GATHER_LABEL:Record<Gather,string>={GATHERING:'Đang gom',PROJECTED:'Dự kiến đủ 100 USD',REACHED:'Đạt mức gom'};
+// Labels carry the unit (owner brief 19/10/2026: the host showed "0" and "Đang gom · thiếu 100,00"). Only USD uses "$".
+export const GATHER_LABEL:Record<Gather,string>={GATHERING:'Đang gom',PROJECTED:'Dự kiến đủ $100,00',REACHED:'Đạt mức gom $100,00'};
+/** One line for a PP: "Đang gom · thiếu $100,00", "Dự kiến đủ $100,00" (only with money still to come), "Đạt mức gom $100,00" (book balance). */
+export function gatherText(g:{state:Gather;label:string;missing:string}){return g.state==='GATHERING'?g.label+' · thiếu '+formatUsd(g.missing):g.label;}
 export function gatherOf(balanceUsd:string|null,pendingUsd:string|null,extra='0'){
   const b=balanceUsd==null?0:toCents(balanceUsd),p=pendingUsd==null?0:toCents(pendingUsd),x=toCents(extra||'0');
   const state:Gather=b>=GATHER_TARGET_CENTS?'REACHED':b+p>=GATHER_TARGET_CENTS?'PROJECTED':'GATHERING';

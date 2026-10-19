@@ -6,7 +6,8 @@ import toast from 'react-hot-toast';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
-import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,PP_STATUS_LABEL,gatherOf,type VmOpsStatus} from '@/lib/vm-ops';
+import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,PP_STATUS_LABEL,gatherOf,gatherText,type VmOpsStatus} from '@/lib/vm-ops';
+import {formatLedger,formatUsd} from '@/lib/money-input';
 import {viMoney} from '@/components/account-store/batch-format';
 import type {ManagedVM} from '../shared';
 import type {VmAccount} from './AccountCell';
@@ -65,7 +66,7 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone}:{projectId:s
     else face=rights.writeMoney?<span className="text-xs pm-link">Ghi yêu cầu rút</span>:<span className="pm-muted text-xs">Chưa yêu cầu rút</span>;
   }else{
     const label=ops?.milestone?MILESTONE_LABEL[ops.milestone as keyof typeof MILESTONE_LABEL]:'Đã yêu cầu';
-    face=<><span className={'vm-money vm-money-'+(ops?.milestone||'none').toLowerCase()}>{label}</span><span className="vm-money-line text-xs vm-ellipsis">{r.paypal}{m?' · '+viMoney(m.amount)+' '+m.currency+(r.phase==='WAITING'&&m.received!=='0.00'?' · còn '+viMoney(m.remaining):''):''}</span></>;
+    face=<><span className={'vm-money vm-money-'+(ops?.milestone||'none').toLowerCase()}>{label}</span><span className="vm-money-line text-xs vm-ellipsis">{r.paypal}{m?' · '+formatLedger(m.amount,m.currency)+(r.phase==='WAITING'&&m.received!=='0.00'?' · còn '+formatLedger(m.remaining,m.currency):''):''}</span></>;
   }
   const clickable=hasEarnApp&&(!!r||rights.writeMoney)||canRecreate;
   return <div className="vm-payout">
@@ -95,7 +96,7 @@ function RequestSummary({request:r,milestone}:{request:NonNullable<OpsRow['reque
   const m=r.money;
   return <div className="text-xs space-y-1">
     <p>Yêu cầu ngày {r.requestedAt.split('-').reverse().join('/')} · <strong>{r.paypal}</strong> · {r.email}{r.reference?' · mã '+r.reference:''}</p>
-    {m?<p>Yêu cầu <strong>{viMoney(m.amount)} {m.currency}</strong> · đã về PP <strong>{viMoney(m.received)}</strong>{m.pendingLinked!=='0.00'?' · chờ nhận '+viMoney(m.pendingLinked):''}{r.phase==='WAITING'?' · còn chờ '+viMoney(m.remaining):''}{m.shortfall?' · chốt thiếu '+viMoney(m.shortfall)+' ('+m.settleNote+')':''}</p>:<p className="pm-muted">Số tiền chỉ hiện cho người có quyền tiền.</p>}
+    {m?<p>Yêu cầu <strong>{formatLedger(m.amount,m.currency)}</strong> · đã về PP <strong>{formatLedger(m.received,m.currency)}</strong>{m.pendingLinked!=='0.00'?' · chờ nhận '+formatLedger(m.pendingLinked,m.currency):''}{r.phase==='WAITING'?' · còn chờ '+formatLedger(m.remaining,m.currency):''}{m.shortfall?' · chốt thiếu '+formatLedger(m.shortfall,m.currency)+' ('+m.settleNote+')':''}</p>:<p className="pm-muted">Số tiền chỉ hiện cho người có quyền tiền.</p>}
     {r.state!=='REQUESTED'&&<p className="text-amber-600">{r.state==='FAILED'?'Thất bại':'Đã huỷ'}{r.stateNote?': '+r.stateNote:''}</p>}
     {milestone==='RECREATE'&&<p className="text-emerald-600">Tiền đã về đủ PP. Tạo lại máy thật xong thì bấm “Ghi nhận đã tạo lại VM”.</p>}
     {milestone==='MONEY_REVIEW'&&<p className="text-amber-600">Tiền về khác số yêu cầu hoặc khác đồng tiền; cần đối chiếu ở Kho tài khoản.</p>}
@@ -126,12 +127,12 @@ function RequestForm({projectId,vm,cycle,lock,onDone}:{projectId:string;vm:Manag
   if(!data.earnApp)return <p className="text-xs pm-muted">VM chưa có tài khoản EarnApp; gán tài khoản trước.</p>;
   return <div className="space-y-2 text-sm">
     <div className="flex gap-2 items-center flex-wrap"><label className="text-xs flex items-center gap-1"><input type="checkbox" checked={onlyUsable} onChange={e=>setOnlyUsable(e.target.checked)}/>PP dùng được, còn email</label>
-      {data.rights.balance&&<select aria-label="Sắp xếp PP" className="pm-input w-auto text-xs" value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="NEAR">Gần đạt 100 trước</option><option value="REACHED">Đã đạt 100 trước</option><option value="BALANCE">Số dư cao trước</option></select>}</div>
+      {data.rights.balance&&<select aria-label="Sắp xếp PP" className="pm-input w-auto text-xs" value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="NEAR">Gần đạt $100 trước</option><option value="REACHED">Đã đạt $100 trước</option><option value="BALANCE">Số dư cao trước</option></select>}</div>
     <label className="pm-label text-xs">Mã PP<select className="pm-input" value={ppId} disabled={save.isLoading} onChange={e=>{setPp(e.target.value);const x=data.paypals.find(y=>y.id===e.target.value);setEmail(x?.emails.find(m=>m.own)?.id||x?.emails[0]?.id||'');}}>
-      <option value="">Chọn mã PP</option>{list.map(x=><option key={x.id} value={x.id}>{x.code} · {PP_STATUS_LABEL[x.status]||x.status}{x.balanceUsd!==null?' · '+viMoney(x.balanceUsd)+' USD':''} · {x.unused} email trống{x.emails.some(e=>e.own)?' · đang dùng':''}</option>)}</select></label>
+      <option value="">Chọn mã PP</option>{list.map(x=><option key={x.id} value={x.id}>{x.code} · {PP_STATUS_LABEL[x.status]||x.status}{x.balanceUsd!==null?' · số dư '+formatUsd(x.balanceUsd):''} · {x.unused} email trống{x.emails.some(e=>e.own)?' · đang dùng':''}</option>)}</select></label>
     {pp&&<div className="vm-pp-info text-xs" aria-live="polite">
       <span>Tình trạng <strong className={pp.usable?'':'text-amber-600'}>{PP_STATUS_LABEL[pp.status]||pp.status}</strong></span>
-      {g?<><span>Số dư USD <strong>{viMoney(pp.balanceUsd!)}</strong></span><span>Còn chờ <strong>{viMoney(pp.pendingUsd!)}</strong></span><span>Thiếu đến 100 <strong>{viMoney(g.missing)}</strong></span><span>Sau khoản này <strong>{viMoney(g.projectedWith)}</strong></span><span className="vm-gather">{g.label}</span></>:<span className="pm-muted">Số dư cần quyền xem tiền vào và tiền ra</span>}
+      {g?<><span>Số dư USD <strong>{formatUsd(pp.balanceUsd!)}</strong></span><span>Chờ về <strong>{formatUsd(pp.pendingUsd!)}</strong></span><span>Thiếu đến $100,00 <strong>{formatUsd(g.missing)}</strong></span><span>Sau khoản này <strong>{formatUsd(g.projectedWith)}</strong></span><span className="vm-gather">{gatherText(g)}</span></>:<span className="pm-muted">Số dư cần quyền xem tiền vào và tiền ra</span>}
       <span>Email chưa dùng còn <strong>{pp.unused}</strong></span></div>}
     {pp&&<label className="pm-label text-xs">Email nhận<select className="pm-input" value={emailId} disabled={save.isLoading} onChange={e=>setEmail(e.target.value)}>{pp.emails.map(e=><option key={e.id} value={e.id}>{e.email}{e.own?' (đang giữ cho EarnApp này)':''}</option>)}</select>
       {emailId&&emailId!==own&&<span className="text-xs pm-muted">Email mới sẽ được giữ riêng cho {data.earnApp.login} khi lưu; email đã gán không cấp cho EarnApp khác.</span>}</label>}

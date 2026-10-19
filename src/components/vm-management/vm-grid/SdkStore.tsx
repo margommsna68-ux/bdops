@@ -8,6 +8,7 @@ import {trpc} from '@/lib/trpc';
 import {amountInput,canonicalAmount,formatSdkAmount,parseSdkAmount,SDK_NOTE_MAX,SDK_STATE_LABEL} from '@/lib/sdk-money';
 import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {errorMessage,useVMRefresh} from '../shared';
+import {useBusinessKey} from '@/components/business-management/shared';
 import {pageOf,type SdkPlaceFilter,type SdkSort,type SdkStateFilter,type SdkStoreUrl} from './grid-model';
 import {SdkTimeline,placeText,stateClass,type StoreSdk} from './SdkCell';
 type Preview=inferRouterOutputs<AppRouter>['vmManagement']['sdkStorePreview'];
@@ -64,21 +65,28 @@ function StoreRow({projectId,r,open,onToggle,canEdit,onOpenVm}:{projectId:string
 }
 function StoreDetail({projectId,r,canEdit}:{projectId:string;r:StoreSdk;canEdit:boolean}){
   const info=trpc.vmManagement.sdkInfo.useMutation(),confirm=trpc.vmManagement.sdkConfirm.useMutation(),utils=trpc.useUtils(),refresh=useVMRefresh();
-  const [amount,setAmount]=useState(amountInput(r.amount)),[note,setNote]=useState(r.note||''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  useEffect(()=>{setAmount(amountInput(r.amount));setNote(r.note||'');},[r.revision,r.amount,r.note]);
+  // The version the edit started from: while nothing is typed the fields follow the store; once typed, a newer version from someone
+  // else never replaces the typed text nor becomes the expected revision by itself (the save would then overwrite their value). The
+  // person sees the new value and chooses "So với bản mới" explicitly.
+  const [base,setBase]=useState({revision:r.revision,amount:r.amount,note:r.note}),[touched,setTouched]=useState(false);
+  const [amount,setAmount]=useState(amountInput(r.amount)),[note,setNote]=useState(r.note||''),[error,setError]=useState(''),[busy,setBusy]=useState(false),keyFor=useBusinessKey();
+  useEffect(()=>{if(touched)return;setBase({revision:r.revision,amount:r.amount,note:r.note});setAmount(amountInput(r.amount));setNote(r.note||'');},[r.revision,r.amount,r.note,touched]);
   const parsed=amount.trim()?parseSdkAmount(amount):null,amountError=parsed&&'error' in parsed?parsed.error:'',value=parsed&&'value' in parsed?parsed.value:null;
-  const amountChanged=(amount.trim()?value:null)!==canonicalAmount(r.amount),noteChanged=(note.trim()||null)!==(r.note||null),changed=(amountChanged||noteChanged)&&!amountError;
-  async function run(fn:()=>Promise<{message:string}>){if(busy)return;setBusy(true);setError('');try{const x=await fn();toast.success(x.message,{duration:2000});await Promise.all([utils.vmManagement.sdkStore.invalidate(),utils.vmManagement.sdkDetail.invalidate(),refresh()]);}catch(e){setError(errorMessage(e));}finally{setBusy(false);}}
-  const save=()=>{if(!changed)return;void run(()=>info.mutateAsync({projectId,key:crypto.randomUUID(),sdkId:r.id,expectedRevision:r.revision,amount:amountChanged?(amount.trim()?amount:null):undefined,note:noteChanged?(note.trim()||null):undefined}));};
-  const keys=(e:React.KeyboardEvent,multi=false)=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!(multi&&e.shiftKey)){e.preventDefault();save();}if(e.key==='Escape'){setAmount(amountInput(r.amount));setNote(r.note||'');}};
+  const amountChanged=(amount.trim()?value:null)!==canonicalAmount(base.amount),noteChanged=(note.trim()||null)!==(base.note||null),changed=(amountChanged||noteChanged)&&!amountError;
+  const moved=touched&&r.revision!==base.revision;
+  async function run(fn:()=>Promise<{message:string}>,after?:()=>void){if(busy)return;setBusy(true);setError('');try{const x=await fn();toast.success(x.message,{duration:2000});after?.();await Promise.all([utils.vmManagement.sdkStore.invalidate(),utils.vmManagement.sdkDetail.invalidate(),refresh()]);}catch(e){setError(errorMessage(e));}finally{setBusy(false);}}
+  const save=()=>{if(!changed||moved)return;const input={projectId,sdkId:r.id,expectedRevision:base.revision,amount:amountChanged?(amount.trim()?amount:null):undefined,note:noteChanged?(note.trim()||null):undefined};void run(()=>info.mutateAsync({...input,key:keyFor(input)}),()=>setTouched(false));};
+  const edit=(set:(v:string)=>void)=>(e:{target:{value:string}})=>{setTouched(true);set(e.target.value);};
+  const keys=(e:React.KeyboardEvent,multi=false)=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!(multi&&e.shiftKey)){e.preventDefault();save();}if(e.key==='Escape'){setTouched(false);setAmount(amountInput(r.amount));setNote(r.note||'');}};
   return <div className="vm-sdk-store-detail-body">
     <div className="space-y-2">
       {r.state==='UNCONFIRMED'&&<div className="pm-review text-sm"><p>Dữ liệu cũ: web chưa có bằng chứng mã này đã hay chưa từng nối EarnApp, nên chưa cho dùng lại.</p>
-        {canEdit&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={busy} onClick={()=>void run(()=>confirm.mutateAsync({projectId,key:crypto.randomUUID(),sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED'}))}>Xác nhận chưa từng nối</button><button className="pm-button" disabled={busy} onClick={()=>void run(()=>confirm.mutateAsync({projectId,key:crypto.randomUUID(),sdkId:r.id,expectedRevision:r.revision,decision:'LINKED'}))}>Đã từng nối (chỉ để tra cứu)</button></div>}</div>}
-      {canEdit?<><div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" placeholder="Chưa ghi tiền" aria-label={'Tiền tích luỹ '+r.code} value={amount} disabled={busy} onChange={e=>setAmount(e.target.value)} onKeyDown={e=>keys(e)}/></label>
-        <label className="pm-label text-xs">Ghi chú<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú '+r.code} value={note} disabled={busy} onChange={e=>setNote(e.target.value)} onKeyDown={e=>keys(e,true)}/></label></div>
+        {canEdit&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Xác nhận chưa từng nối</button><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'LINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Đã từng nối (chỉ để tra cứu)</button></div>}</div>}
+      {canEdit?<><div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" placeholder="Chưa ghi tiền" aria-label={'Tiền tích luỹ '+r.code} value={amount} disabled={busy} onChange={edit(setAmount)} onKeyDown={e=>keys(e)}/></label>
+        <label className="pm-label text-xs">Ghi chú<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú '+r.code} value={note} disabled={busy} onChange={edit(setNote)} onKeyDown={e=>keys(e,true)}/></label></div>
         {amountError&&<p className="vm-cell-error" role="alert">{amountError}</p>}
-        <div className="flex justify-end"><button type="button" className="pm-button pm-button-primary" disabled={!changed||busy} onClick={save}>{busy?'Đang lưu…':'Lưu'}</button></div></>:<p className="text-xs pm-muted">Chỉ xem.</p>}
+        {moved&&<p className="pm-review text-xs" role="alert">Người khác vừa sửa mã này: tiền hiện {formatSdkAmount(r.amount)||'chưa ghi'}{r.note!==base.note?' · ghi chú đã đổi':''}. Nội dung bạn nhập được giữ; bấm <button type="button" className="underline" onClick={()=>setBase({revision:r.revision,amount:r.amount,note:r.note})}>So với bản mới</button> rồi lưu nếu vẫn muốn ghi.</p>}
+        <div className="flex justify-end"><button type="button" className="pm-button pm-button-primary" disabled={!changed||busy||moved} onClick={save}>{busy?'Đang lưu…':'Lưu'}</button></div></>:<p className="text-xs pm-muted">Chỉ xem.</p>}
       {error&&<p role="alert" className="vm-status-error">{error}</p>}
     </div>
     <div><h4 className="text-xs font-semibold mb-1">Lịch sử mã</h4><SdkTimeline projectId={projectId} sdkId={r.id}/></div>
@@ -89,16 +97,18 @@ const RESULT:Record<string,string>={NEW:'Thêm mới',UPDATE:'Cập nhật',SAME
 function StorePaste({projectId}:{projectId:string}){
   const preview=trpc.vmManagement.sdkStorePreview.useMutation(),apply=trpc.vmManagement.sdkStoreApply.useMutation(),utils=trpc.useUtils(),refresh=useVMRefresh();
   const [text,setText]=useState(()=>{try{return localStorage.getItem(pasteKey(projectId))||'';}catch{return '';}});
-  const [result,setResult]=useState<Preview|null>(null),[applied,setApplied]=useState<ApplyResult|null>(null),[summary,setSummary]=useState(''),[error,setError]=useState(''),[checking,setChecking]=useState(false);
+  const [checked,setResult]=useState<(Preview&{text:string})|null>(null),[applied,setApplied]=useState<ApplyResult|null>(null),[summary,setSummary]=useState(''),[error,setError]=useState(''),[checking,setChecking]=useState(false);
   // One key per checked content: an unanswered save keeps it, so "Lưu" again replays instead of writing twice.
   const key=useRef<{text:string;key:string}|null>(null),seq=useRef(0);
   useEffect(()=>{try{if(text.trim())localStorage.setItem(pasteKey(projectId),text);else localStorage.removeItem(pasteKey(projectId));}catch{/* private mode */}},[projectId,text]);
-  useEffect(()=>{setApplied(null);setError('');if(!text.trim()){setResult(null);return;}const n=++seq.current;setChecking(true);
-    const t=setTimeout(()=>{preview.mutateAsync({projectId,text}).then(r=>{if(n===seq.current)setResult(r);}).catch(e=>{if(n===seq.current){setResult(null);setError(errorMessage(e));}}).finally(()=>{if(n===seq.current)setChecking(false);});},400);
+  // A check answer counts only for the text it was made for: changing or clearing the box while a check runs never leaves the old
+  // list savable (the late answer is dropped by the sequence number and, in any case, no longer matches the text).
+  useEffect(()=>{setApplied(null);setError('');const n=++seq.current;if(!text.trim()){setResult(null);setChecking(false);return;}setChecking(true);
+    const t=setTimeout(()=>{preview.mutateAsync({projectId,text}).then(r=>{if(n===seq.current)setResult({...r,text});}).catch(e=>{if(n===seq.current){setResult(null);setError(errorMessage(e));}}).finally(()=>{if(n===seq.current)setChecking(false);});},400);
     return ()=>clearTimeout(t);},[text,projectId]);// eslint-disable-line react-hooks/exhaustive-deps
-  const ready=result?result.rows.filter(r=>r.outcome==='NEW'||r.outcome==='UPDATE'):[];
+  const result=checked&&(checked.text===text||applied)?checked:null,ready=result&&result.text===text?result.rows.filter(r=>r.outcome==='NEW'||r.outcome==='UPDATE'):[];
   async function save(){
-    if(!result||!ready.length||apply.isLoading)return;if(key.current?.text!==text)key.current={text,key:crypto.randomUUID()};setError('');
+    if(!result||result.text!==text||!ready.length||apply.isLoading)return;if(key.current?.text!==text)key.current={text,key:crypto.randomUUID()};setError('');
     try{const r=await apply.mutateAsync({projectId,key:key.current.key,rows:ready.map(x=>({line:x.line,code:x.code,expectedRevision:x.expectedRevision,amount:x.amount,note:x.note}))});
       setApplied(r);key.current=null;await Promise.all([utils.vmManagement.sdkStore.invalidate(),refresh()]);
       const line=`Đã lưu ${r.saved} SDK`+(r.same?` · ${r.same} giữ nguyên`:'')+(r.errors?` · ${r.errors} lỗi`:'');toast.success(line);

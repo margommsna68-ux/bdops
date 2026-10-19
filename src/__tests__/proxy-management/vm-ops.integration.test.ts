@@ -92,7 +92,7 @@ describe('PayPal gom tiền và yêu cầu rút',()=>{
     const f=await setup();try{
       await recordOpening(f.scope,{paypalId:f.pp13.id,date:today,currency:'USD',amount:'82',key:randomUUID()},db);
       await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'18');
-      let g=(await readPaypalGather(f.scope,db)).paypals.find(p=>p.paypalId===f.pp13.id)!;expect(g.gather).toMatchObject({state:'PROJECTED',label:'Dự kiến đủ 100 USD',missing:'18.00'});
+      let g=(await readPaypalGather(f.scope,db)).paypals.find(p=>p.paypalId===f.pp13.id)!;expect(g.gather).toMatchObject({state:'PROJECTED',label:'Dự kiến đủ $100,00',missing:'18.00'});
       await f.receive(f.pp13.id,f.emails[0].email,'18');
       g=(await readPaypalGather(f.scope,db)).paypals.find(p=>p.paypalId===f.pp13.id)!;expect(g).toMatchObject({balanceUsd:'100.00',pendingUsd:'0.00'});expect(g.gather!.state).toBe('REACHED');
       const {recordTransfer}=await import('@/server/business-management/paypal-ledger');
@@ -160,7 +160,7 @@ describe('Tạo lại VM',()=>{
     const f=await setup();try{
       const {endpoint,config}=await installProxy(f,0,11);
       await f.link(0,0,f.emails[0].id);const v0=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});
-      await saveVmSdk(f.scope,{key:randomUUID(),vmId:v0.id,expectedVmRevision:v0.revision,expectedCycle:1,code:'sdk-old-'+f.x,amount:'7,5'},db);
+      await saveVmSdk(f.scope,{key:randomUUID(),vmId:v0.id,expectedVmRevision:v0.revision,expectedCycle:1,code:'sdk-old-'+f.x,expectedSdkRevision:null,amount:'7,5'},db);
       await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'OK',expectedCycle:1}]},db);
       const req=await f.request(0,f.emails[0].id,'24');await f.receive(f.pp13.id,f.emails[0].email,'24');
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);expect(r).toMatchObject({cycle:2,proxyKept:true});

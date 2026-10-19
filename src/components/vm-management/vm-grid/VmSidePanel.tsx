@@ -1,4 +1,5 @@
 "use client";
+import {formatLedger} from '@/lib/money-input';
 import Link from 'next/link';
 import {Copy,X} from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -19,7 +20,6 @@ import {links} from '@/lib/links';
 import {moduleOn} from '@/lib/features';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
 import {opsLabel,type VmOpsStatus} from '@/lib/vm-ops';
-import {viMoney} from '@/components/account-store/batch-format';
 const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Proxy'},{key:'install',label:'Cài proxy'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 const ROLE:Record<string,string>={DESIRED:'Chờ cài',INSTALLED:'Đã cài',UNCERTAIN:'Giữ để kiểm tra'};
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Chưa bắt đầu',IN_PROGRESS:'Đang cài',FAILED:'Cài chưa xong',CONFIRMED:'Đã xác nhận',CANCELLED:'Đã huỷ'};
@@ -105,7 +105,7 @@ function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
   return <div className="space-y-3">
     <div><h3 className="text-sm font-semibold mb-2">Lượt vận hành đã đóng</h3>{d.cycles.length?<ul className="text-xs space-y-1">{d.cycles.map(c=><li key={c.number}><strong>Lượt {c.number}</strong> · {c.reason==='SUSPENDED'?'SUS':'tiền đã về đủ'} · {c.login||'không có EarnApp'}{c.sdk?' · SDK '+c.sdk:''} · tình trạng cuối {opsLabel(c.status as VmOpsStatus|null)}{c.proxyKept?' · giữ proxy':''} · {c.by} {localDate(c.closedAt)}{c.note?' · '+c.note:''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa tạo lại lần nào (lượt 1).</p>}</div>
     <div><h3 className="text-sm font-semibold mb-2">Yêu cầu rút EarnApp</h3>{d.requests.length?<ul className="text-xs space-y-2">{d.requests.map(r=><li key={r.id}><div><strong>Lượt {r.cycle}</strong> · {r.login} · {r.paypal} · {r.email} · ngày {r.requestedAt.split('-').reverse().join('/')} · {PHASE[r.phase]||r.phase}{r.consumed?' · đã dùng để tạo lại VM':''}{r.reviewAfterRecreate?<span className="text-amber-600"> · cần đối chiếu (khoản nhận đổi sau khi tạo lại; VM giữ lượt mới)</span>:null}</div>
-      {r.money&&<div className="pm-muted">Yêu cầu {viMoney(r.money.amount)} {r.money.currency} · đã về {viMoney(r.money.received)}{r.money.remaining!=='0.00'?' · còn chờ '+viMoney(r.money.remaining):''}{r.money.receipts.length?' · '+r.money.receipts.map(x=>x.date.split('-').reverse().join('/')+' '+viMoney(x.amount)+' ('+x.status+')').join(', '):''}</div>}
+      {r.money&&<div className="pm-muted">Yêu cầu {formatLedger(r.money.amount,r.money.currency)} · đã về {formatLedger(r.money.received,r.money.currency)}{r.money.remaining!=='0.00'?' · còn chờ '+formatLedger(r.money.remaining,r.money.currency):''}{r.money.receipts.length?' · '+r.money.receipts.map(x=>x.date.split('-').reverse().join('/')+' '+formatLedger(x.amount,r.money!.currency)+' ('+x.status+')').join(', '):''}</div>}
       <div className="pm-muted">{r.history.map((x,i)=><span key={i} className="block">{localDate(x.at)} · {x.by}: {x.what}</span>)}</div></li>)}</ul>:<p className="pm-muted text-xs">Chưa có yêu cầu rút.</p>}</div>
     <div><h3 className="text-sm font-semibold mb-2">Tình trạng đã ghi</h3>{d.events.length?<ul className="text-xs space-y-1">{d.events.map(e=><li key={e.id}>{localDate(e.at)} · {e.by} · lượt {e.cycle} · {e.kind==='RECREATE'?'Ghi nhận tạo lại VM → ':e.kind==='UNDO'?'Hoàn tác trên web: ':''}{opsLabel(e.from as VmOpsStatus|null)} → {opsLabel(e.to as VmOpsStatus|null)}{e.note?' · '+e.note:''}{e.kind==='RECREATE'&&e.detail&&typeof e.detail==='object'&&'proxy' in (e.detail as object)?' · '+String((e.detail as {proxy:string}).proxy):''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa ghi tình trạng (Chưa ghi).</p>}</div>
   </div>;

@@ -270,3 +270,7 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 /* Kho SDK scrolls as a whole, so the paste results and "Lưu N SDK" are always reachable with the mouse wheel / touch. */
 .vm-sdk-store{overflow-y:auto;overscroll-behavior:contain}
 .vm-sdk-store-table{flex:none;overflow-x:auto;overflow-y:visible}
+/* Purchase money (Kho tài khoản, 19/10/2026): errors stay at their field; the formula line keeps the units. */
+.acc-money{display:flex;flex-direction:column;gap:8px}
+.pm-field-error{display:block;color:#b91c1c;font-size:12px;line-height:1.35;font-weight:400;margin-top:2px;white-space:normal}
+.acc-money-sum{font-variant-numeric:tabular-nums}
