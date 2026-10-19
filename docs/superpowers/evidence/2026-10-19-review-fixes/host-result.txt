@@ -1,0 +1,14 @@
+Host moneytohome.up.railway.app, owner API, READ-ONLY (no write; proxyCheck is a check; the retired start command refuses).
+Before: 2026-10-19T12:01:32.538Z  After: 2026-10-19T12:07:06.326Z
+
+servers: SAME 10
+vms: SAME 576
+newRule: SAME {"total": 576, "missing": 0, "assigned": 553, "blocked": 0, "review": 23}
+oldRule: SAME {"pending": 574, "installed": 1, "both": 0, "uncertain": 22}
+ops: SAME [["Chưa ghi", 506], ["NOT_LINKED", 70]]
+registry: SAME {"total": 1261, "stateCounts": {"ALL": 1261, "OTHER": 56, "LIVE": 1193, "QUARANTINED": 56, "NEW": 9, "BLOCKED": 3}}
+batchPP: SAME [{"code": "PP-2026-10-19-1", "qty": 6, "received": 6, "total": "420000", "currency": "VND", "usdt": "16.26646", "rate": "25820"}]
+sdkStore: SAME 5
+
+Release: commit 3f7c595, backup 378b018b-3b2b-494b-b249-05105b578568 (40438500 bytes), deploy 61c73e21-873b-4fd2-94ec-21db060a8dbc SUCCESS, no migration.
+No VM on the host is in Blocked status (statuses: 506 Chưa ghi, 70 Chưa nối), so the old-format Blocked restore has nothing to act on there now; the 23 Cần kiểm tra VMs were not changed.
