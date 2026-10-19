@@ -83,3 +83,28 @@ Lỗi của kịch bản, không phải sản phẩm, đã sửa kịch bản:
   - Ca còn lại: kịch bản mở dòng "gán tài khoản" cũ nhất của dự án. Dòng đó là lần gán chỉ tài khoản (hoàn tác được, đúng) từ fixture SDK mới.
   - Sửa kịch bản để mở dòng chỉ xem, chạy lại bước đó: 4/4.
 - **PayPal / Kho tài khoản:** không chạy lại; đợt này không sửa các trang đó.
+
+## Phát hành
+
+- **Commit:** `d331cb5`.
+- **Backup host trước deploy:** `64463ab5-342f-4eb6-a51f-16b56e3b70d0` (40.413.083 byte, SHA-256 `b0a4d000…6ef54`).
+- **Deploy:** `e6abf1bc-006e-46b7-af87-02d013028046`, SUCCESS. Service `moneytohome`, environment `proxy-trial-20261015`. Migration `20261019150000_sdk_store` chạy ở bước pre-deploy.
+- **Số liệu host, đọc lại từ dữ liệu hiện hành, chỉ đọc:**
+  - Trước deploy: 10 server / 576 VM, 0 VM có SDK, 0 thao tác SDK.
+  - Sau deploy: 10 server / 576 VM, 0 VM có SDK, Kho SDK 0 mã, 0 thao tác SDK.
+  - Migration không có mã nào để chuyển trên host.
+- **Host xem đọc** (`host-result.txt`, ảnh `h1`, `h4`):
+  - Cột: Server | VM | Tình trạng | Proxy | SDK | Tài khoản EarnApp | PayPal nhận | Rút tiền | Ghi chú; không còn "Cài proxy".
+  - Ô Proxy dòng đầu: "Giao 84.32.138.211:5432 · Chờ cài"; ô SDK: "Chưa có SDK".
+  - Khung SDK mở rồi Huỷ, nút Lưu mờ. Khung Proxy hiện đúng hành động. Kho SDK mở / lọc / đóng.
+  - Chỉ có `user.verifyPin` và `user.heartbeat`, không có POST ghi. Không có lỗi JavaScript.
+  - Xem trước qua API (không ghi): `sdkStorePreview` → "Thêm vào kho"; Dán bảng SDK → "Ghi SDK mới" kèm tiền / ghi chú; dự án lạ → FORBIDDEN.
+
+## Chưa kiểm / giới hạn
+
+- **Host:** chưa có SDK, tài khoản EarnApp hay PayPal, nên mọi thao tác ghi (ghi / chuyển / nối / dán / hoàn tác) chỉ kiểm trên dữ liệu thử cục bộ và DB test. Trên host chỉ xem đọc.
+- **Bộ gõ tiếng Việt:** chặn Enter khi `isComposing`, giống ô sửa cũ; chưa thử trực tiếp với Unikey / EVKey.
+- **"Lệnh soạn cho lượt cũ" trên trình duyệt:** kiểm bằng trường hợp VM vừa bị người khác đổi (revision). Lệnh `expectedCycle` cũ sau khi tạo lại VM được kiểm bằng test tự động (`sdk-store` ca 6, ca 5b).
+- **Tiền tích luỹ:** chỉ USD (mặc định của brief); chưa có chọn tiền tệ khác.
+- **Kho SDK:** đọc toàn bộ mã của dự án một lần rồi lọc / sắp xếp trên trình duyệt. Hợp với vài nghìn mã; nhiều hơn nữa thì cần chia trang ở máy chủ.
+- **PayPal / Kho tài khoản:** không chạy lại hồi quy trình duyệt, vì đợt này không sửa các trang đó.

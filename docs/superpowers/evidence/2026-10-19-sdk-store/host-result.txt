@@ -1,0 +1,40 @@
+Cột: SERVER | VM | TÌNH TRẠNG | PROXY | SDK | TÀI KHOẢN EARNAPP | PAYPAL NHẬN | RÚT TIỀN | GHI CHÚ
+Không còn cột Cài proxy: true
+Dải đếm: Tất cả 576 Thiếu proxy 0 Chờ cài 553 Đã cài 0 Cần kiểm tra 23 Chưa SDK 576 Chưa tài khoản 576 Chưa PayPal 576 Đã xoá 0
+Ô Proxy dòng đầu: Giao 84.32.138.211:5432 Chờ cài
+Ô SDK dòng đầu: Chưa có SDK
+Khung SDK: An-01 / VM_001 · SDK EarnApp Mã SDK Tiền tích luỹ (USD) Chưa ghi Ghi chú SDK Chọn SDK đã lưu Huỷ Lưu Enter lưu · Esc huỷ. Ghi SDK không đổi tài khoản, PayPal hay tình trạng VM.
+Nút Lưu khi chưa sửa: mờ, không bấm được
+Khung Proxy: An-01 / VM_001 · Proxy · Chờ cài Chờ cài 84.32.138.211:5432 (cấu hình #1). Bắt đầu cài Copy proxy để cài (bắt đầu cài) Đổi proxy…
+Kho SDK: Kho SDK Dùng chung mọi server của dự án. Chỉ SDK chưa từng nối EarnApp mới dùng lại hoặc chuyển VM được. Tiền là số tích luỹ người vận hành ghi, không phải thu / chi. Dán SDK vào kho Mọi vị trí Trong kho (không ở VM) Đang ở VM Cập nhật gần nhất Tiền cao → thấp Tiền thấp → cao Theo mã Chưa nối 0 Chưa
+URL kho: /infrastructure/servers?sdk=1
+URL lọc Tất cả: /infrastructure/servers?sdk=1&sf=ALL
+Đóng kho, bảng còn: 100 dòng trên trang
+POST tRPC: ["user.verifyPin","user.heartbeat"]
+Chỉ đọc (không có POST ghi): true
+Lỗi JavaScript: không có
+
+# API chỉ đọc sau deploy (.runtime/sdk-host-look.ts)
+{
+ "servers": 10,
+ "vms": 576,
+ "liveVms": 576,
+ "withSdk": 0,
+ "sdkRecords": 0,
+ "byState": {},
+ "storePreview": [
+  [
+   "NEW",
+   "Thêm vào kho"
+  ]
+ ],
+ "bulkPreview": [
+  [
+   "READY",
+   "Ghi SDK mới",
+   "Tiền chưa ghi → 2,00 USD · Ghi chú trống → \"ghi chú\""
+  ]
+ ],
+ "foreignStore": "FORBIDDEN",
+ "sdkOperations": 0
+}

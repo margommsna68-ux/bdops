@@ -119,3 +119,5 @@ Kiểm thử dùng `.env.test` trỏ database thử riêng: `npm test`, `npx tsc
     - *Giao việc* tách việc nhân viên với 24 dòng đối chiếu Sheet cũ.
     - Commit 57f4bae, backup 5034ed1d, deploy f2298e2c, migration 20261017120000_account_inventory.
     - Xem `docs/runbooks/account-store.md`.
+
+27. **19/10 — Kho SDK, ô SDK, ô Proxy gộp Cài proxy:** mỗi mã SDK là bản ghi riêng dùng chung mọi server (tiền tích luỹ USD do người vận hành ghi, ghi chú, trạng thái Chưa nối / Đã nối EarnApp / Chưa xác nhận); ô SDK hai dòng mở khung sửa ngay cạnh ô; nút **Kho SDK** trên trang Server / VM (dán SDK | tiền | ghi chú tự kiểm tra); chỉ mã chưa nối mới dùng lại hoặc chuyển VM (nguồn → đích rõ ràng). Cột Cài proxy nằm trong ô Proxy. Nút Lưu / Áp dụng mờ khi không có gì đổi, xanh khi có, ghi đúng số VM sẽ đổi. Xem [SDK và Kho SDK](docs/runbooks/vm-sdk.md). Commit d331cb5, backup 64463ab5, deploy e6abf1bc, migration 20261019150000_sdk_store.
