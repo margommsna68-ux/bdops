@@ -26,7 +26,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          <ThemeProvider>{children}<Toaster position="bottom-right" toastOptions={{ duration: 3000, style: { fontSize: "13px", maxWidth: "520px" } }} /></ThemeProvider>
+          <ThemeProvider>{children}<Toaster position="bottom-right" toastOptions={{ duration: 3000, className: "mth-toast", style: { fontSize: "13px", maxWidth: "520px" } }} /></ThemeProvider>
         </QueryClientProvider>
       </trpc.Provider>
     </SessionProvider>

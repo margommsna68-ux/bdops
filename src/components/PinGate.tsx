@@ -49,7 +49,7 @@ export function PinGate({ children }: { children: React.ReactNode }) {
   if (unlocked) return <>{children}</>;
   if (isLoading || mode === "loading") {
     return (
-      <div className="fixed inset-0 z-[100] bg-gray-900 flex items-center justify-center">
+      <div className="mth-pin-backdrop fixed inset-0 z-[100] bg-gray-900 flex items-center justify-center">
         <p className="text-white">Loading...</p>
       </div>
     );
@@ -87,7 +87,7 @@ export function PinGate({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-gray-900 flex items-center justify-center">
+    <div className="mth-pin-backdrop fixed inset-0 z-[100] bg-gray-900 flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-sm mx-4">
         {mode === "verify" ? (
           <>

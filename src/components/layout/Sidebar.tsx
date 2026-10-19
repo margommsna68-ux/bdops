@@ -73,7 +73,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   const userInitial = userName.charAt(0);
 
   return (
-    <aside className={`${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-300 border-r border-gray-800/40`}>
+    <aside className={`mth-sidebar ${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-300 border-r border-gray-800/40`}>
       {/* ─── Header ─── */}
       <div className="p-4 border-b border-gray-700/30 flex items-center justify-between">
         {!collapsed && (
@@ -229,8 +229,8 @@ function ActiveNavLink({siblings,also,...props}:NavLinkProps&{siblings:string[];
 }
 function NavLink({href,icon,label,collapsed,accentBg,active,onNavigate}:NavLinkProps&{active:boolean}){
   return <Link href={href} onClick={onNavigate} title={collapsed?label:undefined} aria-current={active?'page':undefined}
-    className={`flex items-center ${collapsed?"justify-center":"gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${active?`${accentBg} text-white font-medium shadow-md shadow-blue-500/20`:"text-gray-300 hover:bg-white/[0.06] hover:text-white"}`}>
-    <span className={`w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${active?"bg-white/25":"bg-white/[0.07]"}`}>{icon}</span>
+    className={`mth-nav-link flex items-center ${collapsed?"justify-center":"gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${active?`mth-nav-active ${accentBg} text-white font-medium shadow-md shadow-blue-500/20`:"text-gray-300 hover:bg-white/[0.06] hover:text-white"}`}>
+    <span className={`mth-nav-icon w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${active?"bg-white/25":"bg-white/[0.07]"}`}>{icon}</span>
     {!collapsed&&<span>{label}</span>}
   </Link>;
 }

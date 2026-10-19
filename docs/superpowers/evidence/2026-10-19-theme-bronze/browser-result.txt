@@ -1,0 +1,23 @@
+PASS T0 trình duyệt mới chưa chọn gì: đăng nhập dùng mặc định cũ (Tối) — dark
+PASS T1 đã có nháp Nhập PayPal (1 dòng, 10 USDT / 3) trước khi đổi theme
+PASS T2a bấm thẻ "Đồng ấm" áp dụng ngay (không nút Lưu, không hỏi lại) — bronze
+PASS T2b đổi theme không gửi yêu cầu ghi nào
+PASS T3 quay lại Kho tài khoản: nháp còn nguyên (dòng, tổng 10, số lượng 3)
+PASS T3b lỗi tại ô ("25,820" ở VND) hiện ngay dưới ô, nút khoá màu mờ — Sửa ô tiền mua
+PASS T3c nội dung hợp lệ: nút Nhập bật, màu đồng đậm #8C5A2B — Nhập 1 PP (1 email) rgb(140, 90, 43)
+PASS T4a tải lại: vẫn Đồng ấm
+PASS T4b mở lại trình duyệt (phiên mới): trang đăng nhập đã là Đồng ấm
+PASS T4c tổng quan sau khi mở lại: Đồng ấm
+PASS T5a cuộn ngang và dọc: tiêu đề và cột cố định có nền kín — rgb(243, 232, 215) | rgb(255, 253, 249) | rgb(255, 253, 249)
+PASS T5b chọn 3 dòng: dòng chọn đổi nền, thanh hàng loạt hiện — selected=3
+PASS T5c đổi theme ngay trên trang (thuộc tính data-theme) không bỏ chọn: vẫn 3 dòng
+PASS T5d khung Thay proxy: nền kem, Áp dụng mờ khi chưa chọn — rgb(255, 253, 249)
+PASS T6 Kho proxy: chọn 2 dòng hiện thanh hàng loạt
+PASS T7 toast (mật khẩu không khớp, kiểm ở trình duyệt, không gửi): nền kem chữ nâu — rgb(255, 253, 249) / rgb(58, 42, 28)
+PASS T8 chuyển lần lượt bốn theme trong Thiết lập, mỗi lần áp dụng ngay — Sáng=null, Tối=dark, Vàng kim=golden, Đồng ấm=bronze
+PASS T10 biểu đồ: thanh có màu theme, vẫn bấm được (con trỏ tay) — rgb(107, 122, 46)
+PASS T11 điện thoại 390px: Đồng ấm, trang không tràn ngang — scrollWidth=390
+PASS Không có lệnh ghi dữ liệu nào (chỉ kiểm tra / xem trước) — user.verifyPin, user.heartbeat, accountStore.importPreview
+PASS Không có lỗi JS
+
+21 PASS / 0 FAIL

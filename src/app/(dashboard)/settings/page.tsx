@@ -17,14 +17,14 @@ import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import toast from "react-hot-toast";
 
-const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; descVi: string; preview: { bg: string; card: string; accent: string; text: string; sidebar: string } }[] = [
+const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; descVi: string; preview: { bg: string; card: string; accent: string; text: string; sidebar: string; line: string; head: string; ring: string } }[] = [
   {
     value: "light",
     label: "Light",
     labelVi: "Sáng",
     desc: "Clean business interface",
     descVi: "Giao diện sạch, chuyên nghiệp",
-    preview: { bg: "#f8fafc", card: "#ffffff", accent: "#3b82f6", text: "#0f172a", sidebar: "#0f172a" },
+    preview: { bg: "#f8fafc", card: "#ffffff", accent: "#3b82f6", text: "#0f172a", sidebar: "#0f172a", line: "#e4e9f0", head: "#f0f4f8", ring: "#3b82f6" },
   },
   {
     value: "dark",
@@ -32,7 +32,7 @@ const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; d
     labelVi: "Tối",
     desc: "Modern developer dashboard",
     descVi: "Dashboard hiện đại, tối",
-    preview: { bg: "#0f172a", card: "#111827", accent: "#3b82f6", text: "#f8fafc", sidebar: "#020617" },
+    preview: { bg: "#0f172a", card: "#111827", accent: "#3b82f6", text: "#f8fafc", sidebar: "#020617", line: "#273449", head: "#0f172a", ring: "#3b82f6" },
   },
   {
     value: "golden",
@@ -40,7 +40,15 @@ const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; d
     labelVi: "Vàng kim",
     desc: "Premium SaaS with gold accents",
     descVi: "Cao cấp, điểm nhấn vàng kim",
-    preview: { bg: "#0b0b0c", card: "#111111", accent: "#fbbf24", text: "#f5f5f5", sidebar: "#070707" },
+    preview: { bg: "#0b0b0c", card: "#111111", accent: "#fbbf24", text: "#f5f5f5", sidebar: "#070707", line: "#333333", head: "#0d0d0e", ring: "#fbbf24" },
+  },
+  {
+    value: "bronze",
+    label: "Warm bronze",
+    labelVi: "Đồng ấm",
+    desc: "Light, warm, calm: cream and bronze",
+    descVi: "Sáng, ấm, ít màu: nền kem, điểm nhấn đồng",
+    preview: { bg: "#FAF6EF", card: "#FFFDF9", accent: "#8C5A2B", text: "#3A2A1C", sidebar: "#F7EFE3", line: "#EAD9C2", head: "#F3E8D7", ring: "#8C5A2B" },
   },
 ];
 
@@ -163,7 +171,7 @@ export default function SettingsPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             {language === "vi" ? "Giao diện" : "Theme"}
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {THEMES.map((t) => {
               const isActive = theme === t.value;
               return (
@@ -175,11 +183,12 @@ export default function SettingsPage() {
                       ? "border-blue-500 ring-2 ring-blue-500/20"
                       : "border-gray-200 hover:border-gray-400"
                   }`}
-                  style={isActive && t.value === "golden" ? { borderColor: "#fbbf24", boxShadow: "0 0 0 3px rgba(251,191,36,0.15)" } : undefined}
+                  aria-pressed={isActive}
+                  style={isActive && t.value === "golden" ? { borderColor: "#fbbf24", boxShadow: "0 0 0 3px rgba(251,191,36,0.15)" } : isActive && t.value === "bronze" ? { borderColor: "#8C5A2B", boxShadow: "0 0 0 3px rgba(140,90,43,0.18)" } : undefined}
                 >
                   <div className="rounded-lg overflow-hidden" style={{ backgroundColor: t.preview.bg }}>
                     <div className="flex h-24">
-                      <div className="w-10 flex flex-col gap-1 p-1.5" style={{ backgroundColor: t.preview.sidebar }}>
+                      <div className="w-10 flex flex-col gap-1 p-1.5" style={{ backgroundColor: t.preview.sidebar, borderRight: `1px solid ${t.preview.line}` }}>
                         <div className="w-full h-1.5 rounded" style={{ backgroundColor: t.preview.accent, opacity: 0.8 }} />
                         <div className="w-full h-1 rounded bg-gray-600 opacity-30" />
                         <div className="w-full h-1 rounded bg-gray-600 opacity-30" />
@@ -188,9 +197,11 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex-1 p-2 space-y-1.5">
                         <div className="h-2 w-16 rounded" style={{ backgroundColor: t.preview.text, opacity: 0.8 }} />
-                        <div className="flex gap-1.5">
-                          <div className="h-8 flex-1 rounded" style={{ backgroundColor: t.preview.card }} />
-                          <div className="h-8 flex-1 rounded" style={{ backgroundColor: t.preview.card }} />
+                        {/* A tiny table (header row + rows) and a primary button, in the theme's own colours. */}
+                        <div className="rounded overflow-hidden" style={{ backgroundColor: t.preview.card, border: `1px solid ${t.preview.line}` }}>
+                          <div className="h-2.5" style={{ backgroundColor: t.preview.head, borderBottom: `1px solid ${t.preview.line}` }} />
+                          <div className="h-2.5" style={{ borderBottom: `1px solid ${t.preview.line}` }} />
+                          <div className="h-2.5" />
                         </div>
                         <div className="h-3 w-12 rounded" style={{ backgroundColor: t.preview.accent }} />
                       </div>
@@ -202,7 +213,7 @@ export default function SettingsPage() {
                   </div>
                   {isActive && (
                     <div className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: t.value === "golden" ? "#fbbf24" : "#3b82f6" }}>
+                      style={{ backgroundColor: t.preview.ring }}>
                       <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                       </svg>

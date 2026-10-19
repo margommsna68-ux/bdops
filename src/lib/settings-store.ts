@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type AppLanguage = "en" | "vi";
 export type AppTimezone = string; // IANA timezone
-export type AppTheme = "light" | "dark" | "golden";
+export type AppTheme = "light" | "dark" | "golden" | "bronze";
 
 interface SettingsState {
   language: AppLanguage;

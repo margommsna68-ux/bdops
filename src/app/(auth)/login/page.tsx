@@ -110,7 +110,7 @@ function LoginForm() {
 function LoginPageInner() {
   const t = useT();
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
+    <div className="mth-login min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
       <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-2xl shadow-2xl border border-gray-100 animate-fade-in">
         <div className="text-center">
           <div className="flex justify-center mb-4"><BrandMark size={56} /></div>

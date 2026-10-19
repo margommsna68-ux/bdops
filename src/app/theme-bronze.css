@@ -1,0 +1,152 @@
+/* ═══════════════════════════════════════════════════════
+   THEME "ĐỒNG ẤM" (data-theme="bronze"), owner brief 19/10/2026.
+   Warm, light and calm: cream page, brown text, bronze primary, soft status colours (olive / amber / brick / taupe).
+   Everything is scoped to [data-theme="bronze"]: Sáng, Tối and Vàng kim are untouched. The Tailwind colour utilities and the
+   hard-coded colours of the app CSS are mapped in theme-bronze.generated.css (scripts/build-bronze-theme.cjs); this file holds
+   the tokens and the parts that need a hand-made look (sidebar, header, login / PIN, buttons, toasts, charts).
+   Chọn theme: Thiết lập → Giao diện → Đồng ấm (lưu như các theme khác, khoá bdops-settings trong trình duyệt).
+   ═══════════════════════════════════════════════════════ */
+[data-theme="bronze"] {
+  --ds-page: #FAF6EF;
+  --ds-card: #FFFDF9;
+  --ds-sidebar: #F7EFE3;
+  --ds-header: #FFFDF9;
+  --ds-hover: #F6EDE0;
+  --ds-table-header: #F3E8D7;
+  --ds-input: #FFFDF9;
+  --ds-text-primary: #3A2A1C;
+  --ds-text-secondary: #7A6450;   /* #8A735C darkened: 5.5:1 on the card, 4.6:1 on the table header */
+  --ds-text-muted: #806A55;
+  --ds-border: #EAD9C2;
+  --ds-border-strong: #C9A87E;
+  --ds-accent: #8C5A2B;
+  --ds-accent-hover: #744820;
+  --ds-shadow-card: 0 1px 2px rgba(74,46,20,0.05), 0 1px 3px rgba(74,46,20,0.06);
+  --ds-shadow-md: 0 2px 4px rgba(74,46,20,0.05), 0 4px 10px rgba(74,46,20,0.07);
+  --ds-shadow-lg: 0 4px 8px rgba(74,46,20,0.05), 0 10px 24px rgba(74,46,20,0.09);
+  --ds-shadow-xl: 0 8px 16px rgba(74,46,20,0.07), 0 16px 44px rgba(74,46,20,0.13);
+  /* shadcn/ui (Select, Dialog, Button, Input…): same palette as HSL triplets */
+  --background: 38 56% 96%;
+  --foreground: 28 35% 17%;
+  --card: 40 100% 99%;
+  --card-foreground: 28 35% 17%;
+  --popover: 40 100% 99%;
+  --popover-foreground: 28 35% 17%;
+  --primary: 29 53% 36%;
+  --primary-foreground: 37 100% 97%;
+  --secondary: 36 54% 90%;
+  --secondary-foreground: 28 35% 17%;
+  --muted: 36 54% 90%;
+  --muted-foreground: 29 21% 39%;
+  --accent: 34 64% 88%;
+  --accent-foreground: 28 50% 24%;
+  --destructive: 12 53% 38%;
+  --destructive-foreground: 37 100% 97%;
+  --border: 35 54% 84%;
+  --input: 35 54% 84%;
+  --ring: 28 46% 45%;
+  --chart-1: 28 46% 45%;
+  --chart-2: 69 43% 29%;
+  --chart-3: 37 70% 42%;
+  --chart-4: 12 53% 38%;
+  --chart-5: 30 19% 45%;
+  color-scheme: light;
+}
+[data-theme="bronze"] body { background-color: var(--ds-page); color: var(--ds-text-primary); }
+
+/* ── Surfaces that Tailwind writes as white / grey ── */
+[data-theme="bronze"] .bg-white.rounded-lg,
+[data-theme="bronze"] .bg-white.rounded-xl { border-color: var(--ds-border) !important; box-shadow: var(--ds-shadow-card); }
+[data-theme="bronze"] header.bg-white { background-color: var(--ds-header) !important; border-color: var(--ds-border) !important; box-shadow: 0 1px 0 rgba(74,46,20,0.04) !important; }
+[data-theme="bronze"] .shadow-sm { --tw-shadow-color: rgba(74,46,20,0.06); }
+
+/* ── Tables: header and sticky cells stay opaque while scrolling ── */
+[data-theme="bronze"] thead th { color: var(--ds-text-secondary); background-color: var(--ds-table-header); border-bottom-color: var(--ds-border); backdrop-filter: none; }
+[data-theme="bronze"] tbody tr:nth-child(even) { background-color: rgba(122,100,80,0.025); }
+[data-theme="bronze"] tbody tr:hover { background-color: var(--ds-hover); }
+
+/* ── Inputs, checkboxes, focus ── */
+[data-theme="bronze"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="bronze"] select, [data-theme="bronze"] textarea { color: var(--ds-text-primary); }
+[data-theme="bronze"] input::placeholder, [data-theme="bronze"] textarea::placeholder { color: #9C8268; }
+[data-theme="bronze"] input[type="checkbox"], [data-theme="bronze"] input[type="radio"] { accent-color: #8C5A2B; }
+[data-theme="bronze"] *:focus-visible { outline-color: #A9713F; }
+[data-theme="bronze"] input:not([type="checkbox"]):not([type="radio"]):focus,
+[data-theme="bronze"] select:focus, [data-theme="bronze"] textarea:focus { border-color: #A9713F; box-shadow: 0 0 0 3px rgba(169,113,63,0.16); }
+[data-theme="bronze"] [aria-invalid="true"] { border-color: #A6503A !important; }
+
+/* ── Primary buttons: muted while disabled, solid bronze when there is a valid change ── */
+[data-theme="bronze"] .pm-button-primary,
+[data-theme="bronze"] .vm-status-action.primary { background: #8C5A2B; border-color: #8C5A2B; color: #FFFAF2; }
+[data-theme="bronze"] .pm-button-primary:hover:not(:disabled),
+[data-theme="bronze"] .vm-status-action.primary:hover:not(:disabled) { background: #744820; border-color: #744820; color: #FFFAF2; }
+[data-theme="bronze"] .pm-button-primary:disabled { background: #E9D0B0; border-color: #E9D0B0; color: #6F5A45; opacity: 1; }
+[data-theme="bronze"] .pm-button:disabled:not(.pm-button-primary) { opacity: .5; }
+[data-theme="bronze"] .bg-blue-600 { background-color: #8C5A2B !important; }
+[data-theme="bronze"] .hover\:bg-blue-700:hover { background-color: #744820 !important; }
+[data-theme="bronze"] [aria-busy="true"], [data-theme="bronze"] .pm-button-primary[aria-busy="true"] { cursor: progress; }
+[data-theme="bronze"] .vm-chip.active, [data-theme="bronze"] .vm-chip-ops.active { background: #8C5A2B; border-color: #8C5A2B; color: #FFFAF2; }
+[data-theme="bronze"] .vm-badge-pending { background: #8C5A2B; }
+
+/* ── Sidebar: cream with brown text; the active item has a bronze tint and a clear left mark ── */
+[data-theme="bronze"] aside.mth-sidebar { background-color: var(--ds-sidebar) !important; color: #3A2A1C; border-right: 1px solid var(--ds-border) !important; }
+[data-theme="bronze"] .mth-sidebar .text-white { color: #3A2A1C !important; }
+[data-theme="bronze"] .mth-sidebar .text-gray-200 { color: #3F2F20 !important; }
+[data-theme="bronze"] .mth-sidebar .text-gray-300 { color: #4E3B2A !important; }
+[data-theme="bronze"] .mth-sidebar .text-gray-400,
+[data-theme="bronze"] .mth-sidebar .text-gray-400\/80 { color: #7A6450 !important; }
+[data-theme="bronze"] .mth-sidebar .hover\:text-white:hover { color: #3A2A1C !important; }
+[data-theme="bronze"] .mth-sidebar [class*="border-gray-7"], [data-theme="bronze"] .mth-sidebar [class*="border-gray-8"] { border-color: var(--ds-border) !important; }
+[data-theme="bronze"] .mth-sidebar .mth-nav-link { color: #4E3B2A !important; }
+[data-theme="bronze"] .mth-sidebar .mth-nav-link:hover { background-color: #F1E4D1 !important; color: #3A2A1C !important; }
+[data-theme="bronze"] .mth-sidebar .mth-nav-link .mth-nav-icon { background-color: #EFE2CE !important; color: #5E4A37; }
+[data-theme="bronze"] .mth-sidebar .mth-nav-active { background-color: #F3E4CF !important; color: #5E3A19 !important; font-weight: 600; box-shadow: inset 3px 0 0 #8C5A2B, 0 1px 2px rgba(74,46,20,0.08) !important; }
+[data-theme="bronze"] .mth-sidebar .mth-nav-active .mth-nav-icon { background-color: #8C5A2B !important; color: #FFFAF2; }
+[data-theme="bronze"] .mth-sidebar .hover\:bg-gray-800:hover { background-color: #F1E4D1 !important; }
+[data-theme="bronze"] .mth-sidebar .bg-gray-800 { background-color: var(--ds-card) !important; border-color: var(--ds-border-strong) !important; color: #3A2A1C !important; }
+[data-theme="bronze"] .mth-sidebar button[role="combobox"] { background-color: var(--ds-card) !important; border-color: var(--ds-border-strong) !important; color: #3A2A1C !important; }
+
+/* ── Login and PIN: light cream backdrop instead of the dark one ── */
+[data-theme="bronze"] .mth-login { background-image: linear-gradient(135deg, #F3E8D7 0%, #FAF6EF 55%, #EED9BD 100%) !important; }
+[data-theme="bronze"] .mth-login > div { border-color: var(--ds-border) !important; box-shadow: var(--ds-shadow-xl) !important; }
+[data-theme="bronze"] .mth-pin-backdrop { background-color: #F3E8D7 !important; background-image: linear-gradient(135deg, #F3E8D7 0%, #FAF6EF 60%, #EED9BD 100%); }
+[data-theme="bronze"] .mth-pin-backdrop .text-white { color: #3A2A1C !important; }
+[data-theme="bronze"] .bg-black\/50 { background-color: rgba(58,42,28,0.42) !important; }
+
+/* ── Popovers, menus, dialogs, tooltips, toasts ── */
+[data-theme="bronze"] [role="listbox"], [data-theme="bronze"] [role="menu"] { background-color: var(--ds-card); border-color: var(--ds-border); }
+[data-theme="bronze"] [role="option"][data-highlighted], [data-theme="bronze"] [role="menuitem"][data-highlighted] { background-color: #F3E4CF; color: #3A2A1C; }
+[data-theme="bronze"] [role="dialog"] { background-color: var(--ds-card); border-color: var(--ds-border); }
+[data-theme="bronze"] .mth-toast { background: #FFFDF9 !important; color: #3A2A1C !important; border: 1px solid #EAD9C2; box-shadow: var(--ds-shadow-lg) !important; }
+[data-theme="bronze"] ::-webkit-scrollbar-thumb { background: #DCC6A7; }
+[data-theme="bronze"] ::selection { background-color: rgba(169,113,63,0.22); }
+
+/* ── Charts: same data, labels, tooltips and links; colours follow the theme ── */
+[data-theme="bronze"] .recharts-cartesian-grid line { stroke: #EAD9C2; }
+[data-theme="bronze"] .recharts-text { fill: #7A6450; }
+[data-theme="bronze"] .recharts-wrapper [fill="#16a34a"] { fill: #6B7A2E; }
+[data-theme="bronze"] .recharts-wrapper [fill="#22c55e"] { fill: #7E8B3D; }
+[data-theme="bronze"] .recharts-wrapper [fill="#dc2626"] { fill: #93412D; }
+[data-theme="bronze"] .recharts-wrapper [fill="#ef4444"] { fill: #BE6B55; }
+[data-theme="bronze"] .recharts-wrapper [fill="#f59e0b"] { fill: #C88A2A; }
+[data-theme="bronze"] .recharts-wrapper [fill="#3b82f6"] { fill: #A9713F; }
+[data-theme="bronze"] .recharts-wrapper [fill="#94a3b8"] { fill: #B9A48C; }
+[data-theme="bronze"] .ov-dot[style*="rgb(22, 163, 74)"] { background: #6B7A2E !important; }
+[data-theme="bronze"] .ov-dot[style*="rgb(220, 38, 38)"] { background: #93412D !important; }
+[data-theme="bronze"] .ov-dot[style*="rgb(239, 68, 68)"] { background: #BE6B55 !important; }
+[data-theme="bronze"] .ov-dot[style*="rgb(245, 158, 11)"] { background: #C88A2A !important; }
+[data-theme="bronze"] .ov-dot[style*="rgb(59, 130, 246)"] { background: #A9713F !important; }
+[data-theme="bronze"] .ov-dot[style*="rgb(148, 163, 184)"] { background: #B9A48C !important; }
+[data-theme="bronze"] .ov-kpi.ov-green { border-left-color: #6B7A2E; }
+[data-theme="bronze"] .ov-kpi.ov-red { border-left-color: #93412D; }
+[data-theme="bronze"] .ov-kpi.ov-amber { border-left-color: #C88A2A; }
+[data-theme="bronze"] .ov-kpi.ov-blue { border-left-color: #A9713F; }
+/* Count on a dark status chip (SUS) */
+[data-theme="bronze"] .vm-chip.vm-ops-severe strong { color: #FFFAF2; }
+/* Chart tooltip lines take the series colour inline */
+[data-theme="bronze"] .recharts-tooltip-item[style*="rgb(22, 163, 74)"], [data-theme="bronze"] .recharts-tooltip-item[style*="rgb(34, 197, 94)"] { color: #5D692A !important; }
+[data-theme="bronze"] .recharts-tooltip-item[style*="rgb(220, 38, 38)"], [data-theme="bronze"] .recharts-tooltip-item[style*="rgb(239, 68, 68)"] { color: #93412D !important; }
+[data-theme="bronze"] .recharts-tooltip-item[style*="rgb(245, 158, 11)"] { color: #7A5012 !important; }
+[data-theme="bronze"] .recharts-tooltip-item[style*="rgb(59, 130, 246)"] { color: #8C5A2B !important; }
+[data-theme="bronze"] .recharts-tooltip-item[style*="rgb(148, 163, 184)"] { color: #65503C !important; }
+[data-theme="bronze"] .recharts-tooltip-cursor { fill: rgba(169,113,63,0.08); }
