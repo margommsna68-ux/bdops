@@ -1,0 +1,13 @@
+Trình duyệt mới chưa chọn theme: đăng nhập dark (như trước)
+Đăng nhập với Đồng ấm đã lưu: bronze
+h2-dashboard: bronze
+h3-servers: bronze
+Server/VM cuộn ngang + dọc, nền tiêu đề / cột cố định: rgb(243, 232, 215) | rgb(255, 253, 249)
+h5-proxies: bronze
+h6-accounts: bronze
+h7-history: bronze
+h8-costs: bronze
+h9-settings: bronze
+Điện thoại 390px: bronze · scrollWidth 390
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không

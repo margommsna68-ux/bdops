@@ -26,6 +26,15 @@ heartbeat / importPreview (xem trước, không ghi). Không lỗi JS. Không qu
 Độ tương phản (`node scripts/build-bronze-theme.cjs --contrast`): chữ chính 13,5:1; chữ phụ 5,5:1 (bề mặt), 4,6:1 (tiêu đề bảng); chữ
 trên nút chính 5,6:1; liên kết 5,7:1; olive / hổ phách / đỏ gạch 5,9 / 6,9 / 6,8:1; sidebar 9,3:1, mục chọn 8,0:1.
 
+## Phát hành và host
+
+Commit edb8f94, backup host 2aa822cc-46ee-4d64-a8b3-af2dcc4104ab (40.438.879 byte) trước khi deploy, deploy 12c7760d SUCCESS, không
+migration. Host chỉ xem giao diện, không nhập gì: trình duyệt mới vẫn mở đăng nhập Tối như trước; với Đồng ấm lưu trong trình duyệt
+kiểm, đăng nhập, PIN, Tổng quan, Server / VM (cuộn ngang + dọc, tiêu đề / cột cố định nền kín), Kho proxy, Kho tài khoản PayPal, Lịch
+sử nhập kho, Chi phí, Thiết lập, điện thoại 390px (không tràn ngang) đều Đồng ấm; chỉ có POST user.verifyPin / user.heartbeat, không
+lỗi JS (`host-browser-result.txt`, ảnh `host-*.png`). Số liệu host trước / sau giống hệt (10 server / 576 VM; 553 Có proxy, 23 Cần kiểm
+tra).
+
 ## Chưa kiểm / giới hạn
 
 - Không kiểm trình duyệt khác ngoài Chrome. Tooltip dạng `title` của trình duyệt không đổi màu (do trình duyệt vẽ).
