@@ -16,3 +16,10 @@ chỉ xoá các mục `mth-selection:*:*:<dự án>` của tab (Server / VM và 
   (`browser-result.txt`): Kho proxy chọn 2 → A → B → A → Back: 0 dòng chọn; Server / VM chọn 2 → tương tự: 0; có lựa chọn ở cả hai trang
   (không mở) → đổi dự án xoá cả hai khoá, quay lại không phục hồi; chỉ đổi theme: Kho proxy còn 2, Server / VM còn 2; cấu hình cột, theme,
   PIN, đăng nhập còn nguyên; không có lệnh ghi; không lỗi JS.
+
+## Phát hành và host
+
+Commit 572ddca, backup host 50a6439d-bf67-483e-8bef-9af3daaac7d9 trước khi deploy, deploy 79ab6de8 SUCCESS, không migration. Host, chỉ
+thao tác trình duyệt: Kho proxy MOON chọn 84.32.138.211, 84.32.138.213 → Thiết lập → AE → MOON → Back: không còn dòng chọn; chỉ đổi theme
+(Đồng ấm, Tối) rồi Back: còn "Đã chọn 2 proxy" (sau đó Bỏ chọn); Server / VM chọn An-01/VM_001, VM_002 → đổi dự án → Back: 0. Chỉ POST
+verifyPin / heartbeat, không lỗi JS; số liệu host trước / sau giống hệt.

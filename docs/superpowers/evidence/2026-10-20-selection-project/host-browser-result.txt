@@ -1,0 +1,7 @@
+Kho proxy MOON: Đã chọn 2 proxy
+Sau khi chọn AE: AE
+Back về Kho proxy: không có dòng chọn · ô đang tích 0
+Chỉ đổi theme rồi Back: Đã chọn 2 proxy
+Server / VM chọn 2 → Thiết lập → MOON → AE → MOON → Back: ô đang tích 0
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không
