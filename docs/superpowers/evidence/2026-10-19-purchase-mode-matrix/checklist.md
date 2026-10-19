@@ -42,3 +42,16 @@ mất phản hồi) và các ca mới:
 
 Lượt đầu có 2 ca lỗi kịch bản (nhãn "Giá mỗi PP" trùng chữ trong thông báo lỗi của ô số lượng), dữ liệu đúng; sửa cách tìm ô và chạy lại
 một lượt sạch trên dữ liệu mới. Ảnh: `b1-unit-no-quantity.png`, `b6-batch-cost-unit.png`, `a1-inexact-kept-total.png`. Không quay video.
+
+## Phát hành
+
+Commit a80c611, backup host 2eb77120-ca1d-4d2d-82a5-f0f66fc70865 (40.438.746 byte) trước khi deploy, deploy 88ae31f9 SUCCESS, không
+migration. Host chỉ đọc trước / sau giống hệt (10 server / 576 VM; 553 Có proxy, 23 Cần kiểm tra; 2 lô đều Đã ghi chi phí). Trình duyệt
+host, Nhập PayPal với danh sách trống, không lưu: Tổng 10 / 3 → bấm Đơn giá vẫn ở Tổng 10 kèm ghi chú; Đơn giá 9 chưa có số lượng → bấm
+Tổng vẫn ở Đơn giá 9, lỗi tại ô số lượng, ghi chú "Cần số PP thực mua hợp lệ để tính tổng; giữ giá mỗi PP 9 USDT", nút "Sửa ô tiền mua"
+khoá (ảnh `host-unit-no-quantity.png`; dòng "ghi chú: không thấy" trong `host-browser-result.txt` là biểu thức tìm chữ của kịch bản bị
+hỏng khi tạo bằng sed, ảnh cho thấy ghi chú có hiện). Chỉ có POST user.verifyPin / user.heartbeat, không lỗi JS.
+
+## Giới hạn
+
+- Host chỉ kiểm đọc. Giá Binance thật không dùng (máy chủ giá giả 25.820 cục bộ).

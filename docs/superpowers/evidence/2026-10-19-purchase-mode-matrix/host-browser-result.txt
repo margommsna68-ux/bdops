@@ -1,0 +1,7 @@
+Danh sách tài khoản để trống: true
+Sau khi bấm "Tính theo giá mỗi PP": Tổng chọn=true · ô tổng=10
+Ghi chú: 10 USDT ÷ 3 không chia hết thành giá mỗi PP chính xác nên giữ Tổng tiền thực trả 10 USDT; giá phân bổ chỉ để tham khảo. Tổng 10 USDT · ≈ 3,33 USDT / PP (tham khảo) · ghi một lần vào Chi phí.
+Không có "Chưa ghi chi phí": true
+Đơn giá 9, chưa có số lượng, bấm Tổng: còn ở Đơn giá=true · ô đơn giá=9 · ghi chú: không thấy · không có "Không nhập tiền": true
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không
