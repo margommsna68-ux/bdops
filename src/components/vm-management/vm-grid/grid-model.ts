@@ -12,7 +12,8 @@ export const COLUMNS:ColumnDef[]=[
   {key:'sdk',label:'SDK',width:190,min:130},
   {key:'account',label:'Tài khoản EarnApp',width:230,min:140},
   {key:'paypal',label:'PayPal nhận',width:130,min:90},
-  {key:'payout',label:'Rút tiền',width:200,min:140},
+  // Tiền / Rút (20/10/2026): EarnApp balance read at the VM + the payout request to PayPal, one column.
+  {key:'payout',label:'Tiền / Rút',width:230,min:150},
   {key:'notes',label:'Ghi chú',width:220,min:120,edit:'notes'},
   {key:'version',label:'Cấu hình',width:120,min:90,optional:true},
   {key:'sdkMeta',label:'SDK ghi bởi',width:170,min:110,optional:true},
@@ -51,11 +52,11 @@ export function nextCell(rowIds:string[],fields:EditField[],at:{vmId:string;fiel
 }
 // URL state: everything the user picked survives reload and Back/Forward. The server is in the path.
 export type GridView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED';
-export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS';
+export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS'|'BALANCE'|'CHECKED_OLD'|'WAITING_OLD';
 // Operating status filter (several at once; NONE = Chưa ghi) and money milestone filter.
 export const OPS_FILTERS=['NONE','OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED'] as const;
 export type OpsFilter=typeof OPS_FILTERS[number];
-export type MoneyFilter=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'NONE';
+export type MoneyFilter=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'NONE'|'UNCHECKED'|'WITHDRAWABLE'|'RECEIVED'|'CHECK';
 export type PanelTab='overview'|'proxy'|'work'|'account'|'history';
 // Kho SDK (opened in the page with ?sdk=1): its search, filters, sort and page live in the URL too, so Back / Forward and reload return to it.
 export type SdkStateFilter='FREE'|'UNCONFIRMED'|'LINKED'|'ALL';
@@ -69,7 +70,7 @@ function readSdkUrl(p:{get(name:string):string|null}):SdkStoreUrl{
   const pick=<T extends string>(v:string|null,all:T[],d:T)=>(all as string[]).includes(v||'')?v as T:d;
   return {open:p.get('sdk')==='1',q:p.get('sq')||'',state:pick(p.get('sf'),SDK_STATES,'FREE'),place:pick(p.get('sl'),SDK_PLACES,'ALL'),sort:pick(p.get('ss'),SDK_SORTS,'UPDATED'),page:Math.max(1,Math.floor(Number(p.get('sp'))||1))};
 }
-const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
+const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
 // Links from before 19/10/2026: Chờ cài / Đã cài are now "Có proxy", the orphan install-task view is gone, the install tab is the proxy tab.
 const OLD_VIEW:Record<string,GridView>={PENDING:'ASSIGNED',INSTALLED:'ASSIGNED',TASK_ORPHAN:''};
 export function readGridUrl(p:{get(name:string):string|null}):GridUrl{

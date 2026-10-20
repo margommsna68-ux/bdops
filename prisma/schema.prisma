@@ -675,6 +675,10 @@ model PayPalEmail {
   usedAt          DateTime?
   reviewHold      Boolean             @default(false)
   reviewNote      String?
+  // Held for an EarnApp whose payout is being prepared (20/10/2026): one holder at a time, released when that preparation is
+  // cancelled, turned into the real use (usedEarnAppId) when the request is confirmed sent.
+  holdEarnAppId   String?             @unique
+  holdAt          DateTime?
   earnApp         EarnAppAccount?
   payouts         EarnAppPayout[]
   payoutRequests  EarnPayoutRequest[]
@@ -1460,6 +1464,10 @@ model EarnPayoutRequest {
   // Set when this money was used to record the VM as recreated (one recreation per request).
   consumedAt    DateTime?
   history       Json              @default("[]")
+  // Submission on EarnApp (owner brief 20/10/2026): SENT = sent and waiting for PayPal (all requests before this date);
+  // PREPARING = email held, not sent yet; UNKNOWN = the click was made but the result is not known (check EarnApp's history first).
+  submission    String            @default("SENT")
+  submittedAt   DateTime?
   revision      Int               @default(0)
   receipts      FundTransaction[]
   createdAt     DateTime          @default(now())
@@ -1544,4 +1552,30 @@ model SdkEvent {
 
   @@index([sdkId, createdAt])
   @@index([projectId, createdAt])
+}
+
+// EarnApp balance checks (owner brief 20/10/2026): what a person / AI read on the EarnApp account of a VM, at the time it was read.
+// History only (never edited); the current figure is the newest check (by checkedAt) of the VM's current EarnApp in its current
+// round, so an older check arriving late never replaces a newer one. A failed check keeps the last good figure. Never income or cost.
+model EarnBalanceCheck {
+  id           String    @id @default(cuid())
+  projectId    String
+  vmId         String
+  cycle        Int
+  earnAppId    String
+  checkedAt    DateTime
+  outcome      String    // OK | FAILED
+  amount       Decimal?  @db.Decimal(12, 2)
+  currency     String    @default("USD")
+  // Withdrawal condition as observed on EarnApp: YES (the app offers the payout), NO, UNKNOWN (only the balance was read).
+  withdrawable String    @default("UNKNOWN")
+  condition    String?
+  failure      String?
+  evidence     String?   // a reference (file name, note); never a password, 2FA link or code
+  source       String    // CELL | PASTE | AI | OTHER
+  recordedById String
+  recordedAt   DateTime  @default(now())
+
+  @@index([projectId, vmId, checkedAt])
+  @@index([earnAppId, checkedAt])
 }

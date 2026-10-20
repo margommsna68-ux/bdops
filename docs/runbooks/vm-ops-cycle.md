@@ -124,6 +124,51 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 - **Lần cấp đầu một email PayPal không hoàn tác được** (gán ở Server/VM, dán liên kết, hay ghi yêu cầu rút với email mới), kể cả khi email chưa có tiền. Email giữ dấu đã dùng vĩnh viễn; muốn gỡ khỏi VM thì dùng **Bỏ gán**. Liên kết không cấp email mới (chỉ tài khoản) vẫn hoàn tác được.
 - Đổi tình trạng vẫn hoàn tác được khi chưa có gì sửa tiếp (trong cùng lượt).
 
+## Tiền / Rút tại VM (chủ dự án 20/10/2026)
+
+Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọc trên EarnApp, dòng dưới là yêu cầu rút về PayPal. Hai số hiện cùng lúc, không trừ nhau.
+
+**Hiển thị:**
+- Chưa kiểm tra lần nào: "Chưa kiểm tra". $0 là một lần kiểm tra thật, không phải "chưa biết".
+- Đã xem điều kiện: "$12,40 · Có thể rút" / "Kiểm tra 15:16" (xanh). Chưa xem: "$10,00" / "Chưa kiểm tra điều kiện rút · Kiểm tra 09:15". Số tiền không bao giờ tự suy ra "có thể rút".
+- Kiểm tra lỗi: "Kiểm tra lỗi 15:11" / "gần nhất $8,00 · 10:31" (đỏ), giữ số cuối và lý do. Số cũ hơn 24 giờ: "số cũ, kiểm tra lại" (vàng).
+- Yêu cầu: "Đang chuẩn bị rút", "Chưa xác định kết quả rút", "Chờ về PP $10,00", "Đã về $6,00 · còn chờ $4,00", "Đã về PP $10,00", cùng mã PP và email.
+- Tình trạng VM (OK / OFF / SUS…) không đổi vì tiền.
+
+**Ghi kiểm tra** (`vmOps.balanceRecord`, `src/server/vm-ops/balance.ts`; người, dán bảng và AI dùng chung):
+- Mỗi dòng gồm VM, lượt (`expectedCycle`), EarnApp đã thấy, số tiền, đồng tiền, giờ thật đã xem, kết quả OK / FAILED, điều kiện YES / NO / UNKNOWN, ghi chú điều kiện, căn cứ (không mật khẩu, mã 2FA hay link chứa mã).
+- Lượt sai hoặc EarnApp đã đổi bị từ chối ở dòng đó. Giờ ở tương lai (quá 5 phút) bị từ chối. Bản kiểm tra cũ đến muộn được lưu vào lịch sử nhưng không thay số mới hơn.
+- Cùng khoá gửi lại thì không ghi trùng. Lần kiểm tra mới cùng số tiền là một dòng lịch sử mới.
+- Số dư không phải thu nhập, chi phí hay tiền PayPal. Không cộng tiền ghi chú SDK. Không đổi USD sang USDT.
+- Tại ô: Enter hoặc "Lưu kiểm tra". Nút mờ khi chưa có thay đổi hợp lệ; lỗi hiện tại ô; nháp giữ khi lưu lỗi.
+- Dán bảng → **Số dư EarnApp**: "VM | Số dư" (đã chọn server) hoặc "Server | VM | Số dư", kèm một "Thời điểm kiểm tra". Tự kiểm tra khi dán, một nút "Cập nhật N VM". Ô trống giữ nguyên; 0 hợp lệ; không tạo VM hay tài khoản; dán không xác nhận điều kiện rút. Sau khi lưu, ô dán chỉ còn dòng lỗi.
+
+**Lọc, sắp, tóm tắt** (chạy trên toàn bộ kết quả trước khi chia trang, giữ trong URL `money=` / `sort=`, Back / Forward đúng):
+- Lọc: Chưa kiểm tra / Có thể rút / Chờ tiền về / Đã về PP / Cần kiểm tra (lỗi, số cũ, chưa xác định kết quả, cần đối chiếu).
+- Sắp: số dư cao → thấp (chưa biết xếp cuối), lâu chưa kiểm tra trước, chờ tiền lâu nhất trước.
+- Dải tóm tắt: số dư đã ghi (số gần nhất của tài khoản hiện tại, theo từng đồng tiền), tiền đang chờ về PP (chỉ người có quyền tiền), số VM chưa có dữ liệu. Hai số không cộng với nhau.
+
+**Rút về PayPal** (cùng sổ PayPal, không có sổ thứ hai):
+- Chọn tay mã PP → email vẫn như cũ. Gợi ý tự động chỉ xét PP dùng được, còn email trống, biết số dư: PP gần $100 nhất mà vẫn không vượt sau khoản này (tính cả tiền đã có, đang chờ và đang giữ). PP đã hoặc dự kiến đạt $100 không được ưu tiên. Lý do hiện ngắn; "Dùng gợi ý" chỉ chọn sẵn.
+- Email EarnApp đang dùng luôn thắng; web không tự đổi email.
+- "Chỉ chuẩn bị" (`submission PREPARING`): giữ email (`PayPalEmail.holdEarnAppId`, giữ có điều kiện nên hai người không lấy cùng email), chưa đánh dấu đã dùng, không cộng vào tiền chờ.
+- "Đã gửi trên EarnApp (xác nhận)" (SENT): chỉ khi thấy trong lịch sử rút EarnApp. Email thành đã dùng vĩnh viễn, hết giữ, yêu cầu thành "Chờ về PP". Khoản nhận chỉ tự gắn vào yêu cầu đã SENT.
+- "Chưa xác định kết quả" (UNKNOWN): đã bấm nhưng mất kết nối. Email vẫn giữ, VM vào lọc Cần kiểm tra. Kiểm tra lịch sử EarnApp trước; không bấm rút thêm, không đổi email.
+- Huỷ / thất bại khi chưa gửi thì nhả email giữ. Yêu cầu đã gửi rồi huỷ thì email vẫn đã dùng.
+- Mỗi EarnApp một lượt rút, không chia nhỏ. Tiền về chỉ ghi với giao dịch PayPal khớp. Tiền PP không phải USDT của team.
+
+**Quyền:**
+- Xem số dư: quyền đọc Server / VM và (quyền tiền PayPal hoặc quyền ghi số dư). Người xem khác chỉ thấy "Đã kiểm tra" và điều kiện, không thấy số.
+- Ghi số dư: quyền ghi Server / VM, dự án Proxy / VM, không phải VIEWER, và (ADMIN / MODERATOR hoặc quyền riêng **Ghi kiểm tra tiền EarnApp** `EARN_BALANCE`). Quyền này không cho ghi yêu cầu rút, gán email, xoá kho, sửa chi phí hay sửa khoản nhận.
+- Yêu cầu rút và gán email vẫn cần quyền tiền / gán như trước.
+
+**AI (chuẩn bị, chưa nối máy):**
+- Chưa có kết nối nào từ web tới VM hay EarnApp (không SSH, RDP, agent hay API EarnApp). Web không điều khiển VM và không tự rút tiền.
+- Chưa tạo user, mật khẩu hay token cho AI. Khi chủ dự án yêu cầu: tạo một thành viên USER với module INFRASTRUCTURE và `EARN_BALANCE` (thêm quyền tiền chỉ khi muốn AI ghi yêu cầu rút).
+- "Kiểm tra tiền các VM trên An-01": đọc `vmOps.board` lấy VM, `cycle`, `earnAppId`; đọc EarnApp từng máy; gửi `vmOps.balanceRecord` với `source AI`, giờ thật đã đọc, một khoá cho mỗi lô (gửi lại cùng khoá khi mất trả lời). Dòng bị từ chối vì lượt / tài khoản thì đọc lại bảng, không ép ghi.
+- "Rút tiền các VM đủ điều kiện trên An-01": chỉ VM có điều kiện YES vừa kiểm tra; `vmOps.payoutPick` (có `amount`) lấy gợi ý; `requestPayout` với `submission PREPARING` trước khi bấm; bấm rút trên EarnApp; thấy trong lịch sử → `updatePayout SENT`; mất kết nối → `updatePayout UNKNOWN`, đối chiếu lịch sử EarnApp trước khi làm tiếp. Mọi lệnh mang `expectedCycle`, nên lệnh cũ không chạm VM đã tạo lại hay tài khoản đã đổi. Tiến độ nằm ở trạng thái yêu cầu, nên AI dừng giữa chừng có thể đọc lại và làm tiếp.
+- Còn thiếu để AI thật làm được trên máy: cách vào từng VM (địa chỉ, giao thức, tài khoản, hoặc agent cài sẵn), cách AI đăng nhập EarnApp trên máy đó, nơi giữ bí mật cho AI, và quyết định của chủ dự án về tài khoản AI.
+
 ## Dữ liệu và kiểm tra
 
 - **Migration** `20261019090000_vm_cycle_payout`, chỉ thêm:
@@ -135,3 +180,5 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
   - `vm-ops-rules.test.ts` (5).
   - `vm-grid-model.test.ts`: URL.
 - **Bằng chứng:** `docs/superpowers/evidence/2026-10-19-vm-ops-cycle/`; bản sửa sau rà soát: `docs/superpowers/evidence/2026-10-19-vm-ops-fixes/`.
+- **Migration** `20261020200000_earn_balance_checks`, chỉ thêm: bảng `EarnBalanceCheck`; cột `EarnPayoutRequest.submission` (mặc định SENT cho mọi yêu cầu cũ) / `submittedAt`; `PayPalEmail.holdEarnAppId` / `holdAt`.
+- **Test tiền tại VM:** `earn-money-rules.test.ts` (7), `earn-money.integration.test.ts` (8). Bằng chứng: `docs/superpowers/evidence/2026-10-20-earn-money/`.

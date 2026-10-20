@@ -5,7 +5,8 @@ import {withProxyTransaction} from './transaction';
 import {ProxyDomainError,type ActorScope} from './types';
 import {recordOperation} from '../operation-history/journal';
 import {captureMember} from '../operation-history/snapshot';
-export const proxyCapabilities=['COPY_CREDENTIALS','PROXY_IMPORT','PROXY_REPLACE'] as const;
+// EARN_BALANCE (20/10/2026): record EarnApp balance checks without being a manager (e.g. a dedicated AI account).
+export const proxyCapabilities=['COPY_CREDENTIALS','PROXY_IMPORT','PROXY_REPLACE','EARN_BALANCE'] as const;
 async function administrator(scope:ActorScope,db:Parameters<typeof loadInfrastructureScope>[0]){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   if(current.role!=='ADMIN'||current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN');

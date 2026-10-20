@@ -26,6 +26,8 @@ export async function emailFor(db:VMReader,projectId:string,emailId:string,earnA
   const who=email.paypal.code+' · '+email.email;
   if(email.paypal.status!=='ACTIVE')return {ok:false as const,message:'PayPal '+email.paypal.code+' đang '+email.paypal.status+'; email của PP này không cấp mới'};
   if(email.reviewHold)return {ok:false as const,message:'Email '+who+' đang tạm giữ để đối chiếu dữ liệu cũ; xử lý ở Cần đối chiếu trước'};
+  // Held for another EarnApp's payout being prepared (20/10/2026): not given to anyone else until that preparation ends.
+  if(email.holdEarnAppId&&email.holdEarnAppId!==earnAppId)return {ok:false as const,message:'Email '+who+' đang được giữ cho một lệnh rút đang chuẩn bị; chọn email khác'};
   if(email.earnApp&&email.earnApp.id!==earnAppId)return {ok:false as const,message:'Email '+who+' đang nhận cho '+email.earnApp.login.email+' ('+at(email.earnApp.vm)+'); mỗi email một EarnApp'};
   if(email.usedEarnAppId&&email.usedEarnAppId!==earnAppId){const first=await db.earnAppAccount.findUnique({where:{id:email.usedEarnAppId},include:{login:{select:{email:true}}}});return {ok:false as const,message:'Email '+who+' đã dùng cho EarnApp '+(first?.login.email??'khác')+'; email đã dùng không cấp cho EarnApp khác'};}
   return {ok:true as const,email:{id:email.id,email:email.email,paypalId:email.paypal.id,code:email.paypal.code}};

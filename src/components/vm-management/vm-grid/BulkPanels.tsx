@@ -8,8 +8,9 @@ import {AllocationForm} from '../AllocationDialog';
 import {errorMessage,type ManagedVM} from '../shared';
 import {useBusinessKey} from '@/components/business-management/shared';
 import {AccountPasteBody} from './AccountPanels';
-type PasteKind=Exclude<BulkKind,'GMAIL'>|'ACCOUNT';
-const KIND_LABEL:Record<PasteKind,string>={SDK:'SDK',PROXY:'Proxy',ACCOUNT:'Tài khoản + PP',NOTE:'Ghi chú'};
+import {BalancePasteBody} from './BalancePaste';
+type PasteKind=Exclude<BulkKind,'GMAIL'>|'ACCOUNT'|'BALANCE';
+const KIND_LABEL:Record<PasteKind,string>={SDK:'SDK',PROXY:'Proxy',ACCOUNT:'Tài khoản + PP',BALANCE:'Số dư EarnApp',NOTE:'Ghi chú'};
 const HINT:Record<Exclude<BulkKind,'GMAIL'>,string>={SDK:'Mã SDK, có thể thêm Tiền tích luỹ USD | Ghi chú SDK (của chính mã đó). Mã đang ở VM khác không bị lấy: dùng Chọn SDK đã lưu ở ô SDK để chuyển.',PROXY:'IP, IP:port hoặc IP:port:user:pass (TUT hoặc Chung mooon–Genjy). Chỉ giao vào VM đang trống.',NOTE:'Ghi chú tối đa 1000 ký tự; phần sau cột VM là ghi chú.'};
 type Input={kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]};
 const itemsOf=(p:BulkPreview)=>p.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,expectedSdkRevision:r.expectedSdkRevision,value:r.value,amount:r.amount,note:r.note}));
@@ -50,7 +51,7 @@ export function PasteTablePanel({projectId,servers,serverId,onSaved}:{projectId:
   const change=(fn:()=>void)=>{fn();bulk.reset();setSaved('');};
   useEffect(()=>{
     if(keepResult.current){keepResult.current=false;return;} // the box was trimmed to the failed lines after a save: keep that result on screen
-    if(kind==='ACCOUNT'||kind==='SDK'||!text.trim()){setChecking(false);return;}
+    if(kind==='ACCOUNT'||kind==='SDK'||kind==='BALANCE'||!text.trim()){setChecking(false);return;}
     const n=++seq.current;setChecking(true);const t=setTimeout(()=>{void bulk.check({kind,serverId:server||undefined,text}).finally(()=>{if(n===seq.current)setChecking(false);});},400);
     return ()=>clearTimeout(t);
   },[kind,server,text]);// eslint-disable-line react-hooks/exhaustive-deps
@@ -63,11 +64,12 @@ export function PasteTablePanel({projectId,servers,serverId,onSaved}:{projectId:
     if(keep!==text){keepResult.current=true;setText(keep);}
   }
   // Áp dụng only for the result of exactly the content on screen (changed or cleared while checking = no button).
-  const current=kind!=='ACCOUNT'&&kind!=='SDK'&&!!text.trim()&&bulk.result?.sig===inputSig({kind,serverId:server||undefined,text}),ready=current&&!bulk.applied?bulk.result!.ready:0,locked=bulk.saving;
+  const current=kind!=='ACCOUNT'&&kind!=='SDK'&&kind!=='BALANCE'&&!!text.trim()&&bulk.result?.sig===inputSig({kind,serverId:server||undefined,text}),ready=current&&!bulk.applied?bulk.result!.ready:0,locked=bulk.saving;
   return <div className="space-y-3">
     <div className="vm-kind-tabs" role="tablist" aria-label="Loại cập nhật">{(Object.keys(KIND_LABEL) as PasteKind[]).map(k=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} disabled={locked} onClick={()=>change(()=>setKind(k))}>{KIND_LABEL[k]}</button>)}</div>
     <label className="pm-label">Server<select className="pm-input" aria-label="Server của danh sách" disabled={locked} value={server} onChange={e=>change(()=>setServer(e.target.value))}><option value="">Nhiều server (dán kèm cột Server)</option>{servers.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></label>
     {kind==='ACCOUNT'?<AccountPasteBody projectId={projectId} serverCode={servers.find(s=>s.id===server)?.code??null} text={text} setText={setText} onSaved={onSaved}/>
+    :kind==='BALANCE'?<BalancePasteBody projectId={projectId} serverId={server} onSaved={onSaved}/>
     :kind==='SDK'?<SdkPasteBody projectId={projectId} serverId={server} serverCode={servers.find(s=>s.id===server)?.code??null} servers={servers} onSaved={onSaved}/>:<>
     <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách dán" disabled={locked} value={text} placeholder={server?`VM_001\t…\nVM_002\t…`:`moon05\tVM_001\t…\nmoon06\tVM_002\t…`} onChange={e=>change(()=>setText(e.target.value))}/></label>
     <p className="pm-muted text-xs">{server?'Mỗi dòng: VM | giá trị.':'Mỗi dòng: Server | VM | giá trị.'} {HINT[kind]} Ô trống giữ nguyên{kind!=='PROXY'?'; gõ - để xoá giá trị':''}. Tự kiểm tra khi dán, chưa ghi gì.</p>

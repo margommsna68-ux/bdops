@@ -1,4 +1,6 @@
 "use client";
+import {MONEY_FILTERS,MONEY_FILTER_LABEL,moneyFlags,moneySortKey,moneySummary,type MoneyFlag,type MoneyRow} from '@/lib/vm-ops';
+import {formatLedger as fmtLedger} from '@/lib/money-input';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import Link from 'next/link';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
@@ -68,12 +70,16 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
   const proxyBlocked=(v:ManagedVM)=>vmView(v)==='BLOCKED';
   const opsKey=(v:ManagedVM):OpsFilter=>opsStatus(v)??'NONE';
-  const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&(!url.money||(url.money==='NONE'?!milestone(v):milestone(v)===url.money))&&(!url.warn||proxyBlocked(v));
+  // Money at the VM (20/10/2026): balance read on EarnApp + payout request; filters and sorts run over the whole result before paging.
+  const moneyRow=(v:ManagedVM):MoneyRow=>{const o=opsOfVm.get(v.id),r=o?.request;return {hasEarnApp:!!o?.earnAppId,balance:o?.balance??{latest:null,lastOk:null},request:r?{submission:r.submission,state:r.state,phase:r.phase,requestedAt:r.requestedAt,submittedAt:r.submittedAt,money:r.money?{remaining:r.money.remaining,currency:r.money.currency}:null}:null};};
+  const flagMoney=(m:MoneyFilter):m is MoneyFlag=>(MONEY_FILTERS as readonly string[]).includes(m)&&m!=='WAITING';
+  const moneyMatch=(v:ManagedVM)=>!url.money||(flagMoney(url.money)?moneyFlags(moneyRow(v))[url.money]:url.money==='NONE'?!milestone(v):milestone(v)===url.money);
+  const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&moneyMatch(v)&&(!url.warn||proxyBlocked(v));
   const priority=(v:ManagedVM)=>opsPriority({status:opsStatus(v),proxyBlocked:proxyBlocked(v),milestone:milestone(v)});
   const needle=url.q.trim().toLowerCase(),unusedSdk=(v:ManagedVM)=>v.sdks.filter(s=>s.state!=='LINKED').length;
   // Filter and sort the whole result first, then page it.
   const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdks.map(x=>x.code).join(' ')} ${accountText(v.id)}`.toLowerCase().includes(needle)))
-    .sort((a,b)=>(url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?unusedSdk(a)-unusedSdk(b):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
+    .sort((a,b)=>((url.sort==='BALANCE'||url.sort==='CHECKED_OLD'||url.sort==='WAITING_OLD')?moneySortKey(url.sort,moneyRow(a))-moneySortKey(url.sort,moneyRow(b)):url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?unusedSdk(a)-unusedSdk(b):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,opsOfVm]);
   // Back on the page: tick the saved rows again once the whole result is known (VMs, accounts and statuses loaded), so a row still in
@@ -157,7 +163,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   }
   // Tình trạng cell actions. Each one is the existing checked command; errors propagate so the cell keeps the old state and shows why.
   // Tình trạng: one command for the cell and for bulk; same value = nothing written; old-round commands are refused by the server.
-  const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney};
+  const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney,balanceRead:!!board.data?.rights.balanceRead,balanceWrite:!!board.data?.rights.balanceWrite};
+  const summary=board.data?moneySummary(filtered.map(moneyRow)):null;
   async function setOpsStatus(vm:ManagedVM,status:VmOpsStatus,cycle:number){
     const r=await setOps.mutateAsync({projectId,key:crypto.randomUUID(),items:[{vmId:vm.id,status,expectedCycle:cycle}]}),row=r.rows[0];
     if(row?.outcome==='ERROR')throw new Error(row.message);
@@ -203,16 +210,19 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
       {OPS_FILTERS.map(k=>{const n=active.filter(v=>opsKey(v)===k).length,on=url.st.includes(k);if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{n}</strong></button>;})}
       <span className="pm-muted text-xs ml-2">Proxy / tiền:</span>
       {rights.copy&&!deletedView&&(()=>{const scope=selected.size?selectedRows:filtered,n=blockedIn(scope);return <button type="button" className="pm-button" disabled={!n} title={selected.size?'Proxy Blocked của các dòng đã chọn':'Proxy Blocked trong bộ lọc hiện tại (mọi trang)'} onClick={()=>void copyBlockedOf(scope)}><Copy size={15}/>Copy proxy Blocked ({n})</button>;})()}
+      {(['UNCHECKED','WITHDRAWABLE'] as const).map(k=>{const n=board.data?active.filter(v=>moneyFlags(moneyRow(v))[k]).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
       {(['WAITING','RECREATE','MONEY_REVIEW','FAILED'] as const).map(k=>{const n=board.data?active.filter(v=>milestone(v)===k).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='RECREATE'||k==='MONEY_REVIEW'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MILESTONE_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
+      {(['RECEIVED','CHECK'] as const).map(k=>{const n=board.data?active.filter(v=>moneyFlags(moneyRow(v))[k]).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='CHECK'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
       {(url.st.length>0||url.money||url.warn)&&<button type="button" className="pm-link text-xs" onClick={()=>go({st:[],money:'',warn:false,page:1})}>Bỏ lọc tình trạng</button>}
     </div>
+    {summary&&!deletedView&&(board.data?.rights.balanceRead||board.data?.rights.money)&&<p className="vm-money-summary text-xs" role="status" data-testid="money-summary"><span>Số dư EarnApp đã ghi: <strong>{summary.balances.length?summary.balances.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'—'}</strong> ({summary.known} VM)</span>{board.data?.rights.money&&<span>Đang chờ về PP: <strong>{summary.waiting.length?summary.waiting.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'$0,00'}</strong></span>}<span>Chưa có dữ liệu: <strong>{summary.unchecked}</strong> VM</span><span className="pm-muted">Theo bộ lọc hiện tại (mọi trang); hai số không cộng với nhau.</span></p>}
     {board.error&&<p role="alert" className="pm-error">Chưa đọc được tình trạng vận hành: {board.error.message} <button className="pm-link" onClick={()=>void board.refetch()}>Thử lại</button></p>}
     {accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
         {!storeOpen&&<div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
-          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option></select>
+          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option><option value="BALANCE">Số dư cao → thấp</option><option value="CHECKED_OLD">Lâu chưa kiểm tra tiền trước</option><option value="WAITING_OLD">Chờ tiền lâu nhất trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>}
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
         {hasSelection&&!storeOpen&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}

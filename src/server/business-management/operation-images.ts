@@ -8,7 +8,7 @@ import {restoreSdkImage} from '../vm-management/sdk-undo';
 const fields:Record<BusinessResource,string[]>={
  GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision','loginType','batchId','twoFaLink','smsLink','phone'],
  PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision','batchId','firstEarnAppId'],
- PAYPAL_EMAIL:['email','password','twoFa','hotmailToken','isPrimary','notes','paypalId','businessManaged','archivedAt','revision','usedEarnAppId','usedAt','reviewHold','reviewNote'],
+ PAYPAL_EMAIL:['email','password','twoFa','hotmailToken','isPrimary','notes','paypalId','businessManaged','archivedAt','revision','usedEarnAppId','usedAt','reviewHold','reviewNote','holdEarnAppId','holdAt'],
  VM_BINDING:['gmailId','revision'],
  VM_SDK:['sdkId','sdkRecordedAt','sdkRecordedById','revision'],
  WORK:['title','notes','status','serverId','vmId','assigneeId','createdById','completedById','completedAt','dueDate','archivedAt','revision','kind'],
@@ -23,7 +23,7 @@ const fields:Record<BusinessResource,string[]>={
  EARNAPP:['loginId','vmId','paypalId','paypalEmailId','registeredAt','registeredById','revision','closedAt','closedReason'],
  PAYOUT:['earnAppId','paypalId','paypalEmailId','vmId','startedAt','endedAt'],
  VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
- PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision'],
+ PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt'],
  VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','closedAt'],
  SDK:['code','vmId','holderVmId','heldAt','heldById','amount','currency','amountAt','amountById','note','noteAt','noteById','linkState','linkedEarnAppId','linkedVmId','linkedCycle','linkedAt','linkedById','confirmedAt','confirmedById','revision'],
  // The SDK position of a VM (its mirror): lets undo see a code placed on that VM later by someone else.
@@ -71,7 +71,7 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='SDK'){await restoreSdkImage(tx,projectId,image,actorId);return;}
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
- if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt'].includes(key)?new Date(String(value)):value;}}
+ if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt','submittedAt','holdAt'].includes(key)?new Date(String(value)):value;}}
  else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK','ACCOUNT_BATCH'].includes(image.resource))data.archivedAt=new Date();
  else if(image.resource==='EARNAPP'){await tx.earnAppPayout.deleteMany({where:{earnAppId:image.id}});await tx.earnAppAccount.delete({where:{id:image.id}});return;} // created by the undone operation
  else if(image.resource==='PAYOUT'){await tx.earnAppPayout.deleteMany({where:{id:image.id}});return;} // history period opened by the undone operation
