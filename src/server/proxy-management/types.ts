@@ -64,9 +64,9 @@ export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_SHARED='SHARED',GROUP_UNK
 // SHARED = Chung mooon–Genjy, GENJY = Genjy riêng. Any row may move between classes (owner decision 16/10/2026).
 export type GroupChoice={kind:'TUT'}|{kind:'SHARED'}|{kind:'GENJY'}|{kind:'GROUP';id:string}|{kind:'NEW';name:string};
 export type LocationChoice={kind:'VM';vmId:string}|{kind:'SERVER';serverId:string}|{kind:'UNASSIGN'};
-// manage: RETIRE = "Ngừng quản lý" (keeps IP, credentials, ownership and history; releasePlans lets it drop an unstarted plan), RESTORE brings a retired row back.
+// manage: RETIRE = "Xoá khỏi kho" (keeps IP, credentials, ownership and history; refused while the proxy sits on a VM), RESTORE brings a deleted row back. ADMIN only.
 // STATE flips a current row between NEW and LIVE only; BLOCKED/replace/retire keep their own flows.
-export type ManageChoice={kind:'RETIRE';reason:string;releasePlans?:boolean}|{kind:'RESTORE'}|{kind:'STATE';state:'NEW'|'LIVE'|'BLOCKED'};
+export type ManageChoice={kind:'RETIRE';reason:string}|{kind:'RESTORE'}|{kind:'STATE';state:'NEW'|'LIVE'|'BLOCKED'};
 export interface EditItem {endpointId:string;group?:GroupChoice;location?:LocationChoice;manage?:ManageChoice}
 // sharedList: the owner's confirmed list of shared proxies (IP or full proxy per line); classifies matching identities as Chung mooon–Genjy.
 // syncStates: re-align NEW/LIVE with the real VM holds for the whole project (preview first).
@@ -74,5 +74,5 @@ export interface EditInput {items?:EditItem[];paste?:string;sharedList?:string;s
 export interface NotListedRef {ip:string;identityId:string;state:InventoryState|null}
 export interface EditRow {row:number;endpointId:string|null;ip:string;field:'GROUP'|'LOCATION'|'STATE';before:string;after:string;outcome:Outcome;code?:IssueCode;message:string}
 export interface EditPreview {token:string;rows:EditRow[];ready:number;skipped:number;errors:number;expiresAt:string;notListed:NotListedRef[]}
-export interface EditResult {batchId:string;replay:boolean;undone?:boolean;rows:EditRow[];applied:number;skipped:number;errors:number}
+export interface EditResult {batchId:string;replay:boolean;undone?:boolean;/** Journal entry of this save (for the Hoàn tác button); null when nothing was written. */operationId?:string|null;rows:EditRow[];applied:number;skipped:number;errors:number}
 export interface VmTarget {id:string;code:string;serverId:string;serverCode:string;occupant:string|null}

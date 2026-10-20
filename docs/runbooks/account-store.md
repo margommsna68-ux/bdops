@@ -298,3 +298,39 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   unsaved text open. An error stays at the cell with the typed text; "Đã lưu" only after the server saved.
 - `accountStore.setNote` (`setStockNote`): stock-write right, revision check, only `notes` changes (never password, status, batch or cost),
   journaled (`ACCOUNT_STOCK_NOTE`, undo), same text = nothing written, a retry reuses its key.
+
+## Nhập Apple ID theo mẫu mua (20 October 2026)
+
+- Chọn **Apple ID** → dán nguyên văn `Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại` (tab hoặc `|`, đúng thứ tự, ô trống giữ
+  vị trí; không tách theo `:` vì link có `https://`). Web tự kiểm tra từng dòng, một nút **Nhập**. Không suy loại từ đuôi email: một
+  Apple ID đăng nhập bằng `@gmail.com` vẫn là Apple ID. Mẫu cũ (`Tài khoản | Mật khẩu | 2FA | Email khôi phục | Ghi chú`) còn ở ô
+  **Mẫu cũ** (tuỳ chọn phụ, `loginFormat: STANDARD`); Gmail luôn dùng mẫu cũ (`APPLE5` cho Gmail bị từ chối).
+- Kiểm tra: link chỉ nhận `http(s)://` và được giữ nguyên chữ hoa / thường, tham số, token, `%2F`; số điện thoại là chuỗi (giữ số 0 đầu,
+  dấu `+`, mã quốc gia như người dùng gõ; không đoán quốc gia); dòng thừa cột, link sai, SĐT sai → lỗi tại dòng; không dồn cột thừa vào
+  ghi chú. Bảng kiểm tra chỉ nói "có / không có" (mật khẩu, link 2FA, link SMS, SĐT), không hiện giá trị.
+- Lưu: `GmailAccount.twoFaLink`, `smsLink` (mã hoá như mật khẩu), `phone` (chữ); migration `20261020150000_apple_id_fields` chỉ thêm cột.
+  Không ghi vào Email khôi phục, Ghi chú hay 2FA. Tài khoản đã có không bị ghi đè mật khẩu / link / SĐT; khoá lệnh và chi phí một lần
+  như cũ; nhật ký chỉ giữ digest của mật khẩu và link. Ảnh hoàn tác (`operation-images`) mang cả ba trường.
+- Dùng: dòng hiện SĐT (có copy) và hai nút **Lấy 2FA** / **SMS** (chỉ với quyền copy). Bấm → nhập PIN → link hiện trong khung đó với
+  **Mở trong tab mới** và **Copy link**; không tự mở, không trả link trong danh sách, lịch sử, lỗi hay log (`businessManagement.copyAccount`
+  trả thêm `twoFaLink`, `smsLink`, `phone`; VIEWER / người không có `COPY_CREDENTIALS` / ngoài dự án bị từ chối).
+- Test: `account-parse.test.ts` (mẫu APPLE5), `apple-id-import.integration.test.ts`.
+
+## Xoá khỏi kho và Khôi phục (20 October 2026)
+
+- **Ai:** chỉ ADMIN của đúng dự án (`accountStore.deleteStock` / `restoreStock`, kiểm lại trong giao dịch ghi; hạ quyền giữa chừng → từ
+  chối). Đường "Ẩn tài khoản" cũ (`businessManagement.archiveAccount`) cũng chỉ ADMIN. Nhập, sửa, đổi tình trạng của MODERATOR giữ nguyên.
+- **Ở đâu:** nút thùng rác **Xoá khỏi kho** cuối mỗi dòng Gmail / Apple ID và trong cột Thao tác của PayPal; tick nhiều dòng → **Xoá N dòng**.
+  Bấm là ghi, không hỏi lý do / xác nhận; thông báo có **Hoàn tác** (nhật ký `ACCOUNT_STOCK_DELETE` / `…_RESTORE`, ảnh GMAIL / PAYPAL, hoàn
+  tác chung bị từ chối khi dòng đã đổi tiếp). Dòng bị chặn giữ tick và hiện lý do ngay tại dòng kèm link **Mở**.
+- **Dữ liệu:** chỉ `archivedAt` (không xoá cứng). Chi phí, lô nhập, số lượng mua / đã nhận, sổ PayPal, email và dấu đã dùng không đổi.
+  Khôi phục trả về đúng tình trạng tính từ liên kết (tài khoản / email đã dùng không thành NEW). Chống trùng nhập vẫn thấy dòng đã xoá và
+  chỉ tới Khôi phục; gán tự động / chọn tài khoản không đề xuất dòng đã xoá.
+- **Chặn:** Gmail / Apple ID còn tài khoản EarnApp trên VM đang hoạt động hoặc liên kết VM cũ còn hiệu lực → "Đang gán cho Server / VM".
+  PayPal có email đang nhận cho VM; còn yêu cầu rút `REQUESTED` chưa dùng; còn tiền theo sổ (bất kỳ đồng tiền, cùng quy tắc sổ PayPal);
+  email tạm giữ đối chiếu hoặc liên kết cũ chưa rõ email → chặn kèm đường dẫn (VM, Tiền vào / ra, Cần đối chiếu). Giao dịch đã tất toán
+  không chặn.
+- **Xem:** chip **Đã xoá** (`?state=DELETED`, `accountStore.store {deleted:true}`), Khôi phục từng dòng / **Khôi phục N dòng**. Danh sách
+  phân trang 100 dòng (`?page=`, lọc / tìm trên toàn bộ trước khi phân trang, tổng đúng, "Chọn tất cả trên trang (N)"); đổi bộ lọc về trang 1;
+  trang không còn được kẹp về trang cuối; Back / tải lại giữ tab, bộ lọc và trang.
+- Test: `account-delete.integration.test.ts`, `account-url.test.ts`.

@@ -17,12 +17,12 @@ export function rejectedReport(rows:PreviewRow[]){
 }
 // One-click edits: preview and commit in one go through the same checked endpoints. Valid rows are saved, refused rows come
 // back with their reasons; nothing is reported as saved unless the commit succeeded.
-export interface QuickEditOutcome {applied:number;errors:{ip:string;message:string}[];unchanged:boolean}
-export async function quickEdit<I extends {idempotencyKey:string}>(input:I,inspect:(input:I)=>Promise<{token:string;ready:number;rows:{ip:string;outcome:string;message:string}[]}>,commit:(input:{token:string;idempotencyKey:string})=>Promise<{applied:number}>):Promise<QuickEditOutcome>{
-  const preview=await inspect(input),errors=preview.rows.filter(r=>r.outcome==='ERROR').map(r=>({ip:r.ip,message:r.message}));
-  if(!preview.ready) return {applied:0,errors,unchanged:!errors.length};
+export interface QuickEditOutcome {applied:number;errors:{ip:string;endpointId:string|null;message:string}[];unchanged:boolean;operationId:string|null}
+export async function quickEdit<I extends {idempotencyKey:string}>(input:I,inspect:(input:I)=>Promise<{token:string;ready:number;rows:{ip:string;endpointId?:string|null;outcome:string;message:string}[]}>,commit:(input:{token:string;idempotencyKey:string})=>Promise<{applied:number;operationId?:string|null}>):Promise<QuickEditOutcome>{
+  const preview=await inspect(input),errors=preview.rows.filter(r=>r.outcome==='ERROR').map(r=>({ip:r.ip,endpointId:r.endpointId??null,message:r.message}));
+  if(!preview.ready) return {applied:0,errors,unchanged:!errors.length,operationId:null};
   const result=await commit({token:preview.token,idempotencyKey:input.idempotencyKey});
-  return {applied:result.applied,errors,unchanged:false};
+  return {applied:result.applied,errors,unchanged:false,operationId:result.operationId??null};
 }
 export function quickEditMessage(o:QuickEditOutcome){
   if(o.unchanged) return 'Không thay đổi';

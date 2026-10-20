@@ -11,7 +11,7 @@ import {assertPeriodOpen} from '../business-management/period-lock';
 import {dayDate} from '../business-management/money';
 import {CashDecimal,cashCurrency,normalizeCostMoney,parseOriginalMoney} from '../business-management/usdt-money';
 import {verifyP2PQuote} from '../business-management/binance-p2p';
-import {MAX_LINES,isEmail,parseLoginLines,parsePaypalLines,repeats,type PaypalLine} from './parse';
+import {LOGIN_FORMATS,MAX_LINES,isEmail,parseLoginLines,parsePaypalLines,repeats,type LoginFormat,type PaypalLine} from './parse';
 // Kho tài khoản: receive Gmail / Apple ID logins and PayPals in bulk (one preview, one import of the valid lines), each line with
 // its own result. An existing account is never overwritten (credentials included). A purchase batch records what was actually paid
 // once in the cost ledger; repeat imports, fixes in the same batch and assignments never add a cost.
@@ -20,10 +20,11 @@ export type PriceMode='NONE'|'UNIT'|'TOTAL';
 // A new purchase (batch) or an explicit "Nhập bổ sung" into one existing batch (append). Never both: an append carries no money,
 // source or date, and a new purchase never falls into an old batch because its code matches.
 export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;currency?:string|null;rate?:string|null;notes?:string|null;p2pQuoteToken?:string|null}
-export interface ImportInput {kind:StockKind;loginType?:AccountLoginType|null;text:string;batch?:BatchInput|null;append?:{batchId:string}|null}
+export interface ImportInput {kind:StockKind;loginType?:AccountLoginType|null;/** Apple ID lists default to APPLE5 (Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại); STANDARD is the older pattern. Gmail is always STANDARD. */loginFormat?:LoginFormat|null;text:string;batch?:BatchInput|null;append?:{batchId:string}|null}
+export const loginFormatOf=(input:Pick<ImportInput,'loginType'|'loginFormat'>):LoginFormat=>input.loginFormat??(input.loginType==='APPLE_ID'?'APPLE5':'STANDARD');
 // PayPal rows also carry the emails of the line and, for a code already in stock, the emails it would add (outcome ADD: shown with
 // a "Bổ sung email" action; never imported as a new purchase or a second PayPal).
-export interface ImportRow {line:number;account:string;email:string;hasPassword:boolean;has2fa:boolean;hasRecovery:boolean;outcome:'READY'|'EXISTS'|'ADD'|'ERROR';message:string;existingId:string|null;emails?:string[];newEmails?:string[];head?:boolean}
+export interface ImportRow {line:number;account:string;email:string;hasPassword:boolean;has2fa:boolean;hasRecovery:boolean;has2faLink?:boolean;hasSmsLink?:boolean;hasPhone?:boolean;outcome:'READY'|'EXISTS'|'ADD'|'ERROR';message:string;existingId:string|null;emails?:string[];newEmails?:string[];head?:boolean}
 export const LOGIN_TYPES:AccountLoginType[]=['GMAIL','APPLE_ID'];
 export const typeLabel=(t:AccountLoginType|null|undefined)=>t==='APPLE_ID'?'Apple ID':t==='GMAIL'?'Gmail':'Chưa chọn loại';
 const area=(kind:StockKind)=>kind==='PAYPAL'?'PAYPALS' as const:'INFRASTRUCTURE' as const;
@@ -33,7 +34,9 @@ export const canSeeMoney=(scope:ActorScope)=>scope.role==='ADMIN'||!!scope.allow
 function parse(input:ImportInput){
   if(input.text.length>400000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa '+MAX_LINES+' dòng mỗi lần');
   if(input.kind==='LOGIN'&&!LOGIN_TYPES.includes(input.loginType as AccountLoginType))throw new ProxyDomainError('INVALID_INPUT','Chọn loại tài khoản: Gmail hoặc Apple ID');
-  const rows=input.kind==='LOGIN'?parseLoginLines(input.text):parsePaypalLines(input.text);
+  if(input.kind==='LOGIN'&&input.loginFormat&&!LOGIN_FORMATS.includes(input.loginFormat))throw new ProxyDomainError('INVALID_INPUT','Mẫu dán không hợp lệ');
+  if(input.kind==='LOGIN'&&input.loginType==='GMAIL'&&input.loginFormat==='APPLE5')throw new ProxyDomainError('INVALID_INPUT','Gmail dùng mẫu Tài khoản | Mật khẩu | 2FA | Email khôi phục | Ghi chú');
+  const rows=input.kind==='LOGIN'?parseLoginLines(input.text,loginFormatOf(input)):parsePaypalLines(input.text);
   if(!rows.length||rows.length>MAX_LINES)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến '+MAX_LINES+' dòng mỗi lần');return rows;
 }
 export const MAX_QUANTITY=100000;
@@ -90,12 +93,12 @@ async function classify(db:Db,scope:ActorScope,input:ImportInput){
     const found=await db.gmailAccount.findMany({where:{email:{in:lines.map(l=>l.email).filter(Boolean),mode:'insensitive'}},select:{id:true,email:true,projectId:true,archivedAt:true,batch:{select:{code:true}}}});
     const byEmail=new Map(found.map(f=>[f.email.toLowerCase(),f]));
     for(const l of lines){
-      const base={line:l.line,account:l.email,email:l.email,hasPassword:!!l.password,has2fa:!!l.twoFa,hasRecovery:!!l.recovery,existingId:null};
+      const base={line:l.line,account:l.email,email:l.email,hasPassword:!!l.password,has2fa:!!l.twoFa,hasRecovery:!!l.recovery,has2faLink:!!l.twoFaLink,hasSmsLink:!!l.smsLink,hasPhone:!!l.phone,existingId:null};
       if(l.error){out.push({...base,outcome:'ERROR',message:l.error});continue;}
       const twice=again(l);if(twice){out.push({...base,outcome:'ERROR',message:'Trùng với dòng '+twice.join(', ')+' trong danh sách; giữ một dòng'});continue;}
       const old=byEmail.get(l.email);
       if(old&&old.projectId!==scope.projectId){out.push({...base,outcome:'ERROR',message:'Tài khoản đã thuộc dự án khác'});continue;}
-      if(old){out.push({...base,existingId:old.id,outcome:'EXISTS',message:'Đã có trong kho'+(old.batch?' (lô '+old.batch.code+')':'')+(old.archivedAt?' · đã ẩn':'')+'; giữ nguyên, không ghi đè mật khẩu'});continue;}
+      if(old){out.push({...base,existingId:old.id,outcome:'EXISTS',message:'Đã có trong kho'+(old.batch?' (lô '+old.batch.code+')':'')+(old.archivedAt?' · đã xoá khỏi kho (Khôi phục ở bộ lọc Đã xoá)':'')+'; giữ nguyên, không ghi đè mật khẩu, link hay số điện thoại'});continue;}
       out.push({...base,outcome:'READY',message:l.password?'Nhập mới':'Nhập mới · chưa có mật khẩu'});
     }
   }else{
@@ -150,7 +153,7 @@ export async function previewStockImport(scope:ActorScope,input:ImportInput,db:P
 // Idempotency hash input: secrets are replaced by their digest, so the journal never holds them.
 const digest=(s:string|null)=>s?createHash('sha256').update(s).digest('hex'):null;
 export async function commitStockImport(scope:ActorScope,input:ImportInput&{key:string},db:PrismaClient=prisma){
-  const hashed={kind:input.kind,loginType:input.loginType,batch:input.batch??null,append:input.append??null,lines:input.kind==='LOGIN'?parseLoginLines(input.text).map(l=>({...l,password:digest(l.password),twoFa:digest(l.twoFa)})):parsePaypalLines(input.text)};
+  const hashed={kind:input.kind,loginType:input.loginType,batch:input.batch??null,append:input.append??null,format:input.kind==='LOGIN'?loginFormatOf(input):null,lines:input.kind==='LOGIN'?parseLoginLines(input.text,loginFormatOf(input)).map(l=>({...l,password:digest(l.password),twoFa:digest(l.twoFa),twoFaLink:digest(l.twoFaLink),smsLink:digest(l.smsLink)})):parsePaypalLines(input.text)};
   return runBusinessCommand(scope,{key:input.key,payload:hashed,kind:input.kind==='LOGIN'?'ACCOUNT_STOCK_IMPORT':'PAYPAL_STOCK_IMPORT',module:area(input.kind)},async(tx,images,current)=>{
     assertStockWrite(current,input.kind);
     const purchase=purchaseOf(input),{rows,parsed}=await classify(tx,current,input),ready=rows.filter(r=>r.outcome==='READY');
@@ -183,7 +186,7 @@ async function createRows(tx:Prisma.TransactionClient,images:BusinessCollector,s
     if(!take.has(l.line))continue;
     if(input.kind==='LOGIN'){
       const a=l as LoginLines[number];
-      const row=await tx.gmailAccount.create({data:{projectId:scope.projectId,email:a.email,loginType:input.loginType,batchId,status:'ACTIVE',businessManaged:true,recoveryEmail:a.recovery,notes:a.notes,...(a.password?{password:encrypt(a.password)}:{}),...(a.twoFa?{twoFaCurrent:encrypt(a.twoFa)}:{})}});
+      const row=await tx.gmailAccount.create({data:{projectId:scope.projectId,email:a.email,loginType:input.loginType,batchId,status:'ACTIVE',businessManaged:true,recoveryEmail:a.recovery,notes:a.notes,phone:a.phone,...(a.password?{password:encrypt(a.password)}:{}),...(a.twoFa?{twoFaCurrent:encrypt(a.twoFa)}:{}),...(a.twoFaLink?{twoFaLink:encrypt(a.twoFaLink)}:{}),...(a.smsLink?{smsLink:encrypt(a.smsLink)}:{})}});
       await images.remember('GMAIL',row.id,true);
     }else{
       // The first line of a code creates the PayPal with every email of the code (all lines); later lines of the code add nothing.

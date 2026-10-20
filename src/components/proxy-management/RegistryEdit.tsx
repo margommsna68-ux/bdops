@@ -2,12 +2,12 @@
 import {useEffect,useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import type {EditItem,EditRow,LocationChoice,ManageChoice,ProxyGroupRef,RegistryRow,VmTarget} from '@/server/proxy-management/types';
-// Quick reasons for "Ngừng quản lý"; one reason covers a whole bulk batch. "Khác…" takes free text.
-export const RETIRE_REASONS=['Hết hạn, không gia hạn','Nhà cung cấp thu hồi','Không dùng nữa','Nhập nhầm','Khác…'] as const;
-export const retireReason=(pick:string,text:string)=>pick==='Khác…'?text.trim():pick;
+// Xoá khỏi kho (owner brief 20/10/2026): ADMIN only, one click, journal reason "Xoá khỏi kho", Hoàn tác in the toast. A proxy still on
+// a VM is refused at its row (nothing is unassigned for it); a deleted row (RETIRED) keeps IP, credentials, group and history.
+export const DELETE_REASON='Xoá khỏi kho';
 import {roleLabel} from './RegistryCells';
-import {quickEdit,quickEditMessage} from './quick-save';
-import {AlertCircle,Check,Loader2,X,Ban,RotateCcw} from 'lucide-react';
+import {quickEdit,quickEditMessage,type QuickEditOutcome} from './quick-save';
+import {AlertCircle,Check,Loader2,X,RotateCcw} from 'lucide-react';
 import toast from 'react-hot-toast';
 // "Từ nhóm": TUT is the own stock (owner SELF), genjy is reserved, anything else is an operator-defined group (owner OTHER).
 // GENJY = Genjy riêng, SHARED = Chung mooon–Genjy (both only offered on import).
@@ -33,8 +33,21 @@ export const editSummary=(r:{applied:number;skipped:number;errors:number})=>(r.a
 // VMs the row may move to on a server: free ones plus the VM it already sits on. A VM used by another proxy is never offered.
 export const vmChoices=(targets:VmTarget[],serverId:string,row:RegistryRow)=>targets.filter(t=>t.serverId===serverId&&(!t.occupant||row.locations.some(l=>l.vmId===t.id)));
 export const serverChoices=(targets:VmTarget[])=>targets.reduce<{id:string;code:string}[]>((acc,t)=>acc.some(s=>s.id===t.serverId)?acc:[...acc,{id:t.serverId,code:t.serverCode}],[]);
-export function RetireReason({pick,text,onPick,onText,disabled}:{pick:string;text:string;onPick:(v:string)=>void;onText:(v:string)=>void;disabled?:boolean}){
-  return <div className="flex gap-2 flex-wrap"><select aria-label="Lý do ngừng quản lý" className="pm-input" disabled={disabled} value={pick} onChange={e=>onPick(e.target.value)}>{RETIRE_REASONS.map(r=><option key={r} value={r}>{r}</option>)}</select>{pick==='Khác…'&&<input autoFocus aria-label="Lý do khác" className="pm-input" maxLength={300} placeholder="Ghi lý do" disabled={disabled} value={text} onChange={e=>onText(e.target.value)}/>}</div>;
+export function useInventoryDelete(projectId:string,onSaved:()=>void){
+  const inspect=trpc.proxyManagement.editPreview.useMutation(),commit=trpc.proxyManagement.editCommit.useMutation(),undo=trpc.proxyManagement.undo.useMutation();
+  const [busy,setBusy]=useState(false);
+  async function run(rows:RegistryRow[],kind:'RETIRE'|'RESTORE'):Promise<QuickEditOutcome|null>{
+    if(busy||!rows.length) return null;setBusy(true);
+    try{
+      const o=await quickEdit({projectId,items:rows.map(r=>({endpointId:r.endpointId!,manage:kind==='RETIRE'?{kind:'RETIRE' as const,reason:DELETE_REASON}:{kind:'RESTORE' as const}})),idempotencyKey:crypto.randomUUID()},inspect.mutateAsync,x=>commit.mutateAsync({projectId,...x}));
+      const word=kind==='RETIRE'?'Đã xoá':'Đã khôi phục';
+      if(o.applied){onSaved();toast.success(t=><span className="flex items-center gap-3">{word} {o.applied} proxy{o.errors.length?` · ${o.errors.length} dòng bị chặn`:''}{o.operationId&&<button className="pm-button pm-button-quiet" onClick={()=>{toast.dismiss(t.id);undo.mutateAsync({projectId,id:o.operationId!,reason:''}).then(()=>{toast.success('Đã hoàn tác');onSaved();}).catch(e=>toast.error(failed(e)));}}>Hoàn tác</button>}</span>,{duration:8000});}
+      else if(o.errors.length) toast.error(o.errors.length===1?o.errors[0].ip+' — '+o.errors[0].message:o.errors.length+' dòng bị chặn; lý do ghi tại từng dòng',{duration:6000});
+      else toast('Không thay đổi');
+      return o;
+    }catch(e){toast.error(failed(e));return null;}finally{setBusy(false);}
+  }
+  return {busy,remove:(rows:RegistryRow[])=>run(rows,'RETIRE'),restore:(rows:RegistryRow[])=>run(rows,'RESTORE')};
 }
 const positionText=(row:RegistryRow)=>row.locations.length?row.locations.map(l=>l.serverCode+'/'+l.vmCode+(roleLabel(l.role)?' · '+roleLabel(l.role):'')).join(', '):'Chưa gán';
 const failed=(e:unknown)=>e instanceof Error?e.message:'Chưa lưu được; tải lại và kiểm tra.';
@@ -47,13 +60,12 @@ export function EditPreviewTable({rows}:{rows:EditRow[]}){
 // Every row can change class (TUT / Chung mooon–Genjy / Genjy riêng / own groups) and flip NEW ↔ LIVE; the server checks VM rules.
 // Status follows the real holds for TUT / Chung mooon–Genjy: picking LIVE asks for a Server/VM, picking NEW unassigns in the same save,
 // BLOCKED goes through the controlled BLOCKED write. Choosing a server alone never saves anything (no VM → still NEW).
-export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUnassign=canLocate,canBlock=false,onClose,onSaved}:{projectId:string;row:RegistryRow;groups:ProxyGroupRef[];targets:VmTarget[];canGroup:boolean;canLocate:boolean;canUnassign?:boolean;canBlock?:boolean;onClose:()=>void;onSaved:()=>void}){
+export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUnassign=canLocate,canBlock=false,canDelete=false,onClose,onSaved}:{projectId:string;row:RegistryRow;groups:ProxyGroupRef[];targets:VmTarget[];canGroup:boolean;canLocate:boolean;canUnassign?:boolean;canBlock?:boolean;canDelete?:boolean;onClose:()=>void;onSaved:()=>void}){
   const current=row.locations[0],initialPick=rowPick(row);
   const [state,setState]=useState(row.state),stateEditable=(canLocate||canUnassign||canBlock||canGroup)&&(row.state==='NEW'||row.state==='LIVE');
   const followsRule=row.owner==='SELF'||(row.owner==='GENJY'&&row.subgroup==='PC_CHUNG'),held=row.locations.some(l=>l.role==='DESIRED'||l.role==='INSTALLED');
   const [group,setGroup]=useState<GroupPick>(initialPick),[serverId,setServerId]=useState(current?.serverId||''),[vmId,setVmId]=useState(current?.vmId||''),[rows,setRows]=useState<EditRow[]|null>(null),[error,setError]=useState('');
-  const retired=row.state==='RETIRED',pendingPlan=row.locations.some(l=>l.role==='DESIRED');
-  const [retiring,setRetiring]=useState(false),[pick,setPick]=useState<string>(RETIRE_REASONS[0]),[reasonText,setReasonText]=useState(''),[release,setRelease]=useState(false);
+  const retired=row.state==='RETIRED';
   const preview=trpc.proxyManagement.editPreview.useMutation(),commit=trpc.proxyManagement.editCommit.useMutation(),busy=preview.isLoading||commit.isLoading;
   const servers=serverChoices(targets),vms=serverId?vmChoices(targets,serverId,row):[];
   useEffect(()=>{if(serverId&&!vms.some(v=>v.id===vmId)) setVmId(vms.find(v=>row.locations.some(l=>l.vmId===v.id))?.id||'');},[serverId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -75,7 +87,6 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUn
     }
     if(!item.group&&!item.location&&!item.manage) return; // same value again: nothing to save, no history
     if(item.group?.kind==='NEW'&&!item.group.name){setError('Nhập tên nhóm mới rồi bấm Enter');return;}
-    if(item.manage?.kind==='RETIRE'&&!item.manage.reason){setError('Ghi lý do ngừng quản lý');return;}
     setError('');setRows(null);const key=crypto.randomUUID();
     try{
       const p=await preview.mutateAsync({projectId,items:[item],idempotencyKey:key});
@@ -85,8 +96,8 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUn
     }catch(e){setError(failed(e));}
   }
   if(retired) return <div className="pm-editor" role="group" aria-label={'Sửa proxy '+row.ip}>
-    <div className="pm-muted text-xs">Đã ngừng quản lý. IP, user/pass, nhóm và lịch sử vẫn được giữ; khôi phục sẽ trả về trạng thái trước.</div>
-    <div className="flex gap-2 flex-wrap"><button className="pm-button pm-button-primary" disabled={busy||!canGroup} onClick={()=>void run(undefined,{kind:'RESTORE'})}>{busy?<Loader2 size={16} className="animate-spin"/>:<RotateCcw size={16}/>}Khôi phục</button><button className="pm-button pm-button-quiet" disabled={busy} onClick={onClose}><X size={16}/>Huỷ</button></div>
+    <div className="pm-muted text-xs">Đã xoá khỏi kho. IP, user/pass, nhóm và lịch sử vẫn được giữ; khôi phục sẽ trả về trạng thái trước.</div>
+    <div className="flex gap-2 flex-wrap"><button className="pm-button pm-button-primary" disabled={busy||!canDelete} onClick={()=>void run(undefined,{kind:'RESTORE'})}>{busy?<Loader2 size={16} className="animate-spin"/>:<RotateCcw size={16}/>}Khôi phục</button><button className="pm-button pm-button-quiet" disabled={busy} onClick={onClose}><X size={16}/>Huỷ</button></div>
     {error&&<p role="alert" className="pm-error flex gap-2 w-full"><AlertCircle size={16} className="shrink-0"/>{error}</p>}
     {rows&&rows.some(r=>r.outcome!=='READY')&&<ul role="alert" className={'w-full text-sm '+(rows.some(r=>r.outcome==='ERROR')?'pm-error':'pm-muted')}>{rows.filter(r=>r.outcome!=='READY').map((r,i)=><li key={i}>{r.message}</li>)}</ul>}
   </div>;
@@ -102,29 +113,25 @@ export function RowEditor({projectId,row,groups,targets,canGroup,canLocate,canUn
       {busy&&<span className="pm-muted text-sm flex items-center gap-2"><Loader2 size={16} className="animate-spin"/>Đang lưu…</span>}
       {group.kind==='NEW'&&<button className="pm-button pm-button-primary" disabled={busy||!group.name.trim()} onClick={()=>void run()}><Check size={16}/>Lưu nhóm mới</button>}
       {canUnassign&&row.locations.length>0&&<button className="pm-button" disabled={busy} title="Bỏ gán; VM trống lại" onClick={()=>void run({kind:'UNASSIGN'})}>Bỏ gán</button>}
-      {canGroup&&!retiring&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>setRetiring(true)}><Ban size={16}/>Ngừng quản lý</button>}
       <button className="pm-button pm-button-quiet" disabled={busy} onClick={onClose}><X size={16}/>Huỷ</button>
     </div>
-    {retiring&&<div className="pm-retire" role="group" aria-label="Ngừng quản lý proxy"><strong className="text-sm">Ngừng quản lý {row.ip}</strong><RetireReason pick={pick} text={reasonText} disabled={busy} onPick={setPick} onText={setReasonText}/>{pendingPlan&&<label className="flex gap-2 text-sm items-center"><input type="checkbox" checked={release} onChange={e=>setRelease(e.target.checked)}/>Huỷ giao {row.locations.filter(l=>l.role==='DESIRED').map(l=>l.serverCode+'/'+l.vmCode).join(', ')} (chưa gỡ ngoài máy)</label>}<p className="pm-muted text-xs">Ẩn khỏi danh sách hiện tại; giữ IP, user/pass, nhóm và lịch sử. Khôi phục được ở tab Lịch sử IP.</p><div className="flex gap-2"><button className="pm-button pm-button-primary" disabled={busy||!retireReason(pick,reasonText)} onClick={()=>void run(undefined,{kind:'RETIRE',reason:retireReason(pick,reasonText),releasePlans:release})}>{busy?<Loader2 size={16} className="animate-spin"/>:<Ban size={16}/>}Xác nhận ngừng quản lý</button><button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>setRetiring(false)}>Quay lại</button></div></div>}
     {error&&<p role="alert" className="pm-error flex gap-2 w-full"><AlertCircle size={16} className="shrink-0"/>{error}</p>}
     {rows&&rows.some(r=>r.outcome!=='READY')&&<ul role="alert" className={'w-full text-sm '+(rows.some(r=>r.outcome==='ERROR')?'pm-error':'pm-muted')}>{rows.filter(r=>r.outcome!=='READY').map((r,i)=><li key={i}>{r.field==='GROUP'?'Từ nhóm':r.field==='STATE'?'Trạng thái':'Vị trí'}: {r.message}</li>)}</ul>}
   </div>;
 }
 // Bulk edit for the selected rows: one group or one server for all, or a pasted Proxy | Server | VM table. Preview first, then one save.
-export type BulkMode='GROUP'|'SERVER'|'VM'|'RETIRE'|'RESTORE'|'STATE';
+export type BulkMode='GROUP'|'SERVER'|'VM'|'STATE';
 export function BulkEditPanel({projectId,mode,rows,groups,targets,onClose,onSaved}:{projectId:string;mode:BulkMode;rows:RegistryRow[];groups:ProxyGroupRef[];targets:VmTarget[];onClose:()=>void;onSaved:()=>void}){
   const [group,setGroup]=useState<GroupPick>({kind:'TUT'}),[bulkState,setBulkState]=useState<'NEW'|'LIVE'|'BLOCKED'>('NEW'),[bulkUnassign,setBulkUnassign]=useState(false),[serverId,setServerId]=useState(''),[text,setText]=useState(()=>pasteTemplate(rows)),[error,setError]=useState('');
   const [failures,setFailures]=useState<{ip:string;message:string}[]>([]);
-  const [pick,setPick]=useState<string>(RETIRE_REASONS[0]),[reasonText,setReasonText]=useState(''),[release,setRelease]=useState(false),pendingPlans=rows.filter(r=>r.locations.some(l=>l.role==='DESIRED')).length;
   const inspect=trpc.proxyManagement.editPreview.useMutation(),commit=trpc.proxyManagement.editCommit.useMutation(),busy=inspect.isLoading||commit.isLoading;
   const changed=(fn:()=>void)=>{fn();setFailures([]);setError('');};
-  const titles={GROUP:'Đổi nhóm cho '+rows.length+' proxy',SERVER:'Chuyển '+rows.length+' proxy sang server',VM:'Gán VM theo bảng dán',RETIRE:'Ngừng quản lý '+rows.length+' proxy',RESTORE:'Khôi phục '+rows.length+' proxy',STATE:'Đổi trạng thái '+rows.length+' proxy'};
-  const ready=mode==='GROUP'?group.kind!=='NEW'||!!group.name.trim():mode==='SERVER'?!!serverId:mode==='VM'?!!text.trim():mode==='RETIRE'?!!retireReason(pick,reasonText):true;
+  const titles={GROUP:'Đổi nhóm cho '+rows.length+' proxy',SERVER:'Chuyển '+rows.length+' proxy sang server',VM:'Gán VM theo bảng dán',STATE:'Đổi trạng thái '+rows.length+' proxy'};
+  const ready=mode==='GROUP'?group.kind!=='NEW'||!!group.name.trim():mode==='SERVER'?!!serverId:mode==='VM'?!!text.trim():true;
   // One click: build the change, write it (server checks every row), report what was saved and what was refused.
   async function apply(){
     setError('');setFailures([]);
-    const manage:ManageChoice|null=mode==='RETIRE'?{kind:'RETIRE',reason:retireReason(pick,reasonText),releasePlans:release}:mode==='RESTORE'?{kind:'RESTORE'}:null;
-    const input=mode==='VM'?{paste:text}:{items:rows.map(r=>manage?{endpointId:r.endpointId!,manage}:mode==='GROUP'?{endpointId:r.endpointId!,group:toGroupChoice(group)}:{endpointId:r.endpointId!,location:{kind:'SERVER' as const,serverId}})};
+    const input=mode==='VM'?{paste:text}:{items:rows.map(r=>mode==='GROUP'?{endpointId:r.endpointId!,group:toGroupChoice(group)}:{endpointId:r.endpointId!,location:{kind:'SERVER' as const,serverId}})};
     try{const o=await quickEdit({projectId,...input,idempotencyKey:crypto.randomUUID()},inspect.mutateAsync,x=>commit.mutateAsync({projectId,...x}));
       if(o.applied) onSaved();
       if(o.errors.length){setFailures(o.errors);toast(quickEditMessage(o));}else{toast.success(quickEditMessage(o));onClose();}
@@ -135,8 +142,6 @@ export function BulkEditPanel({projectId,mode,rows,groups,targets,onClose,onSave
     {mode==='GROUP'&&<label className="pm-label">Nhóm mới cho các proxy đã chọn<GroupChoiceSelect groups={groups} value={group} disabled={busy} allowGenjy onChange={v=>changed(()=>setGroup(v))}/><span className="pm-muted text-xs font-normal">TUT và Chung mooon–Genjy giữ vị trí VM; Genjy riêng và nhóm tự đặt phải bỏ gán trước. Giữ IP, user/pass, nguồn, lịch sử; hoàn tác được.</span></label>}
     {mode==='STATE'&&<label className="pm-label">Trạng thái mới<select aria-label="Trạng thái mới" className="pm-input" disabled={busy} value={bulkState} onChange={e=>changed(()=>setBulkState(e.target.value as 'NEW'|'LIVE'|'BLOCKED'))}><option value="NEW">NEW — trong kho</option><option value="LIVE">LIVE — đã gán VM</option><option value="BLOCKED">BLOCKED</option></select>{bulkState==='NEW'&&<label className="flex gap-2 text-sm items-center font-normal mt-2"><input type="checkbox" checked={bulkUnassign} onChange={e=>changed(()=>setBulkUnassign(e.target.checked))}/>Bỏ gán các dòng đang dùng ở VM để về NEW</label>}<span className="pm-muted text-xs font-normal">NEW/LIVE theo vị trí VM thật: LIVE cần gán VM (dùng Chuyển server / Gán VM), NEW cần bỏ gán. BLOCKED giữ vị trí VM. Dòng đã replace hoặc ngừng quản lý giữ nguyên.</span></label>}
     {mode==='SERVER'&&<label className="pm-label">Server đích<select aria-label="Server đích" className="pm-input" disabled={busy} value={serverId} onChange={e=>changed(()=>setServerId(e.target.value))}><option value="">— Chọn server —</option>{serverChoices(targets).map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select><span className="pm-muted text-xs font-normal">Mỗi proxy nhận VM trống kế tiếp trên server (theo thứ tự tự nhiên); xem trước trước khi lưu.</span></label>}
-    {mode==='RETIRE'&&<div className="space-y-2"><label className="pm-label">Lý do (chung cho cả đợt)<RetireReason pick={pick} text={reasonText} disabled={busy} onPick={v=>changed(()=>setPick(v))} onText={v=>changed(()=>setReasonText(v))}/></label>{pendingPlans>0&&<label className="flex gap-2 text-sm items-center"><input type="checkbox" checked={release} onChange={e=>changed(()=>setRelease(e.target.checked))}/>Bỏ gán VM đang dùng {pendingPlans} proxy (xem trước nêu rõ VM; chưa gỡ ngoài máy)</label>}<p className="pm-muted text-xs">Giữ IP, user/pass, nhóm và lịch sử; dòng đang giữ để kiểm tra (dữ liệu cài cũ chưa rõ) sẽ bị từ chối, đối chiếu ở ô Proxy của VM.</p></div>}
-    {mode==='RESTORE'&&<p className="pm-muted text-xs">Trả các dòng đã ngừng quản lý về trạng thái trước; IP đã có dòng khác đang quản lý sẽ bị từ chối.</p>}
     {mode==='VM'&&<label className="pm-label">Mỗi dòng: Proxy | Server | VM<textarea aria-label="Bảng ánh xạ Proxy | Server | VM" className="pm-input pm-paste" rows={Math.min(12,Math.max(4,rows.length+1))} disabled={busy} value={text} onChange={e=>changed(()=>setText(e.target.value))}/><span className="pm-muted text-xs font-normal">Ghép theo IP (hoặc IP:port:user:pass) và Server + mã VM, không theo thứ tự dòng. Ô trống giữ nguyên; ghi <code>-</code> ở cột Server để bỏ gán.</span></label>}
     {error&&<p role="alert" className="pm-error flex gap-2"><AlertCircle size={16} className="shrink-0"/>{error}</p>}
     {failures.length>0&&<ul role="alert" className="pm-error text-sm">{failures.map((f,i)=><li key={i}><span className="font-mono">{f.ip}</span> — {f.message}</li>)}</ul>}

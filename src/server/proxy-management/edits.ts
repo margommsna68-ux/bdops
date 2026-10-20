@@ -15,7 +15,7 @@ import {INVALID_LINE} from './parse';
 import {expectedAssignmentState,syncAssignmentState} from './assignment-state';
 import {assignProxyToVm,markUsersBlocked,type Collector} from '../vm-management/proxy-change';
 import {HISTORICAL_STATES,isShared,ProxyDomainError,type NotListedRef,type ActorScope,type EditInput,type EditItem,type EditPreview,type EditResult,type EditRow,type InventoryState,type IssueCode,type LocationChoice,type ManageChoice,type VmTarget} from './types';
-const STATE_LABEL:Record<InventoryState,string>={NEW:'NEW',LIVE:'LIVE',BLOCKED:'BLOCKED',REPLACED:'Đã replace',DIE:'Ngừng dùng',QUARANTINED:'Cần kiểm tra',VOID:'Đã thu hồi',RETIRED:'Ngừng quản lý'};
+const STATE_LABEL:Record<InventoryState,string>={NEW:'NEW',LIVE:'LIVE',BLOCKED:'BLOCKED',REPLACED:'Đã replace',DIE:'Ngừng dùng',QUARANTINED:'Cần kiểm tra',VOID:'Đã thu hồi',RETIRED:'Đã xoá'};
 export const RETIRED_LABEL=STATE_LABEL.RETIRED;
 type RetiredNote={reason:string;previousState:InventoryState;previousStatus:string;previousStatusAt:string|null;by:string;at:string};
 const readNotes=(cipher:string|null)=>{if(!cipher) return {} as Record<string,unknown>;try{return JSON.parse(decrypt(cipher)) as Record<string,unknown>;}catch{return {};}};
@@ -249,18 +249,19 @@ async function planEdits(scope:ActorScope,input:EditInput,db:Reader):Promise<Pla
         else if(e.inventoryState===m.state) push('STATE',from,to,'SKIP','Đã ở trạng thái '+to);
         else{push('STATE',from,to,'READY',m.state==='LIVE'&&!willHold?'Ghi nhận đang sử dụng (chưa cập nhật vị trí VM)':'Đổi trạng thái '+from+' → '+to);plan.manage=m;}
       }else if(m.kind==='RETIRE'){
-        const plans=e.allocations.map(a=>a.vm.server.code+'/'+a.vm.code),blocked=immovableReason(e);
+        // Xoá khỏi kho (20/10/2026): a proxy still on a VM (any hold, even a pending one, or the VM link kept from the Sheet) is refused
+        // with its position; the person unassigns at Server/VM first. Deleting never releases or unassigns anything.
+        const plans=positionLabel(e);
         if(duplicate) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
-        else if(retired) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ngừng quản lý');
+        else if(retired) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã xoá khỏi kho');
         else if(HISTORICAL_STATES.includes(e.inventoryState)) push('STATE',stateLabel,RETIRED_LABEL,'SKIP','Đã ra khỏi kho hiện tại');
-        else if(blocked) push('STATE',stateLabel,RETIRED_LABEL,'ERROR',blocked.replace(/; .*$/,'')+'; thay hoặc gỡ proxy ở Server/VM trước','STALE_PREVIEW');
-        else if(plans.length&&!m.releasePlans) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Đang dùng cho '+plans.join(', ')+'; chọn "Huỷ giao" để ngừng quản lý','STALE_PREVIEW');
-        else if(!m.reason.trim()) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Cần lý do ngừng quản lý','INVALID_INPUT');
-        else{push('STATE',stateLabel,RETIRED_LABEL,'READY',(plans.length?'Ngừng quản lý và huỷ giao '+plans.join(', ')+' (chưa gỡ ngoài máy)':'Ngừng quản lý; giữ IP, user/pass và lịch sử')+(genjy?'; vẫn thuộc genjy, không nhập lại thành kho TUT':''));plan.manage={kind:'RETIRE',reason:m.reason.trim(),releasePlans:!!plans.length};}
+        else if(plans!=='Chưa gán') push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Đang gán cho '+plans+'; bỏ gán ở Server/VM trước rồi xoá','INVALID_INPUT');
+        else if(!m.reason.trim()) push('STATE',stateLabel,RETIRED_LABEL,'ERROR','Cần lý do xoá','INVALID_INPUT');
+        else{push('STATE',stateLabel,RETIRED_LABEL,'READY','Xoá khỏi kho; giữ IP, user/pass, nhóm và lịch sử, khôi phục được'+(genjy?'; vẫn thuộc genjy, không nhập lại thành kho TUT':''));plan.manage={kind:'RETIRE',reason:m.reason.trim()};}
       }else{
         const note=readNotes(e.notesCipher).retired as RetiredNote|undefined,previous=note?.previousState&&STATE_LABEL[note.previousState]?note.previousState:'QUARANTINED';
         if(duplicate) push('STATE',stateLabel,'Khôi phục','ERROR','Proxy xuất hiện ở nhiều dòng; giữ một dòng','DUPLICATE_INPUT');
-        else if(!retired) push('STATE',stateLabel,'Khôi phục','SKIP','Đang quản lý; không cần khôi phục');
+        else if(!retired) push('STATE',stateLabel,'Khôi phục','SKIP','Đang trong kho; không cần khôi phục');
         else if(twinConflict(e)) push('STATE',stateLabel,STATE_LABEL[previous],'ERROR','IP đã có dòng khác đang quản lý; không khôi phục trùng','CURRENT_IP');
         else{push('STATE',stateLabel,STATE_LABEL[previous],'READY','Khôi phục về trạng thái trước ('+STATE_LABEL[previous]+')');plan.manage={kind:'RESTORE'};}
       }
@@ -285,6 +286,8 @@ async function authorize(scope:ActorScope,needs:Plan['needs'],db:Reader){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   assertInfrastructureAction(current,'READ');if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');
   if(needs.group||needs.manage||needs.share||needs.sync) assertInfrastructureAction(current,'IMPORT');
+  // Xoá / Khôi phục (20/10/2026): ADMIN of the project only; checked again inside the commit transaction (a right dropped meanwhile refuses).
+  if(needs.manage&&current.role!=='ADMIN') throw new ProxyDomainError('FORBIDDEN','Chỉ ADMIN của dự án được xoá / khôi phục proxy');
   if(needs.location||needs.state) assertInfrastructureAction(current,'ASSIGN');
   if(needs.block) assertInfrastructureAction(current,'BLOCK');
   if(!needs.group&&!needs.location&&!needs.manage&&!needs.share&&!needs.state&&!needs.block&&!needs.sync) assertInfrastructureAction(current,'ASSIGN');
@@ -389,8 +392,7 @@ export function createProxyEditService(db:PrismaClient=prisma){
               await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,batchId:batch.id,ip:endpoint.identity!.ip,kind:plan.needs.sync?'STATE_SYNC':'STATE_CHANGED',occurredAt:now,actorId:scope.userId,reason:fresh.inventoryState+' → '+item.manage.state}});states++;
             }
           }else if(item.manage.kind==='RETIRE'){
-            if(endpoint.inventoryState==='RETIRED'||immovableReason(endpoint)) throw new ProxyDomainError('STALE_PREVIEW');
-            if(endpoint.allocations.length||endpoint.vm){if(!item.manage.releasePlans) throw new ProxyDomainError('STALE_PREVIEW');await releasePlans(tx,images,endpoint,'Ngừng quản lý proxy: '+item.manage.reason,now);}
+            if(endpoint.inventoryState==='RETIRED'||endpoint.allocations.length||endpoint.vm) throw new ProxyDomainError('STALE_PREVIEW','Proxy vừa được gán VM hoặc đã xoá; tải lại');
             const note:RetiredNote={reason:item.manage.reason,previousState:endpoint.inventoryState,previousStatus:endpoint.status,previousStatusAt:endpoint.statusAt?.toISOString()||null,by:scope.userId,at:now.toISOString()};
             await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'RETIRED',status:'RESERVED',retiredAt:now,statusAt:now,notesCipher:encrypt(JSON.stringify({...notes,retired:note})),revision:{increment:1}}});
             await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId!,endpointId:endpoint.id,ip:endpoint.identity!.ip,kind:'RETIRED',occurredAt:now,actorId:scope.userId,reason:item.manage.reason}});retired++;
@@ -405,8 +407,8 @@ export function createProxyEditService(db:PrismaClient=prisma){
           }
         }
       }
-      const result:EditResult={batchId:batch.id,replay:false,rows:plan.rows,applied:plan.items.length+(plan.shares||[]).length,skipped:plan.rows.filter(r=>r.outcome==='SKIP').length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length};
-      if(result.applied) await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:result.applied,groups:groupsChanged,moved,unassigned,retired,restored,shared,states},snapshot:await images.finish(),batchId:batch.id});
+      const result:EditResult={batchId:batch.id,replay:false,operationId:null,rows:plan.rows,applied:plan.items.length+(plan.shares||[]).length,skipped:plan.rows.filter(r=>r.outcome==='SKIP').length,errors:plan.rows.filter(r=>r.outcome==='ERROR').length};
+      if(result.applied){const op=await recordOperation(tx,{scope:current,kind:'PROXY_EDIT',summary:{count:result.applied,groups:groupsChanged,moved,unassigned,retired,restored,shared,states},snapshot:await images.finish(),batchId:batch.id});result.operationId=op.id;}
       await tx.proxyBatch.update({where:{id:batch.id},data:{status:'APPLIED',appliedAt:now,result:result as unknown as Prisma.InputJsonValue}});
       await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_EDIT',entity:'ProxyBatch',entityId:batch.id,changes:{applied:result.applied,skipped:result.skipped,errors:result.errors,groups:groupsChanged,moved,unassigned,retired,restored,shared}}});
       return result;

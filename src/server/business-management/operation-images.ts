@@ -6,7 +6,7 @@ import {dayText} from './money';
 import {formatSdkAmount,SDK_STATE_LABEL,type SdkLinkState} from '@/lib/sdk-money';
 import {restoreSdkImage} from '../vm-management/sdk-undo';
 const fields:Record<BusinessResource,string[]>={
- GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision','loginType','batchId'],
+ GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision','loginType','batchId','twoFaLink','smsLink','phone'],
  PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision','batchId','firstEarnAppId'],
  PAYPAL_EMAIL:['email','password','twoFa','hotmailToken','isPrimary','notes','paypalId','businessManaged','archivedAt','revision','usedEarnAppId','usedAt','reviewHold','reviewNote'],
  VM_BINDING:['gmailId','revision'],

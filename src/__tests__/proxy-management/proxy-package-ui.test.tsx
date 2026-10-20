@@ -41,8 +41,7 @@ describe('package list filters and retire helpers',()=>{
     expect(filterPackages(list,'STOPPED').map(p=>p.code)).toEqual(['D']);
     expect(filterPackages(list,'ALL')).toHaveLength(4);
   });
-  it('builds the retire reason from the quick pick or the free text',async()=>{
-    const {retireReason,RETIRE_REASONS}=await import('@/components/proxy-management/RegistryEdit');
-    expect(retireReason(RETIRE_REASONS[0],'ignored')).toBe('Hết hạn, không gia hạn');expect(retireReason('Khác…','  nhà cung cấp đổi IP ')).toBe('nhà cung cấp đổi IP');expect(retireReason('Khác…','  ')).toBe('');
+  it('deleting from the registry uses one fixed journal reason (no reason picker since 20/10/2026)',async()=>{
+    const {DELETE_REASON}=await import('@/components/proxy-management/RegistryEdit');expect(DELETE_REASON).toBe('Xoá khỏi kho');
   });
 });

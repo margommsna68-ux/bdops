@@ -304,3 +304,7 @@ html:not([data-theme]) .vm-chip.vm-ops-severe strong{color:#fff}
 .vm-sdk-add{display:grid;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--ds-border)}.vm-sdk-add-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,1fr) auto;gap:6px}
 @media (max-width:640px){.vm-sdk-add-grid{grid-template-columns:1fr}.vm-sdk-list{font-size:11px}.vm-sdk-list td,.vm-sdk-list th{padding:4px 3px}}
 .vm-sdk-list td:first-child{min-width:200px}.vm-sdk-list td:nth-child(2){min-width:96px}
+
+/* Apple ID (20/10/2026): phone and the two named link actions under the email, never the links themselves. */
+.acc-apple-line{display:flex;flex-wrap:wrap;gap:.25rem .6rem;align-items:center;font-size:.75rem;margin-top:.15rem}
+.acc-apple-line .pm-link{font-size:.75rem}

@@ -550,6 +550,10 @@ model GmailAccount {
   twoFaOld        String?
   recoveryEmail   String?
   token           String?
+  // Apple ID lists (20/10/2026): links to fetch the 2FA code / SMS (encrypted like a password) and the phone number as typed.
+  twoFaLink       String?
+  smsLink         String?
+  phone           String?
   status          GmailStatus           @default(ACTIVE)
   notes           String?
   vms             VirtualMachine[]

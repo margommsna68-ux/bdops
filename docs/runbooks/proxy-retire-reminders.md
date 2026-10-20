@@ -2,7 +2,20 @@
 
 Triển khai 16/10/2026. Bằng chứng: `../superpowers/evidence/2026-10-16-proxy-retire-reminders.md`. Liên quan: `proxy-groups-edit.md` (sửa nhóm/server/VM), `proxy-packages.md` (gói, nhập gắn gói, sắp xếp).
 
-## Ngừng quản lý (thay cho "xoá")
+## Xoá khỏi kho (20/10/2026; THAY cho "Ngừng quản lý" bên dưới — mục cũ giữ để tra cứu)
+
+- `RETIRED` nay hiện là **Đã xoá**; nút thùng rác **Xoá khỏi kho** ở mỗi dòng (ADMIN của dự án), tick nhiều dòng → **Xoá N dòng**. Bấm là
+  ghi, lý do nhật ký cố định "Xoá khỏi kho", không chọn lý do, không xem trước / xác nhận; thông báo có **Hoàn tác** (`EditResult.operationId`).
+- Chỉ ADMIN được Xoá / Khôi phục / Hoàn tác (`editPreview` / `editCommit` với `manage` RETIRE / RESTORE, kiểm lại ở commit; MODERATOR và
+  USER có `PROXY_IMPORT` bị từ chối). Nhập, sửa nhóm / vị trí, đổi trạng thái giữ nguyên quyền.
+- Proxy còn vị trí VM (hold DESIRED / INSTALLED / UNCERTAIN, kể cả Chờ cài chưa bắt đầu, hoặc liên kết VM từ Sheet) bị chặn tại dòng:
+  "Đang gán cho Server/VM; bỏ gán ở Server/VM trước rồi xoá" kèm link mở VM. Không còn tuỳ chọn Huỷ giao / `releasePlans`; xoá không bỏ gán.
+  LIVE không có vị trí VM xoá được. Dòng bị chặn giữ tick.
+- Bộ lọc **Đã xoá** (trạng thái RETIRED, tab Lịch sử IP / Toàn bộ IP), nút **Khôi phục** tại dòng và **Khôi phục N dòng**; khôi phục theo quy
+  tắc nhận diện hiện có (cùng IP đang quản lý → từ chối, trừ port-stream đã duyệt). Giữ IP, user/pass, nhóm, gói, lịch sử. Test:
+  `proxy-retire.integration.test.ts`.
+
+## Ngừng quản lý (quy tắc 16/10/2026; phần lý do, Huỷ giao và quyền IMPORT đã bị thay ở trên)
 
 - Trạng thái `RETIRED` hiện là **Ngừng quản lý**: dòng rời tab *Đang quản lý*, còn ở *Lịch sử IP* / *Toàn bộ IP* cùng IP, user/pass mã hoá, nhóm, gói, sở hữu và mọi sự kiện. Không xoá cứng. IP đã ngừng quản lý **không nhập lại được** (báo *IP đã xuất hiện trước đây*); muốn dùng lại thì **Khôi phục**.
 - **Một dòng**: nút bút → **Ngừng quản lý** → chọn lý do nhanh (*Hết hạn, không gia hạn* / *Nhà cung cấp thu hồi* / *Không dùng nữa* / *Nhập nhầm* / *Khác…*) → **Xác nhận**. **Hàng loạt**: tick dòng → **Ngừng quản lý** → một lý do cho cả đợt → **Xem trước** → **Lưu N dòng hợp lệ**.

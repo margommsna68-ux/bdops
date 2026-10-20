@@ -11,17 +11,19 @@ import {canSeeMoney} from './inventory';
 //  ASSIGNED  the EarnApp account runs on a VM now (shown with server / VM)
 //  USED      linked before (or its EarnApp account has no VM now); never offered again as NEW
 //  BLOCKED   status is not ACTIVE (error / stopped): history kept, not offered for new assignment
-export type StockState='NEW'|'ASSIGNED'|'USED'|'BLOCKED';
+export type StockState='NEW'|'ASSIGNED'|'USED'|'BLOCKED'|'DELETED';
 const can=(scope:ActorScope,area:'INFRASTRUCTURE'|'PAYPALS',write=false)=>{try{assertBusinessArea(scope,area,write);return true;}catch{return false;}};
 const place=(vm:{id:string;code:string;server:{id:string;code:string}}|null)=>vm?{vmId:vm.id,vm:vm.code,serverId:vm.server.id,server:vm.server.code}:null;
 const vmSelect={select:{id:true,code:true,archivedAt:true,server:{select:{id:true,code:true}}}} as const;
-export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
+/** options.deleted: the rows deleted from the stock (archivedAt set; Khôi phục), instead of the live stock. Batches are the same. */
+export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,options:{deleted?:boolean}={}){
+  const archived=options.deleted?{not:null}:null;
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),logins=can(current,'INFRASTRUCTURE'),paypals=can(current,'PAYPALS');
   if(current.businessMode!=='PROXY_VM'||!logins&&!paypals)throw new ProxyDomainError('FORBIDDEN');
   const money=canSeeMoney(current),projectId=scope.projectId;
   const [gm,pp,batches,legacyVms]=await Promise.all([
-    logins?db.gmailAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,email:true,loginType:true,status:true,notes:true,recoveryEmail:true,revision:true,createdAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}},paypalEmail:{select:{id:true,email:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
-    paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:null},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,_count:{select:{gmails:true}},emails:{select:{id:true,email:true,isPrimary:true,archivedAt:true,usedEarnAppId:true,reviewHold:true,reviewNote:true,createdAt:true,revision:true,earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{isPrimary:'desc'},{createdAt:'asc'},{email:'asc'}]},earnApps:{where:{paypalEmailId:null},select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
+    logins?db.gmailAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,email:true,loginType:true,status:true,notes:true,recoveryEmail:true,phone:true,twoFaLink:true,smsLink:true,revision:true,createdAt:true,archivedAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}},paypalEmail:{select:{id:true,email:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
+    paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,archivedAt:true,_count:{select:{gmails:true}},emails:{select:{id:true,email:true,isPrimary:true,archivedAt:true,usedEarnAppId:true,reviewHold:true,reviewNote:true,createdAt:true,revision:true,earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{isPrimary:'desc'},{createdAt:'asc'},{email:'asc'}]},earnApps:{where:{paypalEmailId:null},select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
     db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),// newest purchase date first; same day: the purchase created last first
    
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
@@ -42,8 +44,8 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   };
   const allocated=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;if(!money||!b)return null;const p=paidOf(b);return p.c&&p.each?{amount:new CashDecimal(p.each).toDecimalPlaces(4).toString(),currency:p.c.currency}:null;};
   const priceState=(batchId:string|null)=>{const b=batchId?batchOf.get(batchId):null;return !b?.costRecord?'NONE' as const:b.costRecord.voidedAt?'VOIDED' as const:'RECORDED' as const;};
-  const loginRows=gm.map(g=>{const vm=g.earnApp?.vm&&!g.earnApp.vm.archivedAt?g.earnApp.vm:null,state:StockState=g.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':g.earnApp?'USED':'NEW';
-    return {id:g.id,email:g.email,type:g.loginType,status:g.status,state,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:g.batchId?batchOf.get(g.batchId)?.code??null:null,batchId:g.batchId,price:allocated(g.batchId),priceState:priceState(g.batchId),credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),
+  const loginRows=gm.map(g=>{const vm=g.earnApp?.vm&&!g.earnApp.vm.archivedAt?g.earnApp.vm:null,state:StockState=g.archivedAt?'DELETED':g.status!=='ACTIVE'?'BLOCKED':vm?'ASSIGNED':g.earnApp?'USED':'NEW';
+    return {id:g.id,email:g.email,type:g.loginType,status:g.status,state,deletedAt:g.archivedAt?.toISOString()??null,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:g.batchId?batchOf.get(g.batchId)?.code??null:null,batchId:g.batchId,price:allocated(g.batchId),priceState:priceState(g.batchId),credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token||g.twoFaLink||g.smsLink),phone:g.phone,links:{twoFa:!!g.twoFaLink,sms:!!g.smsLink},
       earnApp:g.earnApp?{id:g.earnApp.id,revision:g.earnApp.revision,registeredAt:g.earnApp.registeredAt?.toISOString()??null,paypal:g.earnApp.paypal?g.earnApp.paypal.code+' · '+(g.earnApp.paypalEmail?.email??'chưa xác định email'):null}:null,place:place(vm),legacyVmCount:g._count.vms};});
   // PayPal: one row per code, its emails each with their own use. An email is NEW (never given to an EarnApp, not held), ASSIGNED
   // (receiving for an EarnApp account on a VM now), USED (given before; never offered again) or HOLD (old data to reconcile). The
@@ -52,10 +54,10 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
     const emails=p.emails.filter(e=>!e.archivedAt).map(e=>{const vm=e.earnApp?.vm&&!e.earnApp.vm.archivedAt?e.earnApp.vm:null,state:'NEW'|'ASSIGNED'|'USED'|'HOLD'=e.reviewHold&&!e.earnApp?'HOLD':vm?'ASSIGNED':e.earnApp||e.usedEarnAppId?'USED':'NEW';
       return {id:e.id,email:e.email,primary:e.isPrimary,state,earnAppLogin:e.earnApp?.login.email??null,place:place(vm),note:e.reviewHold?e.reviewNote:null,revision:e.revision};});
     const n=(s:string)=>emails.filter(e=>e.state===s).length,counts={total:emails.length,NEW:n('NEW'),ASSIGNED:n('ASSIGNED'),USED:n('USED'),HOLD:n('HOLD')};
-    const state:StockState=p.status!=='ACTIVE'?'BLOCKED':counts.NEW?'NEW':counts.ASSIGNED?'ASSIGNED':'USED';
+    const state:StockState=p.archivedAt?'DELETED':p.status!=='ACTIVE'?'BLOCKED':counts.NEW?'NEW':counts.ASSIGNED?'ASSIGNED':'USED';
     // Old links whose email is not known (before 18/10/2026): shown on the PayPal, never moved to an email by guessing.
     const unknown=p.earnApps.map(a=>({earnAppLogin:a.login.email,place:place(a.vm&&!a.vm.archivedAt?a.vm:null)}));
-    return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),priceState:priceState(p.batchId),emails,counts,unknownLinks:unknown,legacyLoginCount:p._count.gmails};});
+    return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,deletedAt:p.archivedAt?.toISOString()??null,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),priceState:priceState(p.batchId),emails,counts,unknownLinks:unknown,legacyLoginCount:p._count.gmails};});
   const emailsInBatch=new Map<string,number>();for(const p of pp)if(p.batchId)emailsInBatch.set(p.batchId,(emailsInBatch.get(p.batchId)||0)+p.emails.length);
   const batchRows=batches.filter(b=>b.kind==='PAYPAL'?paypals:logins).map(b=>({id:b.id,kind:b.kind,type:b.loginType,code:b.code,source:b.source,purchasedAt:dayText(b.purchasedAt),lineCount:b.lineCount,paidQuantity:b.paidQuantity,received:b.kind==='PAYPAL'?b._count.paypals:b._count.logins,emails:b.kind==='PAYPAL'?emailsInBatch.get(b.id)??0:null,revision:b.revision,notes:b.notes,
     cost:b.costRecord&&!b.costRecord.voidedAt?'RECORDED' as const:b.costRecord?'VOIDED' as const:'NONE' as const,costId:money?b.costRecord?.id??null:null,
@@ -68,8 +70,8 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   // (searched in its own table) or the purchase in Lịch sử nhập kho. Account states (locked, PayPal limit, stopped) are not listed here.
   type Open={type:'vm';place:NonNullable<ReturnType<typeof place>>}|{type:'account';q:string}|{type:'batch';code:string};
   type Review={kind:string;group:'LOGIN'|'PAYPAL';subject:string;reason:string;message:string;place:ReturnType<typeof place>;open:Open};
-  const review:Review[]=[];
-  const add=(r:Omit<Review,'message'>)=>review.push({...r,message:r.subject+': '+r.reason});
+  const review:Review[]=[];const reviewOn=!options.deleted;
+  const add=(r:Omit<Review,'message'>)=>{if(reviewOn)review.push({...r,message:r.subject+': '+r.reason});};
   for(const v of legacyVms)if(!v.earnApp){const at=v.archivedAt?null:place(v),email=v.gmail?.email||'';add({kind:'LEGACY_VM_LOGIN',group:'LOGIN',subject:email,reason:'Gmail cũ ghi trên VM '+v.server.code+' / '+v.code+' (trước quy tắc mới), VM chưa có tài khoản EarnApp. Gán lại tại ô nếu đúng.',place:at,open:at?{type:'vm',place:at}:{type:'account',q:email}});}
   for(const g of loginRows)if(g.legacyVmCount>1)add({kind:'LEGACY_SHARED_LOGIN',group:'LOGIN',subject:g.email,reason:'Từng ghi cho '+g.legacyVmCount+' VM (quy tắc cũ dùng chung); nay một tài khoản chỉ cho một VM.',place:null,open:{type:'account',q:g.email}});
   for(const p of paypalRows){for(const e of p.emails)if(e.state==='HOLD')add({kind:'PAYPAL_EMAIL_HOLD',group:'PAYPAL',subject:p.code+' · '+e.email,reason:(e.note||'Email tạm giữ để đối chiếu')+'. Xác định email nào EarnApp cũ đã dùng; web không tự đoán.',place:null,open:{type:'account',q:e.email}});
@@ -90,7 +92,7 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma){
   }
   for(const g of loginRows)if(!g.type)add({kind:'LOGIN_TYPE_MISSING',group:'LOGIN',subject:g.email,reason:'Chưa chọn loại Gmail / Apple ID (dữ liệu cũ); web không tự đoán từ đuôi email.',place:null,open:{type:'account',q:g.email}});
   return {logins:logins?loginRows:[],paypals:paypalRows,batches:batchRows,review,
-    rights:{logins,paypals,writeLogins:can(current,'INFRASTRUCTURE',true)&&['ADMIN','MODERATOR'].includes(current.role),writePaypals:can(current,'PAYPALS',true)&&['ADMIN','MODERATOR'].includes(current.role),money,writeCosts:!!current.teamCashEnabled&&(current.role==='ADMIN'||current.role==='MODERATOR'&&!!current.allowedModules?.includes('COSTS')),copy:current.role!=='VIEWER'&&(current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS'))}};
+    rights:{logins,paypals,admin:current.role==='ADMIN',writeLogins:can(current,'INFRASTRUCTURE',true)&&['ADMIN','MODERATOR'].includes(current.role),writePaypals:can(current,'PAYPALS',true)&&['ADMIN','MODERATOR'].includes(current.role),money,writeCosts:!!current.teamCashEnabled&&(current.role==='ADMIN'||current.role==='MODERATOR'&&!!current.allowedModules?.includes('COSTS')),copy:current.role!=='VIEWER'&&(current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS'))}};
 }
 // Server/VM grid: the EarnApp account of each VM (login, type, PayPal) plus the legacy Gmail link when no account was recorded yet.
 export async function readVmAccounts(scope:ActorScope,db:PrismaClient=prisma){

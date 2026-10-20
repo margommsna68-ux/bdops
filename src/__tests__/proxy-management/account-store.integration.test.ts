@@ -27,24 +27,24 @@ it('bulk Gmail / Apple ID import keeps every line, never overwrites, protects se
     const text=[`${a}|pw-secret-${a}|TOTP${a}|rec-${a}`,`${b}\tpw-b`,`không-phải-email|x`,`${b}|pw-again`,`${c}:pw-c`].join('\n');
     await expect(previewStockImport(f.scope,{kind:'LOGIN',text,batch:{code:'L1',purchasedAt:'2026-10-17',priceMode:'NONE'}},db)).rejects.toMatchObject({code:'INVALID_INPUT'}); // type must be chosen
     const batch={source:'Shop A',purchasedAt:'2026-10-17',priceMode:'UNIT' as const,amount:'25000',quantity:5,currency:'VND',rate:'25000'};
-    const preview=await previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch},db);
+    const preview=await previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text,batch},db);
     expect(preview.rows.map(r=>r.outcome)).toEqual(['READY','ERROR','ERROR','ERROR','READY']);expect(preview.rows[1].message).toMatch(/dòng 4/);expect(preview.rows[3].message).toMatch(/dòng 2/);
     expect(preview.batch).toMatchObject({existing:false,cost:'WILL_RECORD',total:{amount:'125000.00000000',currency:'VND',usdt:'5.000000',quantity:5}});
     expect(JSON.stringify(preview)).not.toMatch(/pw-|TOTP/);
-    const key=randomUUID(),done=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch,key},db);
+    const key=randomUUID(),done=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text,batch,key},db);
     expect(done).toMatchObject({applied:2,errors:3});expect(await costs(f.scope.projectId)).toBe(1);
     const saved=await db.gmailAccount.findFirstOrThrow({where:{email:a}});expect(saved.loginType).toBe('APPLE_ID');expect(saved.password).not.toContain('pw-secret');expect(saved.recoveryEmail).toBe('rec-'+a);
     expect(JSON.stringify(await db.operationJournal.findMany({where:{projectId:f.scope.projectId}}))).not.toMatch(/pw-secret|TOTP/);
     expect(JSON.stringify(await db.auditLog.findMany({where:{projectId:f.scope.projectId}}))).not.toMatch(/pw-secret|TOTP/);
     // Same key again = replay; the same list appended to that batch = nothing new, no second cost; fixing error lines in the batch adds no cost.
-    expect(await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch,key},db)).toMatchObject({replay:true,applied:2});
+    expect(await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text,batch,key},db)).toMatchObject({replay:true,applied:2});
     const append={batchId:done.batch.id};
-    const again=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,append,key:randomUUID()},db);expect(again).toMatchObject({applied:0,exists:2});
-    const fix=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text:`${b}|pw-b`,append,key:randomUUID()},db);expect(fix).toMatchObject({applied:1});
+    const again=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text,append,key:randomUUID()},db);expect(again).toMatchObject({applied:0,exists:2});
+    const fix=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text:`${b}|pw-b`,append,key:randomUUID()},db);expect(fix).toMatchObject({applied:1});
     expect(await costs(f.scope.projectId)).toBe(1);
     const cost=await db.costRecord.findFirstOrThrow({where:{projectId:f.scope.projectId}});expect(cost).toMatchObject({currency:'VND',category:'GMAIL'});expect(cost.amount.toString()).toBe('125000');expect(cost.usdtAmount?.toString()).toBe('5');
     // A new purchase with nothing new is refused (would duplicate the purchase); an existing password is never overwritten.
-    await expect(commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text:`${a}|other-password`,batch,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    await expect(commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text:`${a}|other-password`,batch,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
     expect((await db.gmailAccount.findFirstOrThrow({where:{email:a}})).password).toBe(saved.password);expect(await costs(f.scope.projectId)).toBe(1);
     // Wrong type for an existing batch is refused; the type is never inferred from the email.
     await expect(previewStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:`new-${u()}@gmail.com|x`,append},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
@@ -98,7 +98,7 @@ it('two purchases on the same day are two batches and two costs; retry and doubl
     expect(ap.batch).toMatchObject({existing:true,code:r1.batch.code,cost:'RECORDED'});
     expect(await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:mails(1),append:{batchId:r1.batch.id},key:randomUUID()},db)).toMatchObject({applied:1,batch:{id:r1.batch.id}});
     await expect(commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:mails(1),append:{batchId:r1.batch.id},batch:pay('9'),key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
-    await expect(previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text:mails(1),append:{batchId:r1.batch.id}},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    await expect(previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',loginFormat:'STANDARD',text:mails(1),append:{batchId:r1.batch.id}},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
     expect(await db.costRecord.count({where:{projectId:f.scope.projectId,voidedAt:null}})).toBe(2);
     // Two people buying at the same moment: two batches with different codes, no unique clash.
     const mod=randomUUID();await db.user.create({data:{id:mod,email:mod+'@fixture.invalid'}});await db.projectMember.create({data:{projectId:f.scope.projectId,userId:mod,role:'ADMIN'}});

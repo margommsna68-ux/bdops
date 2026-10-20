@@ -44,7 +44,7 @@ const holds=async(endpointId:string)=>(await db.vMProxyAllocation.findMany({wher
 it('retires rows (single and bulk, one reason) keeping IP/credentials/ownership/history, hides them from the current view, blocks re-import, restores and undoes',async()=>{
   const f=await fixture();try{
     const r=await apply(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RETIRE',reason:'Hết hạn không gia hạn'}},{endpointId:f.e5.id,manage:{kind:'RETIRE',reason:'Hết hạn không gia hạn'}},{endpointId:f.g.id,manage:{kind:'RETIRE',reason:'x'}}],idempotencyKey:key()});
-    expect(r.preview.rows.map(x=>[x.field,x.outcome,x.before,x.after])).toEqual([['STATE','READY','NEW','Ngừng quản lý'],['STATE','READY','BLOCKED','Ngừng quản lý'],['STATE','READY','genjy','Ngừng quản lý']]);
+    expect(r.preview.rows.map(x=>[x.field,x.outcome,x.before,x.after])).toEqual([['STATE','READY','NEW','Đã xoá'],['STATE','READY','BLOCKED','Đã xoá'],['STATE','READY','genjy','Đã xoá']]);
     expect(r.preview.rows[2].message).toContain('vẫn thuộc genjy');expect(r.result).toMatchObject({applied:3,errors:0});
     expect(await db.proxyIdentity.findUniqueOrThrow({where:{id:f.g.identityId!}})).toMatchObject({owner:'GENJY'});
     const gBack=await apply(f.scope,{items:[{endpointId:f.g.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});expect(gBack.result?.applied).toBe(1);
@@ -59,7 +59,7 @@ it('retires rows (single and bulk, one reason) keeping IP/credentials/ownership/
     const again=await batches.preview(f.scope,{kind:'NEW',text:f.net+'2:80:u2:secret-2',owner:'SELF',idempotencyKey:key()});expect(again.rows[0]).toMatchObject({outcome:'ERROR',code:'HISTORICAL_IP'}); // no duplicate import
     const same=await apply(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RETIRE',reason:'again'}}],idempotencyKey:key()});expect(same.preview.rows[0]).toMatchObject({outcome:'SKIP'});expect(same.result).toBeNull();
     const back=await apply(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RESTORE'}},{endpointId:f.e1.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()});
-    expect(back.preview.rows.map(x=>[x.outcome,x.before,x.after])).toEqual([['READY','Ngừng quản lý','NEW'],['SKIP','NEW','Khôi phục']]);expect(back.result).toMatchObject({applied:1,skipped:1});
+    expect(back.preview.rows.map(x=>[x.outcome,x.before,x.after])).toEqual([['READY','Đã xoá','NEW'],['SKIP','NEW','Khôi phục']]);expect(back.result).toMatchObject({applied:1,skipped:1});
     const restored=await db.proxyIP.findUniqueOrThrow({where:{id:f.e2.id}});expect(restored).toMatchObject({inventoryState:'NEW',status:'AVAILABLE',retiredAt:null});
     expect(await ips(f.scope,'CURRENT')).toEqual([f.net+'1',f.net+'2',f.net+'3',f.net+'9']);
     const retireOp=await db.operationJournal.findFirstOrThrow({where:{projectId:f.projectId,kind:'PROXY_EDIT'},orderBy:{createdAt:'asc'}});
@@ -73,17 +73,24 @@ it('retires rows (single and bulk, one reason) keeping IP/credentials/ownership/
     expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e5.id}})).inventoryState).toBe('RETIRED');
   }finally{await f.cleanup();}
 });
-it('retiring a planned proxy needs explicit plan release and previews the VM; installed plans are refused; undo restores the plan',async()=>{
+it('deleting is refused while the proxy sits on a VM (pending or installed), ADMIN only, checked again at commit; undo restores',async()=>{
   const f=await fixture();try{
-    const no={result:null,preview:await service().preview(f.scope,{items:[{endpointId:f.e1.id,manage:{kind:'RETIRE',reason:'r'}},{endpointId:f.e3.id,manage:{kind:'RETIRE',reason:'r',releasePlans:true}}],idempotencyKey:key()})};
-    expect(no.preview.rows[0]).toMatchObject({outcome:'ERROR'});expect(no.preview.rows[0].message).toMatch(/huỷ giao/i);expect(no.preview.rows[1]).toMatchObject({outcome:'READY'});// 19/10/2026: an older confirmed position is released like any other
-    const yes=await apply(f.scope,{items:[{endpointId:f.e1.id,manage:{kind:'RETIRE',reason:'Nhà cung cấp thu hồi',releasePlans:true}}],idempotencyKey:key()});
-    expect(yes.preview.rows[0]).toMatchObject({outcome:'READY',before:'NEW'});expect(yes.preview.rows[0].message).toMatch(/moon1\/VM_001/);expect(yes.result?.applied).toBe(1);
-    expect(await holds(f.e1.id)).toBe(0);expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms.m1_1.id}})).toMatchObject({desiredConfigurationId:null,proxySlotState:'BLANK'});expect((await db.vMConfiguration.findUniqueOrThrow({where:{id:f.h1.config.id}})).status).toBe('CANCELLED');
-    const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.projectId,kind:'PROXY_EDIT'}});await undoOperation(f.scope,op.id,'nhầm',db);
-    expect(await holds(f.e1.id)).toBe(1);expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e1.id}})).inventoryState).toBe('NEW');expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms.m1_1.id}})).toMatchObject({desiredConfigurationId:f.h1.config.id,proxySlotState:'FULL'});
-    await db.projectMember.update({where:{userId_projectId:{userId:f.userId,projectId:f.projectId}},data:{role:'USER',capabilities:[]}});
+    const no=await service().preview(f.scope,{items:[{endpointId:f.e1.id,manage:{kind:'RETIRE',reason:'Xoá khỏi kho'}},{endpointId:f.e3.id,manage:{kind:'RETIRE',reason:'Xoá khỏi kho'}}],idempotencyKey:key()});
+    expect(no.rows.map(r=>r.outcome)).toEqual(['ERROR','ERROR']);expect(no.rows[0].message).toMatch(/Đang gán cho moon1\/VM_001/);expect(no.rows[1].message).toMatch(/moon2\/VM_001/);
+    expect(await holds(f.e1.id)).toBe(1); // nothing released by a delete
+    // Unassigned at Server/VM → deletable; the save returns its journal id for Hoàn tác; undo brings the row back.
+    await db.vMProxyAllocation.updateMany({where:{endpointId:f.e1.id},data:{releasedAt:new Date()}});await db.virtualMachine.update({where:{id:f.vms.m1_1.id},data:{desiredConfigurationId:null,proxySlotState:'BLANK'}});
+    const yes=await apply(f.scope,{items:[{endpointId:f.e1.id,manage:{kind:'RETIRE',reason:'Xoá khỏi kho'}}],idempotencyKey:key()});
+    expect(yes.result).toMatchObject({applied:1,operationId:expect.any(String)});expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e1.id}})).inventoryState).toBe('RETIRED');
+    await undoOperation(f.scope,yes.result!.operationId!,'nhầm',db);expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e1.id}})).inventoryState).toBe('NEW');
+    // ADMIN only: a right dropped between the check and the save refuses the save; MODERATOR and USER (even with PROXY_IMPORT) are refused.
+    const k=key(),p=await service().preview(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RETIRE',reason:'Xoá khỏi kho'}}],idempotencyKey:k});expect(p.ready).toBe(1);
+    await db.projectMember.update({where:{userId_projectId:{userId:f.userId,projectId:f.projectId}},data:{role:'MODERATOR'}});
+    await expect(service().commit(f.scope,p.token,k)).rejects.toMatchObject({code:'FORBIDDEN'});
     await expect(service().preview(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RETIRE',reason:'r'}}],idempotencyKey:key()})).rejects.toMatchObject({code:'FORBIDDEN'});
+    await db.projectMember.update({where:{userId_projectId:{userId:f.userId,projectId:f.projectId}},data:{role:'USER',capabilities:['PROXY_IMPORT']}});
+    await expect(service().preview(f.scope,{items:[{endpointId:f.e2.id,manage:{kind:'RESTORE'}}],idempotencyKey:key()})).rejects.toMatchObject({code:'FORBIDDEN'});
+    expect((await db.proxyIP.findUniqueOrThrow({where:{id:f.e2.id}})).inventoryState).toBe('NEW');
   }finally{await f.cleanup();}
 });
 it('groups rename by id (links kept, duplicates refused, undo) and archive without moving proxies to TUT',async()=>{

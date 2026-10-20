@@ -1,0 +1,38 @@
+PASS AP1 chọn Apple ID: hướng dẫn hiện đúng 5 cột
+PASS AP2 form một tài khoản có đúng 5 trường — Email Apple ID|Mật khẩu|Link lấy 2FA|Link SMS|Số điện thoại
+PASS AP3 tự kiểm tra: 2 hợp lệ (có link 2FA, link SMS, SĐT), 1 lỗi link báo tại dòng; không bắt sửa cấu trúc — 1 apple-<tag>-1@example.invalid mật khẩu, link 2FA, link SMS, SĐT Hợp lệ · Nhập mới / 2 apple-<tag>-2@gmail.com mật khẩu, link SMS, SĐT Hợp lệ · Nhập mới / 3 bad-<tag>@example.invalid mật khẩu Cần sửa · Link lấy 2FA phải là đường dẫn web (http:// hoặc https://)
+PASS AP4 bảng kiểm tra không lộ mật khẩu / link
+PASS AP5 đọc lại đủ và đúng: loại Apple ID, mật khẩu, link (hoa/thường, tham số, mã hoá %2F), SĐT 0 đầu; không vào Email khôi phục / Ghi chú / 2FA — {"email":"apple-<tag>-1@example.invalid","type":"APPLE_ID","phone":"0123456789","rec":null,"notes":null,"tf":null,"pw":"…","l2":true,"ls":true,"enc":"bzio05SJv4sUjL0s3+CAbA==:/EYq3NGe167tzFRZJsLD5A==:lgoycPo3YPXF9m+GrXrgW2+P6VegEYsIFyA3b5w3MiShkjk6hP1tFDJ/HhpE4w=="}
+PASS AP6 Apple ID dùng email gmail.com vẫn là Apple ID; SĐT giữ dấu +
+PASS AP7 nhập lại: Đã có, không ghi đè mật khẩu / link / SĐT; nút Nhập tắt
+PASS AU1 dòng hiện SĐT gọn và hai thao tác Lấy 2FA / SMS; không hiện URL —  apple-<tag>-1@example.invalid 0123456789 Lấy 2FA SMS Apple ID NEW · chưa gán — Dùng được Bị khoá tạm Cần khôi phục 
+PASS AU2 bấm Lấy 2FA: hỏi PIN trước, chưa gọi link
+PASS AU3 sau PIN: link đúng nguyên văn, có nút Mở (tab mới) và Copy; không tự mở
+PASS AU4 người chỉ xem: không có nút Lấy 2FA / SMS; API copy bị từ chối — [{"error":{"json":{"message":"Bạn chưa có quyền thao tác này","code":-32003,"data":{"code":"FORBIDDE
+PASS AU5 người ngoài dự án: API copy bị từ chối — [{"error":{"json":{"message":"Không có quyền truy cập dự án","code":-32003,"data":{"code":"FORBIDDEN
+PASS DL0 mỗi dòng có nút thùng rác "Xoá khỏi kho"
+PASS DL1 xoá một dòng: bấm là ghi, thông báo có Hoàn tác; Hoàn tác trả lại — Đã xoá 1 tài khoản
+Hoàn tác
+PASS DL2 dòng đang gán VM: báo tại dòng "Đang gán cho Server / VM" kèm link mở máy, không bỏ gán — Đang gán cho del-<tag> / VM_001; bỏ gán tại VM trước · Mở
+PASS DL3 xoá hàng loạt: 2 xoá, 1 chặn; dòng bị chặn giữ tick và lý do
+PASS DL4 tiền mua, số lượng, lô không đổi
+PASS DL5 bộ lọc Đã xoá liệt kê g2, g3; URL state=DELETED
+PASS DL6 tải lại giữ bộ lọc Đã xoá và từ khoá
+PASS DL7 khôi phục đơn và hàng loạt; dữ liệu giữ nguyên (mật khẩu còn)
+PASS DL8 trang không tồn tại được kẹp về trang hợp lệ
+PASS DP1 PayPal có email đang nhận cho VM: chặn, nêu VM, link mở máy — dp1-<tag>-1@example.invalid đang nhận cho del-<tag> / VM_001; bỏ gán tại VM trước · Mở
+PASS DP2 PayPal còn số dư theo sổ: chặn, nêu số tiền, dẫn tới tiền ra — Còn lại theo sổ 15.00 USD; chuyển / rút hết hoặc đối chiếu trước · Mở
+PASS DP3 PayPal tự do: xoá được, Hoàn tác trả lại; email và sổ không đổi
+PASS R1 MODERATOR: không có thùng rác, không có chip Đã xoá; vẫn sửa tình trạng được
+PASS R2 MODERATOR gọi API xoá: bị từ chối — [{"error":{"json":{"message":"Chỉ ADMIN của dự án được xoá / khôi phục tài khoản","code":-32003,"data":{"code":"FORBIDDE
+PASS R3 ADMIN bị hạ quyền sau khi mở trang: bấm Xoá bị từ chối, không ghi
+PASS R4 ngoài dự án: API xoá và đọc danh sách đã xoá bị từ chối
+PASS PX1 proxy còn vị trí VM (Chờ cài chưa bắt đầu): chặn tại dòng, link mở VM, không huỷ giao — Đang gán cho del-<tag>/VM_002 · Đang dùng; bỏ gán ở Server/VM trước rồi xoá · Mở del-<tag>/VM_002
+PASS PX2 proxy LIVE không có VM: xoá được (không hỏi lý do / xác nhận), Hoàn tác trả về LIVE — Đã xoá 1 proxy
+Hoàn tác
+PASS PX3 xoá hàng loạt: 2 xoá (giữ IP, user/pass), 1 chặn còn tick
+PASS PX4 bộ lọc Đã xoá (Lịch sử IP) liệt kê 2 dòng với nhãn Đã xoá
+PASS PX5 khôi phục đơn và hàng loạt về đúng trạng thái trước (NEW / LIVE)
+PASS PX6 MODERATOR (có quyền nhập): không có thùng rác, bút sửa không còn Ngừng quản lý; API xoá bị từ chối — [{"error":{"json":{"message":"Chỉ ADMIN của dự án được xoá / khôi phục proxy","code":-32003,"data":{
+
+Kết quả: 34 đạt, 0 lỗi. Lỗi JS: không

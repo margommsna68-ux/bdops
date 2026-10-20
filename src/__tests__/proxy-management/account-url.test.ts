@@ -1,11 +1,14 @@
 import {describe,expect,it} from 'vitest';
-import {openView,readAccountUrl,sameQuery,switchKind,writeAccountUrl} from '@/components/account-store/account-url';
+import {openView,readAccountUrl,sameQuery,switchKind,withFilter,writeAccountUrl} from '@/components/account-store/account-url';
 import {appendToBatch,discardDraft,importDraft} from '@/components/account-store/ImportPanel';
 import {links} from '@/lib/links';
 const params=(s:string)=>new URLSearchParams(s);
 describe('Kho tài khoản URL',()=>{
   it('two kind tabs; history and review are views inside the kind; the page kind is the default',()=>{
-    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:'',pp:'',show:'',month:'',asof:''});
+    expect(readAccountUrl(params(''),'login')).toEqual({tab:'login',view:'',q:'',type:'',state:'',batch:'',page:1,pp:'',show:'',month:'',asof:''});
+    // 20/10/2026: ?page= of the filtered list (a view ignores it); ?state=DELETED is the deleted view; a filter change starts at page 1.
+    expect(readAccountUrl(params('page=3&state=DELETED'),'login')).toMatchObject({page:3,state:'DELETED'});expect(readAccountUrl(params('view=history&page=3'),'login').page).toBe(1);
+    expect(writeAccountUrl({...readAccountUrl(params(''),'login'),page:2},'login')).toBe('?page=2');expect(withFilter({...readAccountUrl(params('page=2'),'login')},{state:'NEW'})).toMatchObject({page:1,state:'NEW'});
     expect(readAccountUrl(params(''),'paypal').tab).toBe('paypal');
     const u=readAccountUrl(params('tab=paypal&view=history&batch=PP-2026-10-17'),'login');expect(u).toMatchObject({tab:'paypal',view:'history',batch:'PP-2026-10-17'});
     expect(writeAccountUrl(u,'login')).toBe('?tab=paypal&view=history&batch=PP-2026-10-17');expect(writeAccountUrl(u,'paypal')).toBe('?view=history&batch=PP-2026-10-17');
@@ -19,7 +22,7 @@ describe('Kho tài khoản URL',()=>{
   });
   it('switching kind drops the other kind’s filters; a view keeps the kind; bad values are ignored',()=>{
     const u=readAccountUrl(params('type=APPLE_ID&state=NEW&q=abc&batch=TK-1'),'login');
-    expect(switchKind(u,'paypal')).toEqual({tab:'paypal',view:'',q:'',type:'',state:'',batch:'',month:''});
+    expect(switchKind(u,'paypal')).toEqual({tab:'paypal',view:'',q:'',type:'',state:'',batch:'',page:1,month:''});
     expect(openView(u,'history','TK-1')).toMatchObject({tab:'login',view:'history',batch:'TK-1',q:'',state:''});
     expect(readAccountUrl(params('tab=paypal&type=GMAIL&state=WHATEVER'),'login')).toMatchObject({type:'',state:''});
   });
