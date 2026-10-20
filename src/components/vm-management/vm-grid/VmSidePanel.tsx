@@ -1,4 +1,5 @@
 "use client";
+import React from 'react';
 import {formatLedger} from '@/lib/money-input';
 import Link from 'next/link';
 import {Copy,X} from 'lucide-react';
@@ -81,6 +82,22 @@ function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   </div>;
 }
 
+// Reconciling an old account's request (review fix 20/10/2026): the account left this VM or round, so the cell no longer shows it.
+// Only what EarnApp's own history shows is recorded, on that old account: sent (its email becomes its receiving email, late money
+// links to the request) or not sent (the held email goes back). Nothing touches the account now on the VM. One click, retry = same key.
+type HistReq={id:string;revision:number;vmId:string;earnAppId:string;cycle:number};
+function OldRequestActions({projectId,request:r,onDone}:{projectId:string;request:HistReq;onDone:()=>void}){
+  const update=trpc.vmOps.updatePayout.useMutation(),key=React.useRef<{sig:string;key:string}|null>(null),[error,setError]=React.useState('');
+  async function run(action:'SENT'|'CANCELLED'){
+    const input={projectId,requestId:r.id,expectedRevision:r.revision,vmId:r.vmId,expectedCycle:r.cycle,earnAppId:r.earnAppId,history:true,action,note:action==='CANCELLED'?'Đối chiếu lịch sử: chưa gửi trên EarnApp':null};
+    const sig=JSON.stringify(input);if(key.current?.sig!==sig)key.current={sig,key:crypto.randomUUID()};setError('');
+    try{await update.mutateAsync({...input,key:key.current.key});toast.success('Đã đối chiếu yêu cầu rút lượt '+r.cycle);onDone();}catch(e){setError(e instanceof Error?e.message:'Chưa lưu được');}
+  }
+  return <div className="flex gap-2 flex-wrap items-center mt-1"><span className="text-amber-600">Tài khoản cũ, chưa xác nhận gửi:</span>
+    <button type="button" className="pm-link" disabled={update.isLoading} onClick={()=>void run('SENT')}>Đã gửi trên EarnApp (theo lịch sử EarnApp)</button>
+    <button type="button" className="pm-link" disabled={update.isLoading} onClick={()=>void run('CANCELLED')}>Chưa gửi — trả email</button>
+    {error&&<span role="alert" className="vm-cell-error">{error}</span>}</div>;
+}
 const PHASE:Record<string,string>={WAITING:'Chờ tiền về',RECEIVED:'Đã nhận đủ',REVIEW:'Cần đối chiếu',FAILED:'Thất bại',CANCELLED:'Đã huỷ'};
 // Rounds of this VM position, recorded statuses and the payout request of every round (amounts only with the money rights).
 function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
@@ -92,6 +109,7 @@ function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
     <div><h3 className="text-sm font-semibold mb-2">Lượt vận hành đã đóng</h3>{d.cycles.length?<ul className="text-xs space-y-1">{d.cycles.map(c=><li key={c.number}><strong>Lượt {c.number}</strong> · {c.reason==='SUSPENDED'?'SUS':'tiền đã về đủ'} · {c.login||'không có EarnApp'}{c.sdk?' · SDK '+c.sdk:''} · tình trạng cuối {opsLabel(c.status as VmOpsStatus|null)}{c.proxyKept?' · giữ proxy':''} · {c.by} {localDate(c.closedAt)}{c.note?' · '+c.note:''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa tạo lại lần nào (lượt 1).</p>}</div>
     <div><h3 className="text-sm font-semibold mb-2">Yêu cầu rút EarnApp</h3>{d.requests.length?<ul className="text-xs space-y-2">{d.requests.map(r=><li key={r.id}><div><strong>Lượt {r.cycle}</strong> · {r.login} · {r.paypal} · {r.email} · ngày {r.requestedAt.split('-').reverse().join('/')} · {PHASE[r.phase]||r.phase}{r.consumed?' · đã dùng để tạo lại VM':''}{r.reviewAfterRecreate?<span className="text-amber-600"> · cần đối chiếu (khoản nhận đổi sau khi tạo lại; VM giữ lượt mới)</span>:null}</div>
       {r.money&&<div className="pm-muted">Yêu cầu {formatLedger(r.money.amount,r.money.currency)} · đã về {formatLedger(r.money.received,r.money.currency)}{r.money.remaining!=='0.00'?' · còn chờ '+formatLedger(r.money.remaining,r.money.currency):''}{r.money.receipts.length?' · '+r.money.receipts.map(x=>x.date.split('-').reverse().join('/')+' '+formatLedger(x.amount,r.money!.currency)+' ('+x.status+')').join(', '):''}</div>}
+      {r.old&&d.rights.writeMoney&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<OldRequestActions projectId={projectId} request={r} onDone={()=>void h.refetch()}/>}
       <div className="pm-muted">{r.history.map((x,i)=><span key={i} className="block">{localDate(x.at)} · {x.by}: {x.what}</span>)}</div></li>)}</ul>:<p className="pm-muted text-xs">Chưa có yêu cầu rút.</p>}</div>
     <div><h3 className="text-sm font-semibold mb-2">Tình trạng đã ghi</h3>{d.events.length?<ul className="text-xs space-y-1">{d.events.map(e=><li key={e.id}>{localDate(e.at)} · {e.by} · lượt {e.cycle} · {e.kind==='RECREATE'?'Ghi nhận tạo lại VM → ':e.kind==='UNDO'?'Hoàn tác trên web: ':''}{opsLabel(e.from as VmOpsStatus|null)} → {opsLabel(e.to as VmOpsStatus|null)}{e.note?' · '+e.note:''}{e.kind==='RECREATE'&&e.detail&&typeof e.detail==='object'&&'proxy' in (e.detail as object)?' · '+String((e.detail as {proxy:string}).proxy):''}</li>)}</ul>:<p className="pm-muted text-xs">Chưa ghi tình trạng (Chưa ghi).</p>}</div>
   </div>;

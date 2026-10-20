@@ -1,0 +1,24 @@
+PASS R1.1 A đang nhập $10 cho lượt 1 / A1, nút Lưu sáng
+PASS R1.2 B tạo lại VM_001 (lượt 2) và gán tài khoản B1 — [{"result":{"data":{"json":{"rows":[{"line":1,"vmId":"cmvgjvtq30003143kj9797ww5","server":"Rv-jvtpz","vm":"VM_001","outc
+PASS R1.3 A: nháp $10 giữ nguyên, báo tại chỗ, Lưu khoá — Rv-jvtpz / VM_001 · lượt 2 · p32-jvtpz-b1@example.invalid Số dư EarnApp Chưa kiểm tra tài khoản EarnApp ở lượt 2. Đọc được số dư Kiểm tra thất bại Số dư Đồng tiền Điều kiện rút trên EarnApp Chưa kiểm 
+PASS R1.4 không có số dư nào ghi cho VM_001 (cả lượt cũ lẫn tài khoản mới) — []
+PASS R1.5 "Ghi lần mới": form trống cho tài khoản hiện hành, không tự gửi số cũ
+PASS R1.6 lệnh SENT cũ (API, định danh A1) bị từ chối; B1 không nhận email, email vẫn giữ cho A1, chưa dùng — [{"error":{"json":{"message":"VM đã đổi tài khoản EarnApp hoặc sang lượt mới; yêu cầu này thuộc tài khoản cũ — đối chiếu ở Lịch sử của VM, không áp vào tài khoả {"id":"cmvgjvtqk000g143knkklmfkc","email":"p60-1-jvtpz@example.invalid","usedEarnAppId":null,"holdEarnAppId":"cmvgjvtre001e143kqpsx8zwo"}
+PASS H1 đối chiếu lịch sử: email thành của A1 (đã dùng), B1 không đổi, yêu cầu A1 lượt 1 = SENT — {"e":{"id":"cmvgjvtqk000g143knkklmfkc","email":"p60-1-jvtpz@example.invalid","usedEarnAppId":"cmvgjvtre001e143kqpsx8zwo","holdEarnAppId":null},"a1":{"id":"cmvgjvtre001e143kqpsx8zwo","login":"a1@example.invalid","vmId":null,"email":"cmvgjvtqk000g143knkklmfkc","closed":true},"b1":{"code":"VM_001","revision":4,"cycle":2,"ea":"cmvgjw6qb000hb7grfkapcder","login":"b1@example.invalid","email":null}}
+PASS R2.1 B đổi VM_002 sang B2 trong cùng lượt — [{"result":{"data":{"json":{"rows":[{"line":1,"vmId":"cmvgjvtq50005143k5gbvow2x","server":"Rv-jvtpz","vm":"VM_002","outc
+PASS R2.2 A: form xác nhận giữ nguyên, báo tài khoản cũ, Lưu khoá — Rv-jvtpz / VM_002 · lượt 1 · p32-jvtpz-b2@example.invalid Xác nhận EarnApp đã nhận yêu cầu rút (thấy trong lịch sử rút của EarnApp). Email p85-1-jvtpz@example.invalid thành email nhận của EarnApp này,
+PASS R2.3 dữ liệu: B2 chưa có email, email p85-1 vẫn giữ cho A2 (chưa dùng), yêu cầu A2 vẫn PREPARING — {"b2":{"code":"VM_002","revision":2,"cycle":1,"ea":"cmvgjwhtr000wb7grcxf9qzhk","login":"b2@example.invalid","email":null},"e":{"id":"cmvgjvtql000m143kkf799vrv","email":"p85-1-jvtpz@example.invalid","usedEarnAppId":null,"holdEarnAppId":"cmvgjvtro001l143kxrp1vxnh"}}
+PASS R2.4 email đang giữ cho A2 không được đề xuất cho B2 — 200
+PASS R3.1 B bỏ gán B1 khỏi VM_001 — [{"result":{"data":{"json":{"rows":[{"line":1,"vmId":"cmvgjvtq30003143kj9797ww5","server":"Rv-jvtpz","vm":"VM_001","outc
+PASS R3.2 A: form yêu cầu rút giữ số 9, báo đổi tài khoản, nút Lưu khoá — Rv-jvtpz / VM_001 · lượt 2 PP dùng được, còn email Gần đạt $100 trước Đã đạt $100 trước Số dư cao trước Gợi ý: pp82pbulz — pp82pbulz: đã có / chờ / giữ $82,00, sau khoản này $91,00 (gần $100,00 nhất, không vượt) Dùng gợi
+PASS R3.3 không có yêu cầu rút mới cho VM_001
+PASS R4.1 trước khi chốt: "Đã về $6,00 · còn chờ $4,00" — Chưa kiểm tra Đã về $6,00 · còn chờ $4,00 pp60-jvtpz · p60-2-jvtpz@example.invalid
+PASS R4.2 sau khi chốt: "Đã về PP $6,00" + "Đã chốt thiếu $4,00", không hiện $10 — Chưa kiểm tra Đã về PP $6,00 Đã chốt thiếu $4,00 · Cần tạo lại VM
+PASS R4.3 sổ tiền không đổi (không thêm giao dịch), yêu cầu $10 giữ nguyên, chênh lệch $4 ghi ở yêu cầu — {"id":"cmvgjvtt9002m143ke99wb4ra","revision":1,"vmId":"cmvgjvtq70007143kspqpvjtd","cycle":1,"earnAppId":"cmvgjvtrx001s143kjmz6qfkl","submission":"SENT","state":"REQUESTED","shortfall":"4.00","amount":"10.00"}
+PASS S1 API board + balanceHistory của nhân viên không quyền tiền: không có 731.25 / 529.75 (cả điều kiện, lý do, căn cứ) — 200/200
+PASS S2 vẫn có trạng thái trung tính: FAILED + có ghi chú bị ẩn
+PASS S3 khung của nhân viên: "Kiểm tra lỗi … (lý do ẩn theo quyền)", không có số — Rv-jvtpz / VM_004 · lượt 1 · p32-jvtpz-a4@example.invalid Số dư EarnApp Kiểm tra lỗi 17:37 (lý do ẩn theo quyền). Số gần nhất (ẩn) lúc 17:28. Ghi số dư cần quyền ghi Server / VM (quản lý) hoặc quyền “
+PASS S4 chủ dự án vẫn đọc đủ nội dung
+PASS Không có lỗi trang
+
+Tổng: 22 PASS, 0 FAIL

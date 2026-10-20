@@ -150,3 +150,77 @@ describe('payout: suggested PayPal, held emails, milestones',()=>{
     }finally{await f.cleanup();}
   });
 });
+// Review fixes 20/10/2026: a payout request acts only on its own VM, round and EarnApp; free text never carries money to staff
+// without the read right. (Independent repro cases kept here as guards.)
+describe('review fixes: request identity, free text',()=>{
+  const reqRev=async(id:string)=>(await db.earnPayoutRequest.findUniqueOrThrow({where:{id}})).revision;
+  it('SUS → recreate → new EarnApp: SENT of the old preparation never touches the new account; the old account reconciles in history and late money links to it',async()=>{
+    const f=await setup();try{
+      const p60=await f.pp('pp-60'),email=p60.emails[0].id,oldId=await f.ea(0);
+      const r=await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1,earnAppId:oldId,paypalEmailId:email,amount:'10',date:today,submission:'PREPARING'},db);
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'SUSPENDED',expectedCycle:1}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:v.id,expectedRevision:v.revision,login:f.logins[5].id}]},db);
+      const newId=await f.ea(0);expect(newId).not.toBe(oldId);
+      // The operating command (from the cell, with the identity it saw) is refused, with or without the identity.
+      await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'SENT',vmId:f.vms[0].id,expectedCycle:1,earnAppId:oldId},db)).rejects.toMatchObject({code:'STALE_PREVIEW',message:expect.stringMatching(/tài khoản cũ/)});
+      await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'SENT'},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      // A command naming the new account / round for the old request is refused too.
+      await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'SENT',vmId:f.vms[0].id,expectedCycle:2,earnAppId:newId,history:true},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      // RETRY on an old account is work on a machine it left: refused even in history.
+      await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'RETRY',vmId:f.vms[0].id,expectedCycle:1,earnAppId:oldId,history:true},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      // The new account cannot take the email held by the old preparation.
+      expect((await readPayoutPick(f.scope,{vmId:f.vms[0].id,amount:'10'},db)).paypals.flatMap(p=>p.emails.map(x=>x.id))).not.toContain(email);
+      // History reconciliation: SENT on the old account only; replay of the same key writes nothing twice.
+      const k=randomUUID(),rev=await reqRev(r.id),hist={key:k,requestId:r.id,expectedRevision:rev,action:'SENT' as const,vmId:f.vms[0].id,expectedCycle:1,earnAppId:oldId,history:true};
+      await updatePayoutRequest(f.scope,hist,db);expect(await updatePayoutRequest(f.scope,hist,db)).toMatchObject({replay:true});
+      expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({usedEarnAppId:oldId,holdEarnAppId:null});
+      expect(await db.earnAppAccount.findUniqueOrThrow({where:{id:oldId}})).toMatchObject({paypalEmailId:email,vmId:null});
+      expect(await db.earnAppAccount.findUniqueOrThrow({where:{id:newId}})).toMatchObject({paypalEmailId:null,vmId:f.vms[0].id});
+      expect(await db.earnPayoutRequest.findUniqueOrThrow({where:{id:r.id}})).toMatchObject({submission:'SENT',earnAppId:oldId,cycle:1});
+      // Late money for the old account links to the old request, snapshot without the new account.
+      await recordReceipts(f.scope,{paypalId:p60.id,date:today,currency:'USD',status:'RECEIVED',text:`${p60.emails[0].email} | 10 | TX-L-${f.x}`,key:randomUUID()},db);
+      expect(await db.fundTransaction.findFirstOrThrow({where:{transactionId:'TX-L-'+f.x}})).toMatchObject({payoutRequestId:r.id,earnAppId:oldId});
+      // The VM board shows the new round without the old request; the old email is never offered again.
+      expect((await f.ops(0)).request).toBeNull();
+      expect((await readPayoutPick(f.scope,{vmId:f.vms[0].id,amount:'10'},db)).paypals.flatMap(p=>p.emails.map(x=>x.id))).not.toContain(email);
+    }finally{await f.cleanup();}
+  });
+  it('A → B on the same round: SENT / UNKNOWN / RETRY from the cell refused; history UNKNOWN keeps the hold, history FAILED gives it back; B untouched',async()=>{
+    const f=await setup();try{
+      const p85=await f.pp('pp-85'),email=p85.emails[0].id,a=await f.ea(1);
+      const r=await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[1].id,expectedCycle:1,earnAppId:a,paypalEmailId:email,amount:'10',date:today,submission:'PREPARING'},db);
+      const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[1].id}});await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:v.id,expectedRevision:v.revision,login:f.logins[5].id}]},db);
+      const b=await f.ea(1);expect(b).not.toBe(a);
+      const id={vmId:f.vms[1].id,expectedCycle:1,earnAppId:a};
+      for(const action of ['SENT','UNKNOWN','FAILED'] as const)await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action,note:'x',...id},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      // B's own request form saw A: refused (no hold / link for B from A's draft).
+      await expect(createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[1].id,expectedCycle:1,earnAppId:a,paypalEmailId:p85.emails[1].id,amount:'10',date:today,submission:'PREPARING'},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'UNKNOWN',...id,history:true},db);
+      expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({holdEarnAppId:a,usedEarnAppId:null});
+      await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:await reqRev(r.id),action:'FAILED',note:'EarnApp không có lệnh rút',...id,history:true},db);
+      expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({holdEarnAppId:null,usedEarnAppId:null});
+      expect(await db.earnAppAccount.findUniqueOrThrow({where:{id:b}})).toMatchObject({paypalEmailId:null});
+      expect(await db.earnPayoutRequest.count({where:{earnAppId:b}})).toBe(0);
+      // The live request of B works as before.
+      const rb=await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[1].id,expectedCycle:1,earnAppId:b,paypalEmailId:email,amount:'10',date:today,submission:'PREPARING'},db);
+      await updatePayoutRequest(f.scope,{key:randomUUID(),requestId:rb.id,expectedRevision:await reqRev(rb.id),action:'SENT',vmId:f.vms[1].id,expectedCycle:1,earnAppId:b},db);
+      expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({usedEarnAppId:b});
+    }finally{await f.cleanup();}
+  });
+  it('condition / failure / evidence free text reaches only who may read balances; EARN_BALANCE opens no PayPal money',async()=>{
+    const f=await setup();try{
+      await f.check(0,{amount:'731.25',condition:'Số dư 731.25 USD, đủ rút',evidence:'ảnh 731.25',checkedAt:new Date(Date.now()-5000).toISOString()});
+      await f.check(0,{outcome:'FAILED',amount:null,failure:'Khoản 529.75 USD đang cần đối chiếu'});
+      const board=await readVmOps(f.worker,db),hist=await readBalanceHistory(f.worker,{vmId:f.vms[0].id},db);
+      expect(JSON.stringify({board,hist})).not.toMatch(/731|529/);
+      expect(board.vms.find(v=>v.vmId===f.vms[0].id)!.balance.latest).toMatchObject({outcome:'FAILED',failure:null,noteHidden:true});
+      expect(hist.rows[1]).toMatchObject({outcome:'OK',condition:null,evidence:null,noteHidden:true});
+      // The owner (money rights) still sees all of it.
+      const full=JSON.stringify(await readBalanceHistory(f.scope,{vmId:f.vms[0].id},db));expect(full).toMatch(/731\.25 USD, đủ rút/);expect(full).toMatch(/529\.75/);
+      // EARN_BALANCE: balances yes, PayPal amounts no.
+      await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.worker.projectId}},data:{capabilities:['EARN_BALANCE']}});
+      const w=await readVmOps(f.worker,db);expect(w.rights).toMatchObject({balanceRead:true,money:false,writeMoney:false});
+      expect(JSON.stringify(await readBalanceHistory(f.worker,{vmId:f.vms[0].id},db))).toMatch(/529\.75/);
+    }finally{await f.cleanup();}
+  });
+});

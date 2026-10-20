@@ -62,7 +62,10 @@ export async function recordBalanceChecks(scope:ActorScope,input:{key:string;sou
     return {rows,applied:rows.filter(x=>x.outcome==='APPLIED').length,errors:rows.filter(x=>x.outcome==='ERROR').length};
   },db);
 }
-const view=(c:{outcome:string;amount:{toFixed(n:number):string}|null;currency:string;withdrawable:string;checkedAt:Date;failure:string|null;condition:string|null},money:boolean):BalanceCheckView=>({outcome:c.outcome as 'OK'|'FAILED',amount:money&&c.amount?c.amount.toFixed(2):null,currency:c.currency,withdrawable:c.withdrawable as Withdrawable,checkedAt:c.checkedAt.toISOString(),failure:c.failure,condition:c.condition});
+// Free text (observed condition, failure reason, evidence) is written by people / AI and may name amounts, so it goes out only with
+// the balance read right (review fix 20/10/2026). Everyone else gets the neutral operating facts: outcome, withdrawable as observed,
+// check time, and whether a note exists; never a rewritten copy of the note.
+const view=(c:{outcome:string;amount:{toFixed(n:number):string}|null;currency:string;withdrawable:string;checkedAt:Date;failure:string|null;condition:string|null},money:boolean):BalanceCheckView=>({outcome:c.outcome as 'OK'|'FAILED',amount:money&&c.amount?c.amount.toFixed(2):null,currency:c.currency,withdrawable:c.withdrawable as Withdrawable,checkedAt:c.checkedAt.toISOString(),failure:money?c.failure:null,condition:money?c.condition:null,noteHidden:!money&&!!(c.failure||c.condition)});
 /** Newest check and newest good check of each VM's current EarnApp in its current round (for the grid). */
 export async function currentBalances(db:PrismaClient,projectId:string,vms:{id:string;cycle:number;earnAppId:string|null}[],read:boolean){
   const ids=vms.filter(v=>v.earnAppId).map(v=>v.id),out=new Map<string,{latest:BalanceCheckView|null;lastOk:BalanceCheckView|null}>();

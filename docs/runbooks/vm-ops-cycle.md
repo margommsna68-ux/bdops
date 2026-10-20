@@ -162,6 +162,13 @@ Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọ
 - Ghi số dư: quyền ghi Server / VM, dự án Proxy / VM, không phải VIEWER, và (ADMIN / MODERATOR hoặc quyền riêng **Ghi kiểm tra tiền EarnApp** `EARN_BALANCE`). Quyền này không cho ghi yêu cầu rút, gán email, xoá kho, sửa chi phí hay sửa khoản nhận.
 - Yêu cầu rút và gán email vẫn cần quyền tiền / gán như trước.
 
+**Sửa sau kiểm độc lập (20/10/2026):**
+- Một yêu cầu rút thuộc đúng một VM, một lượt và một EarnApp. Lệnh từ ô (`vmOps.updatePayout`, `requestPayout`) mang `vmId`, `expectedCycle`, `earnAppId` đã thấy; kiểm lại trong giao dịch. Khi tài khoản đã rời VM (đổi A → B cùng lượt) hoặc VM đã tạo lại, lệnh vận hành bị từ chối ("yêu cầu này thuộc tài khoản cũ"): không gán email, không đổi liên kết, không đánh dấu đã dùng cho tài khoản hiện hành, với cả SENT, UNKNOWN, RETRY, FAILED / CANCELLED, CORRECT, SETTLE.
+- Đối chiếu lịch sử tài khoản cũ (`history: true`, ở Lịch sử của VM → "Đã gửi trên EarnApp (theo lịch sử EarnApp)" / "Chưa gửi — trả email"): SENT làm email thành email nhận của tài khoản cũ, đã dùng vĩnh viễn, để tiền về muộn gắn đúng yêu cầu cũ; UNKNOWN giữ email; FAILED / CANCELLED nhả email đang giữ; CORRECT / SETTLE chỉ sửa tiền. RETRY bị từ chối (gửi lại là thao tác trên máy mà tài khoản đã rời). Tài khoản mới trên VM không bị đụng tới.
+- Nháp gắn định danh: số dư tại ô gắn dự án + VM + lượt + EarnApp từ lúc bắt đầu nhập; form yêu cầu rút gắn lượt + EarnApp lúc mở; form thao tác gắn đúng yêu cầu lúc mở. Dữ liệu nền đổi → nháp giữ, báo tại chỗ, Lưu khoá; muốn ghi cho tài khoản mới bấm "Ghi lần mới" (form trống) sau khi kiểm tra lại. Mất phản hồi thì bấm lại cùng nội dung, định danh và khoá. Dán bảng đã gắn VM / lượt / EarnApp từng dòng từ lúc kiểm tra (giữ như trước).
+- Nội dung tự do (điều kiện quan sát, lý do lỗi, căn cứ) chỉ trả cho người có quyền đọc số dư; người khác nhận trạng thái trung tính (kết quả, điều kiện YES / NO / UNKNOWN, giờ, `noteHidden`), không có bản chép lại. `EARN_BALANCE` đọc được số dư và ghi chú kiểm tra, không mở tiền PayPal hay quyền rút.
+- "Đã về PP" là tiền thực nhận: yêu cầu $10, nhận $6, chốt thiếu $4 → "Đã về PP $6,00" / "Đã chốt thiếu $4,00 · Cần tạo lại VM". Sổ tiền, tổng hợp và điều kiện tạo lại VM không đổi.
+
 **AI (chuẩn bị, chưa nối máy):**
 - Chưa có kết nối nào từ web tới VM hay EarnApp (không SSH, RDP, agent hay API EarnApp). Web không điều khiển VM và không tự rút tiền.
 - Chưa tạo user, mật khẩu hay token cho AI. Khi chủ dự án yêu cầu: tạo một thành viên USER với module INFRASTRUCTURE và `EARN_BALANCE` (thêm quyền tiền chỉ khi muốn AI ghi yêu cầu rút).

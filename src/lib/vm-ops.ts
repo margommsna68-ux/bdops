@@ -81,12 +81,12 @@ export const PP_STATUS_LABEL:Record<string,string>={ACTIVE:'Dùng được',PEND
 // BALANCE_STALE_HOURS is shown as old and asks for a new check.
 export const BALANCE_STALE_HOURS=24;
 export type Withdrawable='YES'|'NO'|'UNKNOWN';
-export interface BalanceCheckView {outcome:'OK'|'FAILED';amount:string|null;currency:string;withdrawable:Withdrawable;checkedAt:string;failure?:string|null;condition?:string|null}
+export interface BalanceCheckView {outcome:'OK'|'FAILED';amount:string|null;currency:string;withdrawable:Withdrawable;checkedAt:string;failure?:string|null;condition?:string|null;/** A note exists but is shown only with the balance read right. */noteHidden?:boolean}
 export const WITHDRAWABLE_LABEL:Record<Withdrawable,string>={YES:'Có thể rút',NO:'Chưa đủ điều kiện rút',UNKNOWN:'Chưa kiểm tra điều kiện rút'};
 export function balanceState(b:{latest:BalanceCheckView|null;lastOk:BalanceCheckView|null},now:Date=new Date()){
   if(!b.latest)return {kind:'UNCHECKED' as const};
   const stale=(at:string)=>now.getTime()-new Date(at).getTime()>BALANCE_STALE_HOURS*3600e3;
-  if(b.latest.outcome==='FAILED')return {kind:'FAILED' as const,at:b.latest.checkedAt,failure:b.latest.failure||null,last:b.lastOk};
+  if(b.latest.outcome==='FAILED')return {kind:'FAILED' as const,at:b.latest.checkedAt,failure:b.latest.failure||null,hidden:!!b.latest.noteHidden,last:b.lastOk};
   return {kind:'OK' as const,at:b.latest.checkedAt,amount:b.latest.amount!,currency:b.latest.currency,zero:toCents(b.latest.amount||'0')===0,stale:stale(b.latest.checkedAt),withdrawable:b.latest.withdrawable,condition:b.latest.condition||null};
 }
 export const MONEY_FILTERS=['UNCHECKED','WITHDRAWABLE','WAITING','RECEIVED','CHECK'] as const;
