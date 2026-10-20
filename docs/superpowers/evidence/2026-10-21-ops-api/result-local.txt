@@ -1,0 +1,29 @@
+PASS U1 Quyền nhân viên có 2 quyền mới
+PASS U2 Thiết lập có mục Token API vận hành (ADMIN)
+PASS U3 Token hiện một lần sau khi tạo
+PASS U4 Danh sách chỉ có phần nhận diện, không đọc lại token
+PASS U5 Người có EARN_PAYOUT thấy "Chuẩn bị rút", không thấy "Ghi yêu cầu rút"
+PASS U6 Form chỉ chuẩn bị, có gợi ý PP (không lộ sổ)
+Lỗi JS: không
+PASS F1 /me: hiệu lực READ/BALANCE_WRITE/PAYOUT/RECEIPT = [{"READ":true,"BALANCE_WRITE":true,"PAYOUT":true,"RECEIPT":true}]
+PASS F2 /projects: id, code PROXY_TRIAL, name Proxy & VM — Bản thử
+PASS F3 resolve đúng server + VM (không phân biệt hoa thường)
+PASS F4 Chi tiết VM: lượt 1, revision 1, chưa có số dư / yêu cầu rút
+PASS F5 Ghi số dư $12.40 (có thể rút, có căn cứ)
+PASS F6 Gợi ý PP pp82pbulz cho $10.00 USD
+PASS F7 Chuẩn bị rút: giữ email, PREPARING
+PASS F8 Gửi lại cùng key → kết quả cũ (replay), không tạo yêu cầu thứ hai
+PASS F9 Ghi chưa xác định kết quả (giữ email)
+PASS F10 Chưa đối chiếu UNKNOWN → không ghi tiền về (VALIDATION)
+PASS F11 Ghi đã gửi trên EarnApp
+PASS F12 Nhận $6.00 → còn chờ $4.00
+PASS F13 Cùng mã giao dịch, key khác → DUPLICATE
+PASS F14 Nhận thêm $4.00 → đủ $10.00 theo sổ
+PASS F15 Đọc lại yêu cầu: 2 khoản nhận, lịch sử có giờ quan sát + giờ máy chủ
+PASS F15b Revision cũ → 409 kèm trạng thái hiện tại
+PASS F17 Script không in token / PIN ở bất kỳ bước nào
+PASS U8 Ô Tiền / Rút VM_001 trên web: $12,40 Có thể rút Kiểm tra 00:01 Đã về PP $10,00 Cần tạo lại VM
+PASS U9 Nút lưu của người chỉ chuẩn bị: "Lưu chuẩn bị rút (giữ email)"
+PASS U7 Thu hồi trong Thiết lập
+Lỗi JS: không
+PASS F16 Sau khi thu hồi trong Thiết lập: /me → 401 TOKEN_REVOKED

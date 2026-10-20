@@ -16,6 +16,7 @@ import { useSettingsStore, TIMEZONE_OPTIONS, type AppTheme } from "@/lib/setting
 import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import toast from "react-hot-toast";
+import { OpsTokensPanel } from "@/components/settings/OpsTokensPanel";
 
 const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; descVi: string; preview: { bg: string; card: string; accent: string; text: string; sidebar: string; line: string; head: string; ring: string } }[] = [
   {
@@ -58,6 +59,7 @@ export default function SettingsPage() {
   const currentModules = useProjectStore((s) => s.currentModules);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
   const currentProjectCode = useProjectStore((s) => s.currentProjectCode);
+  const proxyMode = useProjectStore((s) => s.currentBusinessMode) === "PROXY_VM";
   const t = useT();
 
   const { language, timezone, theme, setLanguage, setTimezone, setTheme } = useSettingsStore();
@@ -453,6 +455,9 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+
+        {/* ─── Token API vận hành (ADMIN, Proxy / VM) ─── */}
+        {isAdmin && proxyMode && projectId && <OpsTokensPanel projectId={projectId} />}
       </div>
     </div>
   );

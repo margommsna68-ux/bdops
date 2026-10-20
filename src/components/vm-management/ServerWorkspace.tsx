@@ -163,7 +163,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   }
   // Tình trạng cell actions. Each one is the existing checked command; errors propagate so the cell keeps the old state and shows why.
   // Tình trạng: one command for the cell and for bulk; same value = nothing written; old-round commands are refused by the server.
-  const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney,balanceRead:!!board.data?.rights.balanceRead,balanceWrite:!!board.data?.rights.balanceWrite};
+  const opsRights={assign:rights.assign,money:!!board.data?.rights.money,writeMoney:!!board.data?.rights.writeMoney,payout:!!board.data?.rights.payout,balanceRead:!!board.data?.rights.balanceRead,balanceWrite:!!board.data?.rights.balanceWrite};
   const summary=board.data?moneySummary(filtered.map(moneyRow)):null;
   async function setOpsStatus(vm:ManagedVM,status:VmOpsStatus,cycle:number){
     const r=await setOps.mutateAsync({projectId,key:crypto.randomUUID(),items:[{vmId:vm.id,status,expectedCycle:cycle}]}),row=r.rows[0];

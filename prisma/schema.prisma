@@ -1579,3 +1579,50 @@ model EarnBalanceCheck {
   @@index([projectId, vmId, checkedAt])
   @@index([earnAppId, checkedAt])
 }
+
+// ─── API vận hành AI (/api/ops/v1, owner brief 21/10/2026) ───────────────────────────────────────────────────────────────────
+// A token belongs to one user and acts within that user's CURRENT rights (re-read on every request), limited to its projects and
+// operations. Only the SHA-256 of the token is stored; the full token is shown once at creation.
+model OpsToken {
+  id          String    @id @default(cuid())
+  name        String
+  prefix      String    @unique
+  tokenHash   String    @unique
+  userId      String
+  projectIds  String[]
+  scopes      String[]
+  allowedIps  String[]  @default([])
+  expiresAt   DateTime
+  createdById String
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  revokedById String?
+  lastUsedAt  DateTime?
+  lastUsedIp  String?
+
+  @@index([userId])
+}
+// Fixed-window counters shared by every instance (rate limits, failed PINs per token).
+model OpsRateBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+}
+// Audit of every API call that reached a decision (allowed fields only: never headers, body, PIN or token).
+model OpsAudit {
+  id         String   @id @default(cuid())
+  requestId  String
+  tokenId    String?
+  userId     String?
+  projectId  String?
+  action     String
+  objectId   String?
+  ip         String?
+  httpStatus Int
+  result     String
+  replay     Boolean  @default(false)
+  at         DateTime @default(now())
+
+  @@index([tokenId, at])
+  @@index([projectId, at])
+}

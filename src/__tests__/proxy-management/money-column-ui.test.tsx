@@ -46,7 +46,7 @@ describe('Tiền / Rút cell: why there is no money yet',()=>{
 describe('balance line',()=>{
   it('a recorded balance is a $ amount on its own, with the condition and a short check time',()=>{
     const l=balanceLine(ops({latest:check('12.40','YES'),lastOk:check('12.40','YES')}),true)!;
-    expect(l.lead).toBe('$12,40');expect(l.text).toBe('Có thể rút');expect(l.sub).toMatch(/^Kiểm tra \d\d:\d\d$/);
+    expect(l.lead).toBe('$12,40');expect(l.text).toBe('Có thể rút');expect(l.sub).toMatch(/^Kiểm tra (\d\d\/\d\d )?\d\d:\d\d$/); // the day is added when the check (5 minutes ago) was before midnight in Asia/Bangkok
   });
   it('$0 recorded is $0,00; an unknown condition is said on the second line',()=>{
     const l=balanceLine(ops({latest:check('0.00','UNKNOWN'),lastOk:check('0.00','UNKNOWN')}),true)!;

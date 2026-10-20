@@ -3,8 +3,8 @@ import {useEffect,useState} from 'react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {trpc} from '@/lib/trpc';
 import toast from 'react-hot-toast';
-type Capability='COPY_CREDENTIALS'|'PROXY_IMPORT'|'PROXY_REPLACE'|'EARN_BALANCE';
-const choices:{value:Capability;label:string}[]=[{value:'COPY_CREDENTIALS',label:'Xem / copy thông tin đăng nhập'},{value:'PROXY_IMPORT',label:'Nhập proxy mới'},{value:'PROXY_REPLACE',label:'Nhận proxy replace'},{value:'EARN_BALANCE',label:'Ghi kiểm tra tiền EarnApp (số dư tại VM)'}];
+type Capability='COPY_CREDENTIALS'|'PROXY_IMPORT'|'PROXY_REPLACE'|'EARN_BALANCE'|'EARN_PAYOUT'|'PAYPAL_RECEIPT_RECORD';
+const choices:{value:Capability;label:string}[]=[{value:'COPY_CREDENTIALS',label:'Xem / copy thông tin đăng nhập'},{value:'PROXY_IMPORT',label:'Nhập proxy mới'},{value:'PROXY_REPLACE',label:'Nhận proxy replace'},{value:'EARN_BALANCE',label:'Ghi kiểm tra tiền EarnApp (số dư tại VM)'},{value:'EARN_PAYOUT',label:'Chuẩn bị rút EarnApp (giữ email PP, ghi đã gửi / chưa rõ)'},{value:'PAYPAL_RECEIPT_RECORD',label:'Ghi khoản nhận PP của yêu cầu rút'}];
 export function MemberRightsDialog({projectId,onClose}:{projectId:string;onClose:()=>void}){
   const utils=trpc.useUtils(),members=trpc.proxyManagement.members.useQuery({projectId},{refetchOnWindowFocus:false});
   const [id,setId]=useState(''),[capabilities,setCapabilities]=useState<Capability[]>([]),[allowInfrastructure,setAllowInfrastructure]=useState(false);

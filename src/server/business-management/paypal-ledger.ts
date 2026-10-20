@@ -178,10 +178,19 @@ export function ledgerRange(input:{month?:string|null;asOf?:string|null}){
 export async function readPaypalLedger(scope:ActorScope,input:{month?:string|null;asOf?:string|null},db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),r=rights(current);
   if(current.businessMode!=='PROXY_VM'||!r.funds&&!r.withdrawals)return {rights:r,asOf:null,month:null,paypals:[],emails:[],totals:null};
+  return bookOf(db,scope.projectId,r,input);
+}
+/** USD balance by the book of every PayPal (up to today). Only for the payout suggestion of a member with a payout right, who
+ *  receives the suggestion and the projected figure of the suggested PayPal, never the book itself. */
+export async function bookUsdBalances(db:PrismaClient,projectId:string){
+  const book=await bookOf(db,projectId,{funds:true,withdrawals:true,writeFunds:false,writeWithdrawals:false},{});
+  return new Map(book.paypals.map(p=>[p.paypalId,p.currencies.find(c=>c.currency==='USD')?.balance??'0.00']));
+}
+async function bookOf(db:PrismaClient,projectId:string,r:ReturnType<typeof rights>,input:{month?:string|null;asOf?:string|null}){
   const {month,start,end,until}=ledgerRange(input);
   const [funds,outs]=await Promise.all([
-    r.funds?db.fundTransaction.findMany({where:{projectId:scope.projectId,voidedAt:null,confirmed:true,failed:false,date:{lt:until}},select:{paypalId:true,paypalEmailId:true,amount:true,currency:true,date:true,entryKind:true}}):Promise.resolve([]),
-    r.withdrawals?db.withdrawal.findMany({where:{projectId:scope.projectId,voidedAt:null,date:{lt:until}},select:{sourcePaypalId:true,destPaypalId:true,amount:true,currency:true,date:true,type:true,receivedAmount:true,receivedCurrency:true,ledgerVersion:true,paypalFee:true,agentUserId:true}}):Promise.resolve([]),
+    r.funds?db.fundTransaction.findMany({where:{projectId,voidedAt:null,confirmed:true,failed:false,date:{lt:until}},select:{paypalId:true,paypalEmailId:true,amount:true,currency:true,date:true,entryKind:true}}):Promise.resolve([]),
+    r.withdrawals?db.withdrawal.findMany({where:{projectId,voidedAt:null,date:{lt:until}},select:{sourcePaypalId:true,destPaypalId:true,amount:true,currency:true,date:true,type:true,receivedAmount:true,receivedCurrency:true,ledgerVersion:true,paypalFee:true,agentUserId:true}}):Promise.resolve([]),
   ]);
   type Acc={opening:Money;receipts:Money;internalIn:Money;out:Money;review:number};
   const per=new Map<string,Acc>(),acc=(id:string)=>{let a=per.get(id);if(!a){a={opening:{},receipts:{},internalIn:{},out:{},review:0};per.set(id,a);}return a;};

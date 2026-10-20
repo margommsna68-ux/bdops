@@ -1,0 +1,218 @@
+openapi: 3.0.3
+info:
+  title: MoneyToHome — API vận hành AI
+  version: "1.0.0"
+  description: |
+    API for an operator script (e.g. Claude) to read MoneyToHome and record EarnApp balances, payout preparation, sent / unknown
+    results and money received on PayPal. It records what was done elsewhere: it does NOT connect to any VM, does not log in to
+    EarnApp and does not send money.
+
+    - Every call: `Authorization: Bearer <token>` (created once by an ADMIN in Thiết lập → Token API vận hành).
+    - Every POST: `X-Ops-Pin` (the token user's PIN) and `Idempotency-Key` (8–100 chars `A-Za-z0-9._:-`).
+    - Effective rights = the user's current rights in the project ∩ the token's projects ∩ the token's operations.
+    - Money is a decimal string ("10.00"); currency is explicit; USD is never USDT. Times are ISO 8601 with a time zone.
+    - Same key + same body → the first result (`replay: true`). Same key + another body → 409 IDEMPOTENCY_CONFLICT.
+    - Answers: `{ ok, data, error }`; `error = { code, message, details? }`. Every answer has `X-Request-Id`.
+servers:
+  - url: https://moneytohome.up.railway.app/api/ops/v1
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+  parameters:
+    projectId: {name: projectId, in: query, required: true, schema: {type: string}}
+    cursor: {name: cursor, in: query, schema: {type: string}, description: nextCursor of the previous page}
+    limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    pin: {name: X-Ops-Pin, in: header, required: true, schema: {type: string}}
+    key: {name: Idempotency-Key, in: header, required: true, schema: {type: string, pattern: '^[A-Za-z0-9._:-]{8,100}$'}}
+  schemas:
+    Money: {type: string, pattern: '^\d{1,10}(\.\d{1,2})?$', example: "10.00"}
+    Error:
+      type: object
+      properties:
+        ok: {type: boolean, enum: [false]}
+        data: {nullable: true}
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, TOKEN_EXPIRED, TOKEN_REVOKED, FORBIDDEN, PIN_REQUIRED, PIN_INVALID, PIN_LOCKED, RATE_LIMITED, NOT_FOUND, AMBIGUOUS, REVISION_CONFLICT, CYCLE_CHANGED, ACCOUNT_CHANGED, IDEMPOTENCY_CONFLICT, DUPLICATE, VALIDATION, INTERNAL]
+            message: {type: string}
+            details: {type: object, description: 'Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal)'}
+    Vm:
+      type: object
+      properties:
+        id: {type: string}
+        code: {type: string}
+        serverId: {type: string}
+        serverCode: {type: string}
+        deleted: {type: boolean}
+        status: {type: string, nullable: true, description: 'Recorded operating status (OK, NOT_LINKED, …); null = Chưa ghi'}
+        statusLabel: {type: string}
+        expectedCycle: {type: integer, description: 'VmOperation.cycle — send back as expectedCycle'}
+        revision: {type: integer, description: 'VirtualMachine.revision — send back as expectedVmRevision'}
+        proxyState: {type: string, enum: [ASSIGNED, MISSING, REVIEW]}
+        proxy: {type: object, nullable: true, properties: {id: {type: string}, host: {type: string, description: masked}, port: {type: integer}, group: {type: string}}}
+        earnAppAccount: {type: object, nullable: true, properties: {id: {type: string}, login: {type: string, description: masked}}}
+    Balance:
+      type: object
+      properties:
+        status: {type: string, enum: [OK, ERROR]}
+        amount: {allOf: [{$ref: '#/components/schemas/Money'}], nullable: true, description: 'null without the balance read right'}
+        currency: {type: string}
+        withdrawable: {type: boolean, nullable: true, description: 'as observed on EarnApp; null = not observed'}
+        checkedAt: {type: string, format: date-time}
+        errorMessage: {type: string, nullable: true}
+        noteHidden: {type: boolean}
+    Withdrawal:
+      type: object
+      properties:
+        id: {type: string}
+        revision: {type: integer, description: 'send back as expectedRequestRevision'}
+        vmId: {type: string}
+        cycle: {type: integer}
+        earnAppAccountId: {type: string}
+        current: {type: boolean, description: 'false = the account left this VM / round (history only)'}
+        paypalId: {type: string}
+        paypalCode: {type: string}
+        paypalEmailId: {type: string}
+        paypalEmail: {type: string, description: 'full for payout / receipt rights, masked otherwise'}
+        requestedOn: {type: string, format: date}
+        state: {type: string, enum: [REQUESTED, FAILED, CANCELLED]}
+        submission: {type: string, enum: [PREPARING, SUBMITTED_ON_EARNAPP, UNKNOWN_RESULT]}
+        phase: {type: string, enum: [WAITING, RECEIVED, REVIEW, FAILED, CANCELLED], description: 'from the PayPal book'}
+        money: {type: object, nullable: true, properties: {currency: {type: string}, requested: {$ref: '#/components/schemas/Money'}, received: {$ref: '#/components/schemas/Money'}, pendingLinked: {$ref: '#/components/schemas/Money'}, remaining: {$ref: '#/components/schemas/Money'}}}
+        receipts: {type: array, nullable: true, items: {type: object}, description: detail only}
+        history: {type: array, items: {type: object, properties: {recordedAt: {type: string}, observedAt: {type: string, nullable: true}, kind: {type: string, nullable: true}, text: {type: string}}}, description: detail only}
+paths:
+  /health:
+    get: {security: [], summary: 'Service up; verifiedIp = your address as the server trusts it', responses: {'200': {description: ok}}}
+  /me:
+    get: {summary: 'User, token (prefix, scopes, expiry) and per project the effective operations', responses: {'200': {description: ok}, '401': {description: 'UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED'}}}
+  /projects:
+    get: {summary: 'Projects of the token: id, code, name (MOON is a name, not the code)', responses: {'200': {description: ok}}}
+  /servers:
+    get: {summary: Servers of a project, parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/cursor'}, {$ref: '#/components/parameters/limit'}], responses: {'200': {description: '{items, nextCursor}'}}}
+  /vms:
+    get:
+      summary: Current VMs (server code, VM code, id order)
+      parameters: [{$ref: '#/components/parameters/projectId'}, {name: serverId, in: query, schema: {type: string}}, {$ref: '#/components/parameters/cursor'}, {$ref: '#/components/parameters/limit'}]
+      responses: {'200': {description: '{items: Vm[], nextCursor}'}}
+  /vms/resolve:
+    get:
+      summary: Exact server code + VM code (case-insensitive, never partial); 404 NOT_FOUND, 409 AMBIGUOUS
+      parameters: [{$ref: '#/components/parameters/projectId'}, {name: server, in: query, required: true, schema: {type: string}}, {name: vm, in: query, required: true, schema: {type: string}}]
+      responses: {'200': {description: Vm, content: {application/json: {schema: {$ref: '#/components/schemas/Vm'}}}}}
+  /vms/{id}:
+    get:
+      summary: 'VM + SDK counts (reference SDK money with money rights; never the EarnApp balance) + balance + current withdrawal + past rounds (paged)'
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/cursor'}, {$ref: '#/components/parameters/limit'}]
+      responses: {'200': {description: ok}}
+  /earnapp-accounts/{id}:
+    get: {summary: 'State, current VM, masked login, receiving email, withdrawal', parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/projectId'}], responses: {'200': {description: ok}}}
+  /paypal/suggest:
+    get:
+      summary: 'PP / email for one EarnApp and amount (scope PAYOUT). Holds nothing. USD only for the $100 target; without amount exact=false'
+      parameters: [{$ref: '#/components/parameters/projectId'}, {name: earnAppAccountId, in: query, required: true, schema: {type: string}}, {name: amount, in: query, schema: {$ref: '#/components/schemas/Money'}}, {name: currency, in: query, required: true, schema: {type: string}}]
+      responses: {'200': {description: '{exact, suggestion: {paypalId, code, paypalEmailId, email, why, afterUsd}, candidates[]}'}}
+  /withdrawals:
+    get:
+      summary: Withdrawal requests (newest first)
+      parameters: [{$ref: '#/components/parameters/projectId'}, {name: status, in: query, schema: {type: string, enum: [PREPARING, SUBMITTED_ON_EARNAPP, UNKNOWN_RESULT, FAILED, CANCELLED]}}, {$ref: '#/components/parameters/cursor'}, {$ref: '#/components/parameters/limit'}]
+      responses: {'200': {description: '{items: Withdrawal[], nextCursor}'}}
+  /withdrawals/{id}:
+    get: {summary: 'One request with revision, identity (VM / round / EarnApp), receipts and history', parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/projectId'}], responses: {'200': {description: Withdrawal}}}
+  /vms/{id}/balance-check:
+    post:
+      summary: 'Record a balance read on EarnApp (scope BALANCE_WRITE; user right EARN_BALANCE or manager)'
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/pin'}, {$ref: '#/components/parameters/key'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, expectedVmRevision, expectedCycle, earnAppAccountId, status, checkedAt]
+              properties:
+                projectId: {type: string}
+                expectedVmRevision: {type: integer}
+                expectedCycle: {type: integer}
+                earnAppAccountId: {type: string}
+                status: {type: string, enum: [OK, ERROR], description: 'OK needs amount + currency ("0.00" is valid); ERROR takes no amount and needs errorMessage'}
+                amount: {$ref: '#/components/schemas/Money'}
+                currency: {type: string}
+                withdrawable: {type: boolean, nullable: true, description: 'true only when seen on EarnApp; needs evidenceNote'}
+                checkedAt: {type: string, format: date-time, description: 'when it was really read; an older reading arriving late is history only'}
+                errorMessage: {type: string, maxLength: 300}
+                evidenceNote: {type: string, maxLength: 300, description: 'never passwords / 2FA / links with codes (masked anyway)'}
+      responses: {'200': {description: '{replay, vm, balance}'}, '409': {description: 'CYCLE_CHANGED / ACCOUNT_CHANGED / REVISION_CONFLICT / IDEMPOTENCY_CONFLICT'}, '422': {description: VALIDATION}}
+  /withdrawals/prepare:
+    post:
+      summary: 'Prepare a payout: hold the chosen email (not used yet). Scope PAYOUT; user right EARN_PAYOUT or manager'
+      parameters: [{$ref: '#/components/parameters/pin'}, {$ref: '#/components/parameters/key'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, vmId, expectedVmRevision, expectedCycle, earnAppAccountId, paypalEmailId, amount, currency, requestedAt]
+              properties:
+                projectId: {type: string}
+                vmId: {type: string}
+                expectedVmRevision: {type: integer}
+                expectedCycle: {type: integer}
+                earnAppAccountId: {type: string}
+                paypalEmailId: {type: string, description: from /paypal/suggest}
+                amount: {$ref: '#/components/schemas/Money'}
+                currency: {type: string}
+                requestedAt: {type: string, format: date-time, description: 'kept as the request day (Asia/Bangkok)'}
+      responses: {'200': {description: '{replay, withdrawal}'}, '409': {description: 'DUPLICATE (EarnApp already has a request; details.withdrawalId) / REVISION_CONFLICT (email held meanwhile) / CYCLE_CHANGED / ACCOUNT_CHANGED'}, '422': {description: 'VALIDATION (email used, PP not usable, …)'}}
+  /withdrawals/{id}/status:
+    post:
+      summary: 'SUBMITTED_ON_EARNAPP (seen in EarnApp history; the email becomes used for good) or UNKNOWN_RESULT (keeps holding). Scope PAYOUT'
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/pin'}, {$ref: '#/components/parameters/key'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, vmId, expectedVmRevision, expectedCycle, earnAppAccountId, expectedRequestRevision, status, observedAt]
+              properties:
+                projectId: {type: string}
+                vmId: {type: string}
+                expectedVmRevision: {type: integer}
+                expectedCycle: {type: integer}
+                earnAppAccountId: {type: string}
+                expectedRequestRevision: {type: integer}
+                status: {type: string, enum: [SUBMITTED_ON_EARNAPP, UNKNOWN_RESULT]}
+                evidenceNote: {type: string, maxLength: 300, description: required for SUBMITTED_ON_EARNAPP}
+                observedAt: {type: string, format: date-time}
+      responses: {'200': {description: '{replay, changed, withdrawal}'}, '409': {description: 'REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED (old account: reconcile in the web, VM history)'}}
+  /withdrawals/{id}/receipts:
+    post:
+      summary: 'Money that really arrived on PayPal for this request (scope RECEIPT; user right PAYPAL_RECEIPT_RECORD or manager). Parts add up; never over what is open; full = from the book'
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/pin'}, {$ref: '#/components/parameters/key'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, expectedRequestRevision, amount, currency, receivedAt]
+              properties:
+                projectId: {type: string}
+                expectedRequestRevision: {type: integer}
+                amount: {$ref: '#/components/schemas/Money'}
+                currency: {type: string, description: must be the request currency}
+                receivedAt: {type: string, format: date-time}
+                transactionId: {type: string, maxLength: 100, description: 'PayPal payment id; recorded once. Without it a same email / day / amount receipt is a possible duplicate (refused; a person decides in Kho tài khoản)'}
+                evidenceNote: {type: string, maxLength: 300}
+      responses: {'200': {description: '{replay, receiptId, withdrawal}'}, '409': {description: 'DUPLICATE / REVISION_CONFLICT'}, '422': {description: 'VALIDATION (not SUBMITTED yet, UNKNOWN_RESULT not reconciled, over the open part, other currency, period closed)'}}

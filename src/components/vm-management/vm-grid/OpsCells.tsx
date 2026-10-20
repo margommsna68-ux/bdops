@@ -13,7 +13,8 @@ import type {ManagedVM} from '../shared';
 import {AccountCell,type VmAccount} from './AccountCell';
 import {BalanceSection,LineView,balanceLine,requestLine} from './MoneyParts';
 export type OpsRow=inferRouterOutputs<AppRouter>['vmOps']['board']['vms'][number];
-export type OpsRights={assign:boolean;money:boolean;writeMoney:boolean;balanceRead?:boolean;balanceWrite?:boolean};
+// payout = may prepare a request and record it sent / unknown (managers, or EARN_PAYOUT); writeMoney = every other money action.
+export type OpsRights={assign:boolean;money:boolean;writeMoney:boolean;payout?:boolean;balanceRead?:boolean;balanceWrite?:boolean};
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
 const message=(e:unknown)=>e instanceof Error?e.message:'Chưa lưu được';
 // Tình trạng (operating state) at the cell: pick → saved at once. The same value writes nothing. While saving the cell is locked;
@@ -85,15 +86,15 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
         <p className="font-semibold text-xs">Rút về PayPal</p>
         {r?<RequestSummary request={r} milestone={ops?.milestone||''}/>:<p className="text-xs pm-muted">{hasEarnApp?'Chưa ghi yêu cầu rút cho EarnApp này.':'VM chưa có tài khoản EarnApp ở lượt này.'}</p>}
         <div className="flex flex-col gap-1">
-          {!r&&hasEarnApp&&rights.writeMoney&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('request')}>Ghi yêu cầu rút</button>}
-          {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<><button type="button" className="vm-status-action primary" onClick={()=>setMode('sent')}>Đã gửi trên EarnApp (xác nhận)</button>{r.submission==='PREPARING'&&<button type="button" className="vm-status-action" onClick={()=>setMode('unknown')}>Chưa xác định kết quả</button>}</>}
+          {!r&&hasEarnApp&&(rights.writeMoney||rights.payout)&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('request')}>{rights.writeMoney?'Ghi yêu cầu rút':'Chuẩn bị rút (giữ email)'}</button>}
+          {r&&(rights.writeMoney||rights.payout)&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<><button type="button" className="vm-status-action primary" onClick={()=>setMode('sent')}>Đã gửi trên EarnApp (xác nhận)</button>{r.submission==='PREPARING'&&<button type="button" className="vm-status-action" onClick={()=>setMode('unknown')}>Chưa xác định kết quả</button>}</>}
           {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.submission==='SENT'&&r.phase==='WAITING'&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('receive')}>Ghi tiền về PP</button>}
           {canRecreate&&<button type="button" className={'vm-status-action'+(ops?.milestone==='RECREATE'?' primary':'')} onClick={()=>setMode('recreate')}>Ghi nhận đã tạo lại VM{ops?.milestone!=='RECREATE'?' (SUS)':''}</button>}
           {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase==='WAITING'&&m&&m.received!=='0.00'&&<button type="button" className="vm-status-action" onClick={()=>setMode('settle')}>Chốt nhận thiếu (ghi phí / chênh lệch)</button>}
           {r&&rights.writeMoney&&r.state!=='REQUESTED'&&<button type="button" className="vm-status-action" onClick={()=>setMode('retry')}>Gửi lại (cùng lượt rút)</button>}
           {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase!=='RECEIVED'&&<><button type="button" className="vm-status-action" onClick={()=>setMode('fail')}>Đánh dấu thất bại</button><button type="button" className="vm-status-action" onClick={()=>setMode('cancel')}>Huỷ yêu cầu</button></>}
         </div>
-        {!rights.writeMoney&&<p className="text-xs pm-muted">Ghi tiền cần quyền ghi Tiền vào PayPal.</p>}
+        {!rights.writeMoney&&<p className="text-xs pm-muted">{rights.payout?'Ghi tiền về, thất bại, huỷ, gửi lại cần quyền ghi Tiền vào PayPal.':'Ghi tiền cần quyền ghi Tiền vào PayPal.'}</p>}
       </div>}
     </div>,document.body)}
   </div>;
@@ -133,7 +134,7 @@ function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:strin
   const g=pp&&pp.balanceUsd!==null?gatherOf(pp.balanceUsd,pp.pendingUsd,amountOk?amount.replace(',','.'):'0'):null;
   async function submit(){
     if(lock.current||!bound||moved)return;setError('');
-    const input={projectId,vmId:vm.id,expectedCycle:bound.cycle,earnAppId:bound.earnAppId,paypalEmailId:emailId,amount:amount.trim().replace(',','.'),currency:'USD',reference:reference.trim()||null,date,submission:prepare?'PREPARING' as const:'SENT' as const};
+    const input={projectId,vmId:vm.id,expectedCycle:bound.cycle,earnAppId:bound.earnAppId,paypalEmailId:emailId,amount:amount.trim().replace(',','.'),currency:'USD',reference:reference.trim()||null,date,submission:prepare||data?.rights.prepareOnly?'PREPARING' as const:'SENT' as const};
     lock.current=true;try{const r=await save.mutateAsync({...input,key:keyOf(input)});toast.success((r.replay?'Đã có yêu cầu rút ':prepare?'Đã chuẩn bị rút (giữ email) ':'Đã ghi yêu cầu rút ')+vm.code);await onDone();}catch(e){setError(message(e));}finally{lock.current=false;}
   }
   if(pick.error)return <p role="alert" className="vm-status-error">{pick.error.message}</p>;
@@ -154,11 +155,11 @@ function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:strin
     <div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Số tiền (USD)<input className="pm-input" inputMode="decimal" value={amount} disabled={save.isLoading} aria-invalid={!!amount&&!amountOk} onChange={e=>setAmount(e.target.value)}/></label><label className="pm-label text-xs">Ngày yêu cầu<input type="date" className="pm-input" value={date} disabled={save.isLoading} onChange={e=>setDate(e.target.value)}/></label></div>
     {amount&&!amountOk&&<span className="text-xs text-red-600" role="alert">Số tiền là số dương, tối đa 2 chữ số thập phân</span>}
     <label className="pm-label text-xs">Mã tham chiếu (nếu có)<input className="pm-input" value={reference} maxLength={200} disabled={save.isLoading} onChange={e=>setRef(e.target.value)}/></label>
-    <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={prepare} onChange={e=>setPrepare(e.target.checked)}/>Chỉ chuẩn bị (giữ email, chưa bấm rút trên EarnApp)</label>
+    {data.rights.prepareOnly?<p className="text-xs pm-muted">Chuẩn bị: giữ email, chưa bấm rút trên EarnApp (quyền «Chuẩn bị rút EarnApp»).</p>:<label className="text-xs flex items-center gap-1"><input type="checkbox" checked={prepare} onChange={e=>setPrepare(e.target.checked)}/>Chỉ chuẩn bị (giữ email, chưa bấm rút trên EarnApp)</label>}
     <p className="text-xs pm-muted">Mỗi EarnApp chỉ một lượt rút. Yêu cầu chưa phải tiền về; tiền về ghi ở bước sau. Ghi yêu cầu trên web không chứng minh EarnApp đã nhận.</p>
     {moved&&<p role="alert" className="vm-status-error">VM đã đổi tài khoản EarnApp hoặc sang lượt mới từ khi mở form. Nháp giữ nguyên, không lưu cho tài khoản mới; kiểm tra lại thực tế rồi đóng khung và ghi lần mới.</p>}
     {error&&<p role="alert" className="vm-status-error">{error}</p>}
-    <button type="button" className="pm-button pm-button-primary w-full" disabled={save.isLoading||!emailId||!amountOk||moved||!bound} onClick={()=>void submit()}>{save.isLoading?'Đang lưu…':prepare?'Lưu chuẩn bị rút':'Lưu yêu cầu rút (đã gửi trên EarnApp)'}</button>
+    <button type="button" className="pm-button pm-button-primary w-full" disabled={save.isLoading||!emailId||!amountOk||moved||!bound} onClick={()=>void submit()}>{save.isLoading?'Đang lưu…':prepare||data.rights.prepareOnly?'Lưu chuẩn bị rút (giữ email)':'Lưu yêu cầu rút (đã gửi trên EarnApp)'}</button>
   </div>;
 }
 function RequestAction({projectId,vm,mode,request:live,lock,onDone,onBack}:{projectId:string;vm:ManagedVM;mode:Exclude<Mode,'request'|'recreate'|null>;request:NonNullable<OpsRow['request']>|null;lock:React.MutableRefObject<boolean>;onDone:()=>Promise<void>;onBack:()=>void}){

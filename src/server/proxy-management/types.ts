@@ -11,8 +11,10 @@ export const HISTORICAL_STATES:InventoryState[]=['REPLACED','VOID','RETIRED'];
 export type BatchKind='NEW'|'BLOCKED'|'REPLACE'|'SHEET';
 export type Outcome='READY'|'SKIP'|'ERROR';
 export type IssueCode='INVALID_INPUT'|'COUNT_MISMATCH'|'DUPLICATE_INPUT'|'NOT_FOUND'|'AMBIGUOUS_OLD'|'NOT_BLOCKED'|'CURRENT_IP'|'HISTORICAL_IP'|'OWNER_CONFLICT'|'GENJY_RESERVED'|'SOURCE_UNAVAILABLE'|'STALE_PREVIEW'|'KEY_PAYLOAD_MISMATCH'|'UNKNOWN_PACKAGE'|'PACKAGE_MISMATCH'|'FORBIDDEN';
+// reason: the finer cause the ops API reports (21/10/2026); tRPC / UI keep using code and the message.
+export type DomainReason='CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'REVISION_CONFLICT'|'DUPLICATE'|'NOT_FOUND'|'VALIDATION';
 export class ProxyDomainError extends Error {
-  constructor(public readonly code:IssueCode, message?:string){super(message?`${code}: ${message}`:code);this.name='ProxyDomainError';}
+  constructor(public readonly code:IssueCode, message?:string, public readonly reason?:DomainReason, public readonly details?:Record<string,unknown>){super(message?`${code}: ${message}`:code);this.name='ProxyDomainError';}
 }
 // Text for people: the domain code stays in the tRPC error code, never in the sentence shown on screen.
 const FALLBACK:Partial<Record<IssueCode,string>>={STALE_PREVIEW:'Dữ liệu vừa thay đổi; tải lại rồi thử lại',FORBIDDEN:'Bạn chưa có quyền thao tác này',NOT_FOUND:'Không tìm thấy dữ liệu (có thể đã bị xoá hoặc đổi)',INVALID_INPUT:'Dữ liệu chưa hợp lệ',DUPLICATE_INPUT:'Dữ liệu bị trùng',KEY_PAYLOAD_MISMATCH:'Yêu cầu đã đổi so với lần kiểm tra; kiểm tra lại',SOURCE_UNAVAILABLE:'Chưa kết nối được nguồn Genjy',CURRENT_IP:'IP đang được dùng',OWNER_CONFLICT:'Sở hữu proxy chưa rõ hoặc không phù hợp',GENJY_RESERVED:'Proxy thuộc Genjy'};

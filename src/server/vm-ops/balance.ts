@@ -1,6 +1,6 @@
-import type {PrismaClient} from '@prisma/client';
+import type {Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
-import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
+import {ProxyDomainError,type ActorScope,type DomainReason} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {runBusinessCommand} from '../business-management/idempotency';
 import {authorizeBusiness} from '../business-management/scope';
@@ -22,7 +22,7 @@ import type {BalanceCheckView,Withdrawable} from '@/lib/vm-ops';
 // Rights: write = ADMIN / MODERATOR with Server/VM write, or a member with the EARN_BALANCE capability (e.g. an AI account);
 // amounts are visible to the PayPal money readers and to who may record them. VIEWERs and other projects get nothing to write.
 export type BalanceSource='CELL'|'PASTE'|'AI'|'OTHER';
-export interface BalanceItem {vmId:string;expectedCycle:number;earnAppId:string;checkedAt:string;outcome:'OK'|'FAILED';amount?:string|null;currency?:string|null;withdrawable?:Withdrawable|null;condition?:string|null;failure?:string|null;evidence?:string|null;line?:number}
+export interface BalanceItem {vmId:string;expectedCycle:number;earnAppId:string;/** VM revision seen (ops API); checked in the transaction. */expectedVmRevision?:number;checkedAt:string;outcome:'OK'|'FAILED';amount?:string|null;currency?:string|null;withdrawable?:Withdrawable|null;condition?:string|null;failure?:string|null;evidence?:string|null;line?:number}
 const AMOUNT=/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/;
 export async function balanceRights(scope:ActorScope,db:Parameters<typeof loadInfrastructureScope>[0]=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
@@ -40,20 +40,25 @@ function checkItem(i:BalanceItem,now:Date):string|null{
   if((i.condition||'').length>300||(i.failure||'').length>300||(i.evidence||'').length>300)return 'Ghi chú / căn cứ tối đa 300 ký tự';
   return null;
 }
-export async function recordBalanceChecks(scope:ActorScope,input:{key:string;source:BalanceSource;items:BalanceItem[]},db:PrismaClient=prisma){
+// strict (ops API, one VM per call): a refused line throws with its reason, so nothing is written or journaled and the caller gets a
+// clear code; the cell and the paste keep their per-line answers.
+export async function recordBalanceChecks(scope:ActorScope,input:{key:string;source:BalanceSource;items:BalanceItem[];strict?:boolean},db:PrismaClient=prisma){
   if(!input.items.length||input.items.length>1000)throw new ProxyDomainError('INVALID_INPUT','Từ 1 đến 1000 VM mỗi lần');
   if(new Set(input.items.map(i=>i.vmId)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng mỗi lần ghi');
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'EARN_BALANCE_CHECK',module:'INFRASTRUCTURE',reversible:false},async(tx,_images,current)=>{
-    const r=await balanceRights(current,tx);if(!r.write)throw new ProxyDomainError('FORBIDDEN','Ghi số dư EarnApp cần quyền ghi Server / VM (quản lý) hoặc quyền "Ghi kiểm tra tiền EarnApp"');
+  // The write right is checked before a replay too: a retry after the right was taken away is refused (ops API, 21/10/2026).
+  const authorize=async(tx:Prisma.TransactionClient)=>{const r=await balanceRights(scope,tx);if(!r.write)throw new ProxyDomainError('FORBIDDEN','Ghi số dư EarnApp cần quyền ghi Server / VM (quản lý) hoặc quyền "Ghi kiểm tra tiền EarnApp"');return r.current;};
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'EARN_BALANCE_CHECK',module:'INFRASTRUCTURE',reversible:false,authorize},async(tx,_images,current)=>{
     const now=new Date(),rows:{line:number;vmId:string;outcome:'APPLIED'|'ERROR';message:string}[]=[];
     for(const [n,i] of input.items.entries()){
       const line=i.line??n+1,row=(outcome:'APPLIED'|'ERROR',message:string)=>rows.push({line,vmId:i.vmId,outcome,message});
-      const bad=checkItem(i,now);if(bad){row('ERROR',bad);continue;}
-      const vm=await tx.virtualMachine.findFirst({where:{id:i.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},select:{id:true,code:true,server:{select:{code:true}},operation:{select:{cycle:true}},earnApp:{select:{id:true,closedAt:true}}}});
-      if(!vm){row('ERROR','VM không còn hoạt động trong dự án');continue;}
-      const cycle=vm.operation?.cycle??1;if(cycle!==i.expectedCycle){row('ERROR',staleCycle(cycle));continue;}
-      if(!vm.earnApp||vm.earnApp.closedAt){row('ERROR','VM chưa có tài khoản EarnApp ở lượt này');continue;}
-      if(vm.earnApp.id!==i.earnAppId){row('ERROR','VM đã đổi tài khoản EarnApp; kiểm tra lại đúng tài khoản hiện hành');continue;}
+      const fail=(reason:DomainReason,message:string)=>{if(input.strict)throw new ProxyDomainError(reason==='VALIDATION'?'INVALID_INPUT':reason==='NOT_FOUND'?'NOT_FOUND':'STALE_PREVIEW',message,reason);row('ERROR',message);};
+      const bad=checkItem(i,now);if(bad){fail('VALIDATION',bad);continue;}
+      const vm=await tx.virtualMachine.findFirst({where:{id:i.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},select:{id:true,code:true,revision:true,server:{select:{code:true}},operation:{select:{cycle:true}},earnApp:{select:{id:true,closedAt:true}}}});
+      if(!vm){fail('NOT_FOUND','VM không còn hoạt động trong dự án');continue;}
+      const cycle=vm.operation?.cycle??1;if(cycle!==i.expectedCycle){fail('CYCLE_CHANGED',staleCycle(cycle));continue;}
+      if(i.expectedVmRevision!==undefined&&vm.revision!==i.expectedVmRevision){fail('REVISION_CONFLICT','VM vừa được sửa; tải lại');continue;}
+      if(!vm.earnApp||vm.earnApp.closedAt){fail('ACCOUNT_CHANGED','VM chưa có tài khoản EarnApp ở lượt này');continue;}
+      if(vm.earnApp.id!==i.earnAppId){fail('ACCOUNT_CHANGED','VM đã đổi tài khoản EarnApp; kiểm tra lại đúng tài khoản hiện hành');continue;}
       await tx.earnBalanceCheck.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,earnAppId:vm.earnApp.id,checkedAt:new Date(i.checkedAt),outcome:i.outcome,
         amount:i.outcome==='OK'?i.amount!:null,currency:(i.currency||'USD').toUpperCase(),withdrawable:i.outcome==='OK'?i.withdrawable||'UNKNOWN':'UNKNOWN',
         condition:i.condition?.trim()||null,failure:i.outcome==='FAILED'?i.failure!.trim():null,evidence:i.evidence?.trim()||null,source:input.source,recordedById:current.userId}});
