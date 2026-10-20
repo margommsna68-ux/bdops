@@ -1,0 +1,7 @@
+Ô SDK: 5 ô có mã · 1 SDK · 1 chưa dùng
+Mã đại diện của M-001 là mã chưa dùng của VM (đã đọc)
+Có mã VM, mã đã ở VM: 1 moon1 / M-001 <mã> Giữ nguyên · Đã có trong danh sách của VM; giữ nguyên · nút: Áp dụng 0 SDK (tắt: true)
+Theo khoảng: 3 dòng: M-006 → M-008 · 1 moon1 / M-006 hostlook-check-0001 Thêm mới · Thêm SDK mới / 2 moon1 / M-007 — Bỏ qua · Dòng trống: giữ vị trí, không ghi / 3 moon1 / M-008 hostlook-check-0002 Thêm mới · Thêm SDK mới
+Dòng xem trước mang lượt VM: M-001→lượt 1, M-006→lượt 1, M-008→lượt 1
+tRPC POST: user.verifyPin, user.heartbeat, vmManagement.sdkPastePreview
+Lỗi JS: không

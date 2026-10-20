@@ -163,4 +163,5 @@ Migration `20261019150000_sdk_store` (chỉ thêm), đã chạy thử trên bả
   không thêm lịch sử. Cập nhật chỉ khi đúng phiên bản đã đọc. Thử lại cùng khoá trả kết quả cũ, không ghi lại.
 - **Đếm:** "chưa dùng" chỉ đếm UNLINKED; mã cũ chưa xác nhận hiện riêng ("3 SDK · 1 chưa dùng · 1 chưa xác nhận"); mã hiện ở ô / copy nhanh
   ưu tiên mã thật sự chưa dùng; danh sách xếp Chưa dùng → Chưa xác nhận → Đã dùng. Không đổi trạng thái dữ liệu cũ.
-- Test: `src/__tests__/proxy-management/sdk-list-review.integration.test.ts`. Evidence docs/superpowers/evidence/2026-10-20-sdk-review-fixes/.
+- Test: `src/__tests__/proxy-management/sdk-list-review.integration.test.ts`. Phát hành: commit e85a82f, backup host 97a9cf96, deploy 73622735, không
+  migration; host chỉ đọc trước / sau giống hệt, chỉ xem trước bản dán. Evidence docs/superpowers/evidence/2026-10-20-sdk-review-fixes/.
