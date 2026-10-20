@@ -161,7 +161,7 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     await images.remember('FUND',f.id,true);
     await tx.payPalAccount.update({where:{id:r.paypalId},data:{revision:{increment:1}}});await tx.payPalEmail.update({where:{id:r.paypalEmailId},data:{revision:{increment:1}}});
     await tx.earnPayoutRequest.update({where:{id:r.id},data:{revision:{increment:1},history:[...(r.history as Prisma.JsonArray),{...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()}]}});
-    return {receiptId:f.id,requestId:r.id};
+    return {receiptId:f.id,requestId:r.id,vmId:r.vmId,cycle:r.cycle,earnAppId:r.earnAppId,paypalEmailId:r.paypalEmailId,amount:amount.toFixed(2),currency,receivedOn:dayText(date),receivedAt:at.toISOString(),transactionId:txId};
   },db);
 }
 // ─── Commands ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -205,7 +205,8 @@ export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestIn
     try{row=await tx.earnPayoutRequest.create({data:{projectId:scope.projectId,earnAppId:earnApp.id,vmId:vm.id,cycle,paypalId:email.paypalId,paypalEmailId:email.id,currency,amount,reference:input.reference?.trim().slice(0,200)||null,requestedAt:date,requestedById:current.userId,submission,submittedAt:submission==='SENT'?new Date():null,history:[historyEntry(current.userId,submission==='PREPARING'?'PREPARED':'REQUESTED',(submission==='PREPARING'?'Chuẩn bị rút ':'Ghi yêu cầu rút ')+amount.toFixed(2)+' '+currency)]}});}
     catch(e){if((e as {code?:string}).code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','EarnApp này vừa được ghi yêu cầu rút; tải lại','DUPLICATE');throw e;}
     await images.remember('PAYOUT_REQUEST',row.id,true);
-    return {id:row.id,where:vm.server.code+' / '+vm.code,cycle};
+    // What was recorded (kept with the command key): a retry acknowledges this request as it was created.
+    return {id:row.id,where:vm.server.code+' / '+vm.code,cycle,vmId:vm.id,earnAppId:earnApp.id,paypalEmailId:email.id,amount:amount.toFixed(2),currency,submission,requestedOn:dayText(date)};
   },db);
 }
 export type PayoutAction='FAILED'|'CANCELLED'|'RETRY'|'CORRECT'|'SETTLE'|'SENT'|'UNKNOWN';
@@ -287,8 +288,8 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
       const shortfall=D(m.remaining);Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall});what='Chốt nhận '+m.received+' '+r.currency+', thiếu '+shortfall.toFixed(2)+': '+note;
     }
     await images.remember('PAYOUT_REQUEST',r.id);
-    await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,revision:{increment:1},history:[...(r.history as Prisma.JsonArray),{...historyEntry(current.userId,kind,what),...(observedAt?{observedAt:observedAt.toISOString()}:{})}]}});
-    return {id:r.id,changed:true};
+    const after=await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,revision:{increment:1},history:[...(r.history as Prisma.JsonArray),{...historyEntry(current.userId,kind,what),...(observedAt?{observedAt:observedAt.toISOString()}:{})}]}});
+    return {id:r.id,changed:true,action:input.action,vmId:r.vmId,cycle:r.cycle,earnAppId:r.earnAppId,revision:after.revision,submission:after.submission,state:after.state,observedAt:observedAt?.toISOString()??null};
   },db);
 }
 // ─── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────

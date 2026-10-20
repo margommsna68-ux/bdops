@@ -9,9 +9,10 @@ import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
 import {hashToken,memberOps,userActive,type OpsScope} from './tokens';
+import {runWithOpsAuth} from './context';
 import {hit,peek} from './limits';
 import {clientIp,ipAllowed,maskEmail,redactSecrets} from './safety';
-import {balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
+import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
@@ -22,7 +23,7 @@ export class OpsError extends Error{constructor(public readonly code:OpsCode,mes
 const fail=(code:OpsCode,message:string,details?:Record<string,unknown>,retryAfter?:number)=>new OpsError(code,message,details,retryAfter);
 const json=(status:number,body:unknown,headers:Record<string,string>={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 function fromDomain(e:ProxyDomainError):OpsError{
-  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION'};
+  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED'};
   const code:OpsCode=e.reason?byReason[e.reason]:e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'?'VALIDATION':e.code==='KEY_PAYLOAD_MISMATCH'?'IDEMPOTENCY_CONFLICT':'REVISION_CONFLICT';
   const message=e.code==='KEY_PAYLOAD_MISMATCH'?'Idempotency-Key này đã dùng cho một nội dung khác; dùng key mới cho lệnh mới':redactSecrets(userMessage(e))!;
   return fail(code,message,e.details);
@@ -95,7 +96,7 @@ export async function handleOpsRequest(req:Request,path:string,db:PrismaClient=p
       if(p==='INVALID'){await hit(db,'pinFail',row.id);throw fail('PIN_INVALID','PIN chưa đúng');}
     }
     const c:Ctx={db,requestId,ip,token,url:new URL(req.url),body,key,audit};
-    const data=await route.run(c,params);
+    const data=write?await runWithOpsAuth({tokenId:row.id,userId:row.userId,operation:route.scope!},()=>route.run(c,params)):await route.run(c,params);
     return done(200,audit.replay?'REPLAY':'OK',{ok:true,data,error:null});
   }catch(e){
     if(e instanceof OpsError)return error(e);
@@ -219,20 +220,28 @@ const serviceKey=(c:Ctx,projectId:string)=>'ops:'+createHash('sha256').update(c.
 const id64=z.string().min(1).max(64),money=z.string().regex(/^\d{1,10}(\.\d{1,2})?$/,'Số tiền là chuỗi thập phân, ví dụ "10.00"'),cur=z.string().regex(/^[A-Za-z]{3,5}$/,'Đồng tiền 3–5 chữ cái'),iso=z.string().datetime({offset:true,message:'Thời điểm ISO 8601 có múi giờ'});
 const note=z.string().max(300).nullish();
 const BalanceBody=z.object({projectId:id64,expectedVmRevision:z.number().int().min(0),expectedCycle:z.number().int().min(1),earnAppAccountId:id64,status:z.enum(['OK','ERROR']),amount:money.nullish(),currency:cur.nullish(),withdrawable:z.boolean().nullish(),checkedAt:iso,errorMessage:note,evidenceNote:note}).strict();
+type BalanceRecorded={checkId:string;vmId:string;cycle:number;earnAppId:string;outcome:string;amount:string|null;currency:string;withdrawable:string;checkedAt:string;recordedAt:string};
 async function balanceCheck(c:Ctx,[vmId]:string[]){
   const b=BalanceBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   if(b.status==='OK'&&(b.amount==null||!b.currency))throw fail('VALIDATION','status OK cần amount và currency ("0.00" là hợp lệ)');
   if(b.status==='ERROR'&&b.amount!=null)throw fail('VALIDATION','status ERROR không nhận amount; số dư tốt gần nhất được giữ');
   if(b.status==='ERROR'&&!b.errorMessage?.trim())throw fail('VALIDATION','status ERROR cần errorMessage');
   if(b.withdrawable===true&&!b.evidenceNote?.trim())throw fail('VALIDATION','withdrawable=true cần evidenceNote: căn cứ đã thấy điều kiện rút trên EarnApp');
-  const scope=scopeOf(c,projectId);
+  const scope=scopeOf(c,projectId);let rec:BalanceRecorded|undefined;
   try{
     const r=await recordBalanceChecks(scope,{key:serviceKey(c,projectId),source:'AI',strict:true,items:[{vmId,expectedCycle:b.expectedCycle,earnAppId:b.earnAppAccountId,expectedVmRevision:b.expectedVmRevision,checkedAt:b.checkedAt,outcome:b.status==='OK'?'OK':'FAILED',amount:b.amount??null,currency:b.currency?.toUpperCase()??null,
       withdrawable:b.withdrawable===true?'YES':b.withdrawable===false?'NO':'UNKNOWN',failure:redactSecrets(b.errorMessage?.trim()||null),evidence:redactSecrets(b.evidenceNote?.trim()||null)}]},c.db);
-    c.audit.replay=!!r.replay;
+    c.audit.replay=!!r.replay;rec=(r.recorded as BalanceRecorded[]|undefined)?.[0];
   }catch(e){throw await withCurrentVm(c,projectId,vmId,e);}
-  const vm=await loadVm(c,projectId,vmId),view=vmView(vm),rights=await rightsOf(c,projectId);
-  return {replay:!!c.audit.replay,vm:{id:view.id,expectedCycle:view.expectedCycle,revision:view.revision,earnAppAccountId:view.earnAppAccount?.id??null},balance:view.earnAppAccount?await balanceView(c.db,projectId,{id:vm.id,cycle:view.expectedCycle,earnAppId:view.earnAppAccount.id},rights.balanceRead):null};
+  if(!rec)throw fail('INTERNAL','Lệnh ghi không trả bản ghi; dùng lại cùng Idempotency-Key');
+  // recorded / vm / balance = this command as it was first written (also on a replay); current = the VM now, named apart.
+  const rights=await rightsOf(c,projectId),vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect}),view=vm?vmView(vm):null;c.audit.objectId=rec.checkId;
+  return {replay:!!c.audit.replay,
+    recorded:{checkId:rec.checkId,vmId:rec.vmId,expectedCycle:rec.cycle,earnAppAccountId:rec.earnAppId,status:rec.outcome==='OK'?'OK':'ERROR',amount:rights.balanceRead?rec.amount:null,currency:rec.currency,withdrawable:rec.withdrawable==='YES'?true:rec.withdrawable==='NO'?false:null,checkedAt:rec.checkedAt,recordedAt:rec.recordedAt},
+    vm:{id:rec.vmId,expectedCycle:rec.cycle,earnAppAccountId:rec.earnAppId},
+    balance:await balanceAsOf(c.db,projectId,rec,rights.balanceRead),
+    current:view?{vm:{id:view.id,expectedCycle:view.expectedCycle,revision:view.revision,earnAppAccountId:view.earnAppAccount?.id??null,deleted:view.deleted},
+      balance:view.earnAppAccount?await balanceView(c.db,projectId,{id:view.id,cycle:view.expectedCycle,earnAppId:view.earnAppAccount.id},rights.balanceRead):null}:null};
 }
 // A conflict answers with the current state the caller may see, so it can decide; nothing is retried with the new revision.
 async function withCurrentVm(c:Ctx,projectId:string,vmId:string,e:unknown){
@@ -255,39 +264,45 @@ const PrepareBody=z.object({projectId:id64,vmId:id64,expectedVmRevision:z.number
 async function prepare(c:Ctx){
   const b=PrepareBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=b.vmId;
   const at=new Date(b.requestedAt);if(at.getTime()>Date.now()+5*60e3)throw fail('VALIDATION','requestedAt ở tương lai');
-  let id:string;
+  let rec:{id:string;vmId:string;cycle:number;earnAppId:string;paypalEmailId:string;amount:string;currency:string;submission:string;requestedOn:string};
   try{
     const r=await createPayoutRequest(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId:b.vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,earnAppId:b.earnAppAccountId,paypalEmailId:b.paypalEmailId,amount:b.amount,currency:b.currency.toUpperCase(),date:dayText(at),submission:'PREPARING',reference:null},c.db);
-    id=r.id as string;c.audit.replay=!!r.replay;
+    rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;
   }catch(e){
     const err=await withCurrentVm(c,projectId,b.vmId,e);
     if(err instanceof OpsError&&err.code==='DUPLICATE'&&typeof err.details?.withdrawalId==='string'){const {r,cycle}=await loadRequest(c,projectId,err.details.withdrawalId);throw fail('DUPLICATE','EarnApp này đã có yêu cầu rút; mỗi EarnApp chỉ một lượt rút. Dùng yêu cầu cũ, không tạo mới',{withdrawalId:r.id,current:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})});}
     throw err;
   }
-  c.audit.objectId=id;const {r,cycle}=await loadRequest(c,projectId,id);
-  return {replay:!!c.audit.replay,withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})};
+  c.audit.objectId=rec.id;const {r,cycle}=await loadRequest(c,projectId,rec.id),rights=await rightsOf(c,projectId);
+  return {replay:!!c.audit.replay,
+    recorded:{withdrawalId:rec.id,vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,submission:'PREPARING',requestedOn:rec.requestedOn},
+    current:{withdrawal:withdrawalView(r,rights,{currentCycle:cycle})}};
 }
 const StatusBody=z.object({projectId:id64,vmId:id64,expectedVmRevision:z.number().int().min(0),expectedCycle:z.number().int().min(1),earnAppAccountId:id64,expectedRequestRevision:z.number().int().min(0),status:z.enum(['SUBMITTED_ON_EARNAPP','UNKNOWN_RESULT']),evidenceNote:note,observedAt:iso}).strict();
 async function status(c:Ctx,[id]:string[]){
   const b=StatusBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
   if(b.status==='SUBMITTED_ON_EARNAPP'&&!b.evidenceNote?.trim())throw fail('VALIDATION','SUBMITTED_ON_EARNAPP cần evidenceNote: đã thấy yêu cầu trong lịch sử rút của EarnApp');
   if(new Date(b.observedAt).getTime()>Date.now()+5*60e3)throw fail('VALIDATION','observedAt ở tương lai');
-  let changed=true;
+  let rec:{changed?:boolean;action?:string;vmId?:string;cycle?:number;earnAppId?:string;revision?:number;submission?:string;state?:string;observedAt?:string|null}={};
   try{
     const r=await updatePayoutRequest(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRevision:b.expectedRequestRevision,action:b.status==='SUBMITTED_ON_EARNAPP'?'SENT':'UNKNOWN',note:redactSecrets(b.evidenceNote?.trim()||null),vmId:b.vmId,expectedCycle:b.expectedCycle,earnAppId:b.earnAppAccountId,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt},c.db);
-    c.audit.replay=!!r.replay;changed=r.changed!==false;
+    c.audit.replay=!!r.replay;rec=r as typeof rec;
   }catch(e){throw await withCurrentRequest(c,projectId,id,e);}
-  const {r,cycle}=await loadRequest(c,projectId,id);
-  return {replay:!!c.audit.replay,changed,withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})};
+  const {r,cycle}=await loadRequest(c,projectId,id),changed=rec.changed!==false;
+  return {replay:!!c.audit.replay,changed,
+    recorded:changed?{withdrawalId:id,status:rec.action==='SENT'?'SUBMITTED_ON_EARNAPP':'UNKNOWN_RESULT',vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId,revisionAfter:rec.revision,observedAt:rec.observedAt??null}:{withdrawalId:id,status:null,note:'Không thay đổi (đã ở trạng thái này)'},
+    current:{withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})}};
 }
 const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note}).strict();
 async function receipt(c:Ctx,[id]:string[]){
   const b=ReceiptBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
-  let receiptId:string;
+  let rec:{receiptId:string;requestId:string;amount:string;currency:string;receivedOn:string;receivedAt:string;transactionId:string|null;earnAppId:string;paypalEmailId:string};
   try{
     const r=await recordPayoutReceipt(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRequestRevision:b.expectedRequestRevision,amount:b.amount,currency:b.currency.toUpperCase(),receivedAt:b.receivedAt,transactionId:b.transactionId?.trim()||null,evidence:redactSecrets(b.evidenceNote?.trim()||null)},c.db);
-    receiptId=r.receiptId as string;c.audit.replay=!!r.replay;
+    rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;
   }catch(e){throw await withCurrentRequest(c,projectId,id,e);}
-  const {r,cycle}=await loadRequest(c,projectId,id);
-  return {replay:!!c.audit.replay,receiptId,withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle,history:true})};
+  const {r,cycle}=await loadRequest(c,projectId,id),rights=await rightsOf(c,projectId);c.audit.objectId=rec.receiptId;
+  return {replay:!!c.audit.replay,
+    recorded:{receiptId:rec.receiptId,withdrawalId:rec.requestId,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,receivedOn:rec.receivedOn,receivedAt:rec.receivedAt,transactionId:rec.transactionId},
+    current:{withdrawal:withdrawalView(r,rights,{currentCycle:cycle,history:true})}};
 }

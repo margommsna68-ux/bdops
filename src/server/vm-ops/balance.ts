@@ -48,7 +48,9 @@ export async function recordBalanceChecks(scope:ActorScope,input:{key:string;sou
   // The write right is checked before a replay too: a retry after the right was taken away is refused (ops API, 21/10/2026).
   const authorize=async(tx:Prisma.TransactionClient)=>{const r=await balanceRights(scope,tx);if(!r.write)throw new ProxyDomainError('FORBIDDEN','Ghi số dư EarnApp cần quyền ghi Server / VM (quản lý) hoặc quyền "Ghi kiểm tra tiền EarnApp"');return r.current;};
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'EARN_BALANCE_CHECK',module:'INFRASTRUCTURE',reversible:false,authorize},async(tx,_images,current)=>{
-    const now=new Date(),rows:{line:number;vmId:string;outcome:'APPLIED'|'ERROR';message:string}[]=[];
+    // recorded: what each applied line wrote, kept in the command's stored result, so a retry with the same key acknowledges exactly
+    // that check (VM, round, EarnApp, figure) and never the account or balance now on the VM (review fix 21/10/2026).
+    const now=new Date(),rows:{line:number;vmId:string;outcome:'APPLIED'|'ERROR';message:string}[]=[],recorded:{checkId:string;vmId:string;cycle:number;earnAppId:string;outcome:string;amount:string|null;currency:string;withdrawable:string;checkedAt:string;recordedAt:string}[]=[];
     for(const [n,i] of input.items.entries()){
       const line=i.line??n+1,row=(outcome:'APPLIED'|'ERROR',message:string)=>rows.push({line,vmId:i.vmId,outcome,message});
       const fail=(reason:DomainReason,message:string)=>{if(input.strict)throw new ProxyDomainError(reason==='VALIDATION'?'INVALID_INPUT':reason==='NOT_FOUND'?'NOT_FOUND':'STALE_PREVIEW',message,reason);row('ERROR',message);};
@@ -59,12 +61,13 @@ export async function recordBalanceChecks(scope:ActorScope,input:{key:string;sou
       if(i.expectedVmRevision!==undefined&&vm.revision!==i.expectedVmRevision){fail('REVISION_CONFLICT','VM vừa được sửa; tải lại');continue;}
       if(!vm.earnApp||vm.earnApp.closedAt){fail('ACCOUNT_CHANGED','VM chưa có tài khoản EarnApp ở lượt này');continue;}
       if(vm.earnApp.id!==i.earnAppId){fail('ACCOUNT_CHANGED','VM đã đổi tài khoản EarnApp; kiểm tra lại đúng tài khoản hiện hành');continue;}
-      await tx.earnBalanceCheck.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,earnAppId:vm.earnApp.id,checkedAt:new Date(i.checkedAt),outcome:i.outcome,
+      const made=await tx.earnBalanceCheck.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,earnAppId:vm.earnApp.id,checkedAt:new Date(i.checkedAt),outcome:i.outcome,
         amount:i.outcome==='OK'?i.amount!:null,currency:(i.currency||'USD').toUpperCase(),withdrawable:i.outcome==='OK'?i.withdrawable||'UNKNOWN':'UNKNOWN',
         condition:i.condition?.trim()||null,failure:i.outcome==='FAILED'?i.failure!.trim():null,evidence:i.evidence?.trim()||null,source:input.source,recordedById:current.userId}});
+      recorded.push({checkId:made.id,vmId:made.vmId,cycle:made.cycle,earnAppId:made.earnAppId,outcome:made.outcome,amount:made.amount?.toFixed(2)??null,currency:made.currency,withdrawable:made.withdrawable,checkedAt:made.checkedAt.toISOString(),recordedAt:made.recordedAt.toISOString()});
       row('APPLIED',i.outcome==='OK'?'Đã ghi số dư':'Đã ghi kiểm tra thất bại (giữ số gần nhất)');
     }
-    return {rows,applied:rows.filter(x=>x.outcome==='APPLIED').length,errors:rows.filter(x=>x.outcome==='ERROR').length};
+    return {rows,recorded,applied:rows.filter(x=>x.outcome==='APPLIED').length,errors:rows.filter(x=>x.outcome==='ERROR').length};
   },db);
 }
 // Free text (observed condition, failure reason, evidence) is written by people / AI and may name amounts, so it goes out only with

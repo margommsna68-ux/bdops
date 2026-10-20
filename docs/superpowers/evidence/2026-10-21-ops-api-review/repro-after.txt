@@ -1,0 +1,4 @@
+{"replayAcknowledgesOriginalAccount":true,"replayBalance":"10.00","originalBalance":"10.00","noDuplicateWrites":true}
+{"tokenRevokedBeforeTransaction":true,"httpStatus":401,"writeCount":0,"errorCode":"TOKEN_REVOKED"}
+{"userLockedBeforeFourthCompareFinishes":true,"fourthResult":"LOCKED"}
+      Tests  3 passed (3)

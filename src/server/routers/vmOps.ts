@@ -4,7 +4,7 @@ import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {domain} from './businessManagement';
 import {VM_OPS_STATUSES} from '@/lib/vm-ops';
 import {setVmStatus,recordRecreated} from '../vm-ops/ops';
-import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readPayoutPick,readPaypalGather} from '../vm-ops/payout';
+import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readPayoutPick,readPaypalGather,recordPayoutReceipt} from '../vm-ops/payout';
 import {recordBalanceChecks,readBalanceHistory,previewBalancePaste} from '../vm-ops/balance';
 // VM operating state, payout requests and recreation (owner brief 18/10/2026). People and AI use these same checked endpoints.
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),cycle=z.number().int().positive(),revision=z.number().int().nonnegative();
@@ -18,6 +18,9 @@ export const vmOpsRouter=router({
   gather:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readPaypalGather(await scope(ctx,input.projectId),ctx.prisma))),
   requestPayout:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,earnAppId:id,paypalEmailId:id,amount:z.string().max(40),currency:z.string().max(5).optional(),reference:z.string().max(200).nullish(),date:z.string().length(10),submission:z.enum(['PREPARING','SENT']).optional()})).mutation(({ctx,input})=>domain(async()=>createPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
   updatePayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,history:z.boolean().optional(),action:z.enum(['FAILED','CANCELLED','RETRY','CORRECT','SETTLE','SENT','UNKNOWN']),note:z.string().max(500).nullish(),amount:z.string().max(40).nullish(),reference:z.string().max(200).nullish()})).mutation(({ctx,input})=>domain(async()=>updatePayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  // Money received for one payout request (review fix 21/10/2026): the same command as the ops API (recordPayoutReceipt); managers or
+  // PAYPAL_RECEIPT_RECORD. Confirmed money only, parts add up, never over what is open, duplicates refused, period lock.
+  payoutReceipt:protectedProcedure.input(project.extend({key,requestId:id,expectedRequestRevision:revision,amount:z.string().max(20),currency:z.string().max(5),receivedAt:z.string().max(40),transactionId:z.string().max(100).nullish(),evidence:z.string().max(300).nullish()})).mutation(({ctx,input})=>domain(async()=>recordPayoutReceipt(await scope(ctx,input.projectId),input,ctx.prisma))),
   // EarnApp balance at the VM (owner brief 20/10/2026): one command for the cell, the paste and AI; every line carries VM, round and
   // EarnApp seen; the check time is when it was read.
   balanceRecord:protectedProcedure.input(project.extend({key,source:z.enum(['CELL','PASTE','AI','OTHER']),items:z.array(z.object({vmId:id,expectedCycle:cycle,earnAppId:id,checkedAt:z.string().max(40),outcome:z.enum(['OK','FAILED']),amount:z.string().max(20).nullish(),currency:z.string().max(5).nullish(),withdrawable:z.enum(['YES','NO','UNKNOWN']).nullish(),condition:z.string().max(300).nullish(),failure:z.string().max(300).nullish(),evidence:z.string().max(300).nullish(),line:z.number().int().positive().optional()})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>recordBalanceChecks(await scope(ctx,input.projectId),input,ctx.prisma))),

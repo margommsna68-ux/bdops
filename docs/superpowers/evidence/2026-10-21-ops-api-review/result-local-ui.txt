@@ -1,0 +1,7 @@
+PASS R1 Chỉ có "Ghi tiền về PP" (không có thất bại / huỷ / chốt thiếu / tạo yêu cầu)
+PASS R2 Form không có "Chờ nhận" / "Khoản riêng"
+PASS R3 Sau khi ghi $6: ô hiện còn chờ $4 — Chưa kiểm tra Đã về $6,00 · còn chờ $4,00 pp34-xdst7 · p34-1-xdst7@example.invalid
+PASS R4 Cùng mã giao dịch → từ chối tại form
+PASS R5 Nhận thêm $4 → "Đã về PP $10,00" — Chưa kiểm tra Đã về PP $10,00 Cần tạo lại VM
+PASS R6 Web gọi vmOps.payoutReceipt (recordPayoutReceipt), không gọi đường ghi tiền chung: user.verifyPin, user.heartbeat, vmOps.payoutReceipt
+Lỗi JS: không

@@ -13,7 +13,8 @@ export interface ViewRights {balanceRead:boolean;requestMoney:boolean;payoutEmai
 type Db=PrismaClient|Prisma.TransactionClient;
 const endpointSelect={id:true,host:true,port:true,groupId:true,group:{select:{name:true}},identity:{select:{owner:true,subgroup:true}}} as const;
 export const vmSelect={id:true,code:true,revision:true,archivedAt:true,server:{select:{id:true,code:true,archivedAt:true}},operation:{select:{cycle:true,status:true,revision:true}},
-  earnApp:{select:{id:true,closedAt:true,login:{select:{email:true}}}},allocations:{select:{endpointId:true,role:true}},
+  // Only holds still in force decide the current proxy (released ones stay as history), the same rule as Server / VM.
+  earnApp:{select:{id:true,closedAt:true,login:{select:{email:true}}}},allocations:{where:{releasedAt:null},select:{endpointId:true,role:true}},
   desiredConfiguration:{select:{endpointId:true,endpoint:{select:endpointSelect}}},installedConfiguration:{select:{endpointId:true,endpoint:{select:endpointSelect}}}} as const;
 type VmRow=Prisma.VirtualMachineGetPayload<{select:typeof vmSelect}>;
 type EndpointRow=Prisma.ProxyIPGetPayload<{select:typeof endpointSelect}>;
@@ -52,4 +53,11 @@ export async function balanceView(db:Db,projectId:string,vm:{id:string;cycle:num
   const b=(await currentBalances(db as PrismaClient,projectId,[vm],read)).get(vm.id)??{latest:null,lastOk:null};
   const one=(c:typeof b.latest)=>c&&{status:c.outcome==='OK'?'OK':'ERROR',amount:c.amount,currency:c.currency,withdrawable:c.withdrawable==='YES'?true:c.withdrawable==='NO'?false:null,checkedAt:c.checkedAt,errorMessage:redactSecrets(c.failure??null),noteHidden:!!c.noteHidden};
   return {latest:one(b.latest),lastOk:one(b.lastOk),amountsVisible:read};
+}
+// The balance as one recorded check left it: that VM, round and EarnApp, checks recorded up to it (a newer check, or another account's,
+// never changes this acknowledgement).
+export async function balanceAsOf(db:Db,projectId:string,rec:{vmId:string;cycle:number;earnAppId:string;recordedAt:string},read:boolean){
+  const rows=await db.earnBalanceCheck.findMany({where:{projectId,vmId:rec.vmId,cycle:rec.cycle,earnAppId:rec.earnAppId,recordedAt:{lte:new Date(rec.recordedAt)}},orderBy:[{checkedAt:'desc'},{recordedAt:'desc'}],take:50});
+  const one=(c:typeof rows[number]|undefined)=>c?{status:c.outcome==='OK'?'OK':'ERROR',amount:read&&c.amount?c.amount.toFixed(2):null,currency:c.currency,withdrawable:c.withdrawable==='YES'?true:c.withdrawable==='NO'?false:null,checkedAt:c.checkedAt.toISOString(),errorMessage:read?redactSecrets(c.failure):null,noteHidden:!read&&!!(c.failure||c.condition)}:null;
+  return {latest:one(rows[0]),lastOk:one(rows.find(r=>r.outcome==='OK')),amountsVisible:read};
 }

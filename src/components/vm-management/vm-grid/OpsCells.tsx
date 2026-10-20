@@ -14,7 +14,8 @@ import {AccountCell,type VmAccount} from './AccountCell';
 import {BalanceSection,LineView,balanceLine,requestLine} from './MoneyParts';
 export type OpsRow=inferRouterOutputs<AppRouter>['vmOps']['board']['vms'][number];
 // payout = may prepare a request and record it sent / unknown (managers, or EARN_PAYOUT); writeMoney = every other money action.
-export type OpsRights={assign:boolean;money:boolean;writeMoney:boolean;payout?:boolean;balanceRead?:boolean;balanceWrite?:boolean};
+// receipt = may record money received for a sent request (managers, or PAYPAL_RECEIPT_RECORD) through recordPayoutReceipt.
+export type OpsRights={assign:boolean;money:boolean;writeMoney:boolean;payout?:boolean;receipt?:boolean;balanceRead?:boolean;balanceWrite?:boolean};
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
 const message=(e:unknown)=>e instanceof Error?e.message:'Chưa lưu được';
 // Tình trạng (operating state) at the cell: pick → saved at once. The same value writes nothing. While saving the cell is locked;
@@ -80,7 +81,7 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
       <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · lượt {cycle}{account?.earnApp?' · '+account.earnApp.login.email:''}</p>
       {mode==='request'?<RequestForm projectId={projectId} vm={vm} cycle={cycle} earnAppId={ops?ops.earnAppId:undefined} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={sus&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
-      :mode&&(r||actionOpen.current)?<RequestAction projectId={projectId} vm={vm} mode={mode} request={r} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}} onBack={()=>setMode(null)}/>
+      :mode&&(r||actionOpen.current)?<RequestAction projectId={projectId} vm={vm} mode={mode} request={r} narrow={!rights.writeMoney} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}} onBack={()=>setMode(null)}/>
       :<div className="space-y-2">
         {ops&&hasEarnApp&&<BalanceSection projectId={projectId} vmCode={vm.code} ops={ops} read={!!rights.balanceRead} write={!!rights.balanceWrite} onSaved={onDone}/>}
         <p className="font-semibold text-xs">Rút về PayPal</p>
@@ -88,13 +89,13 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
         <div className="flex flex-col gap-1">
           {!r&&hasEarnApp&&(rights.writeMoney||rights.payout)&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('request')}>{rights.writeMoney?'Ghi yêu cầu rút':'Chuẩn bị rút (giữ email)'}</button>}
           {r&&(rights.writeMoney||rights.payout)&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<><button type="button" className="vm-status-action primary" onClick={()=>setMode('sent')}>Đã gửi trên EarnApp (xác nhận)</button>{r.submission==='PREPARING'&&<button type="button" className="vm-status-action" onClick={()=>setMode('unknown')}>Chưa xác định kết quả</button>}</>}
-          {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.submission==='SENT'&&r.phase==='WAITING'&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('receive')}>Ghi tiền về PP</button>}
+          {r&&(rights.writeMoney||rights.receipt)&&r.state==='REQUESTED'&&r.submission==='SENT'&&r.phase==='WAITING'&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('receive')}>Ghi tiền về PP</button>}
           {canRecreate&&<button type="button" className={'vm-status-action'+(ops?.milestone==='RECREATE'?' primary':'')} onClick={()=>setMode('recreate')}>Ghi nhận đã tạo lại VM{ops?.milestone!=='RECREATE'?' (SUS)':''}</button>}
           {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase==='WAITING'&&m&&m.received!=='0.00'&&<button type="button" className="vm-status-action" onClick={()=>setMode('settle')}>Chốt nhận thiếu (ghi phí / chênh lệch)</button>}
           {r&&rights.writeMoney&&r.state!=='REQUESTED'&&<button type="button" className="vm-status-action" onClick={()=>setMode('retry')}>Gửi lại (cùng lượt rút)</button>}
           {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase!=='RECEIVED'&&<><button type="button" className="vm-status-action" onClick={()=>setMode('fail')}>Đánh dấu thất bại</button><button type="button" className="vm-status-action" onClick={()=>setMode('cancel')}>Huỷ yêu cầu</button></>}
         </div>
-        {!rights.writeMoney&&<p className="text-xs pm-muted">{rights.payout?'Ghi tiền về, thất bại, huỷ, gửi lại cần quyền ghi Tiền vào PayPal.':'Ghi tiền cần quyền ghi Tiền vào PayPal.'}</p>}
+        {!rights.writeMoney&&<p className="text-xs pm-muted">{rights.receipt?'Thất bại, huỷ, gửi lại, chốt thiếu cần quyền ghi Tiền vào PayPal.':rights.payout?'Ghi tiền về, thất bại, huỷ, gửi lại cần quyền ghi Tiền vào PayPal.':'Ghi tiền cần quyền ghi Tiền vào PayPal.'}</p>}
       </div>}
     </div>,document.body)}
   </div>;
@@ -162,17 +163,21 @@ function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:strin
     <button type="button" className="pm-button pm-button-primary w-full" disabled={save.isLoading||!emailId||!amountOk||moved||!bound} onClick={()=>void submit()}>{save.isLoading?'Đang lưu…':prepare||data.rights.prepareOnly?'Lưu chuẩn bị rút (giữ email)':'Lưu yêu cầu rút (đã gửi trên EarnApp)'}</button>
   </div>;
 }
-function RequestAction({projectId,vm,mode,request:live,lock,onDone,onBack}:{projectId:string;vm:ManagedVM;mode:Exclude<Mode,'request'|'recreate'|null>;request:NonNullable<OpsRow['request']>|null;lock:React.MutableRefObject<boolean>;onDone:()=>Promise<void>;onBack:()=>void}){
+// narrow: the member records money with PAYPAL_RECEIPT_RECORD only — recordPayoutReceipt (confirmed, this request, no "khoản riêng").
+function RequestAction({projectId,vm,mode,request:live,narrow,lock,onDone,onBack}:{projectId:string;vm:ManagedVM;mode:Exclude<Mode,'request'|'recreate'|null>;request:NonNullable<OpsRow['request']>|null;narrow?:boolean;lock:React.MutableRefObject<boolean>;onDone:()=>Promise<void>;onBack:()=>void}){
   // The action belongs to the request it was opened on (review fix 20/10/2026); a reload with another request / account keeps the
   // form, says so and locks Lưu.
   const [r]=useState(live!),moved=!live||live.id!==r.id||live.earnAppId!==r.earnAppId||live.cycle!==r.cycle;
-  const update=trpc.vmOps.updatePayout.useMutation(),receipt=trpc.accountStore.receiptRecord.useMutation(),keyOf=useCommandKey();
+  const update=trpc.vmOps.updatePayout.useMutation(),receipt=trpc.accountStore.receiptRecord.useMutation(),own=trpc.vmOps.payoutReceipt.useMutation(),keyOf=useCommandKey();
   const [note,setNote]=useState(''),[amount,setAmount]=useState(r.money&&mode==='receive'?r.money.remaining:''),[status,setStatus]=useState<'RECEIVED'|'PENDING'>('RECEIVED'),[txid,setTx]=useState(''),[date,setDate]=useState(today()),[distinct,setDistinct]=useState(false),[error,setError]=useState(''),[suspect,setSuspect]=useState('');
-  const busy=update.isLoading||receipt.isLoading;
+  const busy=update.isLoading||receipt.isLoading||own.isLoading;
   async function run(){
     if(lock.current||moved)return;setError('');lock.current=true;
     try{
-      if(mode==='receive'){
+      if(mode==='receive'&&narrow){
+        const input={projectId,requestId:r.id,expectedRequestRevision:r.revision,amount:amount.trim().replace(',','.'),currency:r.money?.currency||'USD',receivedAt:date===today()?new Date().toISOString():date+'T12:00:00+07:00',transactionId:txid.trim()||null};
+        await own.mutateAsync({...input,key:keyOf(input)});toast.success('Đã ghi tiền về '+r.paypal+' · '+vm.code);
+      }else if(mode==='receive'){
         // The same book as Kho tài khoản → Ghi tiền vào: one line for this request's email; the server links it to the request.
         const input={projectId,paypalId:r.paypalId,date,currency:r.money?.currency||'USD',status,text:`${r.email} | ${amount.trim().replace(',','.')}${txid.trim()?' | '+txid.trim():''}`,distinct:distinct?[1]:[]};
         const out=await receipt.mutateAsync({...input,key:keyOf(input)});const row=out.rows[0];
@@ -190,7 +195,7 @@ function RequestAction({projectId,vm,mode,request:live,lock,onDone,onBack}:{proj
     {mode==='receive'?<>
       <p className="text-xs">Tiền về <strong>{r.paypal}</strong> qua <strong>{r.email}</strong>. Ghi vào sổ PayPal (Tiền vào), gắn với yêu cầu này.</p>
       <div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Số tiền ({r.money?.currency||'USD'})<input className="pm-input" inputMode="decimal" value={amount} disabled={busy} onChange={e=>{setAmount(e.target.value);setSuspect('');}}/></label><label className="pm-label text-xs">Ngày<input type="date" className="pm-input" value={date} disabled={busy} onChange={e=>setDate(e.target.value)}/></label></div>
-      <div className="flex gap-2" role="radiogroup" aria-label="Trạng thái khoản tiền">{([['RECEIVED','Đã nhận'],['PENDING','Chờ nhận']] as const).map(([k,v])=><button key={k} type="button" role="radio" aria-checked={status===k} className={'pm-button'+(status===k?' pm-button-primary':'')} disabled={busy} onClick={()=>setStatus(k)}>{v}</button>)}</div>
+      {!narrow&&<div className="flex gap-2" role="radiogroup" aria-label="Trạng thái khoản tiền">{([['RECEIVED','Đã nhận'],['PENDING','Chờ nhận']] as const).map(([k,v])=><button key={k} type="button" role="radio" aria-checked={status===k} className={'pm-button'+(status===k?' pm-button-primary':'')} disabled={busy} onClick={()=>setStatus(k)}>{v}</button>)}</div>}
       <label className="pm-label text-xs">Mã giao dịch PayPal (nếu có)<input className="pm-input" value={txid} disabled={busy} onChange={e=>{setTx(e.target.value);setSuspect('');}}/></label>
       <p className="text-xs pm-muted">Trạng thái PAID bên EarnApp hay giờ trong ngày không phải bằng chứng tiền vào PP. Nhận thiếu: ghi đúng số thật; phần còn lại vẫn là tiền chờ.</p>
       {suspect&&<div className="vm-status-error">{suspect}<label className="flex items-center gap-1 mt-1"><input type="checkbox" checked={distinct} onChange={e=>setDistinct(e.target.checked)}/>Đây là khoản riêng</label></div>}

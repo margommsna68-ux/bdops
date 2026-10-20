@@ -1,7 +1,7 @@
 # API vận hành AI `/api/ops/v1` — bằng chứng (21/10/2026)
 
 Brief chủ dự án 21/10/2026 "YÊU CẦU HOÀN CHỈNH: API VẬN HÀNH AI". Thiết kế: `docs/superpowers/specs/2026-10-21-ops-api-design.md`; hướng dẫn:
-`docs/runbooks/ops-api.md`; hợp đồng: `docs/ops-api/openapi.yaml`. Không quay video; dữ liệu thử là dữ liệu giả (example.invalid).
+`docs/runbooks/ops-api.md`; hợp đồng: `docs/ops-api/openapi.json`. Không quay video; dữ liệu thử là dữ liệu giả (example.invalid).
 
 ## Test tự động (DB test riêng)
 

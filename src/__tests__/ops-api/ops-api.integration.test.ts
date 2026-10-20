@@ -1,54 +1,14 @@
 import {afterAll,describe,expect,it} from 'vitest';
+import {db,AI_PIN,ADMIN_PIN,api,setup,balanceBody,prepareBody,statusBody,reqRev} from './ops-fixture';
 import {randomUUID} from 'node:crypto';
-import bcrypt from 'bcryptjs';
-import {businessDB as db,businessFixture} from '../proxy-management/business-fixture';
 import {testClient} from '../proxy-management/db-fixture';
-import {commitStockImport} from '@/server/account-store/inventory';
 import {applyLinks} from '@/server/account-store/links';
 import {setVmStatus,recordRecreated} from '@/server/vm-ops/ops';
 import {createPayoutRequest,updatePayoutRequest,readVmOps} from '@/server/vm-ops/payout';
-import {handleOpsRequest} from '@/server/ops-api/api';
 import {createOpsToken,revokeOpsToken,listOpsTokens} from '@/server/ops-api/tokens';
 import {hit,LIMITS} from '@/server/ops-api/limits';
 afterAll(()=>db.$disconnect());
 // API vận hành AI (owner brief 21/10/2026). Synthetic data only (example.invalid), test database only.
-const AI_PIN='246810',ADMIN_PIN='123456';
-type Call={token?:string|null;pin?:string|null;key?:string|null;body?:unknown;xff?:string};
-async function api(method:'GET'|'POST',path:string,o:Call={}){
-  const [p]=path.split('?'),headers:Record<string,string>={'x-forwarded-for':o.xff??'203.0.113.7'};
-  if(o.token!==null&&o.token!==undefined)headers.authorization='Bearer '+o.token;
-  if(method==='POST'){headers['content-type']='application/json';if(o.pin!==null)headers['x-ops-pin']=o.pin??AI_PIN;if(o.key!==null)headers['idempotency-key']=o.key??randomUUID();}
-  const res=await handleOpsRequest(new Request('http://local.invalid/api/ops/v1/'+path,{method,headers,body:method==='POST'?JSON.stringify(o.body??{}):undefined}),p,db);
-  const text=await res.text();return {status:res.status,headers:res.headers,text,json:JSON.parse(text) as {ok:boolean;data:any;error:{code:string;message:string;details?:any}|null}};
-}
-async function setup(){
-  const f=await businessFixture(),x=randomUUID().slice(0,6),projectId=f.scope.projectId,today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-  await db.project.update({where:{id:projectId},data:{settings:{businessMode:'PROXY_VM',teamCashEnabled:true}}});
-  const vms=[f.vm];for(let i=2;i<=5;i++)vms.push(await db.virtualMachine.create({data:{serverId:f.server.id,code:'VM_00'+i,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}}));
-  await commitStockImport(f.scope,{kind:'PAYPAL',text:[`pp-82 ${[1,2,3].map(n=>`p82-${n}-${x}@example.invalid`).join(' ')}`,`pp-60 p60-1-${x}@example.invalid p60-2-${x}@example.invalid`].join('\n'),batch:{purchasedAt:today,priceMode:'NONE'},key:randomUUID()},db);
-  await commitStockImport(f.scope,{kind:'LOGIN',loginType:'GMAIL',text:Array.from({length:8},(_,i)=>`ops${i+1}-${x}@example.invalid|Secret-pw-${x}`).join('\n'),batch:{purchasedAt:today,priceMode:'NONE'},key:randomUUID()},db);
-  const logins=await db.gmailAccount.findMany({where:{projectId},orderBy:{email:'asc'}});
-  for(const [i,vm] of vms.entries()){const v=await db.virtualMachine.findUniqueOrThrow({where:{id:vm.id}});await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:v.id,expectedRevision:v.revision,login:logins[i].id}]},db);}
-  const pp=async(code:string)=>db.payPalAccount.findFirstOrThrow({where:{projectId,code},include:{emails:{orderBy:{email:'asc'}}}});
-  // Members: ai (USER + Server / VM + the three narrow rights), plain (USER + Server / VM only), viewer.
-  const pw=await bcrypt.hash('Local-pw-'+x,4),pin=await bcrypt.hash(AI_PIN,4),users:string[]=[];
-  const member=async(role:'USER'|'VIEWER',caps:string[])=>{const id=randomUUID();users.push(id);await db.user.create({data:{id,email:id+'@fixture.invalid',username:'ops-'+id.slice(0,8),password:pw,pin}});await db.projectMember.create({data:{projectId,userId:id,role,allowedModules:['INFRASTRUCTURE'],capabilities:caps}});return id;};
-  const ai=await member('USER',['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD']),ai2=await member('USER',['EARN_PAYOUT']),plain=await member('USER',[]),viewer=await member('VIEWER',[]);
-  const g=await businessFixture();await db.project.update({where:{id:g.scope.projectId},data:{settings:{businessMode:'PROXY_VM'}}});await db.projectMember.create({data:{projectId:g.scope.projectId,userId:ai,role:'USER',allowedModules:['INFRASTRUCTURE'],capabilities:['EARN_BALANCE']}});
-  const token=async(userId:string,scopes:('READ'|'BALANCE_WRITE'|'PAYOUT'|'RECEIPT')[],extra:Partial<Parameters<typeof createOpsToken>[1]>={})=>(await createOpsToken(f.scope.userId,{projectId,userId,name:'test',scopes,expiresInDays:30,pin:ADMIN_PIN,...extra},db)).token;
-  const vmNow=async(i:number)=>{const v=await db.virtualMachine.findUniqueOrThrow({where:{id:vms[i].id},include:{earnApp:true,operation:true}});return {id:v.id,revision:v.revision,cycle:v.operation?.cycle??1,earnAppId:v.earnApp!.id};};
-  const cleanup=async()=>{
-    for(const p of [projectId,g.scope.projectId]){await db.earnBalanceCheck.deleteMany({where:{projectId:p}});await db.operationJournal.deleteMany({where:{projectId:p}});await db.vmOpsEvent.deleteMany({where:{projectId:p}});}
-    await db.opsToken.deleteMany({where:{userId:{in:users}}});await db.opsAudit.deleteMany({where:{userId:{in:users}}});await db.projectMember.deleteMany({where:{userId:{in:users}}});
-    await f.cleanup();await g.cleanup();await db.auditLog.deleteMany({where:{userId:{in:users}}});await db.user.deleteMany({where:{id:{in:users}}});
-  };
-  return {...f,g,x,projectId,today,vms,logins,pp,ai,ai2,plain,viewer,token,vmNow,cleanup};
-}
-type F=Awaited<ReturnType<typeof setup>>;
-const balanceBody=async(f:F,i:number,o:Record<string,unknown>={})=>{const v=await f.vmNow(i);return {projectId:f.projectId,expectedVmRevision:v.revision,expectedCycle:v.cycle,earnAppAccountId:v.earnAppId,status:'OK',amount:'10.00',currency:'USD',withdrawable:null,checkedAt:new Date().toISOString(),...o};};
-const prepareBody=async(f:F,i:number,emailId:string,o:Record<string,unknown>={})=>{const v=await f.vmNow(i);return {projectId:f.projectId,vmId:v.id,expectedVmRevision:v.revision,expectedCycle:v.cycle,earnAppAccountId:v.earnAppId,paypalEmailId:emailId,amount:'10.00',currency:'USD',requestedAt:new Date().toISOString(),...o};};
-const statusBody=async(f:F,i:number,w:{id:string;revision:number},o:Record<string,unknown>={})=>{const v=await f.vmNow(i);return {projectId:f.projectId,vmId:v.id,expectedVmRevision:v.revision,expectedCycle:v.cycle,earnAppAccountId:v.earnAppId,expectedRequestRevision:w.revision,status:'SUBMITTED_ON_EARNAPP',evidenceNote:'Thấy trong lịch sử rút EarnApp',observedAt:new Date().toISOString(),...o};};
-const reqRev=async(id:string)=>(await db.earnPayoutRequest.findUniqueOrThrow({where:{id}})).revision;
 
 describe('ops API: tokens, authentication, PIN, limits',()=>{
   it('token lifecycle: shown once, stored hashed, revoked / expired / locked user / removed member refused on the next call',async()=>{
@@ -180,7 +140,7 @@ describe('ops API: payout flow',()=>{
       const email=s.json.data.suggestion.paypalEmailId as string;expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({holdEarnAppId:null}); // a suggestion holds nothing
       // Prepare twice at once with one key: one request, the email held for this EarnApp (not used yet).
       const key=randomUUID(),body=await prepareBody(f,0,email),[a,b]=await Promise.all([api('POST','withdrawals/prepare',{token:t,key,body}),api('POST','withdrawals/prepare',{token:t,key,body})]);
-      expect([a.json.data.replay,b.json.data.replay].sort()).toEqual([false,true]);const w=a.json.data.withdrawal;
+      expect([a.json.data.replay,b.json.data.replay].sort()).toEqual([false,true]);const w=a.json.data.current.withdrawal;
       expect(w).toMatchObject({submission:'PREPARING',paypalEmailId:email,money:{requested:'10.00',currency:'USD'}});expect(await db.earnPayoutRequest.count({where:{projectId:f.projectId}})).toBe(1);
       expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({holdEarnAppId:v0.earnAppId,usedEarnAppId:null});
       // Another token / user cannot take the held email for another EarnApp.
@@ -192,31 +152,31 @@ describe('ops API: payout flow',()=>{
       expect((await api('POST','withdrawals/prepare',{token:t,body:await prepareBody(f,2,p60.emails.find(e=>e.id!==email)!.id)})).json.error?.code).toBe('VALIDATION');
       await db.payPalAccount.update({where:{id:p60.id},data:{status:'ACTIVE'}});
       // UNKNOWN keeps holding; money cannot be recorded before reconciling.
-      const unk=await api('POST','withdrawals/'+w.id+'/status',{token:t,body:await statusBody(f,0,w,{status:'UNKNOWN_RESULT',evidenceNote:null})});expect(unk.json.data.withdrawal.submission).toBe('UNKNOWN_RESULT');
+      const unk=await api('POST','withdrawals/'+w.id+'/status',{token:t,body:await statusBody(f,0,w,{status:'UNKNOWN_RESULT',evidenceNote:null})});expect(unk.json.data.current.withdrawal.submission).toBe('UNKNOWN_RESULT');
       expect((await api('POST','withdrawals/'+w.id+'/receipts',{token:t,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(w.id),amount:'10.00',currency:'USD',receivedAt:new Date().toISOString(),transactionId:'TX-A-'+f.x}})).json.error?.code).toBe('VALIDATION');
       expect((await api('POST','withdrawals/'+w.id+'/status',{token:t,body:await statusBody(f,0,{id:w.id,revision:await reqRev(w.id)},{evidenceNote:null})})).json.error?.code).toBe('VALIDATION');
       const stale=await api('POST','withdrawals/'+w.id+'/status',{token:t,body:await statusBody(f,0,{id:w.id,revision:0})});expect(stale.json.error).toMatchObject({code:'REVISION_CONFLICT',details:{current:{id:w.id,submission:'UNKNOWN_RESULT'}}});
       const sentKey=randomUUID(),sentBody=await statusBody(f,0,{id:w.id,revision:await reqRev(w.id)});
-      const sent=await api('POST','withdrawals/'+w.id+'/status',{token:t,key:sentKey,body:sentBody});expect(sent.json.data).toMatchObject({changed:true,withdrawal:{submission:'SUBMITTED_ON_EARNAPP'}});
+      const sent=await api('POST','withdrawals/'+w.id+'/status',{token:t,key:sentKey,body:sentBody});expect(sent.json.data).toMatchObject({changed:true,recorded:{status:'SUBMITTED_ON_EARNAPP',withdrawalId:w.id},current:{withdrawal:{submission:'SUBMITTED_ON_EARNAPP'}}});
       expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({usedEarnAppId:v0.earnAppId,holdEarnAppId:null});
       // Receipts: 6 then 4 (parts, never the requested amount, never over what is open, one payment id once whatever the key).
       const rec=async(amount:string,tx:string|null,o:Record<string,unknown>={},k=randomUUID())=>api('POST','withdrawals/'+w.id+'/receipts',{token:t,key:k,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(w.id),amount,currency:'USD',receivedAt:new Date().toISOString(),transactionId:tx,evidenceNote:'PayPal activity',...o}});
-      const six=await rec('6.00','TX-6-'+f.x);expect(six.json.data.withdrawal.money).toMatchObject({received:'6.00',remaining:'4.00'});expect(six.json.data.withdrawal.phase).toBe('WAITING');
+      const six=await rec('6.00','TX-6-'+f.x);expect(six.json.data.current.withdrawal.money).toMatchObject({received:'6.00',remaining:'4.00'});expect(six.json.data.current.withdrawal.phase).toBe('WAITING');
       expect((await rec('6.00','TX-6-'+f.x)).json.error?.code).toBe('DUPLICATE');
       expect((await rec('5.00','TX-5-'+f.x)).json.error?.code).toBe('VALIDATION'); // over the 4 still open
       expect((await rec('4.00','TX-4-'+f.x,{currency:'EUR'})).json.error?.code).toBe('VALIDATION');
-      const four=await rec('4.00','TX-4-'+f.x);expect(four.json.data.withdrawal).toMatchObject({phase:'RECEIVED',money:{received:'10.00',remaining:'0.00'}});
+      const four=await rec('4.00','TX-4-'+f.x);expect(four.json.data.current.withdrawal).toMatchObject({phase:'RECEIVED',money:{received:'10.00',remaining:'0.00'}});
       expect(await db.fundTransaction.findMany({where:{payoutRequestId:w.id},select:{amount:true,confirmed:true,earnAppId:true,paypalEmailId:true}})).toHaveLength(2);
       // A retry of the earlier success replays its result although the request changed since.
       const replay=await api('POST','withdrawals/'+w.id+'/status',{token:t,key:sentKey,body:sentBody});expect(replay.json.data.replay).toBe(true);
       // Without a payment id: a second receipt with the same email / day / amount is a possible duplicate (refused, any key).
       const v3=await f.vmNow(3),e3=p82.emails[1].id;
-      const w3=(await api('POST','withdrawals/prepare',{token:t,body:await prepareBody(f,3,e3,{amount:'8.00'})})).json.data.withdrawal;
+      const w3=(await api('POST','withdrawals/prepare',{token:t,body:await prepareBody(f,3,e3,{amount:'8.00'})})).json.data.current.withdrawal;
       await api('POST','withdrawals/'+w3.id+'/status',{token:t,body:await statusBody(f,3,{id:w3.id,revision:await reqRev(w3.id)})});
       const r3=async()=>api('POST','withdrawals/'+w3.id+'/receipts',{token:t,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(w3.id),amount:'3.00',currency:'USD',receivedAt:new Date().toISOString()}});
       expect((await r3()).json.ok).toBe(true);expect((await r3()).json.error?.code).toBe('DUPLICATE');
       // Account changed in the same round: the operating command for the old account's request is refused.
-      const v4=await f.vmNow(4),w4=(await api('POST','withdrawals/prepare',{token:t,body:await prepareBody(f,4,p82.emails[0].id,{amount:'9.00'})})).json.data.withdrawal;
+      const v4=await f.vmNow(4),w4=(await api('POST','withdrawals/prepare',{token:t,body:await prepareBody(f,4,p82.emails[0].id,{amount:'9.00'})})).json.data.current.withdrawal;
       const vm4=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[4].id}});await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:vm4.id,expectedRevision:vm4.revision,login:f.logins[7].id}]},db);
       const moved=await api('POST','withdrawals/'+w4.id+'/status',{token:t,body:{...await statusBody(f,4,{id:w4.id,revision:await reqRev(w4.id)}),earnAppAccountId:v4.earnAppId}});expect(moved.json.error?.code).toBe('ACCOUNT_CHANGED');
       // Late money for an old, closed account: VM 3 is recreated after SUS; the 5 still open on its old request is received later,
@@ -225,7 +185,7 @@ describe('ops API: payout flow',()=>{
       const vm3=await db.virtualMachine.findUniqueOrThrow({where:{id:v3.id}});
       expect((await api('POST','withdrawals/'+w3.id+'/status',{token:t,body:{projectId:f.projectId,vmId:v3.id,expectedVmRevision:vm3.revision,expectedCycle:2,earnAppAccountId:v3.earnAppId,expectedRequestRevision:await reqRev(w3.id),status:'UNKNOWN_RESULT',evidenceNote:null,observedAt:new Date().toISOString()}})).json.error?.code).toBe('CYCLE_CHANGED');
       const late=await api('POST','withdrawals/'+w3.id+'/receipts',{token:t,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(w3.id),amount:'5.00',currency:'USD',receivedAt:new Date().toISOString(),transactionId:'TX-LATE-'+f.x}});
-      expect(late.json.data.withdrawal).toMatchObject({current:false,phase:'RECEIVED',earnAppAccountId:v3.earnAppId});
+      expect(late.json.data.current.withdrawal).toMatchObject({current:false,phase:'RECEIVED',earnAppAccountId:v3.earnAppId});
       expect(await db.fundTransaction.findFirstOrThrow({where:{transactionId:'TX-LATE-'+f.x}})).toMatchObject({earnAppId:v3.earnAppId,paypalEmailId:e3,vmId:v3.id});
       expect((await db.earnAppAccount.findUniqueOrThrow({where:{id:v3.earnAppId}})).closedAt).not.toBeNull();
       // Detail of a request: history with observed and server times, receipts; no secret anywhere.

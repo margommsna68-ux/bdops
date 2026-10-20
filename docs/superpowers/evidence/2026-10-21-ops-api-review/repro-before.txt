@@ -1,0 +1,4 @@
+.runtime/review-ops-api-ack-20261021.test.ts on commit 1cca9fc (before the fix), 3 failed / 3:
+{"replayAcknowledgesOriginalAccount":false,"replayBalance":"99.00","originalBalance":"10.00","noDuplicateWrites":true}
+{"tokenRevokedBeforeTransaction":true,"httpStatus":200,"writeCount":1,"errorCode":null}
+{"userLockedBeforeFourthCompareFinishes":true,"fourthResult":"OK"}

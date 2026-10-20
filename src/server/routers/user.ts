@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, moderatorProcedure } from "../trpc";
 import bcrypt from "bcryptjs";
+import { checkPin } from "../business-management/pin";
 import { createAuditLog } from "@/lib/audit";
 import { LOCK_DURATION_MS } from "../auth";
 
@@ -52,51 +53,18 @@ export const userRouter = router({
     .input(z.object({ pin: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
-      const user = await ctx.prisma.user.findUnique({
-        where: { id: userId },
-        select: { pin: true, pinFailedCount: true, pinLockedAt: true },
-      });
-      if (!user?.pin) throw new Error("PIN not set");
-
-      // Lock check — 30 min auto-expire, admin can unlock earlier
-      let currentFailedCount = user.pinFailedCount || 0;
-      if (user.pinLockedAt) {
-        const lockExpiry = user.pinLockedAt.getTime() + LOCK_DURATION_MS;
-        const msLeft = lockExpiry - Date.now();
-        if (msLeft > 0) {
-          const minsLeft = Math.ceil(msLeft / 60000);
-          throw new Error(`PIN_LOCKED: PIN bị khóa — còn ${minsLeft} phút. Liên hệ admin để mở khóa sớm.`);
-        }
-        // Lock expired — auto-unlock
-        await ctx.prisma.user.update({
-          where: { id: userId },
-          data: { pinLockedAt: null, pinFailedCount: 0 },
-        });
-        currentFailedCount = 0;
+      // One rule with the ops API (pin.ts, review fix 21/10/2026): concurrent checks are decided on the user row as it is then.
+      const r = await checkPin(ctx.prisma, userId, input.pin);
+      if (r === "NOT_SET") throw new Error("PIN not set");
+      if (r === "LOCKED") {
+        const u = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { pinLockedAt: true } });
+        const minsLeft = u?.pinLockedAt ? Math.max(1, Math.ceil((u.pinLockedAt.getTime() + LOCK_DURATION_MS - Date.now()) / 60000)) : 30;
+        throw new Error(`PIN_LOCKED: PIN bị khóa — còn ${minsLeft} phút. Liên hệ admin để mở khóa sớm.`);
       }
-
-      const valid = await bcrypt.compare(input.pin, user.pin);
-      if (!valid) {
-        const newCount = currentFailedCount + 1;
-        await ctx.prisma.user.update({
-          where: { id: userId },
-          data: {
-            pinFailedCount: newCount,
-            pinLockedAt: newCount >= 3 ? new Date() : null,
-          },
-        });
-        if (newCount >= 3) {
-          throw new Error("PIN_LOCKED: Đã sai 3 lần — PIN bị khóa 30 phút. Liên hệ admin để mở khóa sớm.");
-        }
-        throw new Error(`Sai PIN (còn ${3 - newCount} lần trước khi bị khóa 30 phút)`);
-      }
-
-      // Success — reset counter
-      if (currentFailedCount > 0) {
-        await ctx.prisma.user.update({
-          where: { id: userId },
-          data: { pinFailedCount: 0 },
-        });
+      if (r === "LOCKED_NOW") throw new Error("PIN_LOCKED: Đã sai 3 lần — PIN bị khóa 30 phút. Liên hệ admin để mở khóa sớm.");
+      if (r === "INVALID") {
+        const u = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { pinFailedCount: true } });
+        throw new Error(`Sai PIN (còn ${Math.max(1, 3 - (u?.pinFailedCount ?? 0))} lần trước khi bị khóa 30 phút)`);
       }
       return { valid: true };
     }),

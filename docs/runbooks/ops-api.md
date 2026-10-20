@@ -5,7 +5,7 @@ API cho Claude vận hành (hoặc script khác) đọc MoneyToHome và ghi nh�
 
 **API này chỉ đọc / ghi MoneyToHome. Nó chưa tạo kết nối tới VM, không đăng nhập EarnApp và không tự rút tiền trên EarnApp.**
 
-Hợp đồng đầy đủ: [docs/ops-api/openapi.yaml](../ops-api/openapi.yaml). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md).
+Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md).
 
 ## 1. Quyền
 
@@ -23,7 +23,9 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 
 - `EARN_PAYOUT` không mở: ghi yêu cầu "đã gửi" trực tiếp, thất bại / huỷ / gửi lại / sửa / chốt thiếu, đối chiếu tài khoản cũ, sổ PayPal, chi phí,
   rút / chuyển. Trên web người có quyền này thấy nút "Chuẩn bị rút (giữ email)" và "Đã gửi trên EarnApp / Chưa xác định kết quả".
-- `PAYPAL_RECEIPT_RECORD` chỉ ghi khoản nhận gắn một yêu cầu rút đã gửi; không mở dán khoản nhận tổng quát, số dư đầu, thu hồi.
+- `PAYPAL_RECEIPT_RECORD` chỉ ghi khoản nhận gắn một yêu cầu rút đã gửi (`recordPayoutReceipt`, chung cho web và API); trên web người có quyền này
+  thấy "Ghi tiền về PP" ở ô Tiền / Rút (chỉ khoản đã nhận, không có Chờ nhận / Khoản riêng). Không mở dán khoản nhận tổng quát, số dư đầu, sửa / thu hồi
+  giao dịch, chuyển / rút PP, chi phí.
 - Đọc tiền: số dư EarnApp cần quyền đọc số dư (đọc Tiền vào PayPal hoặc ghi số dư); tiền của yêu cầu rút cần đọc Tiền vào PayPal hoặc một trong hai
   quyền hẹp; sổ PayPal (số dư theo sổ của PP) chỉ với đọc Tiền vào + Rút / chuyển.
   Qua token, quyền đi kèm một thao tác ghi (EARN_BALANCE, EARN_PAYOUT, PAYPAL_RECEIPT_RECORD) chỉ mở dữ liệu khi token có thao tác đó: token chỉ READ
@@ -42,7 +44,7 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
    `MTH_TOKEN` / `MTH_PIN` trong phiên terminal của bạn. Lưu ý: một công cụ chạy cùng tài khoản máy vẫn đọc được file / biến đó; đây là
    nơi cất bên ngoài cuộc chat, không phải nơi AI tuyệt đối không đọc được.
 5. **Thử đọc một VM**: `node scripts/ops-client.mjs me` → `projects` → `resolve <projectId> <server> <vm>` → `vm <projectId> <vmId>`.
-6. **Vận hành trong phạm vi được giao** (mục 4). Thu hồi token ở Thiết lập khi không dùng nữa; lệnh sau bị từ chối ngay.
+6. **Vận hành trong phạm vi được giao** (mục 4). Thu hồi token ở Thiết lập khi không dùng nữa; lệnh sau bị từ chối ngay, kể cả lệnh ghi đang chờ vào giao dịch (token được kiểm lại trong giao dịch ghi).
 
 ## 3. Quy ước
 
@@ -52,10 +54,13 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 - ID ổn định; `projectId` lấy từ `/projects` (MOON là tên hiển thị, không phải code). Tiền là chuỗi thập phân "10.00"; đồng tiền rõ ràng.
 - `expectedCycle` = lượt VM (`VmOperation.cycle`); `expectedVmRevision` = `VirtualMachine.revision`; `expectedRequestRevision` = revision của yêu cầu
   rút. Kiểm trong cùng giao dịch ghi. 409 trả `details.current` (trạng thái hiện tại theo quyền); không tự lấy revision mới để ép ghi.
+- Lệnh ghi trả `{ replay, recorded, current }`: `recorded` là đúng lệnh đó như lần ghi đầu (VM, lượt, EarnApp, số tiền, id bản ghi) — gửi lại vẫn
+  y nguyên, không bao giờ lấy tài khoản / số dư đang có trên VM thay vào; `current` là trạng thái lúc này (có thể là tài khoản / lượt khác), tách riêng.
+  Ghi số dư còn có `vm` / `balance` = số dư mà bản ghi đó để lại (cùng VM / lượt / EarnApp).
 - Gửi lại: cùng key + cùng nội dung → kết quả cũ (`replay: true`), không ghi lần hai, kể cả khi dữ liệu đã đổi sau đó; cùng key + nội dung khác →
   `IDEMPOTENCY_CONFLICT`. Key gắn với người dùng + dự án (không gắn token), nên xoay token vẫn chống trùng. Mất phản hồi → gửi lại **cùng key**.
 - Giới hạn (dùng chung mọi instance): 120 đọc / phút và 30 ghi / phút mỗi token; 30 lần xác thực sai / phút mỗi IP; PIN sai 3 lần khoá người dùng
-  30 phút (như web), 5 lần sai / 30 phút khoá riêng token. 429 có `Retry-After`.
+  30 phút (như web; nhiều request cùng lúc được quyết định lần lượt trên trạng thái mới nhất), 5 lần sai / 30 phút khoá riêng token. 429 có `Retry-After`.
 - IP: lấy từ X-Forwarded-For theo số proxy tin cậy (`OPS_TRUSTED_PROXY_HOPS`, mặc định 1 = Railway); phần client tự khai bị bỏ. `GET /health` trả
   `verifiedIp` để kiểm.
 - Không trả mật khẩu, 2FA, link lấy mã, token, credentials proxy. Proxy: id + host che + port + nhóm. Email đăng nhập che. Email PP nhận tiền đầy đủ cho
@@ -95,7 +100,11 @@ curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rcv-$WD-1" -X POST "$B/withdraw
 ```
 
 Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` / `MTH_PIN` hoặc file bí mật; không in token, PIN, header hay môi trường):
-`post <path> <body.json>` in ra `idempotencyKey`; gửi lại sau khi mất phản hồi bằng `--key <cùng key>`.
+- `post <path> <body.json>`: key và nội dung được ghi vào nhật ký lệnh cục bộ (`~/.mth/ops-journal`, không có token / PIN) và key được in ra **trước khi gửi**.
+- Mất phản hồi / ngắt kết nối → `RESULT_UNKNOWN` "Chưa xác định kết quả" (lệnh có thể đã ghi): chạy `retry <key>` — gửi lại đúng đường dẫn, nội dung và
+  key; không tạo lệnh mới. `pending` liệt kê lệnh chưa rõ kết quả. Một key không bao giờ dùng cho nội dung khác (script từ chối).
+- Token / PIN chỉ gửi tới đúng origin của `MTH_BASE` dưới `/api/ops/v1/`: đường dẫn có `..`, dạng mã hoá (`%2e`, `%2f`), tuyệt đối hoặc URL khác bị từ
+  chối trước khi gửi; không đi theo redirect; `MTH_BASE` phải là https (http chỉ cho localhost khi thử).
 
 ## 5. Luồng chuẩn cho AI
 

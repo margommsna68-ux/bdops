@@ -1,0 +1,3809 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "MoneyToHome — API vận hành AI",
+  "version": "1.1.0",
+  "description": "Reads MoneyToHome and records EarnApp balances, payout preparation, sent / unknown results and money received on PayPal. It does NOT connect to any VM, does not log in to EarnApp and does not send money. Every answer is the envelope {ok, data, error} with X-Request-Id. Writes need X-Ops-Pin and Idempotency-Key; a write answer is {replay, recorded, current}: `recorded` = this command as first written (identical on a replay), `current` = the state now. Effective rights = the user's current rights ∩ the token's projects ∩ the token's operations."
+ },
+ "servers": [
+  {
+   "url": "https://moneytohome.up.railway.app/api/ops/v1"
+  }
+ ],
+ "security": [
+  {
+   "bearer": []
+  }
+ ],
+ "components": {
+  "securitySchemes": {
+   "bearer": {
+    "type": "http",
+    "scheme": "bearer"
+   }
+  },
+  "parameters": {
+   "projectId": {
+    "name": "projectId",
+    "in": "query",
+    "required": true,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "cursor": {
+    "name": "cursor",
+    "in": "query",
+    "schema": {
+     "type": "string"
+    }
+   },
+   "limit": {
+    "name": "limit",
+    "in": "query",
+    "schema": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 200,
+     "default": 50
+    }
+   },
+   "id": {
+    "name": "id",
+    "in": "path",
+    "required": true,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "pin": {
+    "name": "X-Ops-Pin",
+    "in": "header",
+    "required": true,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "key": {
+    "name": "Idempotency-Key",
+    "in": "header",
+    "required": true,
+    "schema": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9._:-]{8,100}$"
+    }
+   }
+  },
+  "schemas": {
+   "Error": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       false
+      ]
+     },
+     "data": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     },
+     "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "code": {
+        "type": "string",
+        "enum": [
+         "UNAUTHORIZED",
+         "TOKEN_EXPIRED",
+         "TOKEN_REVOKED",
+         "FORBIDDEN",
+         "PIN_REQUIRED",
+         "PIN_INVALID",
+         "PIN_LOCKED",
+         "RATE_LIMITED",
+         "NOT_FOUND",
+         "AMBIGUOUS",
+         "REVISION_CONFLICT",
+         "CYCLE_CHANGED",
+         "ACCOUNT_CHANGED",
+         "IDEMPOTENCY_CONFLICT",
+         "DUPLICATE",
+         "VALIDATION",
+         "INTERNAL"
+        ]
+       },
+       "message": {
+        "type": "string"
+       },
+       "details": {
+        "type": "object",
+        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId."
+       }
+      },
+      "required": [
+       "code",
+       "message"
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "Project": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "code",
+     "name"
+    ]
+   },
+   "Server": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "vmCount": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "id",
+     "code",
+     "vmCount"
+    ]
+   },
+   "Proxy": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "host": {
+      "type": "string",
+      "description": "masked (84.32.***.52)",
+      "nullable": true
+     },
+     "port": {
+      "type": "integer",
+      "nullable": true
+     },
+     "group": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "host",
+     "port",
+     "group"
+    ]
+   },
+   "EarnAppRef": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "login": {
+      "type": "string",
+      "description": "masked login email",
+      "nullable": true
+     }
+    },
+    "required": [
+     "id",
+     "login"
+    ]
+   },
+   "Vm": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "serverId": {
+      "type": "string"
+     },
+     "serverCode": {
+      "type": "string"
+     },
+     "deleted": {
+      "type": "boolean"
+     },
+     "status": {
+      "type": "string",
+      "description": "recorded operating status; null = Chưa ghi",
+      "nullable": true
+     },
+     "statusLabel": {
+      "type": "string"
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "description": "VmOperation.cycle → send back as expectedCycle"
+     },
+     "revision": {
+      "type": "integer",
+      "description": "VirtualMachine.revision → expectedVmRevision"
+     },
+     "proxyState": {
+      "type": "string",
+      "enum": [
+       "ASSIGNED",
+       "MISSING",
+       "REVIEW"
+      ]
+     },
+     "proxy": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Proxy"
+       }
+      ]
+     },
+     "earnAppAccount": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/EarnAppRef"
+       }
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "code",
+     "serverId",
+     "serverCode",
+     "deleted",
+     "status",
+     "statusLabel",
+     "expectedCycle",
+     "revision",
+     "proxyState",
+     "proxy",
+     "earnAppAccount"
+    ]
+   },
+   "Balance": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "OK",
+       "ERROR"
+      ]
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00",
+      "description": "null without the balance read right (or for ERROR)",
+      "nullable": true
+     },
+     "currency": {
+      "type": "string"
+     },
+     "withdrawable": {
+      "type": "boolean",
+      "description": "as observed on EarnApp; null = not observed",
+      "nullable": true
+     },
+     "checkedAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "errorMessage": {
+      "type": "string",
+      "nullable": true
+     },
+     "noteHidden": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "status",
+     "amount",
+     "currency",
+     "withdrawable",
+     "checkedAt",
+     "errorMessage",
+     "noteHidden"
+    ]
+   },
+   "BalanceState": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "latest": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Balance"
+       }
+      ]
+     },
+     "lastOk": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Balance"
+       }
+      ]
+     },
+     "amountsVisible": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "latest",
+     "lastOk",
+     "amountsVisible"
+    ]
+   },
+   "WithdrawalMoney": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "currency": {
+      "type": "string"
+     },
+     "requested": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00"
+     },
+     "received": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00"
+     },
+     "pendingLinked": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00"
+     },
+     "remaining": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00"
+     },
+     "shortfall": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00",
+      "nullable": true
+     }
+    },
+    "required": [
+     "currency",
+     "requested",
+     "received",
+     "pendingLinked",
+     "remaining",
+     "shortfall"
+    ]
+   },
+   "Receipt": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00"
+     },
+     "currency": {
+      "type": "string"
+     },
+     "receivedOn": {
+      "type": "string",
+      "format": "date"
+     },
+     "transactionId": {
+      "type": "string",
+      "nullable": true
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "RECEIVED",
+       "PENDING",
+       "FAILED",
+       "VOIDED"
+      ]
+     },
+     "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+     }
+    },
+    "required": [
+     "id",
+     "amount",
+     "currency",
+     "receivedOn",
+     "transactionId",
+     "status",
+     "recordedAt"
+    ]
+   },
+   "HistoryLine": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "observedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "kind": {
+      "type": "string",
+      "nullable": true
+     },
+     "text": {
+      "type": "string",
+      "description": "full text with money rights; a neutral milestone otherwise"
+     }
+    },
+    "required": [
+     "recordedAt",
+     "observedAt",
+     "kind",
+     "text"
+    ]
+   },
+   "Withdrawal": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "revision": {
+      "type": "integer",
+      "description": "→ expectedRequestRevision"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "earnAppAccountId": {
+      "type": "string"
+     },
+     "current": {
+      "type": "boolean",
+      "description": "false = the account left this VM / round (history)"
+     },
+     "paypalId": {
+      "type": "string"
+     },
+     "paypalCode": {
+      "type": "string"
+     },
+     "paypalEmailId": {
+      "type": "string"
+     },
+     "paypalEmail": {
+      "type": "string",
+      "description": "full with the payout / receipt rights, masked otherwise"
+     },
+     "requestedOn": {
+      "type": "string",
+      "format": "date"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "REQUESTED",
+       "FAILED",
+       "CANCELLED"
+      ]
+     },
+     "submission": {
+      "type": "string",
+      "enum": [
+       "PREPARING",
+       "SUBMITTED_ON_EARNAPP",
+       "UNKNOWN_RESULT"
+      ]
+     },
+     "submittedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "phase": {
+      "type": "string",
+      "enum": [
+       "WAITING",
+       "RECEIVED",
+       "REVIEW",
+       "FAILED",
+       "CANCELLED"
+      ],
+      "description": "from the PayPal book"
+     },
+     "settled": {
+      "type": "boolean"
+     },
+     "consumed": {
+      "type": "boolean"
+     },
+     "money": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/WithdrawalMoney"
+       }
+      ]
+     },
+     "note": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "id",
+     "revision",
+     "vmId",
+     "cycle",
+     "earnAppAccountId",
+     "current",
+     "paypalId",
+     "paypalCode",
+     "paypalEmailId",
+     "paypalEmail",
+     "requestedOn",
+     "state",
+     "submission",
+     "submittedAt",
+     "phase",
+     "settled",
+     "consumed",
+     "money",
+     "note"
+    ]
+   },
+   "WithdrawalDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "revision": {
+      "type": "integer",
+      "description": "→ expectedRequestRevision"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "earnAppAccountId": {
+      "type": "string"
+     },
+     "current": {
+      "type": "boolean",
+      "description": "false = the account left this VM / round (history)"
+     },
+     "paypalId": {
+      "type": "string"
+     },
+     "paypalCode": {
+      "type": "string"
+     },
+     "paypalEmailId": {
+      "type": "string"
+     },
+     "paypalEmail": {
+      "type": "string",
+      "description": "full with the payout / receipt rights, masked otherwise"
+     },
+     "requestedOn": {
+      "type": "string",
+      "format": "date"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "REQUESTED",
+       "FAILED",
+       "CANCELLED"
+      ]
+     },
+     "submission": {
+      "type": "string",
+      "enum": [
+       "PREPARING",
+       "SUBMITTED_ON_EARNAPP",
+       "UNKNOWN_RESULT"
+      ]
+     },
+     "submittedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "phase": {
+      "type": "string",
+      "enum": [
+       "WAITING",
+       "RECEIVED",
+       "REVIEW",
+       "FAILED",
+       "CANCELLED"
+      ],
+      "description": "from the PayPal book"
+     },
+     "settled": {
+      "type": "boolean"
+     },
+     "consumed": {
+      "type": "boolean"
+     },
+     "money": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/WithdrawalMoney"
+       }
+      ]
+     },
+     "note": {
+      "type": "string",
+      "nullable": true
+     },
+     "receipts": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Receipt"
+      },
+      "nullable": true
+     },
+     "history": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/HistoryLine"
+      }
+     }
+    },
+    "required": [
+     "id",
+     "revision",
+     "vmId",
+     "cycle",
+     "earnAppAccountId",
+     "current",
+     "paypalId",
+     "paypalCode",
+     "paypalEmailId",
+     "paypalEmail",
+     "requestedOn",
+     "state",
+     "submission",
+     "submittedAt",
+     "phase",
+     "settled",
+     "consumed",
+     "money",
+     "note",
+     "receipts",
+     "history"
+    ]
+   },
+   "VmDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "serverId": {
+      "type": "string"
+     },
+     "serverCode": {
+      "type": "string"
+     },
+     "deleted": {
+      "type": "boolean"
+     },
+     "status": {
+      "type": "string",
+      "description": "recorded operating status; null = Chưa ghi",
+      "nullable": true
+     },
+     "statusLabel": {
+      "type": "string"
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "description": "VmOperation.cycle → send back as expectedCycle"
+     },
+     "revision": {
+      "type": "integer",
+      "description": "VirtualMachine.revision → expectedVmRevision"
+     },
+     "proxyState": {
+      "type": "string",
+      "enum": [
+       "ASSIGNED",
+       "MISSING",
+       "REVIEW"
+      ]
+     },
+     "proxy": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Proxy"
+       }
+      ]
+     },
+     "earnAppAccount": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/EarnAppRef"
+       }
+      ]
+     },
+     "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "total": {
+        "type": "integer"
+       },
+       "unused": {
+        "type": "integer"
+       },
+       "used": {
+        "type": "integer"
+       },
+       "unconfirmed": {
+        "type": "integer"
+       },
+       "referenceMoney": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00"
+        },
+        "description": "per currency, money rights only; never the EarnApp balance",
+        "nullable": true
+       },
+       "note": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "total",
+       "unused",
+       "used",
+       "unconfirmed",
+       "referenceMoney",
+       "note"
+      ]
+     },
+     "balance": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/BalanceState"
+       }
+      ]
+     },
+     "withdrawal": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Withdrawal"
+       }
+      ]
+     },
+     "pastCycles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "items": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "number": {
+           "type": "integer"
+          },
+          "reason": {
+           "type": "string"
+          },
+          "earnAppAccountId": {
+           "type": "string",
+           "nullable": true
+          },
+          "login": {
+           "type": "string",
+           "nullable": true
+          },
+          "withdrawalId": {
+           "type": "string",
+           "nullable": true
+          },
+          "closedAt": {
+           "type": "string",
+           "format": "date-time"
+          }
+         },
+         "required": [
+          "number",
+          "reason",
+          "earnAppAccountId",
+          "login",
+          "withdrawalId",
+          "closedAt"
+         ]
+        }
+       },
+       "nextCursor": {
+        "type": "string",
+        "nullable": true
+       }
+      },
+      "required": [
+       "items",
+       "nextCursor"
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "code",
+     "serverId",
+     "serverCode",
+     "deleted",
+     "status",
+     "statusLabel",
+     "expectedCycle",
+     "revision",
+     "proxyState",
+     "proxy",
+     "earnAppAccount",
+     "sdk",
+     "balance",
+     "withdrawal",
+     "pastCycles"
+    ]
+   },
+   "EarnAppAccount": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "ON_VM",
+       "NOT_ON_VM",
+       "CLOSED"
+      ]
+     },
+     "closedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "closedReason": {
+      "type": "string",
+      "nullable": true
+     },
+     "registeredAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "login": {
+      "type": "string",
+      "nullable": true
+     },
+     "loginType": {
+      "type": "string"
+     },
+     "vm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "serverCode": {
+        "type": "string"
+       },
+       "expectedCycle": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "id",
+       "code",
+       "serverCode",
+       "expectedCycle"
+      ],
+      "nullable": true
+     },
+     "receivingEmail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "paypalEmailId": {
+        "type": "string"
+       },
+       "paypalCode": {
+        "type": "string"
+       },
+       "email": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "paypalEmailId",
+       "paypalCode",
+       "email"
+      ],
+      "nullable": true
+     },
+     "withdrawal": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Withdrawal"
+       }
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "state",
+     "closedAt",
+     "closedReason",
+     "registeredAt",
+     "login",
+     "loginType",
+     "vm",
+     "receivingEmail",
+     "withdrawal"
+    ]
+   },
+   "Suggestion": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "earnAppAccountId": {
+      "type": "string"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "amount": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00",
+      "nullable": true
+     },
+     "currency": {
+      "type": "string"
+     },
+     "exact": {
+      "type": "boolean",
+      "description": "true only with an amount in USD"
+     },
+     "existingWithdrawalId": {
+      "type": "string",
+      "nullable": true
+     },
+     "note": {
+      "type": "string",
+      "nullable": true
+     },
+     "suggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "paypalId": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "paypalEmailId": {
+        "type": "string"
+       },
+       "email": {
+        "type": "string"
+       },
+       "why": {
+        "type": "string"
+       },
+       "afterUsd": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       }
+      },
+      "required": [
+       "paypalId",
+       "code",
+       "paypalEmailId",
+       "email",
+       "why",
+       "afterUsd"
+      ],
+      "nullable": true
+     },
+     "candidates": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "paypalId": {
+         "type": "string"
+        },
+        "code": {
+         "type": "string"
+        },
+        "status": {
+         "type": "string"
+        },
+        "usable": {
+         "type": "boolean"
+        },
+        "emails": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+           "paypalEmailId": {
+            "type": "string"
+           },
+           "email": {
+            "type": "string"
+           },
+           "own": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "paypalEmailId",
+           "email",
+           "own"
+          ]
+         }
+        },
+        "projectedUsd": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00"
+        },
+        "afterUsd": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00",
+         "nullable": true
+        },
+        "balanceUsd": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00"
+        },
+        "pendingUsd": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00"
+        },
+        "heldUsd": {
+         "type": "string",
+         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+         "example": "10.00"
+        }
+       },
+       "required": [
+        "paypalId",
+        "code",
+        "status",
+        "usable",
+        "emails",
+        "projectedUsd",
+        "afterUsd"
+       ]
+      }
+     }
+    },
+    "required": [
+     "earnAppAccountId",
+     "vmId",
+     "amount",
+     "currency",
+     "exact",
+     "existingWithdrawalId",
+     "note",
+     "suggestion",
+     "candidates"
+    ]
+   },
+   "Me": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "username": {
+        "type": "string",
+        "nullable": true
+       },
+       "name": {
+        "type": "string",
+        "nullable": true
+       }
+      },
+      "required": [
+       "id",
+       "username",
+       "name"
+      ]
+     },
+     "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "prefix": {
+        "type": "string"
+       },
+       "name": {
+        "type": "string"
+       },
+       "expiresAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "scopes": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "enum": [
+          "READ",
+          "BALANCE_WRITE",
+          "PAYOUT",
+          "RECEIPT"
+         ]
+        }
+       }
+      },
+      "required": [
+       "id",
+       "prefix",
+       "name",
+       "expiresAt",
+       "scopes"
+      ]
+     },
+     "projects": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "projectId": {
+         "type": "string"
+        },
+        "code": {
+         "type": "string"
+        },
+        "name": {
+         "type": "string"
+        },
+        "role": {
+         "type": "string"
+        },
+        "capabilities": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "effective": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "READ": {
+           "type": "boolean"
+          },
+          "BALANCE_WRITE": {
+           "type": "boolean"
+          },
+          "PAYOUT": {
+           "type": "boolean"
+          },
+          "RECEIPT": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "READ",
+          "BALANCE_WRITE",
+          "PAYOUT",
+          "RECEIPT"
+         ]
+        }
+       },
+       "required": [
+        "projectId",
+        "code",
+        "name",
+        "role",
+        "capabilities",
+        "effective"
+       ]
+      }
+     }
+    },
+    "required": [
+     "user",
+     "token",
+     "projects"
+    ]
+   },
+   "Health": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "service": {
+      "type": "string"
+     },
+     "version": {
+      "type": "string"
+     },
+     "verifiedIp": {
+      "type": "string",
+      "description": "your address as the server trusts it",
+      "nullable": true
+     }
+    },
+    "required": [
+     "service",
+     "version",
+     "verifiedIp"
+    ]
+   },
+   "ProjectList": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Project"
+      }
+     }
+    },
+    "required": [
+     "items"
+    ]
+   },
+   "ServerPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Server"
+      }
+     },
+     "nextCursor": {
+      "type": "string",
+      "description": "pass as cursor; null = last page",
+      "nullable": true
+     }
+    },
+    "required": [
+     "items",
+     "nextCursor"
+    ]
+   },
+   "VmPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Vm"
+      }
+     },
+     "nextCursor": {
+      "type": "string",
+      "description": "pass as cursor; null = last page",
+      "nullable": true
+     }
+    },
+    "required": [
+     "items",
+     "nextCursor"
+    ]
+   },
+   "WithdrawalPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Withdrawal"
+      }
+     },
+     "nextCursor": {
+      "type": "string",
+      "description": "pass as cursor; null = last page",
+      "nullable": true
+     }
+    },
+    "required": [
+     "items",
+     "nextCursor"
+    ]
+   },
+   "BalanceAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "checkId": {
+        "type": "string"
+       },
+       "vmId": {
+        "type": "string"
+       },
+       "expectedCycle": {
+        "type": "integer"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       },
+       "status": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "ERROR"
+        ]
+       },
+       "amount": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       },
+       "currency": {
+        "type": "string"
+       },
+       "withdrawable": {
+        "type": "boolean",
+        "nullable": true
+       },
+       "checkedAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "recordedAt": {
+        "type": "string",
+        "format": "date-time"
+       }
+      },
+      "required": [
+       "checkId",
+       "vmId",
+       "expectedCycle",
+       "earnAppAccountId",
+       "status",
+       "amount",
+       "currency",
+       "withdrawable",
+       "checkedAt",
+       "recordedAt"
+      ],
+      "description": "this command as first written (same on a replay)"
+     },
+     "vm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "expectedCycle": {
+        "type": "integer"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "expectedCycle",
+       "earnAppAccountId"
+      ],
+      "description": "identity of the recorded check"
+     },
+     "balance": {
+      "$ref": "#/components/schemas/BalanceState",
+      "description": "the balance as this check left it (that VM / round / EarnApp, checks up to it)"
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "id": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "revision": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string",
+          "nullable": true
+         },
+         "deleted": {
+          "type": "boolean"
+         }
+        },
+        "required": [
+         "id",
+         "expectedCycle",
+         "revision",
+         "earnAppAccountId",
+         "deleted"
+        ]
+       },
+       "balance": {
+        "nullable": true,
+        "allOf": [
+         {
+          "$ref": "#/components/schemas/BalanceState"
+         }
+        ]
+       }
+      },
+      "required": [
+       "vm",
+       "balance"
+      ],
+      "description": "the VM now — may be another account / round",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "vm",
+     "balance",
+     "current"
+    ]
+   },
+   "PrepareAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       },
+       "paypalEmailId": {
+        "type": "string"
+       },
+       "amount": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       },
+       "currency": {
+        "type": "string"
+       },
+       "submission": {
+        "type": "string",
+        "enum": [
+         "PREPARING"
+        ]
+       },
+       "requestedOn": {
+        "type": "string",
+        "format": "date"
+       }
+      },
+      "required": [
+       "withdrawalId",
+       "vmId",
+       "cycle",
+       "earnAppAccountId",
+       "paypalEmailId",
+       "amount",
+       "currency",
+       "submission",
+       "requestedOn"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "$ref": "#/components/schemas/Withdrawal"
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "StatusAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "changed": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "status": {
+        "type": "string",
+        "enum": [
+         "SUBMITTED_ON_EARNAPP",
+         "UNKNOWN_RESULT"
+        ],
+        "nullable": true
+       },
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       },
+       "revisionAfter": {
+        "type": "integer"
+       },
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       },
+       "note": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "withdrawalId",
+       "status"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "$ref": "#/components/schemas/Withdrawal"
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "changed",
+     "recorded",
+     "current"
+    ]
+   },
+   "ReceiptAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "receiptId": {
+        "type": "string"
+       },
+       "withdrawalId": {
+        "type": "string"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       },
+       "paypalEmailId": {
+        "type": "string"
+       },
+       "amount": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       },
+       "currency": {
+        "type": "string"
+       },
+       "receivedOn": {
+        "type": "string",
+        "format": "date"
+       },
+       "receivedAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "transactionId": {
+        "type": "string",
+        "nullable": true
+       }
+      },
+      "required": [
+       "receiptId",
+       "withdrawalId",
+       "earnAppAccountId",
+       "paypalEmailId",
+       "amount",
+       "currency",
+       "receivedOn",
+       "receivedAt",
+       "transactionId"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "$ref": "#/components/schemas/WithdrawalDetail"
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkProject": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Project"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkServer": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Server"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkProxy": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Proxy"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkEarnAppRef": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/EarnAppRef"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVm": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Vm"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkBalance": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Balance"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkBalanceState": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/BalanceState"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkWithdrawalMoney": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/WithdrawalMoney"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkReceipt": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Receipt"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkHistoryLine": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/HistoryLine"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkWithdrawal": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Withdrawal"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkWithdrawalDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/WithdrawalDetail"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVmDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/VmDetail"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkEarnAppAccount": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/EarnAppAccount"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkSuggestion": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Suggestion"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkMe": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Me"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkHealth": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Health"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkProjectList": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ProjectList"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkServerPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ServerPage"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVmPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/VmPage"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkWithdrawalPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/WithdrawalPage"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkBalanceAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/BalanceAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkPrepareAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/PrepareAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkStatusAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/StatusAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkReceiptAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ReceiptAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   }
+  }
+ },
+ "paths": {
+  "/health": {
+   "get": {
+    "security": [],
+    "summary": "Service up; verifiedIp = your address as the server trusts it",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkHealth"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me": {
+   "get": {
+    "summary": "User, token and the effective operations per project",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkMe"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/projects": {
+   "get": {
+    "summary": "Projects of the token (id, code, name)",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkProjectList"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/servers": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkServerPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "name": "serverId",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVmPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/resolve": {
+   "get": {
+    "summary": "Exact server code + VM code (case-insensitive, never partial)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "name": "server",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "vm",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVm"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVmDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts/{id}": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/projectId"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkEarnAppAccount"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/paypal/suggest": {
+   "get": {
+    "summary": "PP / email for one EarnApp and amount (operation PAYOUT); holds nothing; $100 target USD only",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "name": "earnAppAccountId",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "amount",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+       "example": "10.00"
+      }
+     },
+     {
+      "name": "currency",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSuggestion"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "PREPARING",
+        "SUBMITTED_ON_EARNAPP",
+        "UNKNOWN_RESULT",
+        "FAILED",
+        "CANCELLED"
+       ]
+      }
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkWithdrawalPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/projectId"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkWithdrawalDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/balance-check": {
+   "post": {
+    "summary": "Record a balance read on EarnApp (operation BALANCE_WRITE)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "status": {
+          "type": "string",
+          "enum": [
+           "OK",
+           "ERROR"
+          ],
+          "description": "OK: amount + currency (\"0.00\" valid); ERROR: no amount, errorMessage"
+         },
+         "amount": {
+          "type": "string",
+          "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+          "example": "10.00"
+         },
+         "currency": {
+          "type": "string"
+         },
+         "withdrawable": {
+          "type": "boolean",
+          "description": "true only when seen; needs evidenceNote",
+          "nullable": true
+         },
+         "checkedAt": {
+          "type": "string",
+          "format": "date-time"
+         },
+         "errorMessage": {
+          "type": "string",
+          "maxLength": 300
+         },
+         "evidenceNote": {
+          "type": "string",
+          "maxLength": 300
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedVmRevision",
+         "expectedCycle",
+         "earnAppAccountId",
+         "status",
+         "checkedAt"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkBalanceAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/prepare": {
+   "post": {
+    "summary": "Prepare a payout: hold the chosen email, not used yet (operation PAYOUT)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "paypalEmailId": {
+          "type": "string"
+         },
+         "amount": {
+          "type": "string",
+          "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+          "example": "10.00"
+         },
+         "currency": {
+          "type": "string"
+         },
+         "requestedAt": {
+          "type": "string",
+          "format": "date-time"
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "expectedVmRevision",
+         "expectedCycle",
+         "earnAppAccountId",
+         "paypalEmailId",
+         "amount",
+         "currency",
+         "requestedAt"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkPrepareAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}/status": {
+   "post": {
+    "summary": "SUBMITTED_ON_EARNAPP (seen in EarnApp history) or UNKNOWN_RESULT (keeps holding) (operation PAYOUT)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "status": {
+          "type": "string",
+          "enum": [
+           "SUBMITTED_ON_EARNAPP",
+           "UNKNOWN_RESULT"
+          ]
+         },
+         "evidenceNote": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "required for SUBMITTED_ON_EARNAPP",
+          "nullable": true
+         },
+         "observedAt": {
+          "type": "string",
+          "format": "date-time"
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "expectedVmRevision",
+         "expectedCycle",
+         "earnAppAccountId",
+         "expectedRequestRevision",
+         "status",
+         "observedAt"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkStatusAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}/receipts": {
+   "post": {
+    "summary": "Money that really arrived on PayPal for this request (operation RECEIPT); parts add up; never over what is open",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "amount": {
+          "type": "string",
+          "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+          "example": "10.00"
+         },
+         "currency": {
+          "type": "string"
+         },
+         "receivedAt": {
+          "type": "string",
+          "format": "date-time"
+         },
+         "transactionId": {
+          "type": "string",
+          "maxLength": 100,
+          "nullable": true
+         },
+         "evidenceNote": {
+          "type": "string",
+          "maxLength": 300,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedRequestRevision",
+         "amount",
+         "currency",
+         "receivedAt"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkReceiptAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

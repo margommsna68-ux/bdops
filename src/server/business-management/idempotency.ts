@@ -10,6 +10,7 @@ import {authorizeBusiness} from './scope';
 import type {BusinessArea} from './types';
 import {authorizeTeamCash,type CashArea} from './team-cash-scope';
 import {lockCashProject} from './cash-lock';
+import {assertOpsToken} from '../ops-api/context';
 export const businessHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export async function businessCollector(tx:Prisma.TransactionClient,scope:ActorScope,version:3|4=3){
  const before=new Map<string,{resource:ResourceImage['resource'];id:string;before:unknown}>();
@@ -23,6 +24,7 @@ export async function runBusinessCommand<T extends Record<string,unknown>>(scope
  if(input.key.length<8||input.key.length>100)throw new ProxyDomainError('INVALID_INPUT');const hash=businessHash({kind:input.kind,module:input.module,payload:input.payload});
  return withProxyTransaction(async tx=>{
   await lockCashProject(tx,scope.projectId);
+  await assertOpsToken(tx,scope); // ops API only (no-op for the web): the token must still be valid, in this transaction
   const current=input.authorize?await input.authorize(tx):input.cash?await authorizeTeamCash(scope,input.module as CashArea,true,tx):await authorizeBusiness(scope,input.module,true,tx),prior=await tx.operationJournal.findUnique({where:{projectId_commandKey:{projectId:scope.projectId,commandKey:input.key}}});
   if(prior){if(prior.actorId!==scope.userId)throw new ProxyDomainError('FORBIDDEN');if(prior.requestHash!==hash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');const undo=await tx.operationJournal.findUnique({where:{undoOfId:prior.id}});return {...JSON.parse(decrypt(prior.resultCipher!)) as T,replay:true,undone:!!undo};}
   const images=await businessCollector(tx,current,input.cash||current.teamCashEnabled?4:3),result=await fn(tx,images,current),snapshot=await images.finish();
