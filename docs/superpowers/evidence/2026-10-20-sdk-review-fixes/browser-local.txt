@@ -1,0 +1,27 @@
+PASS C1 phiên B2 tạo lại VM_010 → lượt 2
+PASS C2 dòng của VM đã tạo lại báo tại dòng, không ghi; dòng khác vẫn lưu — 1 sdk2-<tag> / VM_010 p28-<tag>-0001 Tiền chưa ghi → 10,00 USD · Ghi chú trống → "ghi A" Lỗi · VM đã được tạo lại, kiểm tra lại dòng này
+PASS C3 nội dung dán được giữ
+PASS C4 Kiểm tra lại: dòng 1 ghép lượt mới (người dùng bấm), dòng 2 giữ nguyên
+PASS C5 sau khi kiểm lại, lưu đúng vào VM_010 lượt 2
+  (nền tải lại: có; nút: Kiểm tra lại)
+PASS F1 nháp cũ không tự sang lượt mới: không ghi, báo tại khung, giữ mã / tiền / ghi chú — VM đã được tạo lại (lượt 3); kiểm tra lại mã đang nhập rồi bấm Thêm.
+PASS F2 người dùng kiểm lại rồi bấm Thêm: lưu vào lượt 3; SDK chưa dùng S1 vẫn ở VM qua các lượt — {"vm":"VM_010","amount":"5","note":"ghi khung","state":"UNLINKED","revision":0,"events":2}
+PASS W0 B lưu trước: 20 USD, ghi B
+PASS W1 Dán bảng: bản dán cũ bị từ chối tại dòng, giữ 20 USD / ghi B của B — 1 sdk2-<tag> / VM_004 p28-<tag>-0004 Tiền chưa ghi → 10,00 USD · Ghi chú trống → "ghi A" Lỗi · SDK p28-<tag>-0004 vừa được thêm với tiền / ghi chú riêng; kiểm tra lại (nội dung đang nhập được giữ) · {"vm":"VM_004","amount":"20","note":"ghi B","state":"UNLINKED","revision":0,"events":2}
+PASS W2 Thêm một mã: A không ghi đè, giữ 20 USD / ghi B — {"vm":"VM_005","amount":"20","note":"ghi B","state":"UNLINKED","revision":0,"events":2}
+PASS W3 A thấy lý do ngay tại khung, không mất nội dung đang nhập — Thêm SDK vào VM (không thay mã đang có) Thêm Mã này đã ở trong danh sách của VM. Chọn SDK đã lưu Đóng SDK p28-<tag>-0005 vừa được thêm với tiền / ghi chú riêng; kiểm tra lại (nội dung đang nhập được giữ) Enter lưu · Esc huỷ. Tiền là tiền tích luỹ USD của mã, k
+PASS W4 cùng mã, cùng VM, ô trống: Giữ nguyên, không thêm lịch sử
+PASS P1 mã đã dùng không cấp lại (báo tại dòng)
+PASS P2 nhiều SDK cùng một VM
+PASS P3 dán lại cùng danh sách: 0 SDK sẽ ghi, giữ nguyên, nút tắt
+PASS P4 theo khoảng: VM_011 thêm, VM_012 dòng trống giữ vị trí, VM_013 không có (không dồn, không tạo) — 1 sdk2-<tag> / VM_011 p28-<tag>-0009 Thêm mới · Thêm SDK mới / 2 sdk2-<tag> / VM_012 — Bỏ qua · Dòng trống: giữ vị trí, không ghi / 3 sdk2-<tag> / VM_013 p28-<tag>-0010 Lỗi · Không có VM VM_013 trên sdk2-<tag> (web không tự tạo VM)
+PASS P5 lưu đúng VM_011; không có mã nào vào VM_012
+PASS K1 ô SDK: "3 SDK · 1 chưa dùng · 1 chưa xác nhận", mã hiện ra là mã thật sự chưa dùng — p28-<tag>-0902 3 SDK · 1 chưa dùng · 1 chưa xác nhận
+PASS K2 không đổi trạng thái dữ liệu cũ
+PASS V1 chỉ xem: không có nút Dán bảng
+PASS V2 chỉ xem: khung SDK báo Chỉ xem, không có ô thêm, không tick được
+PASS V3 chỉ xem: endpoint thêm / dán bị từ chối, không ghi gì — [{"error":{"json":{"message":"Bạn chưa có quyền thao tác này","code":-32003,"data":{"code":"FORBIDDEN","httpStatus":403,
+PASS O1 ngoài dự án: trang Server/VM không hiện server / SDK của dự án thử
+PASS O2 ngoài dự án: xem trước, thêm và đọc đều bị từ chối, không ghi — [{"error":{"json":{"message":"Không có quyền truy cập dự án","code":-32003,"data | [{"error":{"json":{"message":"Không có quyền truy cập dự án","code":-32003,"data | [{"error":{"json":{"message":"Không có quyền truy cập dự án","code":-32003,"data
+
+Kết quả: 24 đạt, 0 lỗi. Lỗi JS: không

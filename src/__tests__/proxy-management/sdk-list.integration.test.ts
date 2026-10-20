@@ -93,7 +93,7 @@ describe('Dán bảng → SDK',()=>{
       const p=await previewSdkPaste(f.scope,{mode:'VM',text,serverId:f.server.id},db);
       expect(p.rows.map(r=>[r.line,r.vm,r.outcome])).toEqual([[1,'VM_005','ERROR'],[2,'VM_002','NEW'],[3,'VM_005','NEW'],[4,'VM_010','NEW'],[5,'VM_009','ERROR'],[6,'VM_007','ERROR'],[7,'VM_002','ERROR']]);
       expect(p.rows[0].message).toMatch(/dòng 7/);expect(p.rows[4].message).toMatch(/Không có VM VM_009/);expect(p.rows[5].message).toMatch(/đã xoá/);
-      const items=p.rows.filter(r=>r.outcome==='NEW').map(r=>({line:r.line,vmId:r.vmId!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
+      const items=p.rows.filter(r=>r.outcome==='NEW').map(r=>({line:r.line,vmId:r.vmId!,expectedCycle:r.expectedCycle!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
       const key=randomUUID(),done=await applySdkPaste(f.scope,{key,items},db);expect(done).toMatchObject({applied:3,errors:0});
       expect(await applySdkPaste(f.scope,{key,items},db)).toMatchObject({replay:true});
       expect(await applySdkPaste(f.scope,{key:randomUUID(),items},db)).toMatchObject({applied:0,same:3});
@@ -109,7 +109,7 @@ describe('Dán bảng → SDK',()=>{
       const p=await previewSdkPaste(f.scope,{mode:'RANGE',text:lines.join('\n'),serverId:f.server.id,startVmId:f.vms.VM_004.id},db);
       expect(p.range).toEqual({from:'VM_004',to:'VM_009',count:6});
       expect(p.rows.map(r=>[r.vm,r.outcome])).toEqual([['VM_004','NEW'],['VM_005','NEW'],['VM_006','SKIP'],['VM_007','ERROR'],['VM_008','NEW'],['VM_009','ERROR']]);
-      const items=p.rows.filter(r=>r.outcome==='NEW').map(r=>({line:r.line,vmId:r.vmId!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
+      const items=p.rows.filter(r=>r.outcome==='NEW').map(r=>({line:r.line,vmId:r.vmId!,expectedCycle:r.expectedCycle!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
       await applySdkPaste(f.scope,{key:randomUUID(),items},db);
       expect((await f.list('VM_004')).map(s=>s.code)).toEqual([f.S(1)]);expect((await f.list('VM_005')).map(s=>s.code)).toEqual([f.S(2)]);expect((await f.list('VM_008')).map(s=>s.code)).toEqual([f.S(5)]);
       expect((await f.list('VM_006')).length).toBe(0);expect((await f.rec(f.S(2))).amount?.toString()).toBe('7');

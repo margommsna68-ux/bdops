@@ -1,0 +1,21 @@
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts (8 tests | 5 failed) 461ms
+     × an old paste is refused at its line after the VM was recreated; other lines still save; saved codes stay across rounds 184ms
+     × the apply endpoint refuses items without the round (never takes the latest one) 30ms
+     × paste NEW after another operator created the same code on the same VM: refused at the line, newer money / note kept 42ms
+     × single add with null revision after another operator created the code: refused, newer money / note kept 35ms
+     ✓ same code, same VM, nothing to change (same values or blank fields): "giữ nguyên", no extra history 55ms
+     ✓ an update checked at one revision is refused once the code changed; with the revision read it saves 54ms
+     ✓ a retry with the same key after a lost answer returns the old result and never undoes a later edit 54ms
+     × "chưa dùng" counts UNLINKED only; UNCONFIRMED shown apart; the quick copy prefers a truly unused code 1ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected [ undefined, undefined ] to deeply equal [ 1, 1 ]
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts:29:46
+AssertionError: promise resolved "{ rows: [ { line: 1, …(4) } ], …(5) }" instead of rejecting
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts:45:140
+AssertionError: expected { rows: [ { line: 1, …(4) } ], …(5) } to match object { applied: +0, errors: 1 }
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts:56:22
+AssertionError: promise resolved "{ changed: true, …(3) }" instead of rejecting
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts:63:156
+AssertionError: expected '3 SDK · 2 chưa dùng' to be '3 SDK · 1 chưa dùng · 1 chưa xác nhận' // Object.is equality
+ ❯ src/__tests__/proxy-management/sdk-list-review.integration.test.ts:107:30
+      Tests  5 failed | 3 passed (8)

@@ -12,16 +12,19 @@ import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {errorMessage,useVMRefresh,type ManagedVM} from '../shared';
 import type {VmAccount} from './AccountCell';
 import {shortCode} from './grid-model';
+import {sdkFirst,sdkSummary} from './sdk-summary';
 export type StoreSdk=inferRouterOutputs<AppRouter>['vmManagement']['sdkStore'][number];
 type VmSdk=ManagedVM['sdks'][number];
 /** The "add a code" form of the frame kept as a draft while the frame is closed (per person, project, VM and round). `pending` = the
- *  request of an add whose answer was lost: a retry of the same content reuses its key (no second write). */
+ *  request of an add whose answer was lost: a retry of the same content reuses its key (no second write). `cycle` = the VM round the
+ *  draft was started in and `seen` = the stored version of the typed code the person saw (null = no stored code): a background reload
+ *  never moves them; a newer round or version asks "Kiểm tra lại" at the form (review fix 20/10/2026). */
 export interface SdkDraftBase {userId:string;projectId:string;vmId:string;cycle:number}
-export interface SdkDraft {code:string;amount?:string;note?:string;base?:SdkDraftBase;pending?:{sig:string;key:string}}
+export interface SdkDraft {code:string;amount?:string;note?:string;base?:SdkDraftBase;pending?:{sig:string;key:string};cycle?:number;seen?:{code:string;revision:number|null}}
 const SDK_PATTERN=/^[A-Za-z0-9._:-]{8,128}$/;
 export const stateClass=(s:SdkLinkState|null|undefined)=>s==='LINKED'?'vm-sdk-state-linked':s==='UNCONFIRMED'?'vm-sdk-state-unconfirmed':'vm-sdk-state-free';
 export const placeText=(r:{vm:StoreSdk['vm']})=>r.vm?r.vm.server+' / '+r.vm.code+(r.vm.deleted?' (đã xoá)':''):'Trong kho';
-export const sdkSummary=(list:VmSdk[])=>{const free=list.filter(s=>s.state!=='LINKED').length;return list.length?`${list.length} SDK · ${free} chưa dùng`:'Chưa có SDK';};
+export {sdkSummary} from './sdk-summary';
 // Fixed-position popover next to a cell (portal: never clipped by the table's scroll area). Opens below, or above when there is no
 // room; a popover taller than the window keeps its footer on screen and scrolls its body.
 export function useAnchored(open:boolean,anchor:React.RefObject<HTMLElement|null>,pop:React.RefObject<HTMLElement|null>,width:number){
@@ -43,7 +46,7 @@ export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{pro
   useEffect(()=>{if(!open)return;const down=(e:MouseEvent)=>{if(!pop.current?.contains(e.target as Node)&&!anchor.current?.contains(e.target as Node))closeRef.current(false);};
     const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.isComposing&&!(e.target as HTMLElement)?.closest?.('[data-sdk-edit]')){e.stopPropagation();e.preventDefault();closeRef.current();}};
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
-  const list=vm.sdks,first=list.find(s=>s.state!=='LINKED')||list[0];
+  const list=vm.sdks,first=sdkFirst(list);
   const view=<>{first?<span className="vm-sdk-line"><code className="vm-sdk vm-ellipsis" title={first.code}>{shortCode(first.code)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+vm.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();copyCode(first.code,vm.code);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>}
     {list.length>0&&<span className="vm-sdk-sub">{sdkSummary(list)}</span>}
     {draft&&<span className="vm-sdk-draft" title="Có mã đang nhập chưa lưu; mở ô để lưu hoặc huỷ">● Nháp chưa lưu</span>}</>;
@@ -70,27 +73,34 @@ export function SdkEditor(props:EditorProps){
 function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embedded,userId}:EditorProps&{userId:string}){
   const store=trpc.vmManagement.sdkStore.useQuery({projectId},{staleTime:10000}),add=trpc.vmManagement.sdkListAdd.useMutation(),used=trpc.vmManagement.sdkUsed.useMutation(),remove=trpc.vmManagement.sdkListRemove.useMutation(),info=trpc.vmManagement.sdkInfo.useMutation();
   const refresh=useVMRefresh(),utils=trpc.useUtils();
-  const own=draft&&(!draft.base||draft.base.userId===userId&&draft.base.projectId===projectId&&draft.base.vmId===vm.id&&draft.base.cycle===vm.cycle)?draft:null;
-  const [d,setD]=useState<SdkDraft>(own||{code:''}),[error,setError]=useState(''),[busy,setBusy]=useState<string|null>(null),[picking,setPicking]=useState(false),[q,setQ]=useState(''),[history,setHistory]=useState<string|null>(null);
+  const own=draft&&(!draft.base||draft.base.userId===userId&&draft.base.projectId===projectId&&draft.base.vmId===vm.id)?{...draft,cycle:draft.cycle??draft.base?.cycle}:null;
+  const [d,setD]=useState<SdkDraft>(own||{code:''}),[error,setError]=useState(''),[lost,setLost]=useState(false),[busy,setBusy]=useState<string|null>(null),[picking,setPicking]=useState(false),[q,setQ]=useState(''),[history,setHistory]=useState<string|null>(null);
   const busyRef=useRef(false),codeInput=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(!embedded)requestAnimationFrame(()=>codeInput.current?.focus({preventScroll:true}));},[embedded]);
   const dirty=!!(d.code.trim()||d.amount?.trim()||d.note?.trim());
-  useEffect(()=>{onDraft(dirty?{...d,base:{userId,projectId,vmId:vm.id,cycle:vm.cycle}}:null);},[d,dirty]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{onDraft(dirty?{...d,base:{userId,projectId,vmId:vm.id,cycle:d.cycle??vm.cycle}}:null);},[d,dirty]);// eslint-disable-line react-hooks/exhaustive-deps
   const byCode=useMemo(()=>new Map((store.data||[]).map(r=>[r.code,r])),[store.data]);
   const code=d.code.trim(),target=code?byCode.get(code):undefined,inList=vm.sdks.some(s=>s.code===code);
+  // Bind the draft to what the person saw: the round when typing started and the version of the typed code once the store answered.
+  useEffect(()=>{if(!code||!store.data||d.seen?.code===code)return;setD(p=>({...p,seen:{code,revision:target?.revision??null}}));},[code,store.data]);// eslint-disable-line react-hooks/exhaustive-deps
+  const seenRev=d.seen?.code===code?d.seen.revision:target?.revision??null,draftCycle=d.cycle??vm.cycle;
+  const recheck=!!code&&!inList&&(draftCycle!==vm.cycle?'VM đã được tạo lại (lượt '+vm.cycle+'); kiểm tra lại mã đang nhập rồi bấm Thêm.':d.seen?.code===code&&!!store.data&&(target?.revision??null)!==seenRev?'SDK '+shortCode(code)+' vừa được người khác '+(seenRev===null?'thêm':'sửa')+'; xem lại tiền / ghi chú ở trên rồi bấm Thêm.':'');
   const codeError=code&&!SDK_PATTERN.test(code)?'Mã SDK 8–128 ký tự chữ/số/._:-':'';
   const amountCheck=d.amount?.trim()?parseSdkAmount(d.amount.trim()):null,amountError=amountCheck&&'error' in amountCheck?amountCheck.error:'';
   const elsewhere=!inList&&target?.vm&&target.vm.id!==vm.id?target.vm:null;
   const blocked=!inList&&target&&target.state!=='UNLINKED'?(target.state==='LINKED'?'SDK này đã dùng cho một tài khoản EarnApp; chỉ giữ để tra cứu, không cấp lại.':'SDK dữ liệu cũ chưa xác nhận đã dùng hay chưa; xác nhận ở Kho SDK trước.'):'';
   const ready=!!code&&!codeError&&!amountError&&!blocked&&!inList&&(d.note||'').length<=SDK_NOTE_MAX&&!!store.data;
+  // "Kiểm tra lại": the person has seen the newer round / version; nothing is saved by this click.
+  const accept=()=>setD(p=>({...p,cycle:vm.cycle,seen:{code,revision:target?.revision??null},pending:undefined}));
   async function run(label:string,fn:()=>Promise<{message:string;changed:boolean}>,after?:()=>void){
     if(busyRef.current)return false;busyRef.current=true;setBusy(label);setError('');onBusy?.(true);
     try{const r=await fn();await Promise.all([refresh(),utils.vmManagement.sdkStore.invalidate(),utils.vmManagement.sdkDetail.invalidate()]);toast.success(vm.code+': '+r.message,{duration:2500});after?.();return true;}
-    catch(e){setError(errorMessage(e));return false;}
+    // Refused (a newer round / version, someone else saved first): reload so the frame shows what is stored now; the typed content stays.
+    catch(e){setError(errorMessage(e));setLost(!(e as {data?:unknown})?.data);void Promise.all([refresh(),utils.vmManagement.sdkStore.invalidate()]).catch(()=>{});return false;}
     finally{busyRef.current=false;setBusy(null);onBusy?.(false);}
   }
-  const submit=()=>{if(!ready||busy)return;
-    const input={projectId,vmId:vm.id,expectedCycle:vm.cycle,code,expectedSdkRevision:target?.revision??null,amount:d.amount?.trim()?d.amount.trim():undefined,note:d.note?.trim()?d.note.trim():undefined,
+  const submit=()=>{if(!ready||busy)return;if(recheck){accept();return;}
+    const input={projectId,vmId:vm.id,expectedCycle:draftCycle,code,expectedSdkRevision:seenRev,amount:d.amount?.trim()?d.amount.trim():undefined,note:d.note?.trim()?d.note.trim():undefined,
       from:elsewhere?{vmId:elsewhere.id,expectedRevision:elsewhere.revision}:null};
     const sig=JSON.stringify(input),key=d.pending?.sig===sig?d.pending.key:crypto.randomUUID();setD(p=>({...p,pending:{sig,key}}));
     void run('add',()=>add.mutateAsync({...input,key}),()=>{setD({code:''});onDraft(null);});};
@@ -114,13 +124,14 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
       {canEdit&&<div className="vm-sdk-add" data-sdk-edit>
         <p className="text-xs font-semibold">Thêm SDK vào VM (không thay mã đang có)</p>
         <div className="vm-sdk-add-grid">
-          <input ref={codeInput} className="pm-input pm-code" aria-label={'Mã SDK mới cho '+vm.code} placeholder="Mã SDK" value={d.code} maxLength={128} readOnly={!!busy} spellCheck={false} onChange={e=>setD(p=>({...p,code:e.target.value,pending:undefined}))} onKeyDown={keys}/>
-          <input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ USD của mã mới '+vm.code} placeholder="Tiền USD (không bắt buộc)" value={d.amount||''} readOnly={!!busy} onChange={e=>setD(p=>({...p,amount:e.target.value,pending:undefined}))} onKeyDown={keys}/>
-          <input className="pm-input" aria-label={'Ghi chú mã mới '+vm.code} placeholder="Ghi chú (không bắt buộc)" value={d.note||''} maxLength={SDK_NOTE_MAX} readOnly={!!busy} onChange={e=>setD(p=>({...p,note:e.target.value,pending:undefined}))} onKeyDown={keys}/>
-          <button type="button" className="pm-button pm-button-primary" disabled={!ready||!!busy} onClick={submit}>{busy==='add'?'Đang lưu…':elsewhere?'Dùng cho VM này':'Thêm'}</button>
+          <input ref={codeInput} className="pm-input pm-code" aria-label={'Mã SDK mới cho '+vm.code} placeholder="Mã SDK" value={d.code} maxLength={128} readOnly={!!busy} spellCheck={false} onChange={e=>setD(p=>({...p,code:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
+          <input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ USD của mã mới '+vm.code} placeholder="Tiền USD (không bắt buộc)" value={d.amount||''} readOnly={!!busy} onChange={e=>setD(p=>({...p,amount:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
+          <input className="pm-input" aria-label={'Ghi chú mã mới '+vm.code} placeholder="Ghi chú (không bắt buộc)" value={d.note||''} maxLength={SDK_NOTE_MAX} readOnly={!!busy} onChange={e=>setD(p=>({...p,note:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
+          <button type="button" className="pm-button pm-button-primary" disabled={!ready||!!busy} onClick={submit}>{busy==='add'?'Đang lưu…':recheck?'Kiểm tra lại':elsewhere?'Dùng cho VM này':'Thêm'}</button>
         </div>
         {codeError&&<p className="vm-cell-error" role="alert">{codeError}</p>}{amountError&&<p className="vm-cell-error" role="alert">{amountError}</p>}
         {blocked&&<p className="vm-status-error" role="alert">{blocked}</p>}
+        {recheck&&!blocked&&<p className="vm-status-error" role="alert">{recheck}</p>}
         {inList&&<p className="text-xs pm-muted">Mã này đã ở trong danh sách của VM.</p>}
         {!inList&&code&&!codeError&&!blocked&&<p className="text-xs" aria-live="polite">{target?<>Mã đã lưu · {placeText(target)} · <span className={stateClass(target.state)}>{SDK_STATE_LABEL[target.state]}</span>{elsewhere?' · sẽ chuyển rõ '+placeText(target)+' → '+here:''}</>:<span className="pm-muted">Mã mới: chưa có tiền / ghi chú riêng.</span>}</p>}
         <div className="flex flex-wrap gap-2 items-center">
@@ -130,13 +141,13 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
         {picking&&<div className="vm-sdk-pick">
           <input className="pm-input" placeholder="Tìm mã, server, VM, ghi chú…" aria-label="Tìm SDK đã lưu" value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setPicking(false);}}}/>
           {store.isLoading&&<p className="text-xs pm-muted"><Loader2 size={12} className="inline animate-spin"/> Đang tải kho…</p>}
-          <ul role="listbox" aria-label="SDK chưa dùng có thể thêm">{choices.map(r=><li key={r.id}><button type="button" role="option" aria-selected={code===r.code} className={code===r.code?'active':''} onClick={()=>{setD({code:r.code});setPicking(false);}}>
+          <ul role="listbox" aria-label="SDK chưa dùng có thể thêm">{choices.map(r=><li key={r.id}><button type="button" role="option" aria-selected={code===r.code} className={code===r.code?'active':''} onClick={()=>{setD({code:r.code,cycle:vm.cycle,seen:{code:r.code,revision:r.revision}});setPicking(false);}}>
             <code className="vm-sdk">{shortCode(r.code,10)}</code><span>{r.amount!==null?formatSdkAmount(r.amount):<span className="pm-muted">Chưa ghi tiền</span>}</span><span className={r.vm?'text-amber-700':'pm-muted'}>{placeText(r)}</span>{r.note&&<span className="pm-muted vm-ellipsis">{r.note}</span>}</button></li>)}</ul>
           {store.data&&!choices.length&&<p className="text-xs pm-muted">Không có SDK chưa dùng nào khác trong dự án.</p>}
           <p className="text-xs pm-muted">Chỉ SDK chưa dùng. SDK đang ở VM khác được chuyển rõ nguồn → đích khi bấm Dùng cho VM này.</p>
         </div>}
       </div>}
-      {error&&<p role="alert" className="vm-status-error">{error}{d.pending?' Bấm lại với cùng nội dung sẽ gửi lại đúng yêu cầu này (không ghi hai lần).':''}</p>}
+      {error&&<p role="alert" className="vm-status-error">{error}{d.pending&&lost?' Bấm lại với cùng nội dung sẽ gửi lại đúng yêu cầu này (không ghi hai lần).':''}</p>}
       <p className="text-xs pm-muted">Enter lưu · Esc huỷ. Tiền là tiền tích luỹ USD của mã, không phải chi phí hay doanh thu. Ghi SDK không đổi tài khoản, PayPal hay tình trạng VM.</p>
     </div>
   </div>;

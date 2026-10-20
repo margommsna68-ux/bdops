@@ -20,6 +20,7 @@ type Tx=Prisma.TransactionClient;
 const vmSelect={id:true,code:true,revision:true,archivedAt:true,managed:true,server:{select:{id:true,code:true,archivedAt:true}},operation:{select:{cycle:true}}} as const;
 type ListVM=Prisma.VirtualMachineGetPayload<{select:typeof vmSelect}>;
 const label=(vm:{code:string;archivedAt:Date|null;server:{code:string;archivedAt:Date|null}})=>where(vm)+(vm.archivedAt||vm.server.archivedAt?' (đã xoá)':'');
+export const RECREATED_LINE='VM đã được tạo lại, kiểm tra lại dòng này';
 const staleCycle=(cycle:number)=>'VM đã sang lượt '+cycle+'; lệnh này dành cho lượt cũ. Tải lại rồi làm theo lượt hiện hành';
 export const USED_REFUSAL=(code:string)=>'SDK '+code+' đã dùng cho một tài khoản EarnApp; chỉ giữ để tra cứu, không cấp lại';
 const UNCONFIRMED_REFUSAL=(code:string)=>'SDK '+code+' là dữ liệu cũ chưa xác nhận đã dùng hay chưa; xác nhận ở Kho SDK trước';
@@ -56,14 +57,19 @@ interface Ctx {projectId:string;actorId:string;images:BusinessCollector;now:Date
 async function event(tx:Tx,ctx:Ctx,sdkId:string,kind:string,data:{fromVmId?:string|null;toVmId?:string|null;fromLabel?:string|null;toLabel?:string|null;detail?:Prisma.InputJsonValue}={}){
   await tx.sdkEvent.create({data:{projectId:ctx.projectId,sdkId,kind,actorId:ctx.actorId,createdAt:ctx.now,...data,detail:{via:ctx.via,...(data.detail as object||{})}}});
 }
-/** The record must still be the version the person saw (null = "I saw no stored code"). The write itself is conditional too. */
-function staleRecord(plan:ListPlan,expected:number|null|undefined){
+/**
+ * The record must still be the version the person saw. null = "I saw no stored code": never a right to overwrite. A code that appeared
+ * meanwhile is refused unless the request changes nothing (same code, same VM, same or blank money / note = giữ nguyên, see callers).
+ * The write itself is conditional too.
+ */
+export function staleRecord(plan:ListPlan,expected:number|null|undefined){
   const exp=expected??null;
   if(!plan.record)return exp===null?null:'SDK '+plan.code+' không còn trong kho như lúc kiểm tra; kiểm tra lại';
-  if(exp===null)return plan.kind==='SAME'?null:'SDK '+plan.code+' đã có trong kho với tiền / ghi chú riêng (có thể vừa được thêm); kiểm tra lại';
+  if(exp===null)return 'SDK '+plan.code+' vừa được thêm với tiền / ghi chú riêng; kiểm tra lại (nội dung đang nhập được giữ)';
   if(plan.record.revision!==exp)return 'SDK '+plan.code+' vừa được người khác thay đổi; kiểm tra lại (nội dung đang nhập được giữ)';
   return null;
 }
+const hasChanges=(plan:ListPlan,info:SdkInfo)=>{const ch=infoChanges(plan.record,info);return !!(ch.amount||ch.note);};
 async function applyInfo(tx:Tx,ctx:Ctx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
@@ -116,6 +122,7 @@ export async function addVmSdk(scope:ActorScope,input:ListAddInput,db:PrismaClie
     await authorizeVM(current,'ASSIGN',tx);
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     const planned=await planListAdd(tx,scope.projectId,vm,code,input.from??null);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
+    if(planned.plan.kind==='SAME'&&!hasChanges(planned.plan,info))return {changed:false,message:'Đã có trong danh sách của VM; giữ nguyên'};
     const stale=staleRecord(planned.plan,input.expectedSdkRevision);if(stale)throw new ProxyDomainError('STALE_PREVIEW',stale);
     const r=await applyListAdd(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:input.from?'Chuyển SDK':'Ô SDK'},vm,planned.plan,info);
     return {changed:r.changed,message:r.message};
@@ -196,7 +203,7 @@ export function parseSdkPaste(mode:PasteMode,text:string,serverCode:string|null,
 /** VM_011 → {prefix:'VM_', n:11, width:3}; codes of the range keep the padding of the start code. */
 export function rangeStart(code:string){const m=/^(.*?)(\d+)$/.exec(code.trim());return m?{prefix:m[1],n:Number(m[2]),width:m[2].length}:null;}
 export const rangeCode=(s:{prefix:string;n:number;width:number},offset:number)=>s.prefix+String(s.n+offset).padStart(s.width,'0');
-export interface PasteRow {line:number;vm:string|null;server:string|null;vmId:string|null;code:string|null;outcome:'NEW'|'TAKE'|'UPDATE'|'SAME'|'SKIP'|'ERROR';message:string;expectedSdkRevision:number|null;amount?:string|null;note?:string|null;info:string|null}
+export interface PasteRow {line:number;vm:string|null;server:string|null;vmId:string|null;expectedCycle:number|null;code:string|null;outcome:'NEW'|'TAKE'|'UPDATE'|'SAME'|'SKIP'|'ERROR';message:string;expectedSdkRevision:number|null;amount?:string|null;note?:string|null;info:string|null}
 export interface PastePreview {mode:PasteMode;rows:PasteRow[];ready:number;same:number;skipped:number;errors:number;range:{from:string;to:string;count:number}|null}
 const MAX=1000;
 function infoText(ch:ReturnType<typeof infoChanges>){
@@ -223,13 +230,13 @@ export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;tex
   const codeLines=new Map<string,number[]>();for(const t of targets)if(!t.l.blank&&!t.l.issue)codeLines.set(t.l.code,[...(codeLines.get(t.l.code)||[]),t.l.line]);
   const rows:PasteRow[]=[];
   for(const t of targets){
-    const base:PasteRow={line:t.l.line,vm:t.vmCode??null,server:t.srv??null,vmId:null,code:t.l.code||null,outcome:'ERROR',message:'',expectedSdkRevision:null,info:null};
+    const base:PasteRow={line:t.l.line,vm:t.vmCode??null,server:t.srv??null,vmId:null,expectedCycle:null,code:t.l.code||null,outcome:'ERROR',message:'',expectedSdkRevision:null,info:null};
     if(t.l.blank){rows.push({...base,code:null,outcome:'SKIP',message:input.mode==='RANGE'?'Dòng trống: giữ vị trí, không ghi':'Dòng trống'});continue;}
     if(t.l.issue){rows.push({...base,message:t.l.issue});continue;}
     if(!t.srv){rows.push({...base,message:'Chọn server hoặc dán kèm cột Server'});continue;}
     if(!t.vm){rows.push({...base,message:'Không có VM '+t.vmCode+' trên '+t.srv+' (web không tự tạo VM)'});continue;}
     if(t.vm.archivedAt||t.vm.server.archivedAt){rows.push({...base,message:label(t.vm)+' đã xoá; không ghi'});continue;}
-    const found={...base,vm:t.vm.code,server:t.vm.server.code,vmId:t.vm.id};
+    const found={...base,vm:t.vm.code,server:t.vm.server.code,vmId:t.vm.id,expectedCycle:cycleOf(t.vm)};
     const twice=codeLines.get(t.l.code)!;if(twice.length>1){rows.push({...found,message:'Cùng SDK với dòng '+twice.filter(n=>n!==t.l.line).join(', ')+'; một mã chỉ ghi một lần'});continue;}
     const planned=await planListAdd(db,scope.projectId,t.vm,t.l.code,null);if('error' in planned){rows.push({...found,message:planned.error});continue;}
     const {plan}=planned,ch=infoChanges(plan.record,{amount:t.l.amount,note:t.l.note}),info=infoText(ch),values={amount:t.l.amount,note:t.l.note};
@@ -239,10 +246,10 @@ export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;tex
   }
   return {mode:input.mode,rows,range,ready:rows.filter(r=>r.outcome==='NEW'||r.outcome==='TAKE'||r.outcome==='UPDATE').length,same:rows.filter(r=>r.outcome==='SAME').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
-export interface PasteApplyItem {line:number;vmId:string;code:string;expectedSdkRevision:number|null;amount?:string|null;note?:string|null}
+export interface PasteApplyItem {line:number;vmId:string;expectedCycle:number;code:string;expectedSdkRevision:number|null;amount?:string|null;note?:string|null}
 export async function applySdkPaste(scope:ActorScope,input:{key:string;items:PasteApplyItem[]},db:PrismaClient=prisma){
   if(!input.items.length||input.items.length>MAX||new Set(input.items.map(i=>i.code)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi mã SDK một dòng, tối đa '+MAX+' dòng');
-  for(const i of input.items){if(normalizeSdk(i.code)!==i.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+i.line);checkInfo(i);}
+  for(const i of input.items){if(normalizeSdk(i.code)!==i.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+i.line);if(!Number.isInteger(i.expectedCycle)||i.expectedCycle<1)throw new ProxyDomainError('INVALID_INPUT','Thiếu lượt VM ở dòng '+i.line+'; kiểm tra lại bản dán');checkInfo(i);}
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_PASTE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);const now=new Date(),ctx:Ctx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'};
     const rows:{line:number;vmId:string;code:string;outcome:'APPLIED'|'SAME'|'ERROR';message:string}[]=[];
@@ -250,11 +257,13 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
       const row=(outcome:'APPLIED'|'SAME'|'ERROR',message:string)=>rows.push({line:item.line,vmId:item.vmId,code:item.code,outcome,message});
       const vm=await tx.virtualMachine.findFirst({where:{id:item.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},select:vmSelect});
       if(!vm||vm.archivedAt||vm.server.archivedAt){row('ERROR','VM không còn hoạt động (đã xoá hoặc không thuộc dự án)');continue;}
+      // The line was checked for one round of this VM; after a recreation it is an old request: never moved to the new round.
+      if(cycleOf(vm)!==item.expectedCycle){row('ERROR',RECREATED_LINE);continue;}
       const planned=await planListAdd(tx,scope.projectId,vm,item.code,null);if('error' in planned){row('ERROR',planned.error);continue;}
       const {plan}=planned,info=checkInfo(item);
-      // A retry after a lost answer finds the code already in this VM's list with the same values: nothing written twice.
-      if(plan.kind==='SAME'){const ch=infoChanges(plan.record,info);if(!ch.amount&&!ch.note){row('SAME','Đã có trong danh sách của VM; giữ nguyên');continue;}}
-      const stale=staleRecord(plan,plan.kind==='SAME'&&item.expectedSdkRevision===null?plan.record!.revision:item.expectedSdkRevision);if(stale){row('ERROR',stale);continue;}
+      // The code is already in this VM's list with the same values (or blank fields): nothing to write, whoever saved it.
+      if(plan.kind==='SAME'&&!hasChanges(plan,info)){row('SAME','Đã có trong danh sách của VM; giữ nguyên');continue;}
+      const stale=staleRecord(plan,item.expectedSdkRevision);if(stale){row('ERROR',stale);continue;}
       try{const sp='p'+item.line;await tx.$executeRawUnsafe('SAVEPOINT '+sp);try{const r=await applyListAdd(tx,ctx,vm,plan,info);await tx.$executeRawUnsafe('RELEASE SAVEPOINT '+sp);row(r.changed?'APPLIED':'SAME',r.message);}catch(e){await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT '+sp);throw e;}}
       catch(e){if(e instanceof ProxyDomainError){row('ERROR',e.message.replace(/^[A-Z_]+: /,''));continue;}throw e;}
     }
@@ -262,6 +271,7 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
   },db);
 }
 // ---- Read: the list of every VM, for the grid (unused first, then used; current code marked) --------------------------------------
+const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
 export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
 export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[]){
   const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
@@ -269,6 +279,6 @@ export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[]){
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
     list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
-  for(const list of out.values())list.sort((a,b)=>Number(a.state==='LINKED')-Number(b.state==='LINKED'));
+  for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

@@ -14,10 +14,12 @@ type Mode='VM'|'RANGE';
 //     filter, sort or selection); blank lines inside keep their VM.
 // Checked while typing (nothing written), result per line Dòng → VM → SDK → Kết quả, one "Áp dụng N SDK". Codes are added to the VM's
 // list (never replacing one); the same code at the same VM again is "giữ nguyên"; a code on another VM or already used is refused.
+// Every line is bound to the VM and its round at the check (review fix 20/10/2026): a VM recreated meanwhile refuses that line at the
+// line, a background reload never re-binds it; "Kiểm tra lại" after the result checks the same content again (the text is kept).
 const OUTCOME:Record<string,string>={NEW:'Thêm mới',TAKE:'Lấy từ kho',UPDATE:'Cập nhật tiền / ghi chú',SAME:'Giữ nguyên',SKIP:'Bỏ qua',ERROR:'Lỗi'};
 export function SdkPasteBody({projectId,serverId,serverCode,servers,onSaved}:{projectId:string;serverId:string;serverCode:string|null;servers:{id:string;code:string}[];onSaved:()=>void}){
   const workspace=trpc.vmManagement.workspace.useQuery({projectId},{staleTime:30000}),check=trpc.vmManagement.sdkPastePreview.useMutation(),apply=trpc.vmManagement.sdkPasteApply.useMutation();
-  const [text,setText]=useState(''),[mode,setMode]=useState<Mode>('VM'),[chosen,setChosen]=useState(false),[start,setStart]=useState(''),[result,setResult]=useState<{sig:string;p:Preview}|null>(null),[error,setError]=useState(''),[done,setDone]=useState<Applied|null>(null),[checking,setChecking]=useState(false);
+  const [text,setText]=useState(''),[mode,setMode]=useState<Mode>('VM'),[chosen,setChosen]=useState(false),[start,setStart]=useState(''),[result,setResult]=useState<{sig:string;p:Preview}|null>(null),[error,setError]=useState(''),[done,setDone]=useState<Applied|null>(null),[checking,setChecking]=useState(false),[again,setAgain]=useState(0);
   const pending=useRef<{sig:string;key:string}|null>(null),seq=useRef(0);
   const vms=useMemo(()=>(workspace.data?.vms||[]).filter(v=>v.serverId===serverId&&!v.archivedAt).sort((a,b)=>compareCodes(a.code,b.code)),[workspace.data,serverId]);
   // Which way the list is written, until the person picks one: a first cell that is a VM (or server) code means "with VM codes".
@@ -29,11 +31,11 @@ export function SdkPasteBody({projectId,serverId,serverCode,servers,onSaved}:{pr
   useEffect(()=>{setDone(null);setError('');
     if(!text.trim()||needsStart){setResult(null);setChecking(false);return;}
     const n=++seq.current;setChecking(true);const t=setTimeout(async()=>{try{const p=await check.mutateAsync({projectId,...input});if(n===seq.current)setResult({sig,p});}catch(e){if(n===seq.current){setResult(null);setError(errorMessage(e));}}finally{if(n===seq.current)setChecking(false);}},400);
-    return ()=>clearTimeout(t);},[sig]);// eslint-disable-line react-hooks/exhaustive-deps
+    return ()=>clearTimeout(t);},[sig,again]);// eslint-disable-line react-hooks/exhaustive-deps
   const p=result?.sig===sig?result.p:null,ready=p&&!done?p.ready:0;
   async function save(){
     if(!p||!ready||apply.isLoading)return;
-    const items=p.rows.filter(r=>r.outcome==='NEW'||r.outcome==='TAKE'||r.outcome==='UPDATE').map(r=>({line:r.line,vmId:r.vmId!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
+    const items=p.rows.filter(r=>r.outcome==='NEW'||r.outcome==='TAKE'||r.outcome==='UPDATE').map(r=>({line:r.line,vmId:r.vmId!,expectedCycle:r.expectedCycle!,code:r.code!,expectedSdkRevision:r.expectedSdkRevision,amount:r.amount,note:r.note}));
     const s=JSON.stringify(items),key=pending.current?.sig===s?pending.current.key:crypto.randomUUID();pending.current={sig:s,key};
     try{const r=await apply.mutateAsync({projectId,key,items});pending.current=null;setDone(r);onSaved();}
     catch(e){setError(errorMessage(e)+' Nội dung được giữ; bấm lại gửi đúng yêu cầu này (không ghi hai lần).');}
@@ -57,6 +59,6 @@ export function SdkPasteBody({projectId,serverId,serverCode,servers,onSaved}:{pr
           <td className={err?'text-red-600':r.outcome==='SAME'||r.outcome==='SKIP'?'pm-muted':''}>{a?(a.outcome==='APPLIED'?'Đã lưu':a.outcome==='SAME'?'Giữ nguyên':'Lỗi')+' · '+a.message:OUTCOME[r.outcome]+' · '+r.message}</td></tr>;})}</tbody></table></div></>}
     {done&&<p role="status" className="pm-success text-sm">Đã lưu {done.applied} SDK · giữ nguyên {done.same} · lỗi {done.errors}.</p>}
     {error&&<p role="alert" className="pm-error">{error}</p>}
-    <div className="flex gap-2 justify-end"><button className="pm-button pm-button-primary" disabled={apply.isLoading||checking||!ready} onClick={()=>void save()}>{apply.isLoading?'Đang lưu…':`Áp dụng ${ready} SDK`}</button></div>
+    <div className="flex gap-2 justify-end">{done&&done.errors>0&&<button type="button" className="pm-button" onClick={()=>setAgain(n=>n+1)}>Kiểm tra lại</button>}<button className="pm-button pm-button-primary" disabled={apply.isLoading||checking||!ready} onClick={()=>void save()}>{apply.isLoading?'Đang lưu…':`Áp dụng ${ready} SDK`}</button></div>
   </div>;
 }

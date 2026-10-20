@@ -127,7 +127,7 @@ Migration `20261019150000_sdk_store` (chỉ thêm), đã chạy thử trên bả
 - **Đã dùng** = mã đã đưa vào một tài khoản EarnApp (`linkState LINKED`). Tick ở danh sách là ghi ngay (một lệnh, không dialog), lưu người,
   thời gian, lượt VM; không bỏ tick được, hoàn tác bị từ chối, không cấp lại cho VM / tài khoản khác. Không suy ra tài khoản từ tài khoản
   hiện tại của VM: `linkedEarnAppId` để trống nếu chưa biết. Lưu, copy, thêm vào VM hay chuyển VM không bao giờ tự đánh dấu Đã dùng.
-- Ô SDK: mã chưa dùng đầu tiên + Copy, và "3 SDK · 2 chưa dùng". Bấm mở danh sách cạnh ô: Mã + Copy (+ lịch sử) | Tiền tích luỹ USD |
+- Ô SDK: mã chưa dùng đầu tiên + Copy, và "3 SDK · 2 chưa dùng" (mã chưa xác nhận đếm riêng, xem mục sửa 20/10 bên dưới). Bấm mở danh sách cạnh ô: Mã + Copy (+ lịch sử) | Tiền tích luỹ USD |
   Ghi chú | Đã dùng; chưa dùng trước, đã dùng sau. Tiền / ghi chú sửa tại chỗ (Enter lưu, Esc huỷ) trên cùng bản ghi với Kho SDK.
   Mã chưa dùng có nút đưa về kho. Ô thêm mã (Enter / Thêm) và "Chọn SDK đã lưu" (mã ở VM khác: chuyển rõ nguồn → đích).
 - Tạo lại VM sau SUS: giữ ID / mã VM; mã chưa dùng (kể cả của lượt trước) vẫn trong danh sách và dùng được cho tài khoản mới; mã đã dùng
@@ -148,3 +148,19 @@ Migration `20261019150000_sdk_store` (chỉ thêm), đã chạy thử trên bả
   nút "Áp dụng N SDK". Dán lại cùng mã cùng VM = Giữ nguyên, không bản sao / lịch sử thừa; ô tiền / ghi chú trống giữ nguyên. Mã ở VM khác
   báo vị trí (không chuyển ngầm); mã đã dùng không cấp lại; một mã chỉ ghi một lần trong đợt.
 - Migration `20261020090000_sdk_vm_list` (thêm cột, không xoá gì): mọi mã đang ở VM vào danh sách của chính VM đó.
+
+### Sửa sau kiểm độc lập (20/10/2026)
+
+- **Bản dán gắn với lượt VM:** mỗi dòng xem trước mang VM và lượt VM lúc kiểm tra (`expectedCycle`); `sdkPasteApply` bắt buộc trường này và
+  kiểm lại trong giao dịch lưu. VM đã được tạo lại thì dòng đó không ghi, báo "VM đã được tạo lại, kiểm tra lại dòng này", nội dung dán giữ
+  nguyên; các dòng khác vẫn lưu theo từng dòng. Không bao giờ tự lấy lượt mới nhất. "Kiểm tra lại" (hiện khi có dòng lỗi) kiểm lại đúng nội
+  dung đó. SDK đã lưu trước vẫn ở danh sách VM qua các lượt; chỉ yêu cầu cũ chưa lưu bị chặn.
+- **Khung SDK đang mở:** nháp thêm mã giữ lượt VM lúc bắt đầu gõ và phiên bản của mã lúc người dùng thấy; dữ liệu nền tải lại không đổi chúng.
+  Lượt hoặc phiên bản đã khác thì khung báo tại chỗ, nút đổi thành "Kiểm tra lại" (bấm không ghi gì), bấm Thêm sau đó mới lưu. Bị từ chối thì
+  khung tải lại dữ liệu, giữ nội dung đang nhập.
+- **Không ghi đè mã người khác vừa thêm:** `expectedSdkRevision = null` chỉ nghĩa là "chưa thấy mã này"; nếu mã đã xuất hiện và yêu cầu làm
+  đổi tiền / ghi chú thì bị từ chối tại dòng / tại khung. Cùng mã, cùng VM và không đổi gì (giá trị như nhau hoặc ô trống) là "Giữ nguyên",
+  không thêm lịch sử. Cập nhật chỉ khi đúng phiên bản đã đọc. Thử lại cùng khoá trả kết quả cũ, không ghi lại.
+- **Đếm:** "chưa dùng" chỉ đếm UNLINKED; mã cũ chưa xác nhận hiện riêng ("3 SDK · 1 chưa dùng · 1 chưa xác nhận"); mã hiện ở ô / copy nhanh
+  ưu tiên mã thật sự chưa dùng; danh sách xếp Chưa dùng → Chưa xác nhận → Đã dùng. Không đổi trạng thái dữ liệu cũ.
+- Test: `src/__tests__/proxy-management/sdk-list-review.integration.test.ts`. Evidence docs/superpowers/evidence/2026-10-20-sdk-review-fixes/.

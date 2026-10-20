@@ -1,0 +1,11 @@
+   × rejects an old paste after the VM is recreated, leaving the new cycle untouched 207ms
+   × does not let a NEW paste silently overwrite a code another operator just created 41ms
+   × does not let an old single-add draft overwrite a code just created on the same VM 34ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  .runtime/review-sdk-list-20261020.test.ts > rejects an old paste after the VM is recreated, leaving the new cycle untouched
+AssertionError: stale cycle paste must not apply: expected 1 to be +0 // Object.is equality
+ FAIL  .runtime/review-sdk-list-20261020.test.ts > does not let a NEW paste silently overwrite a code another operator just created
+AssertionError: newer amount and note must survive the old paste: expected { amount: '10', note: 'older draft' } to deeply equal { amount: '20', …(1) }
+ FAIL  .runtime/review-sdk-list-20261020.test.ts > does not let an old single-add draft overwrite a code just created on the same VM
+AssertionError: newer amount and note must survive the old add: expected { amount: '10', note: 'older draft' } to deeply equal { amount: '20', …(1) }
+      Tests  3 failed (3)
