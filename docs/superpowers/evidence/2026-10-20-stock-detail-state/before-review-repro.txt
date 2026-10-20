@@ -1,0 +1,12 @@
+ ❯ .runtime/review-stock-detail-state-20261020.test.tsx (3 tests | 3 failed) 121ms
+   × a background revision refresh must preserve an unsaved account edit 39ms
+   × a changed account revision must not continue showing the old cached password 21ms
+   × a partial NEW proxy import must keep the refused line editable with its reason 11ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected '0123456789' to be '+84 900 000 002' // Object.is equality
+ ❯ .runtime/review-stock-detail-state-20261020.test.tsx:85:95
+AssertionError: expected 'Apple ID · apple@example.invalidSửaEm…' not to contain '<bí mật giả>'
+ ❯ .runtime/review-stock-detail-state-20261020.test.tsx:95:37
+AssertionError: expected undefined to be 'bad line' // Object.is equality
+ ❯ .runtime/review-stock-detail-state-20261020.test.tsx:109:54
+      Tests  3 failed (3)

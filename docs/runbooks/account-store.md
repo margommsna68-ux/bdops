@@ -366,3 +366,16 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - Test: `account-edit.integration.test.ts`, `account-detail-ui.test.tsx`, `stock-bulk-import.test.tsx`, `account-delete.integration.test.ts`,
   `proxy-retire.integration.test.ts`. Phát hành: commit fe2bf5f, backup host 0211ccb1, deploy d859efc0, không migration; host chỉ đọc trước /
   sau giống hệt (chỉ tick rồi bỏ tick một dòng, mở khung chi tiết ở trạng thái che). Evidence docs/superpowers/evidence/2026-10-20-stock-bulk-import/.
+
+### Sửa sau kiểm độc lập bản fe2bf5f (20 October 2026)
+
+- **Nháp sửa không mất khi dữ liệu nền tải lại:** nháp gắn với phiên bản lúc bấm Sửa. Bản mới đến thì khung báo "vừa được cập nhật ở nơi
+  khác", hiện "Bản mới: …" dưới ô, Lưu khoá lại cho tới khi bấm **Đối chiếu bản mới** (giữ nguyên nháp, chuyển sang phiên bản mới có chủ
+  đích). Nháp chỉ bỏ khi chính lần lưu đó thành công hoặc Huỷ sửa. Mất phản hồi: thử lại gửi đúng nội dung cũ (kể cả revision) với cùng khoá.
+- **Bí mật không dùng lại của phiên bản cũ:** mật khẩu, 2FA, token, link 2FA, link SMS đọc sau PIN gắn với dự án + tài khoản + phiên bản +
+  quyền copy; đổi bất kỳ thứ nào thì ẩn ngay, phải nhập PIN lại. Phản hồi đến chậm cho phiên bản / tài khoản khác bị bỏ, không hiện, không copy.
+- **Nhập proxy một phần:** không còn coi là "đã xong": giữ ô nhập với đúng dòng chưa lưu, lý do từng dòng và nút Kiểm tra và lưu; gói / nhóm
+  mới vừa tạo được chọn như đã có để lần sau không tạo trùng; sửa hết và lưu thành công thì tự đóng. Quy tắc ghép cặp replace không đổi.
+- Test: `stock-detail-state.test.tsx` (jsdom; 4/5 ca đỏ trên fe2bf5f, ca mất phản hồi là ca bảo vệ). Bộ tái hiện
+  `.runtime/review-stock-detail-state-20261020.test.tsx` đỏ 3/3 → xanh 3/3; `.runtime/review-stock-delete-apple-20261020.test.ts` vẫn xanh 2/2.
+  Evidence docs/superpowers/evidence/2026-10-20-stock-detail-state/.

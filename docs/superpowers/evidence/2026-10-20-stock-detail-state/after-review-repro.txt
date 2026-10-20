@@ -1,0 +1,3 @@
+ ✓ .runtime/review-stock-delete-apple-20261020.test.ts (2 tests) 159ms
+ ✓ .runtime/review-stock-detail-state-20261020.test.tsx (3 tests) 117ms
+      Tests  5 passed (5)

@@ -1,0 +1,12 @@
+ ❯ src/__tests__/proxy-management/stock-detail-state.test.tsx (5 tests | 4 failed) 158ms
+   × a background revision keeps the unsaved edit and its base; Lưu waits for an explicit "Đối chiếu bản mới", then sends the new revision 38ms
+   ✓ a lost answer keeps the draft; the retry sends the same body with the same key 21ms
+   × a changed revision hides the cached password; a new PIN reads the current one 21ms
+   × a late secret answer for an older version, another account or a lost copy right is thrown away 17ms
+   × a partial NEW proxy import keeps the refused line editable with its reason; fixing it and saving closes the dialog 10ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ ❯ src/__tests__/proxy-management/stock-detail-state.test.tsx:43:40
+ ❯ src/__tests__/proxy-management/stock-detail-state.test.tsx:60:37
+ ❯ src/__tests__/proxy-management/stock-detail-state.test.tsx:68:30
+ ❯ src/__tests__/proxy-management/stock-detail-state.test.tsx:82:99
+      Tests  4 failed | 1 passed (5)
