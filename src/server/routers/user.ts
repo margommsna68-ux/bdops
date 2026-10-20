@@ -359,7 +359,7 @@ export const userRouter = router({
         orderBy: { date: "desc" },
         take: 50,
         include: {
-          project: { select: { id: true, code: true } },
+          project: { select: { id: true, code: true, name: true } },
           withdrawals: { select: { id: true, transactionId: true, amount: true } },
         },
       }):[];
@@ -384,7 +384,7 @@ export const userRouter = router({
           id: true, date: true, amount: true, paypalFee: true, paypalFeeSetAt: true,
           transactionId: true, collectorNote: true, paidToTeam: true, projectId: true,
           sourcePaypal: { select: { code: true } },
-          project: { select: { code: true } },
+          project: { select: { code: true, name: true } },
           agentEmail: { select: { email: true } },
         },
       }) : [];

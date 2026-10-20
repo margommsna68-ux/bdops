@@ -53,3 +53,8 @@ export function capitalName(name: string | null | undefined): string {
   // Word = run of non-space characters (\b\w would split "bản" at the accented letter).
   return name.replace(/(^|\s)(\S)/gu, (_, s: string, c: string) => s + c.toUpperCase());
 }
+
+/** What people see for a project: its name (MOON); the code (PERSONAL_SHEET) is internal and shown only when there is no name. */
+export function projectLabel(p: { code?: string | null; name?: string | null } | null | undefined): string {
+  return p?.name?.trim() || p?.code || "—";
+}

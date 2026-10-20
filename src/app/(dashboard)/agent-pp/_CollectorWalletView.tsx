@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
-import { formatCurrency, capitalName } from "@/lib/utils";
+import { formatCurrency, capitalName, projectLabel } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { PinVerifyDialog } from "@/components/PinVerify";
 import toast from "react-hot-toast";
@@ -659,7 +659,7 @@ export function CollectorWalletView({ projectId }: { projectId: string }) {
                       {new Date(tx.date).toLocaleDateString("en-US", { day: "2-digit", month: "2-digit" })}
                     </td>
                     <td className="px-2 py-2 text-xs">
-                      {tx.project?.code ? <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{tx.project.code}</span> : <span className="text-gray-300">—</span>}
+                      {tx.project?.code ? <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{projectLabel(tx.project)}</span> : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-2 py-2 text-xs font-medium">{tx.sourcePaypal?.code ?? "—"}</td>
                     <td className="px-2 py-2 text-xs">

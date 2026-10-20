@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
-import { formatCurrency, formatDate, capitalName } from "@/lib/utils";
+import { formatCurrency, formatDate, capitalName, projectLabel } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useSettingsStore } from "@/lib/settings-store";
 import { isCollectorOnly } from "@/lib/collector-utils";
@@ -597,7 +597,7 @@ export default function AgentPPPage() {
                         <td className="px-2 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(w.date)}</td>
                         <td className="px-2 py-2 text-xs">
                           {w.project?.code ? (
-                            <span className="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{w.project.code}</span>
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{projectLabel(w.project)}</span>
                           ) : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-2 py-2 text-xs font-medium">{w.sourcePaypal?.code ?? "—"}</td>
@@ -799,7 +799,7 @@ export default function AgentPPPage() {
                           <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">{formatDate(e.date)}</td>
                           <td className="px-3 py-2 text-xs font-medium text-gray-800">{capitalName(e.collector?.name || e.collector?.username)}</td>
                           <td className="px-3 py-2 text-xs">
-                            {e.project?.code ? <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{e.project.code}</span> : "—"}
+                            {e.project?.code ? <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px]">{projectLabel(e.project)}</span> : "—"}
                           </td>
                           <td className="px-3 py-2 text-xs">
                             <Badge className={

@@ -1,4 +1,5 @@
 "use client";
+import { projectLabel } from "@/lib/utils";
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
@@ -147,7 +148,7 @@ export default function UserDetailPage() {
                     }`}
                     title={m.project.name}
                   >
-                    {m.project.code}
+                    {projectLabel(m.project)}
                   </button>
                 );
               })}
@@ -462,7 +463,7 @@ function AdminWithdrawalsSection({
               return (
                 <tr key={w.id} className="hover:bg-gray-50">
                   <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap">{new Date(w.date).toLocaleDateString("en-US")}</td>
-                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{w.project?.code ?? "—"}</Badge></td>
+                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{projectLabel(w.project)}</Badge></td>
                   <td className="px-2 py-1.5 font-medium">{w.sourcePaypal?.code ?? "—"}</td>
                   <td className="px-2 py-1.5 font-mono text-gray-500 truncate max-w-[120px]">{w.transactionId || "—"}</td>
                   <td className="px-2 py-1.5 text-right font-semibold text-green-700">{formatCurrency(Number(w.amount))}</td>
@@ -562,7 +563,7 @@ function AdminExpensesSection({
               return (
                 <tr key={e.id} className="hover:bg-gray-50">
                   <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap">{new Date(e.date).toLocaleDateString("en-US")}</td>
-                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{e.project?.code ?? "—"}</Badge></td>
+                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[9px]">{projectLabel(e.project)}</Badge></td>
                   <td className="px-2 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${typeColor[e.type] || "bg-gray-100 text-gray-700"}`}>
                       {typeLabel[e.type] || e.type}

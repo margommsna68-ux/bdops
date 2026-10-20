@@ -508,7 +508,7 @@ export const agentPPRouter = router({
           include: {
             agentEmail: { select: { email: true, label: true } },
             agentUser: { select: { name: true, username: true } },
-            project: { select: { code: true } },
+            project: { select: { code: true, name: true } },
           },
         }),
         ctx.prisma.agentSale.count({ where }),

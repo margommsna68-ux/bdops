@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { capitalName } from "@/lib/utils";
+import { capitalName, projectLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -430,7 +430,7 @@ export default function AdminUsersPage() {
                       <span key={ms.project.id} className={`inline-block text-[10px] px-1.5 py-0.5 rounded mr-1 ${
                         ms.project.id === projectId ? "bg-blue-100 text-blue-700 font-medium" : "bg-gray-100 text-gray-500"
                       }`}>
-                        {ms.project.code}
+                        {projectLabel(ms.project)}
                       </span>
                     ))}
                     {isAdmin && (
@@ -974,12 +974,12 @@ export default function AdminUsersPage() {
                 {projectDialog?.memberships && projectDialog.memberships.length > 0 ? (
                   projectDialog.memberships.map((ms: any) => (
                     <div key={ms.project.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
-                      <span className="text-sm font-medium text-blue-800">{ms.project.code || ms.project.name}</span>
+                      <span className="text-sm font-medium text-blue-800">{projectLabel(ms.project)}</span>
                       <span className="text-[10px] text-blue-500">({ms.role})</span>
                       {ms.project.id !== projectId && (
                         <button
                           onClick={() => {
-                            if (confirm(`Xóa ${projectDialog?.name} khỏi project ${ms.project.code}?`)) {
+                            if (confirm(`Xóa ${projectDialog?.name} khỏi dự án ${projectLabel(ms.project)}?`)) {
                               removeMember.mutate({
                                 projectId: ms.project.id,
                                 memberId: ms.id,
@@ -1015,7 +1015,7 @@ export default function AdminUsersPage() {
                   <div className="space-y-2">
                     {available.map((p: any) => (
                       <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-gray-50 border">
-                        <span className="text-sm font-medium">{p.code || p.name}</span>
+                        <span className="text-sm font-medium">{projectLabel(p)}</span>
                         <div className="flex items-center gap-2">
                           <Select value={addProjectRole} onValueChange={(v) => setAddProjectRole(v as any)}>
                             <SelectTrigger className="w-28 h-7 text-xs">
