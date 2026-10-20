@@ -336,3 +336,32 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - Test: `account-delete.integration.test.ts`, `account-url.test.ts`. Phát hành (cùng Apple ID): commit ce29911, backup host 7587897d, deploy 65b78f18,
   migration 20261020150000_apple_id_fields; host chỉ đọc trước / sau giống hệt (chỉ xem kiểm tra dán, không nhập / xoá). Evidence
   docs/superpowers/evidence/2026-10-20-stock-delete-apple-id/.
+
+## Khung chi tiết, một thanh thao tác, nhập xong về bảng (20 October 2026, tiếp)
+
+- **Khung chi tiết:** bấm email ở bảng Gmail / Apple ID → khung ngay dưới dòng (không sang trang cũ). Apple ID 5 cột hiện Email đăng nhập,
+  Mật khẩu, Link lấy mã 2FA, Link SMS, Số điện thoại, Ghi chú; tài khoản mẫu cũ hiện đúng trường đã lưu (2FA TOTP, Email khôi phục, Token);
+  loại bí mật trống không được đề xuất (khung và hộp Copy). Email có Copy riêng; mật khẩu che, Xem / Ẩn / Copy sau PIN (quyền copy +
+  `businessManagement.copyAccount`, giữ trong bộ nhớ của khung, mất khi đóng); "Lấy mã 2FA" / "SMS" mở đúng link đã nhập ở tab mới, chỉ
+  khi bấm.
+- **Sửa (ADMIN / MODERATOR):** nút Sửa → một nút Lưu, mờ khi chưa đổi, "Lưu N trường" khi có thay đổi hợp lệ. Chỉ gửi trường thực sự đổi
+  (`accountStore.updateLogin`, `changes` từng trường: bỏ trống = giữ, `null` = xoá). Ô bí mật trống / đang che = giữ nguyên; xoá một trường là
+  nút riêng "Xoá trường này"; để trống không bao giờ là xoá. Backend kiểm quyền, revision (hai người sửa cùng dòng: người sau bị từ chối,
+  không ghi đè), email trùng (kể cả dòng đã xoá / dự án khác), link http(s), SĐT. Giữ ID, liên kết EarnApp / VM, dấu đã dùng, lô, chi phí.
+  Nhật ký `ACCOUNT_STOCK_EDIT` (ảnh GMAIL, hoàn tác được), chỉ giữ digest của bí mật. Lỗi hiện tại ô, nháp giữ nguyên. Ghi chú vẫn sửa tại ô bảng.
+- **Một thanh thao tác** (`BulkBar`, dùng chung cho Gmail / Apple ID, PayPal, Kho proxy): "Đã chọn N" → thao tác thường dùng (Đổi tình
+  trạng + Áp dụng; proxy: Đổi nhóm, Chuyển server, Gán VM, Trạng thái + Áp dụng, Copy, Khôi phục) → cuối thanh Xoá (nhỏ, đỏ nhẹ) và Bỏ chọn.
+  Thanh luôn ở cùng chỗ, cao cố định (khi chưa chọn: một dòng gợi ý), nên chọn dòng không đẩy bảng; màn hẹp thì xuống dòng để luôn thấy
+  Xoá / Bỏ chọn. N là đúng số dòng bị tác động, kể cả dòng đã chọn ở trang khác ("gồm M ở trang khác"); Xoá ghi số dòng xoá được.
+- **Nhập xong về bảng:** nhập hết (không còn dòng lỗi / email chờ bổ sung) → khung tự đóng, bảng làm mới, "Đã nhập N … vào lô X"; nháp bị bỏ
+  hẳn (nội dung, bí mật, tiền, kết quả kiểm tra, lô nhập bổ sung), chỉ giữ lựa chọn Gmail / Apple ID. Bộ lọc giữ nguyên; nếu che dữ liệu mới,
+  thông báo có "Xem vừa nhập" (mở đúng lô). Nhập một phần: chỉ giữ dòng cần sửa, sửa tiếp vào cùng lô, không thêm chi phí. Mất phản hồi:
+  không đóng, giữ nội dung, Thử lại cùng khoá. Nhập proxy mới: như trên, "Xem vừa nhập" = `?batch=<id>` (danh sách đúng các proxy của đợt).
+- **Sửa sau kiểm độc lập:** đường "Ẩn tài khoản" cũ dùng chung `deleteRefusal` với Xoá khỏi kho (chặn PP còn tiền ở bất kỳ đồng tiền, yêu
+  cầu rút đang chờ, mục cần đối chiếu, đang gán); Lịch sử nhập kho đếm email của mọi PP trong lô (kể cả PP đã xoá), không đổi qua xoá /
+  khôi phục / hoàn tác. Bộ tái hiện `.runtime/review-stock-delete-apple-20261020.test.ts` đỏ 2/2 → xanh 2/2.
+- **Cho AI sau này:** dòng VM mang `data-project-id`, `data-server-id`, `data-vm-id`, `data-vm-code`, `data-cycle`, `data-account-id`; dòng tài
+  khoản `data-account-id`; các nút có tên rõ (Xoá khỏi kho …, Xem / Copy Mật khẩu …). AI dùng cùng endpoint, quyền, PIN, revision và lượt VM
+  như người dùng; không có đường đọc bí mật riêng.
+- Test: `account-edit.integration.test.ts`, `account-detail-ui.test.tsx`, `stock-bulk-import.test.tsx`, `account-delete.integration.test.ts`,
+  `proxy-retire.integration.test.ts`. Evidence docs/superpowers/evidence/2026-10-20-stock-bulk-import/.

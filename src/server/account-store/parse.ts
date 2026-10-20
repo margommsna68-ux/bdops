@@ -27,7 +27,7 @@ export function parseLoginLines(text:string,format:LoginFormat='STANDARD'):Login
     if(format==='APPLE5'){
       const link2=c[2]?webLink(c[2]):null,sms=c[3]?webLink(c[3]):null,phone=c[4]||null;
       const error=!isEmail(email)?'Tài khoản đăng nhập phải là email hợp lệ':c.length>5?'Quá nhiều cột; dùng Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại':(c[1]||'').length>2000?'Ô quá dài'
-        :c[2]&&!link2?'Link lấy 2FA phải là đường dẫn web (http:// hoặc https://)':c[3]&&!sms?'Link SMS phải là đường dẫn web (http:// hoặc https://)':phone&&!PHONE.test(phone)?'Số điện thoại chỉ gồm số, dấu + và khoảng trắng':null;
+        :c[2]&&!link2?'Link lấy mã 2FA phải là đường dẫn web (http:// hoặc https://)':c[3]&&!sms?'Link SMS phải là đường dẫn web (http:// hoặc https://)':phone&&!PHONE.test(phone)?'Số điện thoại chỉ gồm số, dấu + và khoảng trắng':null;
       out.push({line,email,password:v(1),...none,...(error?{}:{twoFaLink:link2,smsLink:sms,phone}),error});continue;
     }
     const error=!isEmail(email)?'Tài khoản đăng nhập phải là email hợp lệ':c.length>5?'Quá nhiều cột; dùng Tài khoản | Mật khẩu | 2FA | Email khôi phục | Ghi chú (ghi chú có dấu | thì dùng tab)':c.slice(1,4).some(s=>s.length>2000)||(c[4]||'').length>1000?'Ô quá dài':c[3]&&!isEmail(c[3].toLowerCase())?'Email khôi phục không hợp lệ':null;

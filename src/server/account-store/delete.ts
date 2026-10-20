@@ -21,7 +21,7 @@ type VmRef={id:string;code:string;archivedAt:Date|null;server:{id:string;code:st
 const livePlace=(vm:VmRef|null|undefined)=>vm&&!vm.archivedAt&&!vm.server.archivedAt?{serverId:vm.server.id,vmId:vm.id,server:vm.server.code,vm:vm.code}:null;
 const vmHref=(p:{serverId:string;vmId:string})=>'/infrastructure/servers/'+encodeURIComponent(p.serverId)+'?vm='+encodeURIComponent(p.vmId)+'&tab=account';
 /** Money left by the book per currency (same rules as the PayPal ledger: confirmed receipts incl. opening + internal in − debits). */
-async function bookBalances(db:Parameters<Parameters<typeof runBusinessCommand>[2]>[0],projectId:string,paypalId:string){
+async function bookBalances(db:Tx,projectId:string,paypalId:string){
   const [funds,outs]=await Promise.all([
     db.fundTransaction.findMany({where:{projectId,paypalId,voidedAt:null,confirmed:true,failed:false},select:{amount:true,currency:true}}),
     db.withdrawal.findMany({where:{projectId,voidedAt:null,OR:[{sourcePaypalId:paypalId},{destPaypalId:paypalId,type:'MIXING'}]},select:{sourcePaypalId:true,destPaypalId:true,type:true,amount:true,currency:true,receivedAmount:true,receivedCurrency:true}}),
@@ -38,6 +38,27 @@ async function withOperation<T extends Record<string,unknown>>(db:PrismaClient,p
   const op=await db.operationJournal.findUnique({where:{projectId_commandKey:{projectId,commandKey:key}},select:{id:true}});
   return {...result,operationId:op?.id??null};
 }
+type Tx=Parameters<Parameters<typeof runBusinessCommand>[2]>[0];
+type Refusal={message:string;place:StockActionRow['place'];href:string|null};
+/** Why a live login / PayPal may not leave the stock now, or null. Shared by Xoá khỏi kho and the older "Ẩn tài khoản" (review fix 20/10/2026). */
+export async function deleteRefusal(tx:Tx,projectId:string,kind:StockKind,id:string):Promise<Refusal|null>{
+  if(kind==='LOGIN'){
+    const old=await tx.gmailAccount.findFirst({where:{id,projectId},include:{earnApp:{select:{vm:vmSelect}},vms:{where:{managed:true,archivedAt:null},select:vmSelect.select,take:1}}});
+    const place=livePlace(old?.earnApp?.vm)||livePlace(old?.vms[0]);
+    return place?{message:'Đang gán cho '+place.server+' / '+place.vm+'; bỏ gán tại VM trước',place,href:vmHref(place)}:null;
+  }
+  const old=await tx.payPalAccount.findFirst({where:{id,projectId},include:{emails:{where:{archivedAt:null},select:{id:true,email:true,reviewHold:true,earnApp:{select:{vm:vmSelect}}}},earnApps:{where:{paypalEmailId:null},select:{id:true}}}});
+  if(!old)return null;
+  const assigned=old.emails.map(e=>({e,place:livePlace(e.earnApp?.vm)})).find(x=>x.place);
+  if(assigned)return {message:assigned.e.email+' đang nhận cho '+assigned.place!.server+' / '+assigned.place!.vm+'; bỏ gán tại VM trước',place:assigned.place,href:vmHref(assigned.place!)};
+  const pp='/paypals?pp='+encodeURIComponent(old.code);
+  const pending=await tx.earnPayoutRequest.count({where:{paypalId:old.id,state:'REQUESTED',consumedAt:null}});
+  if(pending)return {message:'Còn '+pending+' yêu cầu rút đang chờ tiền về; xử lý ở Tiền vào PayPal trước',place:null,href:pp+'&show=in'};
+  const left=await bookBalances(tx,projectId,old.id);
+  if(left.length)return {message:'Còn lại theo sổ '+left.join(', ')+'; chuyển / rút hết hoặc đối chiếu trước',place:null,href:pp+'&show=out'};
+  if(old.emails.some(e=>e.reviewHold&&!e.earnApp)||old.earnApps.length)return {message:'Còn mục cần đối chiếu (email tạm giữ hoặc liên kết cũ chưa rõ email); xử lý ở Cần đối chiếu trước',place:null,href:'/paypals?view=review'};
+  return null;
+}
 export async function deleteStock(scope:ActorScope,input:{kind:StockKind;items:{id:string;expectedRevision:number}[];key:string},db:PrismaClient=prisma){
   if(!input.items.length||input.items.length>MAX)throw new ProxyDomainError('INVALID_INPUT','Chọn từ 1 đến '+MAX+' dòng');
   const result=await runBusinessCommand<StockActionResult>(scope,{key:input.key,payload:input,kind:'ACCOUNT_STOCK_DELETE',module:input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
@@ -45,26 +66,18 @@ export async function deleteStock(scope:ActorScope,input:{kind:StockKind;items:{
     const row=(id:string,outcome:StockActionRow['outcome'],message:string,place:StockActionRow['place']=null,href:string|null=null)=>rows.push({id,outcome,message,place,href:href??(place?vmHref(place):null)});
     for(const item of input.items){
       if(input.kind==='LOGIN'){
-        const old=await tx.gmailAccount.findFirst({where:{id:item.id,projectId:scope.projectId},include:{earnApp:{select:{vm:vmSelect}},vms:{where:{managed:true,archivedAt:null},select:vmSelect.select,take:1}}});
+        const old=await tx.gmailAccount.findFirst({where:{id:item.id,projectId:scope.projectId}});
         if(!old){row(item.id,'ERROR','Không còn trong kho');continue;}
         if(old.archivedAt){row(item.id,'SKIP','Đã xoá trước đó');continue;}
         if(old.revision!==item.expectedRevision){row(item.id,'ERROR','Vừa được sửa; tải lại');continue;}
-        const place=livePlace(old.earnApp?.vm)||livePlace(old.vms[0]);
-        if(place){row(item.id,'ERROR','Đang gán cho '+place.server+' / '+place.vm+'; bỏ gán tại VM trước',place);continue;}
+        const no=await deleteRefusal(tx,scope.projectId,'LOGIN',old.id);if(no){row(item.id,'ERROR',no.message,no.place,no.href);continue;}
         await images.remember('GMAIL',old.id);await tx.gmailAccount.update({where:{id:old.id},data:{archivedAt:now,revision:{increment:1}}});row(item.id,'APPLIED','Đã xoá khỏi kho');
       }else{
-        const old=await tx.payPalAccount.findFirst({where:{id:item.id,projectId:scope.projectId},include:{emails:{where:{archivedAt:null},select:{id:true,email:true,reviewHold:true,earnApp:{select:{vm:vmSelect}}}},earnApps:{where:{paypalEmailId:null},select:{id:true}}}});
+        const old=await tx.payPalAccount.findFirst({where:{id:item.id,projectId:scope.projectId}});
         if(!old){row(item.id,'ERROR','Không còn trong kho');continue;}
         if(old.archivedAt){row(item.id,'SKIP','Đã xoá trước đó');continue;}
         if(old.revision!==item.expectedRevision){row(item.id,'ERROR','Vừa được sửa; tải lại');continue;}
-        const assigned=old.emails.map(e=>({e,place:livePlace(e.earnApp?.vm)})).find(x=>x.place);
-        if(assigned){row(item.id,'ERROR',assigned.e.email+' đang nhận cho '+assigned.place!.server+' / '+assigned.place!.vm+'; bỏ gán tại VM trước',assigned.place);continue;}
-        const pp='/paypals?pp='+encodeURIComponent(old.code);
-        const pending=await tx.earnPayoutRequest.count({where:{paypalId:old.id,state:'REQUESTED',consumedAt:null}});
-        if(pending){row(item.id,'ERROR','Còn '+pending+' yêu cầu rút đang chờ tiền về; xử lý ở Tiền vào PayPal trước',null,pp+'&show=in');continue;}
-        const left=await bookBalances(tx,scope.projectId,old.id);
-        if(left.length){row(item.id,'ERROR','Còn lại theo sổ '+left.join(', ')+'; chuyển / rút hết hoặc đối chiếu trước',null,pp+'&show=out');continue;}
-        if(old.emails.some(e=>e.reviewHold&&!e.earnApp)||old.earnApps.length){row(item.id,'ERROR','Còn mục cần đối chiếu (email tạm giữ hoặc liên kết cũ chưa rõ email); xử lý ở Cần đối chiếu trước',null,'/paypals?view=review');continue;}
+        const no=await deleteRefusal(tx,scope.projectId,'PAYPAL',old.id);if(no){row(item.id,'ERROR',no.message,no.place,no.href);continue;}
         await images.remember('PAYPAL',old.id);await tx.payPalAccount.update({where:{id:old.id},data:{archivedAt:now,revision:{increment:1}}});row(item.id,'APPLIED','Đã xoá khỏi kho');
       }
     }

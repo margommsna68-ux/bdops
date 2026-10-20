@@ -19,7 +19,7 @@ describe('shared link builder',()=>{
     expect(links.proxies({state:'BLOCKED'})).toBe('/infrastructure/proxies?state=BLOCKED');
     const href=links.proxies({q:'1.2.3.4',group:'TUT',state:'OTHER',package:'due',servers:['moon1','none'],tab:'history'});
     const u=readRegistryUrl(params(href.split('?')[1]));
-    expect(u).toEqual({q:'1.2.3.4',servers:['moon1',UNASSIGNED_SERVER],group:'TUT',state:'OTHER',pkg:'due',sort:'PACKAGE',view:'HISTORY',page:1});
+    expect(u).toEqual({q:'1.2.3.4',servers:['moon1',UNASSIGNED_SERVER],group:'TUT',state:'OTHER',pkg:'due',sort:'PACKAGE',view:'HISTORY',page:1,batch:''});
     expect('/infrastructure/proxies'+writeRegistryUrl(u)).toBe(href);
     expect(writeRegistryUrl({...u,sort:'IP'})).toContain('sort=IP');
     expect(readRegistryUrl(params('state=bogus&tab=nope&sort=x'))).toMatchObject({state:'',view:'CURRENT',sort:'PACKAGE'});

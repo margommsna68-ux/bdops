@@ -114,3 +114,12 @@ it('groups rename by id (links kept, duplicates refused, undo) and archive witho
     await expect(renameGroup(f.scope,b.id,'X',db)).rejects.toMatchObject({code:'FORBIDDEN'});
   }finally{await f.cleanup();}
 });
+it('"Xem vừa nhập": the registry lists exactly the proxies received by one import batch, whatever else is in stock',async()=>{
+  const f=await fixture();try{
+    const batches=createProxyBatchService(db,{refreshSource:async()=>({id:'s',sourceKey:'GENJY',hash:'retire-fixture',fetchedAt:new Date().toISOString(),scanSucceeded:true})});
+    const k=key(),p=await batches.preview(f.scope,{kind:'NEW',text:f.net+'31:80:u31:p31\n'+f.net+'32:80:u31:p31',owner:'SELF',newPackage:{code:'PKG-X',site:null},idempotencyKey:k});
+    expect(p.rows.map(x=>[x.row,x.outcome,x.message])).toEqual([[1,'READY',expect.any(String)],[2,'READY',expect.any(String)]]);const r=await batches.commit(f.scope,p.token,k);expect(r.applied).toBe(2);
+    expect((await ips(f.scope,'CURRENT')).length).toBeGreaterThan(2); // the rest of the stock is listed without the filter
+    const page=await queryRegistry(f.scope,{view:'CURRENT',limit:100,batchId:r.batchId},db);expect(page.rows.map(x=>x.ip).sort()).toEqual([f.net+'31',f.net+'32']);expect(page.total).toBe(2);
+  }finally{await f.cleanup();}
+});

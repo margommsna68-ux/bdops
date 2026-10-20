@@ -361,6 +361,7 @@
 [data-theme="bronze"] .pm-field-error{color:#7A3525}
 [data-theme="bronze"] .vm-proxy-pick li button:hover,[data-theme="bronze"] .vm-proxy-pick li button.active{background:var(--ds-surface-muted,rgba(169,113,63,0.12))}
 [data-theme="bronze"] .vm-proxy-pick li button.active{outline:1px solid #A9713F}
+[data-theme="bronze"] .acc-detail-pin{background:rgba(169,113,63,0.08)}
 [data-theme="bronze"] .ov-error{background:rgba(166,80,58,0.08);color:#7A3525}
 [data-theme="bronze"] .ov-kpi:focus-visible,[data-theme="bronze"] .ov-row:focus-visible,[data-theme="bronze"] .ov-legend a:focus-visible{outline:2px solid #A9713F}
 [data-theme="bronze"] .ov-kpi.ov-green{border-left-color:#5D692A}

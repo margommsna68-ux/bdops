@@ -8,7 +8,8 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import Link from 'next/link';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
 import toast from 'react-hot-toast';
-import {AlertTriangle,ArrowLeft,ChevronLeft,ChevronRight,Copy,History,RotateCcw,Search,Trash2} from 'lucide-react';
+import {AlertTriangle,ArrowLeft,ChevronLeft,ChevronRight,Copy,History,RotateCcw,Search} from 'lucide-react';
+import {BulkBar,RowDeleteButton} from '@/components/proxy-management/BulkBar';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
@@ -17,8 +18,10 @@ import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy,type CopyField} from '@/components/business-management/AccountsWorkspace';
 import {viAmount,viDate} from './batch-format';
 import {NoteCell,NoteHeader,useNoteWidth} from './NoteCell';
+import {AccountDetail} from './AccountDetail';
+import {Fragment} from 'react';
 import {PaypalStock} from './PaypalStock';
-import {ImportPanel,appendToBatch,discardDraft,importDraft,type StockKind} from './ImportPanel';
+import {ImportPanel,appendToBatch,discardDraft,finishDraft,importDraft,type StockKind} from './ImportPanel';
 import {openView,PAGE_SIZE,readAccountUrl,sameQuery,switchKind,withFilter,writeAccountUrl,type AccountKind,type AccountUrl} from './account-url';
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
 type Login=Store['logins'][number];type Paypal=Store['paypals'][number];type Batch=Store['batches'][number];
@@ -76,6 +79,17 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   // Pages over the whole filtered list (search and filters first, then the page); a page that no longer exists falls back to the last one.
   const list:{id:string}[]=kind==='paypal'?paypals:logins,pages=Math.max(1,Math.ceil(list.length/PAGE_SIZE)),pageRows=(rows:{id:string}[])=>rows.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
   useEffect(()=>{if(data&&!view&&page>pages)go({...url,page:pages},'replace');});// eslint-disable-line react-hooks/exhaustive-deps
+  // The bar acts on every selected row of the filtered list (pages included); its number is exactly those rows.
+  const chosen=(list as {id:string;revision:number}[]).filter(r=>selected.has(r.id)),onPage=new Set(pageRows(list).map(r=>r.id)),offPage=chosen.filter(r=>!onPage.has(r.id)).length;
+  const bulkStatus=useStatus(projectId,stock,()=>void refresh());
+  // Nhập xong toàn bộ (owner brief 20/10/2026): the panel closes, its draft is dropped (text, secrets, money, check, append target; the
+  // Gmail / Apple ID choice is kept), the table reloads with the filters kept; when they hide the new rows the message offers "Xem vừa nhập".
+  const finished=(k:StockKind)=>(r:{applied:number;emails?:number;batch:string;type:string|null})=>{
+    finishDraft(importDraft(projectId,k),r.type);setOpen(k,false);bump();void refresh();
+    const kk:AccountKind=k==='PAYPAL'?'paypal':'login',hidden=kind!==kk||!!view||!!q||(!!state&&state!=='NEW')||(!!batch&&batch!==r.batch)||(kk==='login'&&!!type&&!!r.type&&type!==r.type)||page>1;
+    const text=k==='PAYPAL'?`Đã nhập ${r.applied} PP (${r.emails??0} email) vào lô ${r.batch}`:`Đã nhập ${r.applied} tài khoản vào lô ${r.batch}`;
+    toast.success(t=><span className="flex items-center gap-3">{text}{hidden&&<button className="pm-button pm-button-quiet" onClick={()=>{toast.dismiss(t.id);go({...switchKind(url,kk),batch:r.batch});}}>Xem vừa nhập</button>}</span>,{duration:hidden?10000:4000});
+  };
   const pager=list.length>PAGE_SIZE||page>1?<div className="pm-table-footer pm-table-pager-top" data-testid="acc-pager"><span className="pm-muted text-xs">Dòng {Math.min(list.length,(page-1)*PAGE_SIZE+1)}–{Math.min(list.length,page*PAGE_SIZE)} / {list.length} · Trang {page}/{pages}</span><div className="flex gap-2"><button className="pm-icon-button" aria-label="Trang trước" disabled={page<=1} onClick={()=>go({...url,page:page-1})}><ChevronLeft size={16}/></button><button className="pm-icon-button" aria-label="Trang sau" disabled={page>=pages} onClick={()=>go({...url,page:page+1})}><ChevronRight size={16}/></button></div></div>:null;
   const base=kind==='paypal'?data?.paypals||[]:(data?.logins||[]).filter(l=>!type||l.type===type),stateCounts=counts(base);
   const batches=(data?.batches||[]).filter(b=>b.kind===stock),review=(data?.review||[]).filter(r=>r.group===stock);
@@ -92,7 +106,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
     <div className="acc-subnav">{view?<button type="button" className="pm-link inline-flex items-center gap-1" onClick={()=>go(openView(url,''))}><ArrowLeft size={14}/> Về danh sách {kindLabel}</button>
       :<><button type="button" className="pm-button pm-button-quiet" onClick={()=>go(openView(url,'history'))}><History size={14}/> Lịch sử nhập kho{data?` (${batches.length})`:''}</button>
         {review.length>0&&<button type="button" className="acc-review-alert" onClick={()=>go(openView(url,'review'))}><AlertTriangle size={14}/> Cần đối chiếu ({review.length})</button>}</>}</div>
-    {(['LOGIN','PAYPAL'] as StockKind[]).map(k=>open[k]&&<div key={k} hidden={k!==stock||!!view}><ImportPanel key={k+':'+importDraft(projectId,k).nonce+':'+nonce} projectId={projectId} kind={k} canCost={!!rights?.writeCosts} onDone={()=>void refresh()} onClose={()=>setOpen(k,false)} onDiscard={()=>{discardDraft(importDraft(projectId,k));bump();}}/></div>)}
+    {(['LOGIN','PAYPAL'] as StockKind[]).map(k=>open[k]&&<div key={k} hidden={k!==stock||!!view}><ImportPanel key={k+':'+importDraft(projectId,k).nonce+':'+nonce} projectId={projectId} kind={k} canCost={!!rights?.writeCosts} onDone={()=>void refresh()} onFinished={finished(k)} onClose={()=>setOpen(k,false)} onDiscard={()=>{discardDraft(importDraft(projectId,k));bump();}}/></div>)}
     {!view&&<div className="pm-surface">
       <div className="pm-actions flex-wrap gap-2">
         <label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm tài khoản" placeholder={kind==='paypal'?'Tìm mã PP, email, VM…':'Tìm email, lô, VM, PayPal…'} value={typed} onChange={e=>setTyped(e.target.value)}/></label>
@@ -101,7 +115,11 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
         {deletedView&&<span className="pm-muted text-xs" role="status">Đã xoá khỏi kho: {list.length} {kind==='paypal'?'PayPal':'tài khoản'}. Giữ nguyên lịch sử, tiền và dấu đã dùng; Khôi phục trả về đúng tình trạng trước.</span>}
         {batch&&<span className="pm-filter-chip" role="status">Đợt nhập <strong className="pm-code">{batch}</strong> · {(kind==='paypal'?paypals:logins).length} {kind==='paypal'?'PayPal':'tài khoản'} <button type="button" className="pm-link" onClick={()=>go(withFilter({...url,tab:kind},{batch:''}))}>Bỏ lọc đợt</button> · <button type="button" className="pm-link" onClick={()=>go(openView(url,'history',batch))}>Xem đợt trong lịch sử</button></span>}
       </div>
-      {admin&&selected.size>0&&<div className="pm-actions gap-2 flex-wrap" role="status"><span className="text-sm">{selected.size} đã chọn</span>{deletedView?<button className="pm-button" disabled={stockAction.busy} onClick={()=>void runStock('restore',list.filter(r=>selected.has(r.id)) as {id:string;revision:number}[])}><RotateCcw size={16}/>Khôi phục {selected.size} dòng</button>:<button className="pm-button" disabled={stockAction.busy} onClick={()=>void runStock('delete',list.filter(r=>selected.has(r.id)) as {id:string;revision:number}[])}><Trash2 size={16}/>Xoá {selected.size} dòng</button>}<button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}>Bỏ chọn</button></div>}
+      {(canWrite||admin)&&<BulkBar count={chosen.length} unit={kind==='paypal'?'PayPal':'tài khoản'} extra={offPage?`gồm ${offPage} ở trang khác`:undefined} busy={stockAction.busy||bulkStatus.busy} onClear={()=>setSelected(new Set())}
+        onDelete={admin&&!deletedView?()=>void runStock('delete',chosen):undefined}>
+        {deletedView?admin&&<button type="button" className="pm-button pm-button-sm" disabled={stockAction.busy} onClick={()=>void runStock('restore',chosen)}><RotateCcw size={14}/>Khôi phục {chosen.length} dòng</button>
+          :canWrite&&<BulkStatusPick options={kind==='paypal'?PP_STATUS:LOGIN_STATUS} busy={bulkStatus.busy} onApply={st=>void bulkStatus.save(chosen,st).then(()=>setSelected(new Set()))}/>}
+      </BulkBar>}
       {pager}
       {kind==='login'?<LoginTable projectId={projectId} rows={pageRows(logins) as Login[]} total={logins.length} store={data} admin={admin} deletedView={deletedView} busy={stockAction.busy} errors={rowErrors} onDelete={l=>void runStock('delete',[l])} onRestore={l=>void runStock('restore',[l])} selected={selected} setSelected={setSelected} onCopy={(row,field)=>setCopy({row,field})} onBatch={b=>go(withFilter({...url,tab:kind},{batch:b}))} onSaved={()=>void refresh()}/>:<PaypalPart projectId={projectId} rows={pageRows(paypals) as Paypal[]} store={data} url={{...url,tab:kind}} go={go} admin={admin} deletedView={deletedView} busy={stockAction.busy} errors={rowErrors} onDelete={p=>void runStock('delete',[p])} onRestore={p=>void runStock('restore',[p])} selected={selected} setSelected={setSelected} onSaved={()=>void refresh()}/>}
     </div>}
@@ -109,7 +127,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
     {view==='review'&&<div className="pm-surface p-4 space-y-3"><h2 className="font-semibold">Cần đối chiếu · {kindLabel}</h2>
       <p className="text-sm pm-muted">Dữ liệu cũ mâu thuẫn với quy tắc mới (một VM một tài khoản; mỗi EarnApp một email PayPal riêng, một mã PP có nhiều email; tiền mua ghi một lần). Web không tự đoán loại, sửa tiền, ghép hay thay liên kết; người vận hành mở từng mục để xử lý. Tài khoản bị khoá, PayPal limit hoặc ngừng dùng là tình trạng tài khoản, xem ở lọc <button type="button" className="pm-link" onClick={()=>go({...switchKind(url,kind),state:'BLOCKED'})}>{STATE_LABEL.BLOCKED}</button>.</p>
       {review.length?<ul className="acc-review-list">{review.map((r,i)=><li key={i}><div><strong>{r.subject}</strong><p className="text-sm">{r.reason}</p></div><button type="button" className="pm-button pm-button-quiet" onClick={()=>openReview(r)}>{r.open.type==='vm'?`Mở VM ${r.open.place.server} / ${r.open.place.vm}`:r.open.type==='batch'?'Mở đợt nhập':kind==='paypal'?'Mở PayPal':'Mở tài khoản'}</button></li>)}</ul>:<p className="text-sm">{store.isLoading?'Đang tải…':'Không còn mục cần đối chiếu.'}</p>}</div>}
-    {copy&&<AccountCopy projectId={projectId} kind="GMAIL" row={copy.row as never} initialField={copy.field} onClose={()=>setCopy(null)}/>}
+    {copy&&<AccountCopy projectId={projectId} kind="GMAIL" row={copy.row as never} initialField={copy.field} available={([['secret',copy.row.has.password],['twoFa',copy.row.has.twoFa],['token',copy.row.has.token],['twoFaLink',copy.row.links.twoFa],['smsLink',copy.row.links.sms]] as [CopyField,boolean][]).filter(([,on])=>on).map(([f])=>f)} onClose={()=>setCopy(null)}/>}
   </div>;
 }
 function StateCell({state,place,extra}:{state:string;place:{serverId:string;vmId:string;server:string;vm:string}|null;extra?:string|null}){
@@ -120,9 +138,9 @@ function useStatus(projectId:string,kind:'LOGIN'|'PAYPAL',onSaved:()=>void){
   const m=trpc.accountStore.setStatus.useMutation();
   return {busy:m.isLoading,save:async(items:{id:string;revision:number}[],status:string)=>{try{const r=await m.mutateAsync({projectId,kind,status,items:items.map(i=>({id:i.id,expectedRevision:i.revision})),key:crypto.randomUUID()});const bad=r.rows.filter(x=>x.outcome==='ERROR');if(bad.length)toast.error(bad.length+' dòng chưa lưu: '+bad[0].message);else if(r.applied)toast.success('Đã lưu '+r.applied+' tài khoản');onSaved();}catch(e){toast.error(errorMessage(e));}}};
 }
-function BulkStatus({count,options,busy,onApply}:{count:number;options:Record<string,string>;busy:boolean;onApply:(s:string)=>void}){
-  const [s,setS]=useState('');if(!count)return null;
-  return <div className="pm-actions gap-2 flex-wrap"><span className="text-sm">{count} đã chọn</span><select className="pm-input w-auto" aria-label="Tình trạng cho các dòng đã chọn" value={s} onChange={e=>setS(e.target.value)}><option value="">Đổi tình trạng…</option>{Object.entries(options).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><button className="pm-button" disabled={!s||busy} onClick={()=>onApply(s)}>Áp dụng</button></div>;
+function BulkStatusPick({options,busy,onApply}:{options:Record<string,string>;busy:boolean;onApply:(s:string)=>void}){
+  const [s,setS]=useState('');
+  return <span className="flex items-center gap-2"><select className="pm-input pm-input-sm w-auto" aria-label="Tình trạng cho các dòng đã chọn" value={s} onChange={e=>setS(e.target.value)}><option value="">Đổi tình trạng…</option>{Object.entries(options).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><button type="button" className="pm-button pm-button-sm" disabled={!s||busy} onClick={()=>{onApply(s);setS('');}}>Áp dụng</button></span>;
 }
 function useSelection(rows:{id:string}[],selected:Set<string>,setSelected:(s:Set<string>)=>void){
   const all=rows.length>0&&rows.every(r=>selected.has(r.id));
@@ -149,11 +167,11 @@ function RowError({err}:{err:StockRowError|undefined}){return err?<div className
 type StockTableProps={admin:boolean;deletedView:boolean;busy:boolean;errors:Record<string,StockRowError>};
 function LoginTable({projectId,rows,total,store,admin,deletedView,busy,errors,onDelete,onRestore,selected,setSelected,onCopy,onBatch,onSaved}:StockTableProps&{projectId:string;rows:Login[];total:number;store:Store|undefined;onDelete:(l:Login)=>void;onRestore:(l:Login)=>void;selected:Set<string>;setSelected:(s:Set<string>)=>void;onCopy:(l:Login,field?:CopyField)=>void;onBatch:(b:string)=>void;onSaved:()=>void}){
   const status=useStatus(projectId,'LOGIN',onSaved),sel=useSelection(rows,selected,setSelected),write=!!store?.rights.writeLogins&&!deletedView,shown=rows,pick=write||admin;
-  const [noteWidth,setNoteWidth]=useNoteWidth();
-  return <>{write&&<BulkStatus count={selected.size} options={LOGIN_STATUS} busy={status.busy} onApply={s=>void status.save(rows.filter(r=>selected.has(r.id)),s).then(()=>setSelected(new Set()))}/>}
+  const [noteWidth,setNoteWidth]=useNoteWidth(),[detail,setDetail]=useState<string|null>(null);
+  return <>
     <div className="pm-table-scroll"><table className="pm-table"><thead><tr>{pick&&<th><input type="checkbox" aria-label={'Chọn tất cả trên trang ('+rows.length+')'} title={'Chọn '+rows.length+' dòng đang hiện trên trang này'+(total>rows.length?' (không phải cả '+total+')':'')} checked={sel.all} onChange={sel.toggleAll}/></th>}<th>Tài khoản</th><th>Loại</th><th>Kho / VM</th><th>PayPal của EarnApp</th><th>Tình trạng</th><th>Lô</th>{store?.rights.money&&<th>Giá phân bổ</th>}<NoteHeader width={noteWidth} onWidth={setNoteWidth}/>{admin&&<th aria-label="Xoá / khôi phục"></th>}</tr></thead>
-      <tbody>{shown.map(l=><tr key={l.id} className={errors[l.id]?'pm-row-blocked':deletedView?'pm-row-retired':undefined}>{pick&&<td><input type="checkbox" aria-label={'Chọn '+l.email} checked={selected.has(l.id)} onChange={()=>sel.toggle(l.id)}/></td>}
-        <td className="whitespace-nowrap"><span className="inline-flex items-center gap-1"><strong>{l.email}</strong>{store?.rights.copy&&l.credentialsAvailable&&<button type="button" className="vm-cell-icon" aria-label={'Copy đăng nhập '+l.email} title="Copy đăng nhập (cần PIN)" onClick={()=>onCopy(l)}><Copy size={13}/></button>}</span>
+      <tbody>{shown.map(l=><Fragment key={l.id}><tr data-account-id={l.id} className={errors[l.id]?'pm-row-blocked':deletedView?'pm-row-retired':undefined}>{pick&&<td><input type="checkbox" aria-label={'Chọn '+l.email} checked={selected.has(l.id)} onChange={()=>sel.toggle(l.id)}/></td>}
+        <td className="whitespace-nowrap"><span className="inline-flex items-center gap-1"><button type="button" className="acc-email-open" aria-expanded={detail===l.id} aria-label={'Mở chi tiết '+l.email} onClick={()=>setDetail(detail===l.id?null:l.id)}><strong>{l.email}</strong></button>{store?.rights.copy&&l.credentialsAvailable&&<button type="button" className="vm-cell-icon" aria-label={'Copy đăng nhập '+l.email} title="Copy đăng nhập (cần PIN)" onClick={()=>onCopy(l)}><Copy size={13}/></button>}</span>
           {(l.phone||l.links.twoFa||l.links.sms)&&<span className="acc-apple-line">{l.phone&&<span className="pm-muted" title="Số điện thoại">{l.phone}<button type="button" className="vm-cell-icon" aria-label={'Copy số điện thoại '+l.email} title="Copy số điện thoại" onClick={()=>void navigator.clipboard.writeText(l.phone!).then(()=>toast.success('Đã copy số điện thoại'))}><Copy size={12}/></button></span>}
             {store?.rights.copy&&l.links.twoFa&&<button type="button" className="pm-link" aria-label={'Lấy 2FA '+l.email} title="Mở link lấy mã 2FA (cần PIN)" onClick={()=>onCopy(l,'twoFaLink')}>Lấy 2FA</button>}
             {store?.rights.copy&&l.links.sms&&<button type="button" className="pm-link" aria-label={'SMS '+l.email} title="Mở link SMS (cần PIN)" onClick={()=>onCopy(l,'smsLink')}>SMS</button>}</span>}<RowError err={errors[l.id]}/></td>
@@ -164,14 +182,15 @@ function LoginTable({projectId,rows,total,store,admin,deletedView,busy,errors,on
         <td className="whitespace-nowrap">{l.batch?<button className="underline text-xs" onClick={()=>onBatch(l.batch!)}>{l.batch}</button>:<span className="pm-muted">—</span>}</td>
         {store?.rights.money&&<td className="text-xs">{l.price?`${money(l.price.amount)} ${l.price.currency}`:<span className="pm-muted">{PRICE_EMPTY[l.priceState]}</span>}</td>}
         <NoteCell projectId={projectId} id={l.id} email={l.email} notes={l.notes} revision={l.revision} canEdit={write} width={noteWidth} onSaved={onSaved}/>
-        {admin&&<td className="whitespace-nowrap">{deletedView?<button type="button" className="pm-icon-button" title="Khôi phục" aria-label={'Khôi phục '+l.email} disabled={busy} onClick={()=>onRestore(l)}><RotateCcw size={16}/></button>:<button type="button" className="pm-icon-button" title="Xoá khỏi kho" aria-label={'Xoá khỏi kho '+l.email} disabled={busy} onClick={()=>onDelete(l)}><Trash2 size={16}/></button>}</td>}</tr>)}
+        {admin&&<td className="whitespace-nowrap">{deletedView?<button type="button" className="pm-icon-button" title="Khôi phục" aria-label={'Khôi phục '+l.email} disabled={busy} onClick={()=>onRestore(l)}><RotateCcw size={16}/></button>:<RowDeleteButton label={l.email} busy={busy} onClick={()=>onDelete(l)}/>}</td>}</tr>
+        {detail===l.id&&<tr className="acc-batch-detail"><td colSpan={10}><AccountDetail projectId={projectId} login={l} canEdit={write} canCopy={!!store?.rights.copy} onSaved={onSaved} onClose={()=>setDetail(null)}/></td></tr>}</Fragment>)}
         {!rows.length&&<tr><td colSpan={10} className="pm-empty">{store?deletedView?'Không có tài khoản đã xoá trong bộ lọc này.':'Chưa có tài khoản trong bộ lọc này.':'Đang tải…'}</td></tr>}</tbody></table></div>
     {store?.rights.money&&<p className="pm-muted text-xs p-3">Giá phân bổ chỉ để tham khảo: tiền thực trả đã ghi một lần trong Chi phí theo lô, không cộng thêm vào lợi nhuận.</p>}</>;
 }
 // PayPal tab: bulk status for the selected PayPals, then the PayPal stock (one row per code with its emails and money).
 function PaypalPart({projectId,rows,store,url,go,admin,deletedView,busy,errors,onDelete,onRestore,selected,setSelected,onSaved}:StockTableProps&{projectId:string;rows:Paypal[];store:Store|undefined;url:AccountUrl;go:(u:AccountUrl,mode?:'push'|'replace')=>void;onDelete:(p:Paypal)=>void;onRestore:(p:Paypal)=>void;selected:Set<string>;setSelected:(s:Set<string>)=>void;onSaved:()=>void}){
   const status=useStatus(projectId,'PAYPAL',onSaved),write=!!store?.rights.writePaypals&&!deletedView;
-  return <>{write&&<BulkStatus count={selected.size} options={PP_STATUS} busy={status.busy} onApply={s=>void status.save(rows.filter(r=>selected.has(r.id)),s).then(()=>setSelected(new Set()))}/>}
+  return <>
     <PaypalStock projectId={projectId} rows={rows} store={store} url={url} go={go} write={write} status={status} selected={write||admin?selected:null} setSelected={setSelected} onSaved={onSaved} inventory={admin?{deletedView,busy,errors,onDelete,onRestore}:undefined}/></>;
 }
 // Lịch sử nhập kho of one kind: one row per purchase. Columns: Đợt nhập (code, purchase date, login type) | Nơi mua | Số lượng mua

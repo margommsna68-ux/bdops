@@ -127,6 +127,6 @@ export function describeBusinessImage(image:BusinessImage){
   if(image.resource==='PACKAGE')return 'Đến hạn '+(row.nextDueDate?dayText(new Date(String(row.nextDueDate))):'chưa đặt');
   return [row.status,row.notes].filter(Boolean).join(' · ')||'Đã lưu';
  };
- const secrets=['password','twoFaCurrent','twoFa','token','hotmailToken'],secretChanged=b&&secrets.some(k=>s[k]!==b[k]);
+ const secrets=['password','twoFaCurrent','twoFa','token','hotmailToken','twoFaLink','smsLink'],secretChanged=b&&secrets.some(k=>s[k]!==b[k]);
  return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',PAYOUT:'Email nhận của EarnApp',VM_OPS:'Tình trạng VM',PAYOUT_REQUEST:'Yêu cầu rút EarnApp',VM_CYCLE:'Lượt VM đã đóng',SDK:'SDK (Kho SDK)',SDK_SLOT:'SDK của VM',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:(image.after?format(s):'Đã gỡ (hoàn tác)')+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:['VM_OPS','VM_CYCLE','PAYOUT_REQUEST'].includes(image.resource)?'Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật':b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
 }

@@ -1,0 +1,9 @@
+ ❯ .runtime/review-stock-delete-apple-20261020.test.ts (2 tests | 2 failed) 164ms
+   × legacy archive must reject a PayPal with a nonzero balance, like stock delete 94ms
+   × purchase history retains all received emails when a PayPal is soft-deleted 65ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected { rejected: false, archived: true } to deeply equal { rejected: true, archived: false }
+ ❯ .runtime/review-stock-delete-apple-20261020.test.ts:44:52
+AssertionError: expected { received: 2, emails: 2 } to deeply equal { received: 2, emails: 4 }
+ ❯ .runtime/review-stock-delete-apple-20261020.test.ts:58:59
+      Tests  2 failed (2)

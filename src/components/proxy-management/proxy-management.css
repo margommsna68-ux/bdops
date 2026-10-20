@@ -36,3 +36,13 @@
 .pm-link{color:#3b82f6;text-decoration:none}.pm-link:hover{text-decoration:underline}.pm-notes{max-width:260px;font-size:12px;color:var(--ds-text-secondary)}
 .pm-deleted-servers{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:0 20px 12px}.pm-blocked{margin:0 20px 12px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25)}
 .pm-filter-chip{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(59,130,246,.1);color:var(--ds-text-secondary)}.pm-filter-chip strong{color:var(--ds-text-primary)}
+/* One bulk bar (20/10/2026): fixed place and height whether or not rows are selected; Xoá small and soft red, at the end. */
+.pm-bulkbar{min-height:56px;height:56px;box-sizing:border-box;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}.pm-bulkbar>*{flex-shrink:0}.pm-bulkbar-actions{flex-wrap:nowrap!important}.pm-bulkbar .pm-input{min-height:32px;height:32px;padding-top:4px;padding-bottom:4px;font-size:12.5px}.pm-bulkbar-idle{background:transparent;border-style:dashed;border-color:var(--ds-border-strong)}
+.pm-bulkbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pm-bulkbar-end{display:flex;align-items:center;gap:8px;margin-left:auto}
+.pm-button-sm{min-height:32px;padding:5px 10px;font-size:12.5px;gap:6px}
+.pm-button-danger{color:#b42318;border-color:rgba(180,35,24,.32);background:transparent}.pm-button-danger:hover:not(:disabled){background:rgba(180,35,24,.07)}
+.pm-icon-danger{color:#b42318}.pm-icon-danger:hover:not(:disabled){background:rgba(180,35,24,.08)}
+[data-theme="dark"] .pm-button-danger,[data-theme="golden"] .pm-button-danger,[data-theme="dark"] .pm-icon-danger,[data-theme="golden"] .pm-icon-danger{color:#f19b93;border-color:rgba(241,155,147,.35)}
+.acc-batch-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+/* Narrow screens: the bar wraps so Xoá / Bỏ chọn stay visible (height then follows its content); a search box in a column of actions is one line high. */
+@media(max-width:640px){.pm-bulkbar{height:auto;flex-wrap:wrap;overflow-x:visible}.pm-bulkbar-actions{flex-wrap:wrap!important}.pm-bulkbar-end{margin-left:0}.pm-actions .vm-search{flex:0 0 auto;width:100%}}

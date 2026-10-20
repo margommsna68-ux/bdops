@@ -1,0 +1,31 @@
+PASS B1 Gmail/Apple ID: một thanh duy nhất, đếm một lần "Đã chọn 2", Đổi tình trạng + Áp dụng, cuối là Xoá 2 dòng + Bỏ chọn — Đã chọn 2 tài khoản Đổi tình trạng… Dùng được Bị khoá tạm Cần khôi phục Cần cập nhật 2FA Bị chặn Ngừng dùng Áp dụng Xoá 2 dòng Bỏ chọn
+PASS B2 chọn dòng không làm bảng nhảy (vị trí bảng giữ nguyên) — y 495.53125 → 495.53125
+PASS B3 Xoá là nút phụ nhỏ (≤34px), chữ đỏ nhẹ, không nền đỏ — {"h":32,"color":"rgb(241, 155, 147)","bg":"rgba(0, 0, 0, 0)"}
+PASS B4 nút xoá từng dòng cùng cỡ nút biểu tượng, có tên rõ — {"w":32,"h":32}
+PASS B5 Áp dụng tình trạng từ thanh: đúng 2 dòng đã chọn — ["SUSPENDED","SUSPENDED"]
+PASS B6 xoá hàng loạt từ thanh: dòng đang gán bị chặn tại dòng và vẫn được chọn (thanh còn "Đã chọn 1") — Đã chọn 1 tài khoản Đổi tình trạng… Dùng được Bị khoá tạm Cần khôi phục Cần cập nhật 2FA Bị chặn Ngừng dùng Áp dụng Xoá 1 dòng Bỏ chọn
+PASS B7 PayPal: cùng mẫu thanh (Đã chọn 1 PayPal → Đổi tình trạng → Xoá → Bỏ chọn) — Đã chọn 1 PayPal Đổi tình trạng… Dùng được Bị limit Bị suspend Đã đóng Chờ xác minh Áp dụng Xoá 1 dòng Bỏ chọn
+PASS B8 Kho proxy: cùng mẫu thanh, Xoá và Bỏ chọn ở cuối, bảng không nhảy — Đã chọn 2 proxy Đổi nhóm Chuyển server Gán VM Trạng thái… NEW LIVE BLOCKED Áp dụng Copy proxy Xoá 2 dòng Bỏ chọn y 748.328125→748.328125
+PASS I1 nhập hết: khung đóng, thông báo "Đã nhập 2 tài khoản…"; bộ lọc Đã gán giữ nguyên nên có nút Xem vừa nhập
+PASS I2 Xem vừa nhập mở đúng đợt vừa nhập: thấy 2 tài khoản mới, không dòng nào được chọn
+PASS I3 mở Nhập lần nữa: lần mua mới (ô dán, nguồn, lô trống), vẫn giữ loại Gmail đã chọn
+PASS I4 nhập một phần: khung còn mở, chỉ giữ dòng lỗi, chuyển sang Nhập bổ sung vào lô vừa tạo — khong-phai-email|x
+PASS I5 sửa dòng lỗi: vẫn vào cùng lô, không ghi thêm chi phí, khung đóng sau khi hết dòng — chi phí 81→81→81
+PASS I6 mất phản hồi: khung không đóng, nội dung giữ nguyên, có Thử lại
+PASS I7 Thử lại cùng khoá: 1 tài khoản, 1 lô, khung đóng — {"acc":1,"batches":1}
+PASS IP1 nhập proxy mới đủ: dialog đóng, thông báo, có Xem vừa nhập (bộ lọc Genjy riêng đang che)
+PASS IP2 Xem vừa nhập: chỉ 2 proxy của đợt đó, có chip "Đang xem đợt nhập vừa thêm"
+PASS D1 bấm email mở khung trong trang: Email đăng nhập, Mật khẩu, Link lấy mã 2FA, Link SMS, Số điện thoại, Ghi chú; mật khẩu che — Email đăng nhập|Mật khẩu|Link lấy mã 2FA|Link SMS|Số điện thoại|Ghi chú
+PASS D2 Xem mật khẩu sau PIN: đúng nguyên văn; Ẩn lại được
+PASS D3 Ẩn: mật khẩu che lại
+PASS D4 Lấy mã 2FA mở đúng link đã nhập (tab mới, chỉ khi bấm) — <link giả đã nhập, đã che>
+PASS D5 vào Sửa: Lưu mờ khi chưa đổi; ô mật khẩu để trống = giữ nguyên
+PASS D6 đổi một trường: Lưu bật (Lưu 1 trường)
+PASS D7 đọc lại DB: chỉ SĐT đổi; mật khẩu, hai link, loại giữ nguyên — {"phone":"+84 900 000 002","pw":true,"l2":true,"ls":true,"type":"APPLE_ID","notes":null}
+PASS TH light: thanh hiện, không tràn ngang trang — {"doc":1280,"vw":1280}
+PASS TH dark: thanh hiện, không tràn ngang trang — {"doc":1280,"vw":1280}
+PASS TH golden: thanh hiện, không tràn ngang trang — {"doc":1280,"vw":1280}
+PASS TH bronze: thanh hiện, không tràn ngang trang — {"doc":1280,"vw":1280}
+PASS TH bronze 390px: thanh hiện, không tràn ngang trang — {"doc":390,"vw":390}
+
+Kết quả: 29 đạt, 0 lỗi. Lỗi JS: không

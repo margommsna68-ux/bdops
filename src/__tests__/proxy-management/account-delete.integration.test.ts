@@ -94,3 +94,16 @@ it('PayPal: refused while an email receives for a VM, a payout request waits, mo
     expect((await readAccountStore(f.scope,db)).paypals.find(p=>p.code===f.pp(3))).toMatchObject({state:'NEW'});expect((await readAccountStore(f.scope,db)).paypals.find(p=>p.code===f.pp(2))?.emails.map(e=>e.state)).toEqual(['NEW','NEW']);expect((await readAccountStore(f.scope,db)).paypals.find(p=>p.code===f.pp(1))?.emails[0].state).toBe('ASSIGNED');
   }finally{await f.cleanup();}
 });
+it('independent review 20/10: the older "Ẩn tài khoản" refuses what Xoá refuses; purchase history keeps counting the emails of a deleted PayPal',async()=>{
+  const f=await setup();try{
+    const p1=await f.paypal(1),p2=await f.paypal(2);
+    await recordOpening(f.scope,{paypalId:p1.id,date:'2026-10-20',currency:'USD',amount:'15',key:randomUUID()},db);
+    const cur=await f.paypal(1);
+    await expect(archiveOperatingAccount(f.scope,{kind:'PAYPAL',id:cur.id,expectedRevision:cur.revision,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT',message:expect.stringMatching(/15\.00 USD/)});
+    expect((await f.paypal(1)).archivedAt).toBeNull();
+    const batchOf=async()=>(await readAccountStore(f.scope,db)).batches.find(b=>b.id===p2.batchId)!;
+    const before=await batchOf();expect(before).toMatchObject({received:4,emails:8});
+    expect((await f.act(f.scope,deleteStock,'PAYPAL',[2])).applied).toBe(1);
+    expect(await batchOf()).toMatchObject({received:4,emails:8});
+  }finally{await f.cleanup();}
+});

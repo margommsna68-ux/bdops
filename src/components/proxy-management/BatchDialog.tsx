@@ -15,7 +15,9 @@ export function PackageChoice({packages,value,onChange,disabled}:{packages:{id:s
     {value.mode==='NEW'&&<p className="pm-muted text-xs">Gói mới nhận đúng một user/pass; tất cả dòng dán phải cùng user/pass đó.</p>}
   </div>;
 }
-export function BatchDialog({projectId,kind,onClose,onSaved}:{projectId:string;kind:BatchKind;onClose:()=>void;onSaved:()=>void}){
+/** The pasted lines the server refused (rows are numbered like parseProxyRows: blank lines skipped), in their order. */
+export const refusedLines=(text:string,rows:{row:number;outcome:string}[])=>{const lines=text.split(/\r?\n/).filter(l=>l.trim());return rows.filter(r=>r.outcome==='ERROR').map(r=>lines[r.row-1]??'').filter(l=>l.trim()).join('\n');};
+export function BatchDialog({projectId,kind,onClose,onSaved,onImported}:{projectId:string;kind:BatchKind;onClose:()=>void;onSaved:()=>void;/** NEW import fully saved: the parent tells the person and the dialog closes. */onImported?:(r:{applied:number;batchId:string})=>void}){
   const [oldText,setOldText]=useState(''),[newText,setNewText]=useState(''),[group,setGroup]=useState<GroupPick>({kind:'TUT'}),[date,setDate]=useState(''),[pkg,setPkg]=useState<PackageChoiceValue>({mode:'AUTO'});
   const catalog=trpc.proxyManagement.catalog.useQuery({projectId},{enabled:kind==='NEW'}),groups=trpc.proxyManagement.groups.useQuery({projectId},{enabled:kind==='NEW'});
   const owner=group.kind==='GENJY'||group.kind==='SHARED'?'GENJY':group.kind==='TUT'?'SELF':'OTHER',subgroup=group.kind==='SHARED'?'PC_CHUNG' as const:undefined,groupSummary=group.kind==='GENJY'?'Genjy riêng':group.kind==='SHARED'?'Chung mooon–Genjy':group.kind==='TUT'?'kho TUT':'nhóm '+(group.kind==='NEW'?(group.name.trim()||'mới'):groups.data?.find(g=>g.id===group.id)?.name||'');
@@ -26,7 +28,15 @@ export function BatchDialog({projectId,kind,onClose,onSaved}:{projectId:string;k
   const inspect=trpc.proxyManagement.preview.useMutation(),commit=trpc.proxyManagement.commit.useMutation();
   const busy=inspect.isLoading||commit.isLoading;
   const changed=(fn:()=>void)=>{fn();setPreview(null);setKey(crypto.randomUUID());setError('');setSaved(null);setReport(null);};
-  function done(result:CommitResult){setSaved(result.undone?'Đợt này đã được hoàn tác. Dữ liệu không được ghi lại.':`Đã lưu ${result.applied} proxy${result.skipped?` · ${result.skipped} giữ nguyên`:''}${result.errors?` · ${result.errors} cần kiểm tra`:''}.`);onSaved();}
+  // Nhập mới (20/10/2026): everything saved → close and hand back to the table; some lines refused → keep only those lines (the saved ones
+  // are never sent again) with their reasons and a new key; a lost answer keeps everything for the retry (failed()).
+  function done(result:CommitResult){
+    if(kind==='NEW'&&!result.undone&&onImported){
+      if(!result.errors){onSaved();onImported({applied:result.applied,batchId:result.batchId});onClose();return;}
+      const bad=result.rows.filter(r=>r.outcome==='ERROR');
+      setOldText(refusedLines(oldText,bad));setPreview(preview?{...preview,rows:bad,ready:0}:null);setKey(crypto.randomUUID());
+    }
+    setSaved(result.undone?'Đợt này đã được hoàn tác. Dữ liệu không được ghi lại.':`Đã lưu ${result.applied} proxy${result.skipped?` · ${result.skipped} giữ nguyên`:''}${result.errors?` · ${result.errors} cần kiểm tra`:''}.`);onSaved();}
   function failed(e:unknown){const message=e instanceof Error?e.message:'Chưa nhận được kết quả; bấm Lưu lại để kiểm tra.';setError(message);const code=(e as {data?:{code?:string}})?.data?.code;if(code==='CONFLICT'||/STALE_PREVIEW|CONFLICT|KEY_PAYLOAD_MISMATCH/.test(message)){setPreview(null);setKey(crypto.randomUUID());}}
   async function check(){setError('');try{const result=await submitCheckedBatch({kind,text:kind==='REPLACE'?undefined:oldText,removedText:kind==='REPLACE'?oldText:undefined,addedText:kind==='REPLACE'?newText:undefined,owner:kind==='NEW'?owner:undefined,subgroup:kind==='NEW'?subgroup:undefined,groupId:kind==='NEW'&&group.kind==='GROUP'?group.id:undefined,newGroup:kind==='NEW'&&group.kind==='NEW'?{name:group.name.trim()}:undefined,receivedDate:date||null,packageCode:kind==='NEW'&&pkg.mode==='EXISTING'?pkg.code:undefined,newPackage:kind==='NEW'&&pkg.mode==='NEW'?{code:pkg.code.trim(),site:pkg.site.trim()||null}:undefined,idempotencyKey:key},input=>inspect.mutateAsync({projectId,...input}),input=>commit.mutateAsync({projectId,...input}),setPreview);if(result.phase==='SAVED')done(result.result);}catch(e){failed(e);}}
   async function save(){if(!preview)return;setError('');try{done(await commit.mutateAsync({projectId,token:preview.token,idempotencyKey:key}));}catch(e){failed(e);}}

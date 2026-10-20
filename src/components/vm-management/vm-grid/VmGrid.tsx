@@ -106,7 +106,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
         <th className="vm-sticky-right" aria-label="Thao tác"></th>
       </tr></thead>
       <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=status==='BLOCKED';
-        return <tr key={v.id} data-row={v.id} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy&&!deletedView?'pm-row-blocked ':'')}>
+        return <tr key={v.id} data-row={v.id} data-project-id={props.projectId} data-server-id={v.serverId} data-vm-id={v.id} data-vm-code={v.code} data-cycle={v.cycle} data-account-id={props.accountOf(v.id)?.earnApp?.id??undefined} className={(busyRows.has(v.id)?'vm-row-busy ':'')+(isSel?'vm-row-selected ':'')+(props.activeVmId===v.id?'vm-row-active ':'')+(blockedProxy&&!deletedView?'pm-row-blocked ':'')}>
           <td className="vm-sticky vm-sticky-check" style={left(0)}><input type="checkbox" aria-label={'Chọn '+v.server+' / '+v.code} checked={isSel} onChange={e=>props.onToggle(v.id,e.target.checked)}/></td>
           {!single&&<td className="vm-sticky" style={left(selectW)}><Link href={links.vms({serverId:v.serverId})} className="pm-link vm-ellipsis" title={v.server}>{v.server}</Link></td>}
           <td className="vm-sticky vm-id-cell" style={left(selectW+serverW)}>{deletedView?<span className="pm-code font-semibold">{v.code}</span>:editable(v,'code','mã VM '+v.code,<button type="button" className="vm-id-button pm-code" title={'Mở chi tiết '+v.code+(canEdit('code')?' · Enter/F2 để sửa mã':'')} onClick={()=>props.onOpen(v.id)}>{v.code}</button>)}</td>

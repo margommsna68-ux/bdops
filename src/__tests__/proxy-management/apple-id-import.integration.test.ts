@@ -16,7 +16,7 @@ it('imports the five-column Apple ID list: each field stored in its own place, l
     const batch={source:'Shop X',purchasedAt:'2026-10-20',priceMode:'TOTAL' as const,amount:'10',quantity:2,currency:'USDT',rate:null};
     const p=await previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch},db);
     expect(p.rows.map(r=>[r.line,r.outcome])).toEqual([[1,'READY'],[2,'READY'],[3,'ERROR'],[4,'ERROR']]);
-    expect(p.rows[0]).toMatchObject({hasPassword:true,has2faLink:true,hasSmsLink:true,hasPhone:true});expect(p.rows[2].message).toMatch(/Link lấy 2FA/);
+    expect(p.rows[0]).toMatchObject({hasPassword:true,has2faLink:true,hasSmsLink:true,hasPhone:true});expect(p.rows[2].message).toMatch(/Link lấy mã 2FA/);
     // Nothing of the secrets or links in the preview rows.
     expect(JSON.stringify(p)).not.toMatch(/Pass:Word|example\.invalid\/2fa|Tok/);
     const key=randomUUID(),done=await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch,key},db);

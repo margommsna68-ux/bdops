@@ -22,9 +22,9 @@ it('Apple ID lines: five columns in order, links kept verbatim (case, query, enc
   expect(rows.map(r=>[r.line,r.email,r.password,r.twoFaLink,r.smsLink,r.phone,r.twoFa,r.recovery,r.notes,r.error])).toEqual([
     [2,'apple-test@example.invalid','ExamplePassword!','https://example.invalid/2fa?id=AbC123&x=%2F','https://example.invalid/sms/TestToken','0123456789',null,null,null,null],
     [3,'a2@gmail.com','Pw:with:colons',null,'https://example.invalid/sms/T2','+84 912 345 678',null,null,null,null],
-    [4,'a3@example.invalid','pw',null,null,null,null,null,null,expect.stringMatching(/Link lấy 2FA/)],
+    [4,'a3@example.invalid','pw',null,null,null,null,null,null,expect.stringMatching(/Link lấy mã 2FA/)],
     [5,'a4@example.invalid','pw',null,null,null,null,null,null,expect.stringMatching(/Quá nhiều cột/)],
-    [6,'a5@example.invalid','pw',null,null,null,null,null,null,expect.stringMatching(/Link lấy 2FA/)]]);
+    [6,'a5@example.invalid','pw',null,null,null,null,null,null,expect.stringMatching(/Link lấy mã 2FA/)]]);
   // The classic pattern is untouched for Gmail and still available for Apple ID.
   expect(parseLoginLines('x@example.invalid:pw:2fa:rec@example.invalid','STANDARD')[0]).toMatchObject({password:'pw',twoFa:'2fa',recovery:'rec@example.invalid',twoFaLink:null,smsLink:null,phone:null,error:null});
 });

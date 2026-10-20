@@ -1,0 +1,2 @@
+ ✓ .runtime/review-stock-delete-apple-20261020.test.ts (2 tests) 160ms
+      Tests  2 passed (2)

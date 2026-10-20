@@ -8,6 +8,7 @@ import {runBusinessCommand} from './idempotency';
 import {authorizeBusiness} from './scope';
 import {verifyBusinessPin} from './pin';
 import {applyLinks} from '../account-store/links';
+import {deleteRefusal} from '../account-store/delete';
 export interface AccountInput {kind:'GMAIL'|'PAYPAL';id?:string;email:string;code?:string;holder?:string;password?:string;twoFa?:string;token?:string;recoveryEmail?:string;paypalId?:string|null;status?:string;notes?:string;expectedRevision?:number;key:string}
 const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Thông tin tài khoản chưa hợp lệ');};
 const manager=(scope:ActorScope)=>{if(!['ADMIN','MODERATOR'].includes(scope.role))throw new ProxyDomainError('FORBIDDEN','Quản lý mới được thêm/sửa tài khoản');};
@@ -44,7 +45,10 @@ export async function archiveOperatingAccount(scope:ActorScope,input:{kind:'GMAI
  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_ACCOUNT_ARCHIVE',module:input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE'},async(tx,images,current)=>{
   manager(current);if(current.role!=='ADMIN')throw new ProxyDomainError('FORBIDDEN','Chỉ ADMIN của dự án được xoá tài khoản khỏi kho'); // 20/10/2026: same rule as Kho tài khoản → Xoá
   const old=input.kind==='GMAIL'?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId}}):await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!old)throw new ProxyDomainError('NOT_FOUND');if(old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
-  const held=input.kind==='GMAIL'?await tx.virtualMachine.count({where:{gmailId:old.id}})+await tx.earnAppAccount.count({where:{loginId:old.id,vmId:{not:null}}}):await tx.gmailAccount.count({where:{paypalId:old.id,archivedAt:null}})+await tx.earnAppAccount.count({where:{paypalId:old.id}});if(held)throw new ProxyDomainError('INVALID_INPUT','Tài khoản đang được ghi trên VM hoặc liên kết Gmail. Bỏ liên kết trước khi ẩn.');await images.remember(input.kind,old.id);
+  const held=input.kind==='GMAIL'?await tx.virtualMachine.count({where:{gmailId:old.id}})+await tx.earnAppAccount.count({where:{loginId:old.id,vmId:{not:null}}}):await tx.gmailAccount.count({where:{paypalId:old.id,archivedAt:null}})+await tx.earnAppAccount.count({where:{paypalId:old.id}});if(held)throw new ProxyDomainError('INVALID_INPUT','Tài khoản đang được ghi trên VM hoặc liên kết Gmail. Bỏ liên kết trước khi ẩn.');
+  // Same refusals as Kho tài khoản → Xoá khỏi kho (review fix 20/10/2026): money left by the book, a payout waiting, reconciliation open.
+  const no=await deleteRefusal(tx,scope.projectId,input.kind==='GMAIL'?'LOGIN':'PAYPAL',old.id);if(no)throw new ProxyDomainError('INVALID_INPUT',no.message);
+  await images.remember(input.kind,old.id);
   if(input.kind==='GMAIL')await tx.gmailAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});else await tx.payPalAccount.update({where:{id:old.id},data:{archivedAt:new Date(),revision:{increment:1}}});return {id:old.id};
  },db);
 }

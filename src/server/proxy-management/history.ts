@@ -30,11 +30,12 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
   const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['QUARANTINED',...HISTORICAL_STATES].includes(r.state)).length,historical:rows.filter(r=>HISTORICAL_STATES.includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY'&&!isShared(r.owner,r.subgroup)).map(r=>r.identityId)).size,shared:new Set(rows.filter(r=>isShared(r.owner,r.subgroup)&&!HISTORICAL_STATES.includes(r.state)).map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
   const search=filter.search?.trim().toLowerCase(),serverSet=filter.servers?.length?new Set(filter.servers):null;
+  const inBatch=filter.batchId?new Set((await db.proxyStatusEvent.findMany({where:{projectId:scope.projectId,batchId:filter.batchId,kind:'RECEIVED'},select:{endpointId:true}})).map(e=>e.endpointId)):null;
   // Group filter: the built-in groups map to owners; anything else is a ProxyGroup id.
   const groupKey=registryGroupKey;
   const groupMatch=(r:RegistryRow)=>!filter.group||groupKey(r)===filter.group;
   const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
-  const scoped=rows.filter(r=>(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
+  const scoped=rows.filter(r=>(!inBatch||(!!r.endpointId&&inBatch.has(r.endpointId)))&&(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
     (filter.view==='ALL'||(filter.view==='HISTORY'?HISTORICAL_STATES.includes(r.state):!HISTORICAL_STATES.includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&

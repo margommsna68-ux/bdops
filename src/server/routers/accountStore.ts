@@ -1,4 +1,5 @@
 import {deleteStock,restoreStock} from '../account-store/delete';
+import {updateLogin} from '../account-store/edit';
 import {z} from 'zod';
 import {router,protectedProcedure} from '../trpc';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
@@ -25,6 +26,8 @@ export const accountStoreRouter=router({
  importPreview:protectedProcedure.input(stockImport).mutation(({ctx,input})=>domain(async()=>previewStockImport(await scope(ctx,input.projectId),input,ctx.prisma))),
  importCommit:protectedProcedure.input(stockImport.extend({key})).mutation(({ctx,input})=>domain(async()=>commitStockImport(await scope(ctx,input.projectId),input,ctx.prisma))),
  batchCost:protectedProcedure.input(project.extend({batchId:id,expectedRevision:revision,priceMode:z.enum(['UNIT','TOTAL']),amount:money,quantity,currency:z.string().max(8),rate:money.nullish(),date:z.string().length(10).nullish(),p2pQuoteToken:z.string().max(4000).nullish(),key})).mutation(({ctx,input})=>domain(async()=>recordBatchCost(await scope(ctx,input.projectId),input,ctx.prisma))),
+ // Khung chi tiết: only the changed fields (undefined keeps, null clears explicitly); revision checked; secrets never echoed back.
+ updateLogin:protectedProcedure.input(project.extend({id,expectedRevision:revision,key,changes:z.object({email:z.string().max(320).nullable().optional(),password:z.string().max(2000).nullable().optional(),twoFa:z.string().max(2000).nullable().optional(),token:z.string().max(20000).nullable().optional(),recoveryEmail:z.string().max(320).nullable().optional(),twoFaLink:z.string().max(2000).nullable().optional(),smsLink:z.string().max(2000).nullable().optional(),phone:z.string().max(40).nullable().optional(),notes:z.string().max(4000).nullable().optional()}).strict()})).mutation(({ctx,input})=>domain(async()=>updateLogin(await scope(ctx,input.projectId),input,ctx.prisma))),
  setNote:protectedProcedure.input(project.extend({id,expectedRevision:revision,notes:z.string().max(4000),key})).mutation(({ctx,input})=>domain(async()=>setStockNote(await scope(ctx,input.projectId),input,ctx.prisma))),
  setStatus:protectedProcedure.input(project.extend({kind:z.enum(['LOGIN','PAYPAL']),items:z.array(z.object({id,expectedRevision:revision})).min(1).max(1000),status:z.string().max(40),key})).mutation(({ctx,input})=>domain(async()=>setStockStatus(await scope(ctx,input.projectId),input,ctx.prisma))),
  linkPreview:protectedProcedure.input(project.extend({text:z.string().max(200000).optional(),items:z.array(link).max(1000).optional()})).mutation(({ctx,input})=>domain(async()=>previewLinks(await scope(ctx,input.projectId),input,ctx.prisma))),
