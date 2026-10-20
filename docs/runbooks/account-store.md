@@ -364,4 +364,5 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   khoản `data-account-id`; các nút có tên rõ (Xoá khỏi kho …, Xem / Copy Mật khẩu …). AI dùng cùng endpoint, quyền, PIN, revision và lượt VM
   như người dùng; không có đường đọc bí mật riêng.
 - Test: `account-edit.integration.test.ts`, `account-detail-ui.test.tsx`, `stock-bulk-import.test.tsx`, `account-delete.integration.test.ts`,
-  `proxy-retire.integration.test.ts`. Evidence docs/superpowers/evidence/2026-10-20-stock-bulk-import/.
+  `proxy-retire.integration.test.ts`. Phát hành: commit fe2bf5f, backup host 0211ccb1, deploy d859efc0, không migration; host chỉ đọc trước /
+  sau giống hệt (chỉ tick rồi bỏ tick một dòng, mở khung chi tiết ở trạng thái che). Evidence docs/superpowers/evidence/2026-10-20-stock-bulk-import/.

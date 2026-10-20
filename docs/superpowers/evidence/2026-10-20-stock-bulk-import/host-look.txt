@@ -1,0 +1,6 @@
+h1-accounts: 1 thanh · "Đã chọn 1 tài khoản Đổi tình trạng… Dùng được Bị khoá tạm Cần khôi phục Cần cập nhật 2FA Bị chặn Ngừng dùng Áp dụng Xoá 1 dòng Bỏ chọn" · bảng dịch 0px
+Khung chi tiết: Email đăng nhập | Mật khẩu | Link lấy mã 2FA | Link SMS | Số điện thoại | Ghi chú · mật khẩu che: có
+h2-paypal: 1 thanh · "Đã chọn 1 PayPal Đổi tình trạng… Dùng được Bị limit Bị suspend Đã đóng Chờ xác minh Áp dụng Xoá 1 dòng Bỏ chọn" · bảng dịch 0px
+h3-proxy: 1 thanh · "Đã chọn 1 proxy Đổi nhóm Chuyển server Gán VM Trạng thái… NEW LIVE BLOCKED Áp dụng Copy proxy Xoá 1 dòng Bỏ chọn" · bảng dịch 0px
+tRPC POST: user.verifyPin, user.heartbeat
+Lỗi JS: không
