@@ -79,6 +79,9 @@ export const authOptions: NextAuthOptions = {
       if (token) {
         (session.user as any).id = token.userId;
         (session.user as any).memberships = token.memberships;
+        // Name and login come from the DB on every refresh, so a rename shows without signing in again.
+        if (session.user) session.user.name = (token.name as string | null | undefined) ?? session.user.name;
+        (session.user as any).username = token.username ?? null;
       }
       return session;
     },
@@ -97,6 +100,8 @@ export const authOptions: NextAuthOptions = {
         if (dbUser) {
           token.userId = dbUser.id;
           token.email = dbUser.email;
+          token.name = dbUser.name;
+          token.username = dbUser.username;
           token.memberships = dbUser.memberships;
         }
       }

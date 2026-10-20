@@ -9,7 +9,7 @@ import { useProjectStore } from "@/lib/store";
 import { useSettingsStore } from "@/lib/settings-store";
 import { useT } from "@/lib/i18n";
 import { isCollectorOnly } from "@/lib/collector-utils";
-import {moneyItems,personalItems,visibleMenu,type NavItem,type NavLinkItem} from "./nav";
+import {moneyItems,personalItems,sidebarIdentity,visibleMenu,type NavItem,type NavLinkItem} from "./nav";
 import {trpc} from '@/lib/trpc';
 import { BrandMark, BRAND_NAME, BRAND_SLOGAN } from "@/components/BrandMark";
 
@@ -68,9 +68,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   // One rule for every mode (src/components/layout/nav.ts): role, modules, optional modules; no project → dashboard/settings/admin.
   const visibleItems=visibleMenu(proxyMode?personalItems(cashMode):cashMode?cashItems:navItems,{role:currentRole||null,modules:currentModules,paypalOnlyProject:isPaypalOnly,canManageUsers});
 
-  const rawName = session?.user?.name || "User";
-  const userName = rawName;
-  const userInitial = userName.charAt(0);
+  const {name:userName,handle:userHandle,initial:userInitial}=sidebarIdentity({name:session?.user?.name,username:(session?.user as {username?:string|null}|undefined)?.username,email:session?.user?.email});
+  const projectName=useProjectStore(s=>s.currentProjectName);
 
   return (
     <aside className={`mth-sidebar ${collapsed ? "w-16" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col shrink-0 transition-all duration-300 border-r border-gray-800/40`}>
@@ -120,10 +119,10 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
           <ProjectSwitcher />
         </div>
       )}
-      {!collectorOnly && collapsed && currentProjectCode && (
-        <div className="p-2 border-b border-gray-700/50 flex justify-center">
+      {!collectorOnly && collapsed && (projectName || currentProjectCode) && (
+        <div className="p-2 border-b border-gray-700/50 flex justify-center" title={projectName || currentProjectCode || ""}>
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isGolden ? "bg-amber-500/20 text-amber-300" : "bg-blue-600/20 text-blue-400"}`}>
-            {currentProjectCode}
+            {(projectName || currentProjectCode || "").trim().slice(0, 3).trim().toUpperCase()}
           </span>
         </div>
       )}
@@ -169,8 +168,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
                       {currentRole}
                     </span>
                   )}
-                  {currentProjectCode && (
-                    <span className="text-[9px] text-gray-400">{currentProjectCode}</span>
+                  {userHandle && (
+                    <span className="text-[10px] text-gray-400 truncate">{userHandle}</span>
                   )}
                 </div>
               </div>

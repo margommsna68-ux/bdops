@@ -50,5 +50,6 @@ export function formatDateTime(date: Date | string): string {
 /** Capitalize first letter of each word: "marua" → "Marua" */
 export function capitalName(name: string | null | undefined): string {
   if (!name) return "";
-  return name.replace(/\b\w/g, (c) => c.toUpperCase());
+  // Word = run of non-space characters (\b\w would split "bản" at the accented letter).
+  return name.replace(/(^|\s)(\S)/gu, (_, s: string, c: string) => s + c.toUpperCase());
 }

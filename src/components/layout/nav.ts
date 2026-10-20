@@ -1,4 +1,5 @@
 import {links} from '@/lib/links';
+import {capitalName} from '@/lib/utils';
 import {moduleOn,type OptionalModule} from '@/lib/features';
 import type {AppModule} from '@/server/trpc';
 // role: who the target page actually serves. ADMIN = admin only (projects, audit log); MOD = admin, or a moderator granted user
@@ -59,4 +60,9 @@ export function personalizeHref(item:NavLinkItem,a:NavAccess):NavLinkItem{
 export function visibleMenu(items:NavItem[],a:NavAccess,modules?:Set<OptionalModule>):NavItem[]{
   const kept=items.flatMap((i):NavItem[]=>'type' in i?[i]:canSee(i,a,modules)?[personalizeHref(i,a)]:[]);
   return kept.filter((i,n)=>!('type' in i)||(!!kept[n+1]&&!('type' in kept[n+1])));
+}
+// Sidebar footer: the user as the Nhân viên page shows them (name, @username); the project is already in the switcher above.
+export function sidebarIdentity(u:{name?:string|null;username?:string|null;email?:string|null}){
+  const name=capitalName(u.name||u.username||u.email)||'User';
+  return {name,handle:u.username?'@'+u.username:'',initial:name.charAt(0).toUpperCase()};
 }

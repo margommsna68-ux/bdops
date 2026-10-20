@@ -115,12 +115,11 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-bold text-white">{p.code}</span>
+                      <span className="text-lg font-bold text-white">{p.name || p.code}</span>
                       {pType === "PAYPAL_ONLY" && (
                         <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">PP Only</span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-300 mt-0.5">{p.name}</p>
                   </div>
                   <div className="text-right">
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${role === "ADMIN" ? "bg-red-500/20 text-red-300" : role === "MODERATOR" ? "bg-blue-500/20 text-blue-300" : "bg-gray-500/20 text-gray-300"}`}>
