@@ -378,4 +378,5 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   mới vừa tạo được chọn như đã có để lần sau không tạo trùng; sửa hết và lưu thành công thì tự đóng. Quy tắc ghép cặp replace không đổi.
 - Test: `stock-detail-state.test.tsx` (jsdom; 4/5 ca đỏ trên fe2bf5f, ca mất phản hồi là ca bảo vệ). Bộ tái hiện
   `.runtime/review-stock-detail-state-20261020.test.tsx` đỏ 3/3 → xanh 3/3; `.runtime/review-stock-delete-apple-20261020.test.ts` vẫn xanh 2/2.
+  Phát hành: commit 6bc27f9, backup host fa1d5724, deploy c896cc53, không migration; host chỉ đọc trước / sau giống hệt.
   Evidence docs/superpowers/evidence/2026-10-20-stock-detail-state/.
