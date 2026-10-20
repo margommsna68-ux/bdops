@@ -1,0 +1,9 @@
+Kho tài khoản: chip Đã xoá có · thùng rác ở dòng: 5 · dòng: 5
+Apple ID hướng dẫn: Mỗi dòng: Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại (tab hoặc |, đúng thứ tự; ô trố
+Kiểm tra dòng mẫu sai link: 1 hostlook-apple@example.invalid mật khẩu Cần sửa · Link lấy 2FA phải là đường dẫn web (http:// hoặc https://)
+Bộ lọc Đã xoá (tài khoản): 1 dòng · URL ok
+PayPal: thùng rác ở dòng: 6
+Kho proxy (một dòng): thùng rác 1 · nút sửa không còn Ngừng quản lý: đúng
+Kho proxy Đã xoá (lịch sử): 1 dòng · nhãn: (không có dòng)
+tRPC POST: user.verifyPin, user.heartbeat, accountStore.importPreview
+Lỗi JS: không

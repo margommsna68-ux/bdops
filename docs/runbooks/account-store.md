@@ -333,4 +333,6 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - **Xem:** chip **Đã xoá** (`?state=DELETED`, `accountStore.store {deleted:true}`), Khôi phục từng dòng / **Khôi phục N dòng**. Danh sách
   phân trang 100 dòng (`?page=`, lọc / tìm trên toàn bộ trước khi phân trang, tổng đúng, "Chọn tất cả trên trang (N)"); đổi bộ lọc về trang 1;
   trang không còn được kẹp về trang cuối; Back / tải lại giữ tab, bộ lọc và trang.
-- Test: `account-delete.integration.test.ts`, `account-url.test.ts`.
+- Test: `account-delete.integration.test.ts`, `account-url.test.ts`. Phát hành (cùng Apple ID): commit ce29911, backup host 7587897d, deploy 65b78f18,
+  migration 20261020150000_apple_id_fields; host chỉ đọc trước / sau giống hệt (chỉ xem kiểm tra dán, không nhập / xoá). Evidence
+  docs/superpowers/evidence/2026-10-20-stock-delete-apple-id/.
