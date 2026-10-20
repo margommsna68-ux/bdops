@@ -182,3 +182,4 @@ Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọ
 - **Bằng chứng:** `docs/superpowers/evidence/2026-10-19-vm-ops-cycle/`; bản sửa sau rà soát: `docs/superpowers/evidence/2026-10-19-vm-ops-fixes/`.
 - **Migration** `20261020200000_earn_balance_checks`, chỉ thêm: bảng `EarnBalanceCheck`; cột `EarnPayoutRequest.submission` (mặc định SENT cho mọi yêu cầu cũ) / `submittedAt`; `PayPalEmail.holdEarnAppId` / `holdAt`.
 - **Test tiền tại VM:** `earn-money-rules.test.ts` (7), `earn-money.integration.test.ts` (8). Bằng chứng: `docs/superpowers/evidence/2026-10-20-earn-money/`.
+- **Phát hành tiền tại VM:** commit 563c642, backup 5bcf8d20, deploy 66f4c1ba; host chỉ đọc trước / sau giống hệt (host chưa có EarnApp).
