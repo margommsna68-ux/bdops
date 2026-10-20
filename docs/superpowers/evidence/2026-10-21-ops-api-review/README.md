@@ -16,3 +16,11 @@ Bản được rà: commit 1cca9fc (+ ghi nhận 487fbb7). Bộ tái hiện đ�
 | 8 | OpenAPI khai `/vms/resolve` trả Vm trực tiếp (thực tế `{ok, data, error}`) | `docs/ops-api/openapi.json` (thay YAML): mọi response là envelope, object đóng (`additionalProperties: false`), đủ ID / revision / lượt / trang / nullable / tiền + đơn vị, lỗi 401 / 403 / 404 / 409 / 422 / 429 | Test đối chiếu phản hồi thật với schema: mọi endpoint, ghi và lỗi (≥ 20 tổ hợp phương thức / đường dẫn / mã) |
 
 Cả bộ: 130 file / 626 test đạt; typecheck sạch; lint chỉ còn cảnh báo cũ; build đạt.
+
+## Phát hành
+
+- Commit 05b64cb (sửa) trên 1cca9fc / 487fbb7. Migration vẫn chỉ là 20261021090000_ops_api (chỉ thêm bảng), không có migration mới.
+- Backup host mới trước khi thử deploy: eaf569f4-cfb2-47bf-86cb-50df7f67820c (41 096 889 byte). Ảnh chụp số liệu: `.runtime/p20-host-before44.json` (local).
+- `railway up` (môi trường proxy-trial-20261015, service moneytohome) trả nguyên văn: `Deploys have been paused temporarily`. Không có deployment
+  mới; host vẫn chạy 28b250e7, migration chưa áp dụng, `/api/ops/v1/health` = 404 trên host. **Chưa triển khai.**
+- Vì chưa deploy: chưa kiểm IP thật qua proxy Railway bằng header giả, nên chưa tuyên bố giới hạn IP của token là an toàn trên host.
