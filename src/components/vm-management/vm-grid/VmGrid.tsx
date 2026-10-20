@@ -89,13 +89,16 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
     if(key==='proxy') return <ProxyCell projectId={props.projectId} vm={v} rights={{assign:rights.assign&&!deletedView,copy:rights.copy,replace:!!rights.replace&&!deletedView}} onCopy={x=>props.onCopy(x,x.desired?'DESIRED':'INSTALLED')} onBusy={markBusy}/>;
     if(key==='sdk') return <SdkCell projectId={props.projectId} vm={v} account={props.accountOf(v.id)} canEdit={rights.assign&&!deletedView} draft={sdkDraft(v.id)} onDraft={d=>d?drafts.set(v.id,'sdk',JSON.stringify(d)):drafts.drop(v.id,'sdk')} onBusy={markBusy}/>;
     if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={rights.assign&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
-    if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone}/>;
+    if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version'){const c=v.desired||v.installed;return c?<span className="text-xs">#{c.version}</span>:<span className="pm-muted">—</span>;}
     if(key==='sdkMeta') return v.sdk?<span className="text-xs vm-ellipsis" title={(v.sdk.recordedBy||'')+' · '+localDate(v.sdk.recordedAt)}>{v.sdk.recordedBy||'—'} · {v.sdk.recordedAt?localDate(v.sdk.recordedAt,true):'chưa rõ ngày'}</span>:<span className="pm-muted">—</span>;
     return <span className="pm-muted">—</span>;
   };
-  return <div className="vm-grid-scroll" style={{maxHeight:props.maxHeight}} data-testid="vm-grid-scroll">
+  // Edge lines of the fixed columns only while something slides under them (set on the element, no re-render while scrolling).
+  const scroller=useRef<HTMLDivElement>(null),edges=()=>{const e=scroller.current;if(!e)return;e.toggleAttribute('data-x-left',e.scrollLeft>0);e.toggleAttribute('data-x-right',e.scrollLeft+e.clientWidth<e.scrollWidth-1);};
+  useEffect(()=>{edges();window.addEventListener('resize',edges);return ()=>window.removeEventListener('resize',edges);});
+  return <div ref={scroller} className="vm-grid-scroll" style={{maxHeight:props.maxHeight}} data-testid="vm-grid-scroll" onScroll={edges}>
     <table className="vm-grid" style={{width:total}}><colgroup><col style={{width:selectW}}/>{!single&&<col style={{width:serverW}}/>}<col style={{width:vmW}}/><col style={{width:opsW}}/>{columns.map(c=><col key={c.key} style={{width:widthOf(prefs,c.key)}}/>)}<col style={{width:FIXED.menu}}/></colgroup>
       <thead><tr>
         <th className="vm-sticky vm-sticky-check" style={left(0)}><input ref={headCheck} type="checkbox" aria-label={`Chọn ${rows.length} VM trên trang này`} title={`Chọn ${rows.length} VM trên trang này`} checked={allOnPage} disabled={!rows.length} onChange={e=>props.onTogglePage(e.target.checked)}/></th>

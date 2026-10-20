@@ -10,7 +10,7 @@ import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,PP_STATUS_LABEL,g
 import {formatLedger,formatUsd} from '@/lib/money-input';
 import {viMoney} from '@/components/account-store/batch-format';
 import type {ManagedVM} from '../shared';
-import type {VmAccount} from './AccountCell';
+import {AccountCell,type VmAccount} from './AccountCell';
 import {BalanceSection,LineView,balanceLine,requestLine} from './MoneyParts';
 export type OpsRow=inferRouterOutputs<AppRouter>['vmOps']['board']['vms'][number];
 export type OpsRights={assign:boolean;money:boolean;writeMoney:boolean;balanceRead?:boolean;balanceWrite?:boolean};
@@ -53,7 +53,7 @@ function useCommandKey(){const ref=useRef<{sig:string;key:string}|null>(null);re
 type Mode='request'|'receive'|'fail'|'cancel'|'settle'|'retry'|'recreate'|'sent'|'unknown'|null;
 // Rút tiền of the current round: request → waiting for money on the PayPal → received in full → "Cần tạo lại VM". The milestone
 // comes from the PayPal book; it cannot be picked by hand. Amounts only with the money rights.
-export function PayoutCell({projectId,vm,ops,account,rights,onDone}:{projectId:string;vm:ManagedVM;ops:OpsRow|undefined;account:VmAccount|undefined;rights:OpsRights;onDone:()=>Promise<unknown>|void}){
+export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{projectId:string;vm:ManagedVM;ops:OpsRow|undefined;account:VmAccount|undefined;rights:OpsRights;onDone:()=>Promise<unknown>|void;onBusy:(vmId:string,busy:boolean)=>void}){
   const p=usePopover(),[mode,setMode]=useState<Mode>(null),r=ops?.request??null,m=r?.money??null,cycle=ops?.cycle??1,sus=ops?.status==='SUSPENDED';
   const canRecreate=rights.assign&&(ops?.milestone==='RECREATE'||sus);
   const openWith=(next:Mode)=>{setMode(next);p.setOpen(true);};
@@ -66,8 +66,10 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone}:{projectId:s
   // "Tiền / Rút" (owner brief 20/10/2026): the balance read on EarnApp, then the payout request; both when both exist.
   const bal=balanceLine(ops,!!rights.balanceRead),req=requestLine(ops);
   let face:React.ReactNode;
-  if(!hasEarnApp&&!r)face=<span className="pm-muted text-xs">{sus&&canRecreate?'SUS · ':''}Chưa có EarnApp</span>;
-  else face=<>{bal&&<LineView line={bal}/>}{req&&<LineView line={req}/>}{!bal&&!req&&<span className="pm-muted text-xs">Chưa kiểm tra</span>}</>;
+  // No account yet (20/10/2026): say so; who may assign opens the existing account picker from here. Never $0, never the SDK money.
+  if(!hasEarnApp&&!r&&!canRecreate)return <div className="vm-payout">{rights.assign?<AccountCell projectId={projectId} vm={vm} link={account} focus="login" canAssign face={<span className="pm-muted text-xs">Chưa gán tài khoản</span>} onSaved={()=>void onDone()} onBusy={onBusy}/>:<span className="pm-muted text-xs">Chưa gán tài khoản</span>}</div>;
+  if(!hasEarnApp&&!r)face=<span className="pm-muted text-xs">{sus?'SUS · ':''}Chưa gán tài khoản</span>;
+  else face=<>{bal&&<LineView line={bal}/>}{req&&<LineView line={req}/>}{!bal&&!req&&<span className="pm-muted text-xs">Chưa kiểm tra</span>}{bal?.text==='Chưa kiểm tra'&&!req&&rights.balanceWrite&&<span className="vm-money-line text-xs">Bấm để ghi số dư</span>}</>;
   void m;void MILESTONE_LABEL;void formatLedger;
   const clickable=hasEarnApp||!!r||canRecreate;
   return <div className="vm-payout">

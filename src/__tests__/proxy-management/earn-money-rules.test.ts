@@ -62,6 +62,8 @@ describe('sort and summary over the whole filtered result',()=>{
     const s=moneySummary([row({balance:{latest:b('10.00','2026-10-20T08:00:00Z'),lastOk:b('10.00','2026-10-20T08:00:00Z')},request:{submission:'SENT',state:'REQUESTED',phase:'WAITING',requestedAt:'2026-10-19',money:{remaining:'4.00',currency:'USD'}}}),
       row({balance:{latest:b('0.00','2026-10-20T08:00:00Z'),lastOk:b('0.00','2026-10-20T08:00:00Z')}}),row({balance:{latest:b('3.50','2026-10-20T08:00:00Z','EUR'),lastOk:b('3.50','2026-10-20T08:00:00Z','EUR')}}),row({}),row({hasEarnApp:false}),
       row({request:{submission:'PREPARING',state:'REQUESTED',phase:'WAITING',requestedAt:'2026-10-19',money:{remaining:'9.00',currency:'USD'}}})]);
-    expect(s).toEqual({balances:[{currency:'EUR',amount:'3.50'},{currency:'USD',amount:'10.00'}],waiting:[{currency:'USD',amount:'4.00'}],unchecked:2,known:3});
+    expect(s).toEqual({balances:[{currency:'EUR',amount:'3.50'},{currency:'USD',amount:'10.00'}],waiting:[{currency:'USD',amount:'4.00'}],unchecked:2,known:3,unassigned:1});
+    // Every VM without an EarnApp account (owner brief 20/10/2026): counted as "chưa gán", never as "chưa kiểm tra" or $0.
+    expect(moneySummary([row({hasEarnApp:false}),row({hasEarnApp:false})])).toEqual({balances:[],waiting:[],unchecked:0,known:0,unassigned:2});
   });
 });

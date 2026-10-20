@@ -12,7 +12,8 @@ type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
 export const TYPE_LABEL:Record<string,string>={GMAIL:'Gmail',APPLE_ID:'Apple ID'};
 // Tài khoản EarnApp at the cell: login (Gmail / Apple ID) and the receiving PayPal email (Mã PP → Email) of this VM, chosen in a popover next to the cell. One
 // save sends both (the server keeps or refuses the row as a whole). Held accounts are not offered; the server re-checks anyway.
-export function AccountCell({projectId,vm,link,focus,canAssign,onSaved,onBusy}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus:'login'|'paypal';canAssign:boolean;onSaved:()=>void;onBusy:(vmId:string,busy:boolean)=>void}){
+// face: what the button shows instead of the account (the Tiền / Rút cell of a VM without an account opens the same picker).
+export function AccountCell({projectId,vm,link,focus,canAssign,face,onSaved,onBusy}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus:'login'|'paypal';canAssign:boolean;face?:React.ReactNode;onSaved:()=>void;onBusy:(vmId:string,busy:boolean)=>void}){
   const e=link?.earnApp,[open,setOpen]=useState(false),button=useRef<HTMLButtonElement>(null),pop=useRef<HTMLDivElement>(null),[pos,setPos]=useState<{top:number;left:number}|null>(null);
   const close=()=>{setOpen(false);button.current?.focus({preventScroll:true});};const closeRef=useRef(close);closeRef.current=close;
   useLayoutEffect(()=>{if(!open)return;const place=()=>{const r=button.current?.getBoundingClientRect();if(!r)return;const h=pop.current?.offsetHeight||360,up=r.bottom+h+8>window.innerHeight&&r.top>h;const next={top:up?r.top-h-6:r.bottom+6,left:Math.max(8,Math.min(r.left,window.innerWidth-372))};setPos(p=>p&&p.top===next.top&&p.left===next.left?p:next);};
@@ -24,7 +25,7 @@ export function AccountCell({projectId,vm,link,focus,canAssign,onSaved,onBusy}:{
     :(e?.paypal?<span className="vm-ellipsis" title={e.paypal.code+' · '+(e.paypal.email||'chưa xác định email')}>{e.paypal.code} · {e.paypal.email||<span className="pm-muted">chưa rõ email</span>}</span>:<span className="pm-muted">{e&&canAssign?'Chọn PayPal':'—'}</span>);
   if(vm.archivedAt)return <span className="pm-muted vm-ellipsis">{focus==='login'?e?.login.email||'—':e?.paypal?.code||'—'}</span>;
   return <div className="vm-status">
-    <button ref={button} type="button" className="vm-link-cell vm-account-button" aria-haspopup="dialog" aria-expanded={open} aria-label={(focus==='login'?'Tài khoản EarnApp ':'PayPal nhận tiền ')+vm.code} onClick={()=>setOpen(o=>!o)}>{view}{canAssign&&<ChevronDown size={11} className="shrink-0 pm-muted"/>}</button>
+    <button ref={button} type="button" className="vm-link-cell vm-account-button" aria-haspopup="dialog" aria-expanded={open} aria-label={(focus==='login'?'Tài khoản EarnApp ':'PayPal nhận tiền ')+vm.code} onClick={()=>setOpen(o=>!o)}>{face??view}{canAssign&&<ChevronDown size={11} className="shrink-0 pm-muted"/>}</button>
     {open&&typeof document!=='undefined'&&createPortal(<div ref={pop} role="dialog" aria-label={`Tài khoản ${vm.server} / ${vm.code}`} className="vm-status-pop vm-account-pop" style={{top:pos?.top??-9999,left:pos?.left??-9999}}>
       <AccountPicker projectId={projectId} vm={vm} link={link} focus={focus} canAssign={canAssign} onBusy={onBusy} onDone={()=>{onSaved();setOpen(false);}}/>
     </div>,document.body)}

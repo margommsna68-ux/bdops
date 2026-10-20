@@ -131,12 +131,12 @@ export function moneySortKey(sort:MoneySort,v:MoneyRow):number{
 }
 /** Balances recorded (the newest good figure of each current account) and money waiting for PayPal, per currency, never added together. */
 export function moneySummary(rows:MoneyRow[]){
-  const bal:Record<string,number>={},wait:Record<string,number>={};let unchecked=0,known=0;
+  const bal:Record<string,number>={},wait:Record<string,number>={};let unchecked=0,known=0,unassigned=0;
   for(const v of rows){
     const ok=v.balance.lastOk;if(ok&&ok.amount!=null){bal[ok.currency]=(bal[ok.currency]||0)+toCents(ok.amount);known++;}
-    if(v.hasEarnApp&&!v.balance.latest)unchecked++;
+    if(v.hasEarnApp&&!v.balance.latest)unchecked++;if(!v.hasEarnApp)unassigned++;
     const r=v.request;if(r&&r.state==='REQUESTED'&&r.phase==='WAITING'&&r.submission==='SENT'&&r.money)wait[r.money.currency]=(wait[r.money.currency]||0)+toCents(r.money.remaining);
   }
   const text=(m:Record<string,number>)=>Object.entries(m).sort(([a],[b])=>a.localeCompare(b)).map(([c,v])=>({currency:c,amount:fromCents(v)}));
-  return {balances:text(bal),waiting:text(wait),unchecked,known};
+  return {balances:text(bal),waiting:text(wait),unchecked,known,unassigned};
 }

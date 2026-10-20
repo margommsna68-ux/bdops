@@ -3,7 +3,25 @@ import {DEFAULT_PREFS,editableFields,moveColumn,nextCell,normalizePrefs,pageOf,r
 const params=(s:string)=>new URLSearchParams(s);
 describe('Server/VM grid model',()=>{
   it('default columns follow the brief and optional columns start hidden',()=>{
-    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['proxy','sdk','account','paypal','payout','notes']);// 19/10/2026: Cài proxy merged into Proxy
+    // 19/10/2026: Cài proxy merged into Proxy. 20/10/2026: Tiền / Rút right after Tình trạng (visible at 1280px with the sidebar open).
+    expect(visibleColumns(DEFAULT_PREFS).map(c=>c.key)).toEqual(['payout','proxy','sdk','account','paypal','notes']);
+  });
+  it('a stored order still in the old default layout moves Tiền / Rút to the front; widths and hidden columns are kept',()=>{
+    const old=normalizePrefs({order:['proxy','sdk','account','paypal','payout','notes','version','sdkMeta'],hidden:['sdkMeta','paypal'],widths:{payout:260,notes:300,vm:140}});
+    expect(old.order).toEqual(['payout','proxy','sdk','account','paypal','notes','version','sdkMeta']);
+    expect(old.hidden).toEqual(['sdkMeta','paypal']);expect(old.widths).toEqual({payout:260,notes:300,vm:140});expect(old.v).toBe(2);
+    // Saved before the money column existed (it was appended after PayPal nhận): same move. An install column from before 19/10 is dropped.
+    expect(normalizePrefs({order:['proxy','status','sdk','account','paypal','notes','version','sdkMeta'],hidden:['version','sdkMeta']}).order).toEqual(['payout','proxy','sdk','account','paypal','notes','version','sdkMeta']);
+    // The optional columns may sit anywhere: only the main order decides.
+    expect(normalizePrefs({order:['version','proxy','sdk','account','paypal','payout','notes','sdkMeta'],hidden:[]}).order).toEqual(['version','payout','proxy','sdk','account','paypal','notes','sdkMeta']);
+  });
+  it('an order the user changed is kept, and a migrated / chosen layout is never moved again',()=>{
+    const own=['notes','proxy','sdk','account','paypal','payout','version','sdkMeta'];
+    expect(normalizePrefs({order:own,hidden:[]}).order).toEqual(own);
+    // After the move the user puts Tiền / Rút back after PayPal nhận on purpose: v2 is stored, so reloading keeps it there.
+    const back=moveColumn(normalizePrefs({order:['proxy','sdk','account','paypal','payout','notes','version','sdkMeta'],hidden:[]}),'payout',4);
+    expect(back.order.slice(0,6)).toEqual(['proxy','sdk','account','paypal','payout','notes']);
+    expect(normalizePrefs(JSON.parse(JSON.stringify(back))).order).toEqual(back.order);
   });
   it('stored preferences are cleaned: unknown keys dropped, new columns put at their default place, widths bounded',()=>{
     const p=normalizePrefs({order:['notes','bogus','proxy','notes'],hidden:['paypal','gmail'],widths:{sdk:20,notes:300}});

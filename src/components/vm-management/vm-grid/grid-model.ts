@@ -5,6 +5,9 @@ export type EditField='code'|'sdk'|'notes';
 export interface ColumnDef {key:ColumnKey;label:string;width:number;min:number;optional?:boolean;edit?:EditField}
 // Fixed columns (not movable/hideable): [select] [server, only for all servers] [VM] [Tình trạng] … [⋯]. These are the movable ones.
 export const COLUMNS:ColumnDef[]=[
+  // Tiền / Rút (20/10/2026): EarnApp balance read at the VM + the payout request to PayPal, one column. Right after Tình trạng so VM,
+  // status and money are visible together on a 1280px laptop with the sidebar open (owner brief 20/10/2026).
+  {key:'payout',label:'Tiền / Rút',width:220,min:150},
   // Proxy: the proxy the VM uses (IP:port + copy) and only the warnings Blocked / Cần kiểm tra; a click opens "Thay proxy" next to the
   // cell (owner decision 19/10/2026: no install step). The old "Cài proxy" / "Tiến độ cài" columns are gone; stored settings drop them.
   {key:'proxy',label:'Proxy',width:250,min:160},
@@ -12,30 +15,35 @@ export const COLUMNS:ColumnDef[]=[
   {key:'sdk',label:'SDK',width:190,min:130},
   {key:'account',label:'Tài khoản EarnApp',width:230,min:140},
   {key:'paypal',label:'PayPal nhận',width:130,min:90},
-  // Tiền / Rút (20/10/2026): EarnApp balance read at the VM + the payout request to PayPal, one column.
-  {key:'payout',label:'Tiền / Rút',width:230,min:150},
   {key:'notes',label:'Ghi chú',width:220,min:120,edit:'notes'},
   {key:'version',label:'Cấu hình',width:120,min:90,optional:true},
   {key:'sdkMeta',label:'SDK ghi bởi',width:170,min:110,optional:true},
 ];
 export const FIXED={select:40,server:96,vm:118,ops:124,menu:48};
-export interface GridPrefs {order:ColumnKey[];hidden:ColumnKey[];widths:Partial<Record<ColumnKey|'server'|'vm',number>>}
-export const DEFAULT_PREFS:GridPrefs={order:COLUMNS.map(c=>c.key),hidden:COLUMNS.filter(c=>c.optional).map(c=>c.key),widths:{}};
+// v: layout version of the stored order. 2 = Tiền / Rút right after Tình trạng (20/10/2026).
+export interface GridPrefs {order:ColumnKey[];hidden:ColumnKey[];widths:Partial<Record<ColumnKey|'server'|'vm',number>>;v?:number}
+export const PREFS_VERSION=2;
+export const DEFAULT_PREFS:GridPrefs={order:COLUMNS.map(c=>c.key),hidden:COLUMNS.filter(c=>c.optional).map(c=>c.key),widths:{},v:PREFS_VERSION};
+// The default order before v2 (payout after PayPal nhận). A stored order still in that layout moves Tiền / Rút to the front; an order
+// the user changed is kept as it is. Only the order of the main columns counts (the optional ones may sit anywhere).
+const OLD_MAIN=['proxy','sdk','account','paypal','payout','notes'];
 // Stored preferences survive new columns being added later: unknown keys are dropped, missing ones appended (hidden if optional).
 export function normalizePrefs(raw:unknown):GridPrefs{
   const keys=COLUMNS.map(c=>c.key),p=(raw&&typeof raw==='object'?raw:{}) as Partial<GridPrefs>;
   const order=(Array.isArray(p.order)?p.order:[]).filter((k):k is ColumnKey=>keys.includes(k as ColumnKey)).filter((k,i,a)=>a.indexOf(k)===i);
-  const missing=keys.filter(k=>!order.includes(k));
-  // A column added later goes to its default place (after the column before it), not to the end.
-  for(const k of missing){const at=keys.indexOf(k),prev=keys.slice(0,at).reverse().find(x=>order.includes(x));order.splice(prev?order.indexOf(prev)+1:0,0,k);}
+  const missing=keys.filter(k=>!order.includes(k)),old=(p.v??1)<PREFS_VERSION;
+  // A column added later goes to its default place (after the column before it), not to the end. Before v2 that place was the old one.
+  const place=old?['proxy','sdk','account','paypal','payout','notes','version','sdkMeta'] as ColumnKey[]:keys;
+  for(const k of missing){const at=place.indexOf(k),prev=place.slice(0,at).reverse().find(x=>order.includes(x));order.splice(prev?order.indexOf(prev)+1:0,0,k);}
+  if(old&&order.filter(k=>OLD_MAIN.includes(k)).join()===OLD_MAIN.join()){order.splice(order.indexOf('payout'),1);order.splice(order.indexOf('proxy'),0,'payout');}
   const hidden=(Array.isArray(p.hidden)?p.hidden:DEFAULT_PREFS.hidden).filter((k):k is ColumnKey=>keys.includes(k as ColumnKey));
   const widths:GridPrefs['widths']={};for(const [k,v] of Object.entries(p.widths||{})) if((keys.includes(k as ColumnKey)||k==='server'||k==='vm')&&typeof v==='number'&&v>=60&&v<=800) widths[k as ColumnKey]=Math.round(v);
-  return {order,hidden:[...hidden,...missing.filter(k=>COLUMNS.find(c=>c.key===k)!.optional&&!hidden.includes(k))],widths};
+  return {order,hidden:[...hidden,...missing.filter(k=>COLUMNS.find(c=>c.key===k)!.optional&&!hidden.includes(k))],widths,v:PREFS_VERSION};
 }
 export const prefsKey=(userId:string)=>'mth.vm-grid.v1.'+userId;
 export function visibleColumns(prefs:GridPrefs){return prefs.order.filter(k=>!prefs.hidden.includes(k)).map(k=>COLUMNS.find(c=>c.key===k)!);}
 export function widthOf(prefs:GridPrefs,key:ColumnKey|'server'|'vm'){const def=key==='server'?FIXED.server:key==='vm'?FIXED.vm:COLUMNS.find(c=>c.key===key)!.width;return prefs.widths[key]??def;}
-export function moveColumn(prefs:GridPrefs,key:ColumnKey,to:number):GridPrefs{const order=prefs.order.filter(k=>k!==key);order.splice(Math.max(0,Math.min(to,order.length)),0,key);return {...prefs,order};}
+export function moveColumn(prefs:GridPrefs,key:ColumnKey,to:number):GridPrefs{const order=prefs.order.filter(k=>k!==key);order.splice(Math.max(0,Math.min(to,order.length)),0,key);return {...prefs,order,v:PREFS_VERSION};}
 export function toggleColumn(prefs:GridPrefs,key:ColumnKey,on:boolean):GridPrefs{return {...prefs,hidden:on?prefs.hidden.filter(k=>k!==key):Array.from(new Set([...prefs.hidden,key]))};}
 export function resizeColumn(prefs:GridPrefs,key:ColumnKey|'server'|'vm',width:number):GridPrefs{const min=key==='server'?70:key==='vm'?80:COLUMNS.find(c=>c.key===key)!.min;return {...prefs,widths:{...prefs.widths,[key]:Math.round(Math.max(min,Math.min(800,width)))}};}
 // Editable cells in visual order: VM code first (when the user may manage), then the visible editable columns.

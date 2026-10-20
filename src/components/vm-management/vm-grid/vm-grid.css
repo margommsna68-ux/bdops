@@ -32,11 +32,14 @@
 .vm-grid-scroll{overflow:auto;position:relative;overscroll-behavior:contain}
 .vm-grid{border-collapse:separate;border-spacing:0;table-layout:fixed;text-align:left}
 .vm-grid th{position:sticky;top:0;z-index:3;background:var(--ds-table-header);font-size:11px;font-weight:600;color:var(--ds-text-secondary);padding:8px 10px;white-space:nowrap;border-bottom:1px solid var(--ds-border);overflow:hidden;text-overflow:ellipsis}
-.vm-grid td{font-size:13px;padding:4px 10px;height:44px;vertical-align:middle;border-bottom:1px solid var(--ds-border);background:var(--ds-card);color:var(--ds-text-primary);overflow:hidden}
+.vm-grid td{font-size:13px;padding:4px 10px;height:44px;vertical-align:middle;border-bottom:1px solid color-mix(in srgb,var(--ds-border) 55%,transparent);background:var(--ds-card);color:var(--ds-text-primary);overflow:hidden}
 .vm-grid td.vm-sticky,.vm-grid td.vm-sticky-right{z-index:2}
 .vm-grid th.vm-sticky,.vm-grid th.vm-sticky-right{z-index:4}
-.vm-grid .vm-sticky-last{box-shadow:inset -1px 0 0 var(--ds-border),5px 0 6px -5px rgba(0,0,0,.18)}
-.vm-grid .vm-sticky-right{position:sticky;right:0;text-align:center;padding:0;box-shadow:inset 1px 0 0 var(--ds-border),-5px 0 6px -5px rgba(0,0,0,.18)}
+/* Fixed columns join the table seamlessly (owner brief 20/10/2026: no shadow / heavy rule after Tình trạng or before ⋯). A thin line
+   shows only while cells actually slide under them (data-x-left / data-x-right set by the scroll position). */
+.vm-grid .vm-sticky-right{position:sticky;right:0;text-align:center;padding:0}
+.vm-grid-scroll[data-x-left] .vm-sticky-last{box-shadow:inset -1px 0 0 var(--ds-border)}
+.vm-grid-scroll[data-x-right] .vm-sticky-right{box-shadow:inset 1px 0 0 var(--ds-border)}
 .vm-grid tr.vm-row-pending td:first-child{box-shadow:inset 3px 0 0 #1d4ed8}
 .vm-grid tr.vm-row-selected td{background:linear-gradient(rgba(29,78,216,.08),rgba(29,78,216,.08)),var(--ds-card)}
 .vm-grid tr.vm-row-active td{background:linear-gradient(rgba(29,78,216,.14),rgba(29,78,216,.14)),var(--ds-card)}
@@ -198,6 +201,9 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 [data-theme="dark"] .vm-money-waiting,[data-theme="golden"] .vm-money-waiting{color:#fde047}[data-theme="dark"] .vm-money-recreate,[data-theme="golden"] .vm-money-recreate{color:#4ade80}
 [data-theme="dark"] .vm-money-money_review,[data-theme="golden"] .vm-money-money_review{color:#fdba74}[data-theme="dark"] .vm-money-failed,[data-theme="golden"] .vm-money-failed{color:#fca5a5}
 .vm-money-line{color:var(--ds-text-secondary);max-width:100%}
+/* A recorded EarnApp balance: the amount itself, readable at a glance, then its condition chip. */
+.vm-money-head{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.vm-money-amount{font-size:14px;font-weight:650;line-height:18px;font-variant-numeric:tabular-nums;color:var(--ds-text-primary);white-space:nowrap}
 .vm-payout-pop{width:380px;max-height:calc(100vh - 16px);overflow-y:auto}
 .vm-pp-info{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 8px;border-radius:8px;background:var(--ds-hover);border:1px solid var(--ds-border)}
 .vm-gather{font-weight:650;color:#1d4ed8}[data-theme="dark"] .vm-gather{color:#93c5fd}

@@ -135,6 +135,15 @@ Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọ
 - Yêu cầu: "Đang chuẩn bị rút", "Chưa xác định kết quả rút", "Chờ về PP $10,00", "Đã về $6,00 · còn chờ $4,00", "Đã về PP $10,00", cùng mã PP và email.
 - Tình trạng VM (OK / OFF / SUS…) không đổi vì tiền.
 
+**Vị trí và cách đọc (chủ dự án 20/10/2026, sau kiểm trên host 1274 px):**
+- Thứ tự mặc định: Chọn → Server (khi xem tất cả) → VM → Tình trạng → **Tiền / Rút** → Proxy → SDK → Tài khoản EarnApp → PayPal nhận → Ghi chú. Ở 1280 px, sidebar mở, cột Tiền / Rút nằm ở 667–887 px (tất cả server) / 571–791 px (một server), trước đây 1467 px / 1371 px.
+- Cấu hình cột đã lưu (`mth.vm-grid.v1.<user>`, có `v`): bản cũ còn đúng thứ tự mặc định cũ (Proxy, SDK, Tài khoản, PayPal, Tiền / Rút, Ghi chú; cột phụ ở đâu cũng được) được chuyển sang thứ tự mới một lần; thứ tự người dùng tự đổi giữ nguyên; chiều rộng và cột ẩn giữ nguyên. Sau khi chuyển, `v: 2` được lưu cùng lần đổi kế tiếp, nên đặt lại Tiền / Rút ở chỗ khác bằng menu Cột thì không bị chuyển lại. Không xoá localStorage.
+- Chưa gán tài khoản: "Chưa gán tài khoản"; người có quyền gán bấm để mở đúng bộ chọn tài khoản của ô Tài khoản EarnApp; người xem chỉ thấy chữ.
+- Đã gán, chưa kiểm tra: "Chưa kiểm tra" (+ "Bấm để ghi số dư" với người có quyền ghi) → mở phần ghi số dư.
+- Đã ghi: số tiền lớn, có $ ("$12,40"), cạnh nhãn điều kiện, dòng dưới "Kiểm tra 18:36". Khoản rút chờ về PP là dòng riêng. Người không có quyền đọc số dư thấy "Đã kiểm tra", không số.
+- Dòng tổng hợp theo bộ lọc (mọi trang): số dư đã ghi, chờ về PP (chỉ với quyền tiền), "Chưa kiểm tra: N VM", "Chưa gán tài khoản: N VM" — mục bằng 0 không hiện. Toàn bộ VM trong bộ lọc chưa gán: một câu "Chưa VM nào trong bộ lọc có tài khoản EarnApp (N VM chưa gán tài khoản)". Thay dòng cũ "Chưa có dữ liệu: 0 VM".
+- Mép cột cố định: không bóng đổ; một đường mảnh chỉ hiện khi đang có ô trượt dưới cột cố định (`data-x-left` / `data-x-right` trên khung cuộn). Đường phân hàng nhạt hơn.
+
 **Ghi kiểm tra** (`vmOps.balanceRecord`, `src/server/vm-ops/balance.ts`; người, dán bảng và AI dùng chung):
 - Mỗi dòng gồm VM, lượt (`expectedCycle`), EarnApp đã thấy, số tiền, đồng tiền, giờ thật đã xem, kết quả OK / FAILED, điều kiện YES / NO / UNKNOWN, ghi chú điều kiện, căn cứ (không mật khẩu, mã 2FA hay link chứa mã).
 - Lượt sai hoặc EarnApp đã đổi bị từ chối ở dòng đó. Giờ ở tương lai (quá 5 phút) bị từ chối. Bản kiểm tra cũ đến muộn được lưu vào lịch sử nhưng không thay số mới hơn.

@@ -215,7 +215,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
       {(['RECEIVED','CHECK'] as const).map(k=>{const n=board.data?active.filter(v=>moneyFlags(moneyRow(v))[k]).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='CHECK'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
       {(url.st.length>0||url.money||url.warn)&&<button type="button" className="pm-link text-xs" onClick={()=>go({st:[],money:'',warn:false,page:1})}>Bỏ lọc tình trạng</button>}
     </div>
-    {summary&&!deletedView&&(board.data?.rights.balanceRead||board.data?.rights.money)&&<p className="vm-money-summary text-xs" role="status" data-testid="money-summary"><span>Số dư EarnApp đã ghi: <strong>{summary.balances.length?summary.balances.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'—'}</strong> ({summary.known} VM)</span>{board.data?.rights.money&&<span>Đang chờ về PP: <strong>{summary.waiting.length?summary.waiting.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'$0,00'}</strong></span>}<span>Chưa có dữ liệu: <strong>{summary.unchecked}</strong> VM</span><span className="pm-muted">Theo bộ lọc hiện tại (mọi trang); hai số không cộng với nhau.</span></p>}
+    {summary&&!deletedView&&filtered.length>0&&<MoneySummaryLine summary={summary} total={filtered.length} balanceRead={!!board.data?.rights.balanceRead} money={!!board.data?.rights.money}/>}
     {board.error&&<p role="alert" className="pm-error">Chưa đọc được tình trạng vận hành: {board.error.message} <button className="pm-link" onClick={()=>void board.refetch()}>Thử lại</button></p>}
     {accountView&&accounts.error&&<p role="alert" className="pm-error">Chưa đọc được tài khoản EarnApp: {accounts.error.message} <button className="pm-link" onClick={()=>void accounts.refetch()}>Thử lại</button></p>}
     {url.vm&&workspace.data&&!panelVm&&<div className="pm-blocked flex flex-wrap gap-2 items-center justify-between" role="alert"><span className="text-sm">VM trong liên kết không còn trong dự án này (đã xoá hẳn hoặc thuộc dự án khác).</span><button className="pm-button pm-button-quiet" onClick={()=>go({vm:null,tab:'overview',cause:null},'replace')}>Đóng, về danh sách</button></div>}
@@ -257,4 +257,16 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     {form==='ADD'&&<AddVmDialog projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} known={allVMs.map(v=>({serverId:v.serverId,code:v.code,archivedAt:v.archivedAt}))} onClose={()=>setForm(null)} onSaved={()=>void refresh()}/>}
     {form==='CREATE'&&<CreateServerDialog projectId={projectId} onClose={()=>setForm(null)} onSaved={id=>{void refresh();router.push(`/infrastructure/servers/${id}`);}}/>}
   </div>;
+}
+// Money summary over the filtered result (all pages). Amounts only with the rights; counts of VMs without an account / never checked
+// for everyone (owner brief 20/10/2026: no "Chưa có dữ liệu: 0 VM" when no VM has an EarnApp yet). Unknown is never shown as $0.
+function MoneySummaryLine({summary:s,total,balanceRead,money}:{summary:ReturnType<typeof moneySummary>;total:number;balanceRead:boolean;money:boolean}){
+  const count=(n:number,label:string)=>n>0&&<span>{label}: <strong>{n}</strong> VM</span>;
+  if(s.unassigned===total&&!s.waiting.length)return <p className="vm-money-summary text-xs" role="status" data-testid="money-summary"><span>Chưa VM nào trong bộ lọc có tài khoản EarnApp ({total} VM chưa gán tài khoản).</span></p>;
+  return <p className="vm-money-summary text-xs" role="status" data-testid="money-summary">
+    {(balanceRead||money)&&s.known>0&&<span>Số dư EarnApp đã ghi: <strong>{s.balances.map(x=>fmtLedger(x.amount,x.currency)).join(' · ')}</strong> ({s.known} VM)</span>}
+    {money&&<span>Đang chờ về PP: <strong>{s.waiting.length?s.waiting.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'$0,00'}</strong></span>}
+    {count(s.unchecked,'Chưa kiểm tra')}{count(s.unassigned,'Chưa gán tài khoản')}
+    <span className="pm-muted">Theo bộ lọc, mọi trang{(balanceRead||money)&&s.known>0&&money?'; số dư và tiền chờ không cộng với nhau':''}.</span>
+  </p>;
 }

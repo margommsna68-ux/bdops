@@ -1,0 +1,27 @@
+PASS C1 cấu hình cũ đúng mặc định → Tiền / Rút ngay sau Tình trạng; PayPal vẫn ẩn, độ rộng giữ — VM|Tình trạng|Tiền / Rút|Proxy|SDK|Tài khoản EarnApp|Ghi chú notes 300
+PASS C2 1280px sidebar mở: Tiền / Rút nằm trọn trong màn hình — mép phải 803
+PASS C3 tải lại: giữ bố cục mới
+PASS C4 cấu hình tự đổi (Ghi chú đầu tiên) giữ nguyên — VM|Tình trạng|Ghi chú|Proxy|SDK|Tài khoản EarnApp|PayPal nhận|Tiền / Rút
+PASS C5 menu Cột đổi vị trí Tiền / Rút; tải lại vẫn giữ lựa chọn — VM|Tình trạng|Proxy|Tiền / Rút|SDK|Tài khoản EarnApp|PayPal nhận|Ghi chú
+  ô: {"1":"Chưa gán tài khoản","2":"Chưa kiểm tra Bấm để ghi số dư","3":"$0,00 Chưa đủ điều kiện rút Kiểm tra 18:36","4":"$12,40 Có thể rút Kiểm tra 18:36","5":"$8,75 Chưa kiểm tra điều kiện rút · Kiểm tra 18:36 Chờ về PP $10,00 pp33-mnxjl · p33-1-mnxjl@example.invalid","6":"Chưa gán tài khoản"}
+PASS M1 chưa gán: "Chưa gán tài khoản" (không $0)
+PASS M2 gán nhưng chưa kiểm tra: "Chưa kiểm tra" — Chưa kiểm tra Bấm để ghi số dư
+PASS M3 số dư $0 hiện $0,00 (đã ghi), có giờ kiểm tra — $0,00 Chưa đủ điều kiện rút Kiểm tra 18:36
+PASS M4 số dư $12,40 + Có thể rút + giờ — $12,40 Có thể rút Kiểm tra 18:36
+PASS M5 số dư $8,75 và khoản chờ về PP $10 hiện riêng — $8,75 Chưa kiểm tra điều kiện rút · Kiểm tra 18:36 Chờ về PP $10,00 pp33-mnxjl · p33-1-mnxjl@example.invalid
+PASS M6 dòng tổng hợp: số dư, chờ về PP, 1 chưa kiểm tra, 2 chưa gán — Số dư EarnApp đã ghi: $21,15 (3 VM) Đang chờ về PP: $10,00 Chưa kiểm tra: 1 VM Chưa gán tài khoản: 2 VM Theo bộ lọc, mọi trang; số dư và tiền chờ không cộng với nhau.
+PASS M7 lọc Chưa tài khoản: một câu "2 VM chưa gán tài khoản", không "0 VM" — Chưa VM nào trong bộ lọc có tài khoản EarnApp (2 VM chưa gán tài khoản).
+PASS M8 bấm "Chưa kiểm tra" mở phần ghi số dư
+PASS M9 bấm "Chưa gán tài khoản" mở bộ chọn tài khoản hiện có — Lk-mnxjl / VM_006 · Tài khoản EarnApp VM chưa có tài khoản EarnApp. Có thể để trống và bổ sung sau. Tài khoản đăng nhập (Gmail / Apple ID) — Không có tài khoản — a2-p22bdfln-1@example.invalid · Gmail 
+PASS X1 lúc đầu không có đường mép trái; khi cuộn ngang mới có đường mảnh, tới cuối thì mép phải tắt — {"a0":{"l":false,"r":true},"a1":{"l":true,"r":false}}
+PASS X2 cuộn: tiêu đề dính trên, cột VM dính trái, nền kín, không bóng đổ — {"gTop":392,"thTop":392,"vmLeft":329,"gLeft":289,"bg":"rgb(21, 29, 48)","shadow":"rgb(39, 52, 73) -1px 0px 0px 0px inset"}
+PASS P1 điện thoại 390: trang không cuộn ngang (bảng cuộn trong khung) — {"doc":390,"vw":390}
+  ô nhân viên: {"1":"Chưa gán tài khoản","2":"Chưa kiểm tra","3":"Đã kiểm tra · Chưa đủ điều kiện rút Kiểm tra 18:36","4":"Đã kiểm tra · Có thể rút Kiểm tra 18:36","5":"Đã kiểm tra Chưa kiểm tra điều kiện rút · Kiểm tra 18:36 Chờ tiền về pp33-mnxjl","6":"Chưa gán tài khoản"}
+PASS S1 nhân viên không quyền tiền: ô không có số tiền nào — {"1":"Chưa gán tài khoản","2":"Chưa kiểm tra","3":"Đã kiểm tra · Chưa đủ điều kiện rút Kiểm tra 18:36","4":"Đã kiểm tra · Có thể rút Kiểm tra 18:36","5":"Đã kiểm tra Chưa kiểm tra điều kiện rút · Kiểm tra 18:36 Chờ tiền về pp33-mnxjl","6":"Chưa gán tài khoản"}
+PASS S2 API vmOps.board của nhân viên không chứa 12.40 / 8.75 / 10.00 — [{"result":{"data":{"json":{"rights":{"money":false,"writeMoney":false,"assign":true,"balanceRead":false,"balanceWrite":false},"vms":[{"vmId":"cmvbrlkh501y5134k
+PASS S3 dòng tổng hợp của nhân viên chỉ có số VM, không số tiền — Chưa kiểm tra: 1 VM Chưa gán tài khoản: 2 VM Theo bộ lọc, mọi trang.
+  nhân viên: nút ở ô Tiền của VM_001 = 1
+PASS W1 người xem (VIEWER, không quyền gán): "Chưa gán tài khoản" là chữ, không có nút mở bộ chọn — Chưa gán tài khoản · nút 0
+PASS E không lỗi JS trên trang
+
+22 PASS / 0 FAIL

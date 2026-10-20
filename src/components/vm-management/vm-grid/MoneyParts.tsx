@@ -11,16 +11,18 @@ import type {OpsRow} from './OpsCells';
 const TZ='Asia/Ho_Chi_Minh';
 export function when(iso:string){const d=new Date(iso),t=d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:TZ}),day=d.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',timeZone:TZ}),today=new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',timeZone:TZ});return day===today?t:day+' '+t;}
 const money=(a:string|null|undefined,c:string)=>a==null?'':formatLedger(a,c);
-export type MoneyLine={text:string;sub:string;tone:''|'recreate'|'waiting'|'failed'|'money_review'};
+// lead: a recorded balance shown as a readable amount on its own (larger than the status chip), then the chip and the second line.
+export type MoneyLine={lead?:string;text:string;sub:string;tone:''|'recreate'|'waiting'|'failed'|'money_review'};
 export function balanceLine(ops:OpsRow|undefined,read:boolean):MoneyLine|null{
   if(!ops?.earnAppId)return null;
   const b=balanceState(ops.balance);
   if(b.kind==='UNCHECKED')return {text:'Chưa kiểm tra',sub:'',tone:''};
   if(b.kind==='FAILED')return {text:'Kiểm tra lỗi '+when(b.at),sub:b.last?(read&&b.last.amount!=null?'gần nhất '+money(b.last.amount,b.last.currency)+' · ':'có số trước · ')+when(b.last.checkedAt):'chưa có số',tone:'failed'};
-  const cond=WITHDRAWABLE_LABEL[b.withdrawable],amount=read&&b.amount!=null?money(b.amount,b.currency):'Đã kiểm tra';
+  const cond=WITHDRAWABLE_LABEL[b.withdrawable],tone=b.withdrawable==='YES'&&!b.stale?'recreate' as const:b.stale?'waiting' as const:'';
   // Unknown condition: the amount alone on the first line, the missing condition said on the second (fits the column).
-  const time='Kiểm tra '+when(b.at)+(b.stale?' · số cũ, kiểm tra lại':'');
-  return {text:b.withdrawable==='UNKNOWN'?amount:amount+' · '+cond,sub:b.withdrawable==='UNKNOWN'?cond+' · '+time:time,tone:b.withdrawable==='YES'&&!b.stale?'recreate':b.stale?'waiting':''};
+  const time='Kiểm tra '+when(b.at)+(b.stale?' · số cũ, kiểm tra lại':''),unknown=b.withdrawable==='UNKNOWN',sub=unknown?cond+' · '+time:time;
+  if(read&&b.amount!=null)return {lead:money(b.amount,b.currency),text:unknown?'':cond,sub,tone};
+  return {text:unknown?'Đã kiểm tra':'Đã kiểm tra · '+cond,sub,tone};
 }
 export function requestLine(ops:OpsRow|undefined):MoneyLine|null{
   const r=ops?.request;if(!r)return null;const m=r.money,who=r.paypal+' · '+r.email;
@@ -33,7 +35,10 @@ export function requestLine(ops:OpsRow|undefined):MoneyLine|null{
   if(r.phase==='REVIEW')return {text:'Cần đối chiếu tiền',sub:who,tone:'money_review'};
   return {text:r.phase==='FAILED'?'Rút thất bại':'Đã huỷ yêu cầu rút',sub:who,tone:'failed'};
 }
-export function LineView({line}:{line:MoneyLine}){return <><span className={'vm-money'+(line.tone?' vm-money-'+line.tone:'')}>{line.text}</span>{line.sub&&<span className="vm-money-line text-xs vm-ellipsis">{line.sub}</span>}</>;}
+export function LineView({line}:{line:MoneyLine}){
+  const chip=line.text&&<span className={'vm-money'+(line.tone?' vm-money-'+line.tone:'')}>{line.text}</span>;
+  return <>{line.lead?<span className="vm-money-head"><span className="vm-money-amount">{line.lead}</span>{chip}</span>:chip}{line.sub&&<span className="vm-money-line text-xs vm-ellipsis">{line.sub}</span>}</>;
+}
 // Balance part of the frame: what was read last, the observed condition, a quick new check (Enter or Lưu), and the history.
 const nowLocal=()=>{const d=new Date(Date.now()-new Date().getTimezoneOffset()*60e3);return d.toISOString().slice(0,16);};
 export function BalanceSection({projectId,vmCode,ops,read,write,onSaved}:{projectId:string;vmCode:string;ops:OpsRow;read:boolean;write:boolean;onSaved:()=>Promise<unknown>|void}){
