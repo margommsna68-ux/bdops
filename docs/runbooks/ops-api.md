@@ -63,6 +63,9 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
   30 phút (như web; nhiều request cùng lúc được quyết định lần lượt trên trạng thái mới nhất), 5 lần sai / 30 phút khoá riêng token. 429 có `Retry-After`.
 - IP: lấy từ X-Forwarded-For theo số proxy tin cậy (`OPS_TRUSTED_PROXY_HOPS`, mặc định 1 = Railway); phần client tự khai bị bỏ. `GET /health` trả
   `verifiedIp` để kiểm.
+  **Kiểm trên host 21/10/2026 (deploy 7134f316):** header giả bị bỏ qua, nhưng với mặc định 1 `verifiedIp` là địa chỉ nút biên Railway (đổi theo
+  request), không phải IP thật (HTTP log Railway: srcIp = IP thật). Token đặt giới hạn IP sẽ bị từ chối. Chưa đặt IP cho token cho tới khi kiểm chuỗi
+  header thật và chỉnh số hop / nguồn IP.
 - Không trả mật khẩu, 2FA, link lấy mã, token, credentials proxy. Proxy: id + host che + port + nhóm. Email đăng nhập che. Email PP nhận tiền đầy đủ cho
   người có quyền rút / ghi khoản nhận. Ghi chú tự do được che link / mật khẩu / mã trước khi lưu và trước khi trả.
 - Nhật ký: `OpsAudit` (requestId, tokenId, userId, projectId, action, objectId, thời gian, IP đã xác minh, HTTP, kết quả, replay) cho mọi lệnh ghi và

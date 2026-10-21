@@ -13,3 +13,18 @@ Chỉ sửa `scripts/ops-client.mjs` (+ test, runbook); không đổi API, nghi�
 Kiểm lại: nhóm API / script `src/__tests__/ops-api` (5 file / 36 ca) + bộ tái hiện ba lỗi trước `.runtime/review-ops-api-ack-20261021.test.ts` (3 / 3)
 + bộ tái hiện này (2 / 2) đều xanh. Cả bộ 132 file / 641 test xanh (một lần chạy trước có 1 ca cũ `proxy-retire` đỏ ngẫu nhiên do dải IP thử ngẫu nhiên
 203.1.x trùng giữa các test chạy song song; chạy riêng 2 lần và chạy lại cả bộ đều xanh; không liên quan script). Typecheck sạch, lint không lỗi.
+
+## Phát hành (21/10/2026)
+
+- Commit 15ebaa9 (sửa script) trên 05b64cb / 34cda98 / 1cca9fc. Backup host trước deploy: 5be4ce43-6b3e-42f6-9b46-376091a2cdcc (41 097 020 byte).
+- Railway nhận deploy lần này: deployment 7134f316 SUCCESS (môi trường proxy-trial-20261015, service moneytohome; 28b250e7 thay ra). Pre-deploy áp
+  dụng `20261021090000_ops_api` ("All migrations have been successfully applied"); không có migration khác.
+- Host chỉ đọc: ảnh chụp số liệu trước / sau (`.runtime/p20-host-before45.json` / `after45`, local) giống hệt (10 server, 576 VM, 1261 proxy, lô nhập,
+  sổ PP). `GET /api/ops/v1/health` = 200; `/me` không token = 401. Thiết lập có khung "Token API vận hành" (`host-settings-token-panel.png`), không tạo
+  token. ai-ops vẫn USER, chỉ "Được truy cập Proxy / Server / VM"; ba quyền tiền EarnApp / rút / khoản nhận tắt. Không cấp quyền, không tạo token,
+  không ghi tiền thử.
+- IP qua proxy Railway: header giả bị bỏ qua (`X-Forwarded-For: 1.2.3.4`, `1.2.3.4, 5.6.7.8`, `X-Real-IP`, `Forwarded` → `verifiedIp` không bao
+  giờ là giá trị giả). Nhưng `verifiedIp` cũng **không phải IP thật** của máy gọi: HTTP log của Railway ghi srcIp = IP công khai thật, còn ứng dụng thấy
+  152.233.68.x / 79.127.228.x (đổi theo request, là nút biên của Railway nối thêm sau client). Với `OPS_TRUSTED_PROXY_HOPS=1` mặc định, token có giới
+  hạn IP sẽ bị từ chối (đóng an toàn, không giả được) chứ không dùng được. **Chưa tuyên bố giới hạn IP dùng được trên host**; tạm thời không đặt IP cho
+  token. Chỉnh số hop / nguồn IP cần kiểm chuỗi header thật trước (ngoài phạm vi lần này, không tự đổi biến môi trường).
