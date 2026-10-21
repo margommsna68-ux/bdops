@@ -15,6 +15,8 @@ afterAll(()=>db.$disconnect());
 // SDK store (owner brief 19/10/2026). Fixture: business-fixture / VM_001, VM_002 and second-fixture / VM_001 (another server).
 async function setup(){
   const f=await businessFixture(),x=randomUUID().slice(0,8);
+  // The "other operator" of these tests records SDK money: since 22/10/2026 that needs the EarnApp balance write right (EARN_BALANCE).
+  await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{capabilities:['EARN_BALANCE']}});
   const vm2=await db.virtualMachine.create({data:{serverId:f.server.id,code:'VM_002',managed:true,proxySlotState:'BLANK'}});
   const server2=await db.server.create({data:{projectId:f.scope.projectId,code:'second-fixture',managed:true}});
   const vm3=await db.virtualMachine.create({data:{serverId:server2.id,code:'VM_001',managed:true,proxySlotState:'BLANK'}});

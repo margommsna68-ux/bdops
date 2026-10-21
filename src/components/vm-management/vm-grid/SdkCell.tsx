@@ -41,17 +41,18 @@ export function useAnchored(open:boolean,anchor:React.RefObject<HTMLElement|null
 function copyCode(code:string,label:string){navigator.clipboard?.writeText(code).then(()=>toast.success('Đã copy SDK '+label,{duration:1500})).catch(()=>toast.error('Trình duyệt chặn copy; mở ô SDK để chọn mã'));}
 // SDK cell (owner brief 20/10/2026): the first unused code (copy) and "3 SDK · 2 chưa dùng". A click opens the VM's SDK list next to
 // the cell; a closed frame keeps a typed new code as a draft (marked in the cell).
-export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy:(vmId:string,busy:boolean)=>void}){
+export function SdkCell({projectId,vm,account,canEdit,money,draft,onDraft,onBusy}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;money:{read:boolean;write:boolean};draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy:(vmId:string,busy:boolean)=>void}){
   const [open,setOpen]=useState(false),anchor=useRef<HTMLDivElement>(null),pop=useRef<HTMLDivElement>(null),pos=useAnchored(open,anchor,pop,620);
   const busy=useRef(false),close=(refocus=true)=>{if(busy.current)return;setOpen(false);if(refocus)anchor.current?.focus({preventScroll:true});};const closeRef=useRef(close);closeRef.current=close;
   useEffect(()=>{if(!open)return;const down=(e:MouseEvent)=>{if(!pop.current?.contains(e.target as Node)&&!anchor.current?.contains(e.target as Node))closeRef.current(false);};
     const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.isComposing&&!(e.target as HTMLElement)?.closest?.('[data-sdk-edit]')){e.stopPropagation();e.preventDefault();closeRef.current();}};
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
-  const list=vm.sdks,first=sdkFirst(list),money=currentSdkMoney(list,first);
+  const list=vm.sdks,first=sdkFirst(list),cur=currentSdkMoney(list,first);
   // 22/10/2026: money + check time of the current code, readable without opening the frame (never a sum of the VM's codes).
   // "Tích luỹ" = Tiền tích luỹ SDK (read on the machine), never the EarnApp balance; no figure = "chưa kiểm tra", never $0; an old figure
   // without an observation time says so instead of borrowing the write time.
-  const moneyLine=money&&<span className="vm-sdk-money" title={'Tiền tích luỹ SDK (đọc trên máy) của mã hiện hành '+money.code+(money.amount===null?': chưa kiểm tra':money.at?', kiểm tra lúc '+when(money.at):', chưa rõ giờ kiểm tra')+' — không phải số dư EarnApp'}>{money.other?'Hiện hành …'+money.code.slice(-4)+' · ':''}Tích luỹ {money.amount!==null?<><strong>{formatSdkAmount(money.amount)}</strong>{money.at?' · '+when(money.at):' · chưa rõ giờ'}</>:<span className="pm-muted">chưa kiểm tra</span>}</span>;
+  const moneyLine=cur&&(cur.hidden?<span className="vm-sdk-money pm-muted" title="Tiền tích luỹ SDK: cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Tích luỹ: ẩn</span>
+    :<span className="vm-sdk-money" title={'Tiền tích luỹ SDK (đọc trên máy) của mã hiện hành '+cur.code+(cur.amount===null?': chưa kiểm tra':cur.at?', kiểm tra lúc '+when(cur.at):', chưa rõ giờ kiểm tra')+' — không phải số dư EarnApp'}>{cur.other?'Hiện hành …'+cur.code.slice(-4)+' · ':''}Tích luỹ {cur.amount!==null?<><strong>{formatSdkAmount(cur.amount)}</strong>{cur.at?' · '+when(cur.at):' · chưa rõ giờ'}</>:<span className="pm-muted">chưa kiểm tra</span>}</span>);
   const view=<>{first?<span className="vm-sdk-line"><code className="vm-sdk vm-ellipsis" title={first.code}>{shortCode(first.code)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+vm.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();copyCode(first.code,vm.code);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>}
     {moneyLine}
     {list.length>0&&<span className="vm-sdk-sub">{sdkSummary(list)}</span>}
@@ -61,11 +62,11 @@ export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{pro
     <div ref={anchor} role="button" tabIndex={0} aria-haspopup="dialog" aria-expanded={open} aria-label={'SDK '+vm.code+': '+sdkSummary(list)+'. Bấm để '+(canEdit?'xem và sửa':'xem')} className={'vm-sdk-cell2 vm-cell-trigger'+(draft?' vm-has-draft':'')} data-cell={vm.id+'|sdk'}
       onClick={()=>setOpen(o=>!o)} onKeyDown={e=>{if((e.key==='Enter'||e.key==='F2'||e.key===' ')&&!open){e.preventDefault();setOpen(true);}}}>{view}</div>
     {open&&typeof document!=='undefined'&&createPortal(<div ref={pop} role="dialog" aria-label={`SDK ${vm.server} / ${vm.code}`} className="vm-status-pop vm-sdk-pop vm-sdk-list-pop" style={{top:pos?.top??-9999,left:pos?.left??-9999,maxHeight:pos?.maxHeight}}>
-      <SdkEditor projectId={projectId} vm={vm} account={account} canEdit={canEdit} draft={draft} onDraft={onDraft} onBusy={b=>{busy.current=b;onBusy(vm.id,b);}} onCancel={()=>close()}/>
+      <SdkEditor projectId={projectId} vm={vm} account={account} canEdit={canEdit} money={money} draft={draft} onDraft={onDraft} onBusy={b=>{busy.current=b;onBusy(vm.id,b);}} onCancel={()=>close()}/>
     </div>,document.body)}
   </div>;
 }
-type EditorProps={projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy?:(b:boolean)=>void;onDone?:()=>void;onCancel?:()=>void;embedded?:boolean};
+type EditorProps={projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;money:{read:boolean;write:boolean};draft:SdkDraft|null;onDraft:(d:SdkDraft|null)=>void;onBusy?:(b:boolean)=>void;onDone?:()=>void;onCancel?:()=>void;embedded?:boolean};
 export function SdkEditor(props:EditorProps){
   const session=useSession();
   if(session.status==='loading')return <p className="text-xs pm-muted p-3"><Loader2 size={12} className="inline animate-spin"/> Đang tải…</p>;
@@ -76,7 +77,8 @@ export function SdkEditor(props:EditorProps){
  * cancels) on the same record as Kho SDK; ticking "Đã dùng" is recorded at once and cannot be undone; an unused code can go back to the
  * store. Adding a code (typed, or "Chọn SDK đã lưu" from the store / another VM with an explicit source) never replaces another one.
  */
-function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embedded,userId}:EditorProps&{userId:string}){
+function SdkListEditor({projectId,vm,canEdit,money,draft,onDraft,onBusy,onCancel,embedded,userId}:EditorProps&{userId:string}){
+  const canMoney=canEdit&&money.write;
   const store=trpc.vmManagement.sdkStore.useQuery({projectId},{staleTime:10000}),add=trpc.vmManagement.sdkListAdd.useMutation(),used=trpc.vmManagement.sdkUsed.useMutation(),remove=trpc.vmManagement.sdkListRemove.useMutation(),info=trpc.vmManagement.sdkInfo.useMutation();
   const refresh=useVMRefresh(),utils=trpc.useUtils();
   const own=draft&&(!draft.base||draft.base.userId===userId&&draft.base.projectId===projectId&&draft.base.vmId===vm.id)?{...draft,cycle:draft.cycle??draft.base?.cycle}:null;
@@ -121,7 +123,7 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
       {!embedded&&<p className="vm-status-pop-title"><strong>{here}</strong> · SDK EarnApp · {sdkSummary(vm.sdks)}</p>}
       {!canEdit&&<p className="text-xs pm-muted">Chỉ xem: tài khoản này chưa có quyền ghi SDK.</p>}
       {vm.sdks.length?<table className="vm-sdk-list"><thead><tr><th>Mã SDK</th><th>Tiền tích luỹ SDK (USD)</th><th>Ghi chú</th><th>Đã dùng</th></tr></thead>
-        <tbody>{vm.sdks.map(s=><SdkRow key={s.recordId} s={s} vm={vm} canEdit={canEdit} busy={busy} onHistory={()=>setHistory(h=>h===s.recordId?null:s.recordId)} historyOpen={history===s.recordId} projectId={projectId}
+        <tbody>{vm.sdks.map(s=><SdkRow key={s.recordId} s={s} vm={vm} canEdit={canEdit} canMoney={canMoney} busy={busy} onHistory={()=>setHistory(h=>h===s.recordId?null:s.recordId)} historyOpen={history===s.recordId} projectId={projectId}
           onInfo={(patch)=>run('info:'+s.recordId,()=>info.mutateAsync({projectId,key:crypto.randomUUID(),sdkId:s.recordId,expectedRevision:s.revision,...patch}).then(r=>({...r,message:r.changed?'Đã lưu SDK '+shortCode(s.code):'Giữ nguyên'})))}
           onUsed={()=>{const input={projectId,vmId:vm.id,expectedCycle:vm.cycle,sdkId:s.recordId,expectedRevision:s.revision};return run('used:'+s.recordId,()=>used.mutateAsync({...input,key:crypto.randomUUID()}));}}
           onRemove={()=>{const input={projectId,vmId:vm.id,expectedCycle:vm.cycle,sdkId:s.recordId,expectedRevision:s.revision};return run('remove:'+s.recordId,()=>remove.mutateAsync({...input,key:crypto.randomUUID()}));}}/>)}</tbody></table>
@@ -131,7 +133,7 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
         <p className="text-xs font-semibold">Thêm SDK vào VM (không thay mã đang có)</p>
         <div className="vm-sdk-add-grid">
           <input ref={codeInput} className="pm-input pm-code" aria-label={'Mã SDK mới cho '+vm.code} placeholder="Mã SDK" value={d.code} maxLength={128} readOnly={!!busy} spellCheck={false} onChange={e=>setD(p=>({...p,code:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
-          <input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ USD của mã mới '+vm.code} placeholder="Tiền USD (không bắt buộc)" value={d.amount||''} readOnly={!!busy} onChange={e=>setD(p=>({...p,amount:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
+          {canMoney&&<input className="pm-input" inputMode="decimal" aria-label={'Tiền tích luỹ USD của mã mới '+vm.code} placeholder="Tiền USD (không bắt buộc)" value={d.amount||''} readOnly={!!busy} onChange={e=>setD(p=>({...p,amount:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>}
           <input className="pm-input" aria-label={'Ghi chú mã mới '+vm.code} placeholder="Ghi chú (không bắt buộc)" value={d.note||''} maxLength={SDK_NOTE_MAX} readOnly={!!busy} onChange={e=>setD(p=>({...p,note:e.target.value,cycle:p.cycle??vm.cycle,pending:undefined}))} onKeyDown={keys}/>
           <button type="button" className="pm-button pm-button-primary" disabled={!ready||!!busy} onClick={submit}>{busy==='add'?'Đang lưu…':recheck?'Kiểm tra lại':elsewhere?'Dùng cho VM này':'Thêm'}</button>
         </div>
@@ -159,10 +161,10 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
   </div>;
 }
 // One code of the list. Money / note: click to edit, Enter saves, Esc cancels (a Vietnamese IME composing never saves).
-function SdkRow({s,vm,canEdit,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}:{s:VmSdk;vm:ManagedVM;canEdit:boolean;busy:string|null;projectId:string;historyOpen:boolean;onHistory:()=>void;onInfo:(p:{amount?:string|null;note?:string|null})=>Promise<boolean>;onUsed:()=>Promise<boolean>;onRemove:()=>Promise<boolean>}){
+function SdkRow({s,vm,canEdit,canMoney,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}:{s:VmSdk;vm:ManagedVM;canEdit:boolean;canMoney:boolean;busy:string|null;projectId:string;historyOpen:boolean;onHistory:()=>void;onInfo:(p:{amount?:string|null;note?:string|null})=>Promise<boolean>;onUsed:()=>Promise<boolean>;onRemove:()=>Promise<boolean>}){
   const [edit,setEdit]=useState<'amount'|'note'|null>(null),[text,setText]=useState(''),[err,setErr]=useState('');
   const isUsed=s.state==='LINKED',rowBusy=!!busy&&busy.endsWith(s.recordId);
-  const start=(f:'amount'|'note')=>{if(!canEdit)return;setErr('');setEdit(f);setText(f==='amount'?(s.amount!==null?(formatSdkAmount(s.amount)||'').replace(/\s*USD$/,''):''):(s.note||''));};
+  const start=(f:'amount'|'note')=>{if(!canEdit||f==='amount'&&!canMoney)return;setErr('');setEdit(f);setText(f==='amount'?(s.amount!==null?(formatSdkAmount(s.amount)||'').replace(/\s*USD$/,''):''):(s.note||''));};
   const save=async()=>{if(!edit)return;const v=text.trim();
     if(edit==='amount'){if(v){const r=parseSdkAmount(v);if('error' in r){setErr(r.error);return;}}const ok=await onInfo({amount:v?v:null});if(ok)setEdit(null);}
     else{if(v.length>SDK_NOTE_MAX){setErr('Ghi chú tối đa '+SDK_NOTE_MAX+' ký tự');return;}const ok=await onInfo({note:v||null});if(ok)setEdit(null);}};
@@ -172,7 +174,7 @@ function SdkRow({s,vm,canEdit,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}
       <button type="button" className="vm-cell-icon" aria-label={'Lịch sử SDK '+s.code} aria-expanded={historyOpen} title="Lịch sử mã" onClick={onHistory}><History size={13}/></button></span>
       {s.current&&<span className="vm-sdk-current">hiện hành</span>}</td>
     <td data-sdk-edit>{edit==='amount'?<input autoFocus className="pm-input vm-sdk-inline" inputMode="decimal" aria-label={'Tiền tích luỹ USD '+s.code} value={text} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
-      :<button type="button" className="vm-sdk-value" disabled={!canEdit} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canEdit?'Ghi tiền':'Chưa ghi'}</span>}</button>}{edit!=='amount'&&s.amount!==null&&<span className="vm-sdk-seen" title={s.amountSource?'Nguồn: '+s.amountSource:undefined}>{s.amountObservedAt?'Kiểm tra '+when(s.amountObservedAt):'Chưa rõ giờ kiểm tra'}</span>}</td>
+      :s.moneyHidden?<span className="pm-muted" title="Cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Ẩn</span>:<button type="button" className="vm-sdk-value" disabled={!canMoney} title={canMoney?undefined:'Sửa tiền cần quyền "Ghi kiểm tra tiền EarnApp"'} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canMoney?'Ghi tiền':'Chưa ghi'}</span>}</button>}{edit!=='amount'&&!s.moneyHidden&&s.amount!==null&&<span className="vm-sdk-seen" title={s.amountSource?'Nguồn: '+s.amountSource:undefined}>{s.amountObservedAt?'Kiểm tra '+when(s.amountObservedAt):'Chưa rõ giờ kiểm tra'}</span>}</td>
     <td data-sdk-edit>{edit==='note'?<textarea autoFocus rows={2} className="pm-input vm-sdk-inline" aria-label={'Ghi chú '+s.code} value={text} maxLength={SDK_NOTE_MAX} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
       :<button type="button" className="vm-sdk-value vm-sdk-note" disabled={!canEdit} onClick={()=>start('note')}>{s.note||<span className="pm-muted">{canEdit?'Thêm ghi chú':'—'}</span>}</button>}
       {err&&<p className="vm-cell-error" role="alert">{err}</p>}</td>
@@ -182,14 +184,16 @@ function SdkRow({s,vm,canEdit,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}
       {!isUsed&&canEdit&&<button type="button" className="vm-cell-icon" aria-label={'Đưa '+s.code+' về kho'} title="Bỏ khỏi VM, đưa về kho (giữ tiền, ghi chú)" disabled={rowBusy} onClick={()=>void onRemove()}><Undo2 size={13}/></button>}</td>
   </tr>;
 }
-const KIND:Record<string,string>={CREATE:'Ghi mã',PLACE:'Đặt hiện hành',HOLD:'Thêm vào VM',MOVE:'Chuyển VM',REMOVE:'Rời VM',AMOUNT:'Sửa tiền',NOTE:'Sửa ghi chú',LINK:'Đã dùng (nối EarnApp)',USED:'Đã dùng',CONFIRM:'Xác nhận dữ liệu cũ',RECREATE:'Tạo lại VM',UNDO:'Hoàn tác',MIGRATE:'Chuyển dữ liệu'};
+const KIND:Record<string,string>={OBSERVE:'Kiểm tra trên máy',CREATE:'Ghi mã',PLACE:'Đặt hiện hành',HOLD:'Thêm vào VM',MOVE:'Chuyển VM',REMOVE:'Rời VM',AMOUNT:'Sửa tiền',NOTE:'Sửa ghi chú',LINK:'Đã dùng (nối EarnApp)',USED:'Đã dùng',CONFIRM:'Xác nhận dữ liệu cũ',RECREATE:'Tạo lại VM',UNDO:'Hoàn tác',MIGRATE:'Chuyển dữ liệu'};
 // History of one code: VMs it was on, moves, money / note edits (old → new), used mark and confirmations.
 export function SdkTimeline({projectId,sdkId}:{projectId:string;sdkId:string}){
   const q=trpc.vmManagement.sdkDetail.useQuery({projectId,sdkId});
   if(q.error)return <p role="alert" className="pm-error text-xs">{q.error.message}</p>;
   if(!q.data)return <p className="text-xs pm-muted"><Loader2 size={12} className="inline animate-spin"/> Đang tải lịch sử…</p>;
   const text=(e:typeof q.data.events[number])=>{const x=e.detail||{};
-    if(e.kind==='AMOUNT')return (formatSdkAmount(x.from as string|null)||'chưa ghi')+' → '+(formatSdkAmount(x.to as string|null)||'xoá');
+    if(x.moneyHidden)return 'tiền / nguồn ẩn (cần quyền xem tiền)'+(x.note?' · '+String(x.note):'');
+    if(e.kind==='AMOUNT')return (formatSdkAmount(x.from as string|null)||'chưa ghi')+' → '+(formatSdkAmount(x.to as string|null)||'xoá')+(x.observedAt?' · lúc '+localDate(String(x.observedAt)):'');
+    if(e.kind==='OBSERVE')return (x.readable===false?'không đọc được tiền (giữ số cũ)':'cùng số, cập nhật giờ kiểm tra')+(x.observedAt?' · lúc '+localDate(String(x.observedAt)):'')+(x.source?' · '+String(x.source):'');
     if(e.kind==='NOTE')return (x.from?'"'+String(x.from)+'"':'trống')+' → '+(x.to?'"'+String(x.to)+'"':'xoá');
     if(e.kind==='MOVE')return (e.from||'?')+' → '+(e.to||'?');if(e.kind==='PLACE'||e.kind==='HOLD')return e.to||'';if(e.kind==='REMOVE'||e.kind==='RECREATE')return (e.from||'')+(x.keptAs==='VM_LIST'?' · vẫn trong danh sách của VM':x.keptAs==='HISTORY'?' · giữ trong lịch sử':x.keptAs==='STORE'?' · về kho':'')+(x.replacedBy?' · thay bằng '+String(x.replacedBy):'');
     if(e.kind==='LINK')return String(x.login||'')+' · lượt '+String(x.cycle??'');if(e.kind==='USED')return (e.to||'')+' · lượt '+String(x.cycle??'');if(e.kind==='CONFIRM')return x.decision==='LINKED'?'đã từng dùng':'chưa từng dùng';if(e.kind==='CREATE')return (x.amount!=null?formatSdkAmount(String(x.amount)):'')+(x.note?' · '+String(x.note):'');

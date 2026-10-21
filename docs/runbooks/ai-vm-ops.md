@@ -69,7 +69,7 @@ sang tài khoản khác.
 
 ### Khảo sát SDK đang chạy (22/10/2026)
 Không phải lần cài: `node scripts/ops-client.mjs sdk-check <survey.json>` (cả bảng, không gửi) rồi `sdk-observe <one-vm.json>` từng VM →
-`POST vms/{id}/sdk-observations` (token cần `VM_OPS`; kèm tiền thì thêm `BALANCE_WRITE` + user `EARN_BALANCE`; mỗi mã gửi `expectedSdkRevision` đã đọc; cả bảng: `sdk-survey`). Mã mới = Chưa xác nhận; mã ở VM khác bị từ chối
+`POST vms/{id}/sdk-observations` (token cần `VM_OPS`; kèm tiền thì thêm `BALANCE_WRITE` + user `EARN_BALANCE`; chụp định danh web bằng `sdk-prepare` TRƯỚC khi đọc máy, revision từng mã lấy từ bản chụp; cả bảng: `sdk-survey`). Mã mới = Chưa xác nhận; mã ở VM khác bị từ chối
 cả lệnh; tiền là số đọc gần nhất kèm `observedAt`, không cộng, không phải số dư EarnApp. Chi tiết: docs/runbooks/vm-sdk.md (mục cuối).
 
 ## 4. Chống lệnh cũ / làm trùng

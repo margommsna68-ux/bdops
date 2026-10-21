@@ -1,0 +1,5 @@
+PLAIN_SDK_WRITE {"denied":true,"amount":"731.25"}
+SDK_UNDO {"oldObservedAt":"2026-10-21T12:32:34.480Z","afterObservedAt":"2026-10-21T12:32:34.480Z","oldSource":"AI SDK review (mth_6Ks5wNVk) · Synthetic OCR","afterSource":"AI SDK review (mth_6Ks5wNVk) · Synthetic OCR"}
+ ✓ .runtime/review-sdk-survey-20261021.test.ts (4 tests) 1119ms
+     ✓ an old survey missing capture-time identity must not be rebound to the latest VM cycle by the client  415ms
+      Tests  4 passed (4)

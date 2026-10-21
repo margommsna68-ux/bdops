@@ -1,0 +1,12 @@
+PASS P1 Không quyền tiền: ô SDK ghi "Tích luỹ: ẩn", không có số tiền
+PASS P2 Không quyền tiền: khung SDK hiện "Ẩn", không có ô nhập tiền
+PASS P3 Không quyền tiền: Kho SDK hiện "Ẩn" thay vì số tiền
+PASS P4 Không quyền tiền: HTML trang không chứa số tiền (máy chủ không gửi)
+PASS P5 Có quyền tiền: ô SDK hiện "Tích luỹ 0,21 USD · hh:mm"
+PASS P6 Sửa tiền trên web: ô SDK hiện 0,5 USD
+PASS P7 Nhật ký: thao tác gần nhất là sửa tiền 0,21 → 0,5
+PASS P8 Hoàn tác xong
+PASS P9 Sau hoàn tác: về 0,21 USD với đúng giờ kiểm tra cũ (20:29), không phải giờ sửa web
+PASS P10 Quan sát mới (sau giờ cũ, trước giờ sửa web) → SAVED, không bị OLDER
+PASS P11 Ô SDK hiện 0,33 USD sau quan sát mới
+Lỗi JS trên trang: không

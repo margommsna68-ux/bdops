@@ -10,6 +10,8 @@ import {previewVmBulk,applyVmBulk} from '@/server/vm-management/bulk';
 afterAll(()=>db.$disconnect());
 async function setup(){
   const f=await businessFixture(),code='review-sdk-'+randomUUID();
+  // The "other operator" of these tests records SDK money: since 22/10/2026 that needs the EarnApp balance write right (EARN_BALANCE).
+  await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{capabilities:['EARN_BALANCE']}});
   await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedVmRevision:f.vm.revision,expectedCycle:1,code,expectedSdkRevision:null,amount:'12.4'},db);
   const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});
   const sdk=await db.sdkRecord.findUniqueOrThrow({where:{vmId:f.vm.id}});

@@ -192,9 +192,14 @@ nhuận, không cộng với số dư tài khoản, không suy ra "Có thể rú
   (CREATED / TAKEN / IN_LIST), `linkState`, `current`, `revisionAfter`, `amount.outcome`; `current` là VM bây giờ.
 
 ### Quy tắc
-- Quyền: ghi mã cần `VM_OPS` (+ quyền SDK của Server / VM); có tiền thì token cần thêm `BALANCE_WRITE` và user cần `EARN_BALANCE` (hoặc
-  ADMIN / MODERATOR), như ghi số dư EarnApp. Đọc tiền SDK cần quyền đọc số dư (tiền, hoặc EARN_BALANCE + BALANCE_WRITE trên token). Token,
-  user còn hoạt động, PIN, quyền, lượt, revision và chống lưu lặp kiểm lại **trong giao dịch**. Không nâng ai-ops lên ADMIN.
+- Quyền (một quy tắc cho API và web, rà soát độc lập 22/10/2026 — `src/server/vm-management/sdk-money-rights.ts`): ghi mã cần `VM_OPS`
+  (+ quyền SDK của Server / VM); có tiền thì token cần thêm `BALANCE_WRITE` và user cần `EARN_BALANCE` (hoặc ADMIN / MODERATOR), như ghi
+  số dư EarnApp. Cùng quyền ghi tiền đó áp cho mọi lệnh web có tiền: sửa tại ô SDK, Kho SDK, Dán bảng → SDK, Dán SDK vào kho, bulk; thiếu
+  quyền thì lệnh bị từ chối rõ (xem trước đánh dấu từng dòng có tiền), không âm thầm bỏ tiền; mã / ghi chú vẫn ghi được không kèm tiền.
+  Đọc tiền SDK cần quyền đọc số dư (quyền tiền, hoặc EARN_BALANCE + BALANCE_WRITE trên token); thiếu quyền thì máy chủ không trả số tiền,
+  giờ kiểm tra, nguồn, ghi chú bằng chứng, lịch sử trước / sau (`moneyHidden`, ô hiện "Ẩn") ở `GET sdks`, `GET vms/{id}`, Kho SDK, khung SDK,
+  bảng VM và Nhật ký thao tác. Token, user còn hoạt động, PIN, quyền, lượt, revision và chống lưu lặp kiểm lại **trong giao dịch**. Không
+  nâng ai-ops lên ADMIN.
 - Một lệnh = một giao dịch; một mã bị từ chối thì **cả lệnh** không ghi gì:
   - mã ở danh sách VM khác, mã Đã dùng / Chưa xác nhận ngoài VM này, mã của dự án khác → `409 DUPLICATE` (không chuyển ngầm);
   - `current:true` mà VM đang có mã hiện hành khác → `409 SDK_CONFLICT` `kind: CURRENT_DIFFERS` (`currentCode`, `currentSdkId`,
@@ -205,27 +210,34 @@ nhuận, không cộng với số dư tài khoản, không suy ra "Có thể rú
   cập nhật quan sát; mã mới → **Chưa xác nhận** (không tự là "Chưa dùng" vì web chưa có tài khoản hay ứng dụng hiện Sign in / Sign up),
   không được cấp lại cho đến khi người xác nhận ở Kho SDK; mã chưa dùng trong kho → vào danh sách VM. Hai file cùng mã = một SDK.
 - Tiền: giá trị gần nhất (không cộng dồn) trên chính mã; `amountObservedAt` riêng với `amountAt`; quan sát cũ đến muộn → `OLDER`, giữ số mới;
-  quan sát mới cùng số → `SAME`, chỉ cập nhật giờ kiểm tra; gửi lại cùng key không thêm lịch sử.
+  quan sát mới cùng số → `SAME`, chỉ cập nhật giờ kiểm tra; gửi lại cùng key không thêm lịch sử. Hoàn tác một lần sửa tiền trên web khôi
+  phục cả số tiền, giờ quan sát, giờ ghi, người ghi và nguồn (snapshot SDK có `amountObservedAt`, `amountSource`); nhật ký cũ thiếu trường
+  thì giờ quan sát về "chưa biết" (null), không bịa; sự kiện đã chốt (Đã dùng) vẫn không hoàn tác được.
 - Không đổi tài khoản EarnApp, tình trạng VM hay dấu cài đặt.
 
 ### Ví dụ (ops-client)
+Định danh web (lượt, revision VM, revision từng mã) được **chụp trước khi đọc máy** và đi cùng bản khảo sát; lúc gửi client không đọc
+web (rà soát độc lập 22/10/2026: bản khảo sát cũ không bao giờ bị gắn sang lượt / revision mới).
 ```
-# 1. Đọc VM và revision
-node scripts/ops-client.mjs vm <projectId> <vmId>
-node scripts/ops-client.mjs get 'sdks?projectId=<projectId>&code=<SDK>'
-# 2. Ghi một VM (one-vm.json: {projectId, vmId, observedAt, source, evidence?, sdks:[{code, amountUsd, current}]};
-#    expectedCycle / expectedVmRevision / expectedSdkRevision để trống thì client đọc web ngay trước khi gửi)
-node scripts/ops-client.mjs sdk-observe one-vm.json
-# 3. Đọc lại
-node scripts/ops-client.mjs vm <projectId> <vmId>
-# Cả bảng: kiểm trên máy (không gửi), rồi chạy từng VM với kết quả từng dòng
+# 1. Chụp định danh web TRƯỚC khi đọc máy (theo vmId hoặc server/vm; --code cho mã trong kho cần kèm revision)
+node scripts/ops-client.mjs sdk-prepare <projectId> vt-01/VM_01 vt-01/VM_02 --out capture.json
+#    → mỗi VM: {projectId, vmId, serverCode, vmCode, capturedAt, expectedCycle, expectedVmRevision, knownSdks:{mã: revision}, sdks:[]}
+# 2. Đọc máy SAU lúc chụp, điền vào đúng mục VM đó: observedAt, source, evidence?, sdks:[{code, amountUsd, amountRead?, current?}]
+#    (không điền expectedSdkRevision: client lấy từ knownSdks; mã web chưa có → null)
+# 3. Kiểm cả bảng trên máy (không gửi): thiếu capturedAt / lượt / revision, đọc máy trước lúc chụp, mã trùng VM, tiền sai dạng…
 node scripts/ops-client.mjs sdk-check survey.json
+# 4. Ghi một VM (hoặc cả bảng), rồi đọc lại
+node scripts/ops-client.mjs sdk-observe one-vm.json
+node scripts/ops-client.mjs vm <projectId> <vmId>
 node scripts/ops-client.mjs sdk-survey survey.json
 ```
+- Mục VM thiếu `capturedAt` / `expectedCycle` / `expectedVmRevision` / `knownSdks`, hoặc `observedAt` trước `capturedAt` → client dừng,
+  báo "đối chiếu / khảo sát lại", không gửi. Lượt / revision đã đổi sau lúc chụp → web từ chối (`CYCLE_CHANGED` / `REVISION_CONFLICT`):
+  chụp lại bằng `sdk-prepare` rồi **đọc máy lại**; không sửa tay revision, không dùng lại quan sát cũ.
 - `sdk-survey` lưu key + nội dung từng VM vào `survey.json.run.json` **trước** khi gửi. Chạy lại: VM đã ghi (DONE) không gửi lại; VM chưa rõ
-  kết quả (UNKNOWN, mất phản hồi) gửi lại đúng key và nội dung cũ; VM bị từ chối (ANSWERED, ví dụ SDK_CONFLICT) giữ nguyên chờ người kiểm,
-  sau khi kiểm mới chạy `--redo <vmId>` (đọc lại web, key mới). Dòng lỗi không làm mất danh sách. Exit 0 tất cả xong / 1 có dòng bị từ chối /
-  3 có dòng chưa rõ.
+  kết quả (UNKNOWN, mất phản hồi) gửi lại đúng key và toàn bộ nội dung cũ; VM bị từ chối (ANSWERED, ví dụ SDK_CONFLICT) giữ nguyên chờ người
+  kiểm, sau khi kiểm mới chạy `--redo <vmId>`: gửi lại **đúng mục đã chụp + khảo sát** với key mới (không tự cập nhật lượt / revision). Dòng
+  lỗi không làm mất danh sách. Exit 0 tất cả xong / 1 có dòng bị từ chối / 3 có dòng chưa rõ.
 - Một lệnh lẻ mất phản hồi: `retry <key>` (không tạo key mới, không tự sang lượt mới, không tự thay revision để né lỗi).
 - Bảng Server / VM: ô SDK có dòng "Tích luỹ 12,345678 USD · 15:56" của **mã hiện hành** ("chưa kiểm tra" khi chưa có số, "chưa rõ giờ" với
   tiền cũ); khung SDK và Kho SDK ghi giờ kiểm tra từng mã. Cột Tiền / Rút giữ nghĩa số dư tài khoản EarnApp và yêu cầu rút.

@@ -10,6 +10,8 @@ afterAll(()=>db.$disconnect());
 // round; a request that did not see a code never overwrites the money / note someone else just saved; "chưa dùng" counts UNLINKED only.
 async function setup(){
   const f=await businessFixture(),x=randomUUID().slice(0,6);
+  // The "other operator" of these tests records SDK money: since 22/10/2026 that needs the EarnApp balance write right (EARN_BALANCE).
+  await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}},data:{capabilities:['EARN_BALANCE']}});
   const vm2=await db.virtualMachine.create({data:{serverId:f.server.id,code:'VM_002',managed:true,proxySlotState:'BLANK'}});
   const S=(n:number)=>'review-'+x+'-'+String(n).padStart(4,'0');
   const cleanup=async()=>{await db.vMSdkHistory.deleteMany({where:{projectId:f.scope.projectId}});await db.operationJournal.deleteMany({where:{projectId:f.scope.projectId}});await f.cleanup();};

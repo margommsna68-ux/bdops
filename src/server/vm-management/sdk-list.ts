@@ -5,6 +5,7 @@ import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
 import {authorizeVM,type VMReader} from './repository';
 import {normalizeSdk} from './sdk-parse';
+import {assertSdkMoneyWrite,carriesMoney,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
 import {checkInfo,cycleOf,FOREIGN_CODE,infoChanges,syncMirror,where,type SdkInfo} from './sdk-store';
 // SDK list of a VM (owner brief 20/10/2026). A VM keeps many SDK codes, to use now or later (SdkRecord.holderVmId); the store, the VM
 // cell, Dán bảng and Kho SDK all read and write the same records.
@@ -120,7 +121,7 @@ export async function addVmSdk(scope:ActorScope,input:ListAddInput,db:PrismaClie
   const code=normalizeSdk(input.code);if(!code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
   const info=checkInfo({amount:input.amount,note:input.note});
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_LIST',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     const planned=await planListAdd(tx,scope.projectId,vm,code,input.from??null);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
     if(planned.plan.kind==='SAME'&&!hasChanges(planned.plan,info))return {changed:false,message:'Đã có trong danh sách của VM; giữ nguyên'};
@@ -218,7 +219,7 @@ export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;tex
   if(input.mode==='RANGE'&&(!server||!input.startVmId))throw new ProxyDomainError('INVALID_INPUT','Chọn server và VM bắt đầu');
   const serverRows=await db.server.findMany({where:{projectId:scope.projectId,managed:true},select:{code:true}});
   const lines=parseSdkPaste(input.mode,input.text,server?.code??null,serverRows.map(x=>x.code));if(!lines.length||lines.length>MAX)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến '+MAX+' dòng mỗi đợt');
-  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:vmSelect});
+  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:vmSelect}),money=await sdkMoneyRights(scope,db);
   const key=(s:string,v:string)=>s.toLowerCase()+'\u0000'+v.toLowerCase(),byKey=new Map<string,ListVM>();
   for(const v of vms){const k=key(v.server.code,v.code),old=byKey.get(k);if(!old||old.archivedAt&&!v.archivedAt)byKey.set(k,v);} // an active VM wins over a deleted one with the same code
   let range:PastePreview['range']=null,start:ReturnType<typeof rangeStart>=null;
@@ -234,6 +235,7 @@ export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;tex
     const base:PasteRow={line:t.l.line,vm:t.vmCode??null,server:t.srv??null,vmId:null,expectedCycle:null,code:t.l.code||null,outcome:'ERROR',message:'',expectedSdkRevision:null,info:null};
     if(t.l.blank){rows.push({...base,code:null,outcome:'SKIP',message:input.mode==='RANGE'?'Dòng trống: giữ vị trí, không ghi':'Dòng trống'});continue;}
     if(t.l.issue){rows.push({...base,message:t.l.issue});continue;}
+    if(t.l.amount!==undefined&&!money.write){rows.push({...base,message:SDK_MONEY_WRITE_REFUSAL});continue;}
     if(!t.srv){rows.push({...base,message:'Chọn server hoặc dán kèm cột Server'});continue;}
     if(!t.vm){rows.push({...base,message:'Không có VM '+t.vmCode+' trên '+t.srv+' (web không tự tạo VM)'});continue;}
     if(t.vm.archivedAt||t.vm.server.archivedAt){rows.push({...base,message:label(t.vm)+' đã xoá; không ghi'});continue;}
@@ -252,7 +254,8 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
   if(!input.items.length||input.items.length>MAX||new Set(input.items.map(i=>i.code)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi mã SDK một dòng, tối đa '+MAX+' dòng');
   for(const i of input.items){if(normalizeSdk(i.code)!==i.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+i.line);if(!Number.isInteger(i.expectedCycle)||i.expectedCycle<1)throw new ProxyDomainError('INVALID_INPUT','Thiếu lượt VM ở dòng '+i.line+'; kiểm tra lại bản dán');checkInfo(i);}
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_PASTE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);const now=new Date(),ctx:Ctx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'};
+    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney(input.items))await assertSdkMoneyWrite(current,tx);
+    const now=new Date(),ctx:Ctx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'};
     const rows:{line:number;vmId:string;code:string;outcome:'APPLIED'|'SAME'|'ERROR';message:string}[]=[];
     for(const item of [...input.items].sort((a,b)=>a.line-b.line)){
       const row=(outcome:'APPLIED'|'SAME'|'ERROR',message:string)=>rows.push({line:item.line,vmId:item.vmId,code:item.code,outcome,message});
@@ -273,13 +276,14 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
 }
 // ---- Read: the list of every VM, for the grid (unused first, then used; current code marked) --------------------------------------
 const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
-export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountSource:string|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
-export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[]){
+export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountSource:string|null;moneyHidden:boolean;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
+/** `money` = the caller may read SDK money (sdk-money-rights.ts); without it amount / observedAt / source are null and `moneyHidden`. */
+export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[],money=true){
   const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
-    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),amountObservedAt:r.amountObservedAt?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money?r.amountObservedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

@@ -30,7 +30,7 @@ const pasteKey=(projectId:string)=>'mth.sdk-store.paste.'+projectId;
 // Kho SDK: every code of the project (all servers). Default view: never-linked codes, the ones that may be reused. Search, filters, sort
 // and page are applied to the whole list before paging and live in the URL. Paste SDK | Tiền tích luỹ USD | Ghi chú: checked while
 // typing (no write), one "Lưu N SDK" for the valid lines; a lost answer keeps the same key so a retry never writes twice.
-export function SdkStorePanel({projectId,url,onUrl,canEdit,maxHeight,onClose,onOpenVm}:{projectId:string;url:SdkStoreUrl;onUrl:(patch:Partial<SdkStoreUrl>,mode?:'push'|'replace')=>void;canEdit:boolean;maxHeight:number;onClose:()=>void;onOpenVm:(vmId:string)=>void}){
+export function SdkStorePanel({projectId,url,onUrl,canEdit,money,maxHeight,onClose,onOpenVm}:{projectId:string;url:SdkStoreUrl;onUrl:(patch:Partial<SdkStoreUrl>,mode?:'push'|'replace')=>void;canEdit:boolean;money:{read:boolean;write:boolean};maxHeight:number;onClose:()=>void;onOpenVm:(vmId:string)=>void}){
   const store=trpc.vmManagement.sdkStore.useQuery({projectId}),[q,setQ]=useState(url.q),[open,setOpen]=useState<string|null>(null),[pasting,setPasting]=useState(false);
   useEffect(()=>{setQ(url.q);},[url.q]);
   useEffect(()=>{if(q===url.q)return;const t=setTimeout(()=>onUrl({q,page:1},'replace'),250);return ()=>clearTimeout(t);},[q,url.q,onUrl]);
@@ -49,21 +49,21 @@ export function SdkStorePanel({projectId,url,onUrl,canEdit,maxHeight,onClose,onO
     {store.error&&<p role="alert" className="pm-error">{store.error.message} <button className="pm-link" onClick={()=>void store.refetch()}>Thử lại</button></p>}
     <div className="vm-pager"><span className="text-sm pm-muted">{rows.length?`${paged.first}–${paged.last} / ${rows.length} SDK`:'0 SDK'}</span>{paged.pages>1&&<span className="flex gap-1">{Array.from({length:paged.pages},(_,i)=>i+1).filter(p=>Math.abs(p-paged.current)<=2||p===1||p===paged.pages).map(p=><button key={p} type="button" className={'pm-button pm-button-quiet'+(p===paged.current?' active':'')} aria-current={p===paged.current?'page':undefined} onClick={()=>onUrl({page:p})}>{p}</button>)}</span>}</div>
     <div className="vm-sdk-store-table"><table className="pm-table"><thead><tr><th>SDK</th><th>Tiền tích luỹ SDK</th><th>Vị trí hiện tại</th><th>Tình trạng</th><th>Ghi chú</th></tr></thead><tbody>
-      {paged.rows.map(r=><StoreRow key={r.id} projectId={projectId} r={r} open={open===r.id} onToggle={()=>setOpen(o=>o===r.id?null:r.id)} canEdit={canEdit} onOpenVm={onOpenVm}/>)}
+      {paged.rows.map(r=><StoreRow key={r.id} projectId={projectId} r={r} open={open===r.id} onToggle={()=>setOpen(o=>o===r.id?null:r.id)} canEdit={canEdit} canMoney={canEdit&&money.write} onOpenVm={onOpenVm}/>)}
       {!paged.rows.length&&<tr><td colSpan={5} className="pm-empty">{store.isLoading?'Đang tải kho…':all.length?'Không có SDK trong bộ lọc này.':'Kho chưa có SDK. Ghi SDK tại ô SDK của VM hoặc dán vào kho.'}</td></tr>}
     </tbody></table></div>
   </div>;
 }
-function StoreRow({projectId,r,open,onToggle,canEdit,onOpenVm}:{projectId:string;r:StoreSdk;open:boolean;onToggle:()=>void;canEdit:boolean;onOpenVm:(vmId:string)=>void}){
+function StoreRow({projectId,r,open,onToggle,canEdit,canMoney,onOpenVm}:{projectId:string;r:StoreSdk;open:boolean;onToggle:()=>void;canEdit:boolean;canMoney:boolean;onOpenVm:(vmId:string)=>void}){
   return <><tr className={open?'vm-row-active':''}>
     <td><button type="button" className="vm-sdk-store-code" aria-expanded={open} onClick={onToggle}>{open?<ChevronDown size={13}/>:<ChevronRight size={13}/>}<code className="vm-sdk">{r.code}</code></button><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+r.code} onClick={()=>void navigator.clipboard?.writeText(r.code).then(()=>toast.success('Đã copy SDK',{duration:1200}))}><Copy size={13}/></button></td>
-    <td className="whitespace-nowrap">{r.amount!==null?formatSdkAmount(r.amount):<span className="pm-muted">Chưa kiểm tra</span>}{r.amount!==null&&<div className="pm-muted text-xs" title={r.amountSource?'Nguồn: '+r.amountSource:undefined}>{r.observedAt?'Kiểm tra '+localDate(r.observedAt):'Chưa rõ giờ kiểm tra'}</div>}</td>
+    <td className="whitespace-nowrap">{r.moneyHidden?<span className="pm-muted" title="Cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Ẩn</span>:r.amount!==null?formatSdkAmount(r.amount):<span className="pm-muted">Chưa kiểm tra</span>}{!r.moneyHidden&&r.amount!==null&&<div className="pm-muted text-xs" title={r.amountSource?'Nguồn: '+r.amountSource:undefined}>{r.observedAt?'Kiểm tra '+localDate(r.observedAt):'Chưa rõ giờ kiểm tra'}</div>}</td>
     <td>{r.vm?<button type="button" className="pm-link text-left" title="Mở VM trong bảng" onClick={()=>onOpenVm(r.vm!.id)}>{r.current?'Hiện hành ở ':'Trong danh sách '}{placeText(r)}</button>:<span className="pm-muted">Trong kho</span>}</td>
     <td><span className={stateClass(r.state)}>{SDK_STATE_LABEL[r.state]}</span>{r.state==='LINKED'&&r.linkedLogin&&<div className="pm-muted text-xs vm-ellipsis" title={r.linkedLogin}>{r.linkedLogin}</div>}</td>
     <td className="vm-sdk-store-note">{r.note?<span className="vm-clamp2" title={r.note}>{r.note}</span>:<span className="pm-muted">—</span>}</td></tr>
-    {open&&<tr className="vm-sdk-store-detail"><td colSpan={5}><StoreDetail projectId={projectId} r={r} canEdit={canEdit}/></td></tr>}</>;
+    {open&&<tr className="vm-sdk-store-detail"><td colSpan={5}><StoreDetail projectId={projectId} r={r} canEdit={canEdit} canMoney={canMoney}/></td></tr>}</>;
 }
-function StoreDetail({projectId,r,canEdit}:{projectId:string;r:StoreSdk;canEdit:boolean}){
+function StoreDetail({projectId,r,canEdit,canMoney}:{projectId:string;r:StoreSdk;canEdit:boolean;canMoney:boolean}){
   const info=trpc.vmManagement.sdkInfo.useMutation(),confirm=trpc.vmManagement.sdkConfirm.useMutation(),utils=trpc.useUtils(),refresh=useVMRefresh();
   // The version the edit started from: while nothing is typed the fields follow the store; once typed, a newer version from someone
   // else never replaces the typed text nor becomes the expected revision by itself (the save would then overwrite their value). The
@@ -82,7 +82,7 @@ function StoreDetail({projectId,r,canEdit}:{projectId:string;r:StoreSdk;canEdit:
     <div className="space-y-2">
       {r.state==='UNCONFIRMED'&&<div className="pm-review text-sm"><p>Dữ liệu cũ: web chưa có bằng chứng mã này đã hay chưa từng dùng cho EarnApp, nên chưa cho dùng lại.</p>
         {canEdit&&<div className="flex gap-2 flex-wrap mt-2"><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Xác nhận chưa từng dùng</button><button className="pm-button" disabled={busy} onClick={()=>{const input={projectId,sdkId:r.id,expectedRevision:r.revision,decision:'LINKED' as const};void run(()=>confirm.mutateAsync({...input,key:keyFor(input)}));}}>Đã từng dùng (chỉ để tra cứu)</button></div>}</div>}
-      {canEdit?<><div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" placeholder="Chưa ghi tiền" aria-label={'Tiền tích luỹ '+r.code} value={amount} disabled={busy} onChange={edit(setAmount)} onKeyDown={e=>keys(e)}/></label>
+      {canEdit?<><div className="grid grid-cols-2 gap-2">{canMoney?<label className="pm-label text-xs">Tiền tích luỹ (USD)<input className="pm-input" inputMode="decimal" placeholder="Chưa ghi tiền" aria-label={'Tiền tích luỹ '+r.code} value={amount} disabled={busy} onChange={edit(setAmount)} onKeyDown={e=>keys(e)}/></label>:<p className="pm-label text-xs pm-muted">Tiền tích luỹ (USD): {r.moneyHidden?'ẩn':formatSdkAmount(r.amount)||'chưa kiểm tra'} · sửa tiền cần quyền “Ghi kiểm tra tiền EarnApp”</p>}
         <label className="pm-label text-xs">Ghi chú<textarea className="pm-input" rows={2} maxLength={SDK_NOTE_MAX} aria-label={'Ghi chú '+r.code} value={note} disabled={busy} onChange={edit(setNote)} onKeyDown={e=>keys(e,true)}/></label></div>
         {amountError&&<p className="vm-cell-error" role="alert">{amountError}</p>}
         {moved&&<p className="pm-review text-xs" role="alert">Người khác vừa sửa mã này: tiền hiện {formatSdkAmount(r.amount)||'chưa ghi'}{r.note!==base.note?' · ghi chú đã đổi':''}. Nội dung bạn nhập được giữ; bấm <button type="button" className="underline" onClick={()=>setBase({revision:r.revision,amount:r.amount,note:r.note})}>So với bản mới</button> rồi lưu nếu vẫn muốn ghi.</p>}

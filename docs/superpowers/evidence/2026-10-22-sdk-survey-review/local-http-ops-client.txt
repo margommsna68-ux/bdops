@@ -1,0 +1,20 @@
+PASS C0 user AI thử: USER + EARN_BALANCE (không ADMIN)
+PASS C1 sdk-prepare chụp lượt / revision / knownSdks + capturedAt của 3 VM
+PASS C2 file khảo sát thiếu định danh lúc chụp → dừng, báo đối chiếu / khảo sát lại, không gửi
+PASS C3 đọc máy trước lúc chụp → sdk-check chặn
+PASS C4 sdk-check chặn "5_17" trước khi gửi
+PASS C5 server từ chối "5_17" (422), không tạo mã
+PASS C6 ba VM thử chưa gán EarnApp
+PASS C7 sdk-survey: A, C ghi xong; B (web đã đổi sau lúc chụp) bị từ chối REVISION_CONFLICT, không gắn sang revision mới
+PASS C8 nội dung gửi mang đúng lượt / revision lúc chụp
+PASS C9 VM A: một SDK, Chưa xác nhận, hiện hành, $0.21, giờ quan sát ≠ giờ ghi
+PASS C10 VM C: $0 lưu là 0 (không phải chưa kiểm tra)
+PASS C11 chạy lại + --redo B với bản chụp cũ: dòng đã ghi không gửi lại; B vẫn bị từ chối (không tự cập nhật revision)
+PASS C12 chụp lại + đọc máy lại → B ghi được
+PASS C13 mã của VM A gửi cho VM B → 409 DUPLICATE, không chuyển
+PASS C14 VM B có mã hiện hành khác → 409 SDK_CONFLICT kèm mã hiện hành, không thay
+PASS C15 (API, revision hiện hành) kết quả cũ đến muộn → OLDER, giữ $0.21
+PASS C16 (API) cùng thời điểm khác tiền → 409 SDK_CONFLICT
+PASS C17 (API) lần mới cùng tiền → SAME, cập nhật giờ kiểm tra
+PASS C18 GET vm đọc lại: $0.21, giờ kiểm tra mới, Chưa xác nhận, vẫn chưa có EarnApp
+PASS C19 Không phát sinh chi phí / quỹ / rút / số dư EarnApp / yêu cầu rút / tài khoản EarnApp; tình trạng VM giữ nguyên

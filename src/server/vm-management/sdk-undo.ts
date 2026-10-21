@@ -22,7 +22,7 @@ export async function restoreSdkImage(tx:Prisma.TransactionClient,projectId:stri
   }
   const target=(before.vmId as string|null)??null,date=(v:unknown)=>v?new Date(String(v)):null;
   if(target&&target!==left)await tx.sdkRecord.updateMany({where:{vmId:target,id:{not:rec.id}},data:{vmId:null}});
-  await tx.sdkRecord.update({where:{id:rec.id},data:{vmId:target,holderVmId:(before.holderVmId as string|null|undefined)??target,heldAt:date(before.heldAt),heldById:(before.heldById as string|null)??null,amount:(before.amount as string|null)??null,currency:String(before.currency||'USD'),amountAt:date(before.amountAt),amountById:(before.amountById as string|null)??null,
+  await tx.sdkRecord.update({where:{id:rec.id},data:{vmId:target,holderVmId:(before.holderVmId as string|null|undefined)??target,heldAt:date(before.heldAt),heldById:(before.heldById as string|null)??null,amount:(before.amount as string|null)??null,currency:String(before.currency||'USD'),amountAt:date(before.amountAt),amountObservedAt:'amountObservedAt' in before?date(before.amountObservedAt):null,amountSource:'amountSource' in before?(before.amountSource as string|null)??null:null,amountById:(before.amountById as string|null)??null,
     note:(before.note as string|null)??null,noteAt:date(before.noteAt),noteById:(before.noteById as string|null)??null,linkState:before.linkState as 'UNLINKED'|'LINKED'|'UNCONFIRMED',
     linkedEarnAppId:(before.linkedEarnAppId as string|null)??null,linkedVmId:(before.linkedVmId as string|null)??null,linkedCycle:(before.linkedCycle as number|null)??null,linkedAt:date(before.linkedAt),linkedById:(before.linkedById as string|null)??null,
     confirmedAt:date(before.confirmedAt),confirmedById:(before.confirmedById as string|null)??null,revision:{increment:1}}});

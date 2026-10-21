@@ -8,6 +8,7 @@ import {syncAssignmentState} from '../proxy-management/assignment-state';
 import {assignableReason,endpointInclude,occupantOf,placeOnVm,vmInclude,type EndpointRow,type VMRow} from '../proxy-management/edits';
 import {authorizeVM,type VMReader} from './repository';
 import {normalizeSdk} from './sdk-parse';
+import {assertSdkMoneyWrite,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
 import {planPlacement,applyPlacement,checkInfo,infoChanges,staleSdk,type SdkInfo} from './sdk-store';
 import {parseSdkAmount,formatSdkAmount,SDK_NOTE_MAX} from '@/lib/sdk-money';
 // "Dán bảng" and the bulk bar on Server/VM: one kind of update per batch (SDK, proxy, existing Gmail or note), matched by server + VM
@@ -87,7 +88,7 @@ function infoText(ch:ReturnType<typeof infoChanges>){
 export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]},db:PrismaClient=prisma):Promise<BulkPreview>{
   const kind=input.kind;if(!RIGHT[kind]||(input.text===undefined)===(input.items===undefined)) throw new ProxyDomainError('INVALID_INPUT');
   refuseGmail(kind);
-  await authorizeVM(scope,RIGHT[kind],db);
+  await authorizeVM(scope,RIGHT[kind],db);const money=kind==='SDK'?await sdkMoneyRights(scope,db):{read:true,write:true};
   const vms=await activeVMs(scope.projectId,db),server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true,archivedAt:null}}):null;
   if(input.serverId&&!server) throw new ProxyDomainError('NOT_FOUND','Server không thuộc dự án này hoặc đã xoá');
   const byId=new Map(vms.map(v=>[v.id,v])),byKey=new Map(vms.map(v=>[v.server.code.toLowerCase()+'\u0000'+v.code.toLowerCase(),v])),servers=new Set(vms.map(v=>v.server.code.toLowerCase()));if(server) servers.add(server.code.toLowerCase());
@@ -123,6 +124,7 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
       const sdk=normalizeSdk(raw);if(!sdk){rows.push({...found,message:'Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)'});continue;}
       const other=twice(sdk);if(other){rows.push({...found,after:sdk,message:'Cùng SDK với dòng '+other.join(', ')+'; mỗi SDK một VM'});continue;}
       const cell=sdkCells(l);if('error' in cell){rows.push({...found,after:sdk,message:cell.error});continue;}
+      if(cell.info.amount!==undefined&&!money.write){rows.push({...found,after:sdk,message:SDK_MONEY_WRITE_REFUSAL});continue;}
       const planned=await planPlacement(db,scope.projectId,{...vm,operation:null},sdk);if('error' in planned){rows.push({...found,after:sdk,message:planned.error});continue;}
       const {plan}=planned,record=plan.kind==='SAME'?plan.current:plan.target,ch=infoChanges(record,cell.info),info=infoText(ch);
       if(plan.kind==='SAME'&&!ch.amount&&!ch.note){rows.push({...found,after:sdk,outcome:'SKIP',message:'Giữ nguyên: cùng SDK hiện tại'});continue;}
@@ -163,6 +165,7 @@ export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:stri
       if(kind==='SDK'){
         if(item.value){const dup=usedSdk.get(item.value);if(dup){row('ERROR','Cùng SDK với '+dup);continue;}usedSdk.set(item.value,at(vm));}
         let info:SdkInfo;try{info=checkInfo({amount:item.amount,note:item.note});}catch(e){row('ERROR',e instanceof Error?e.message.replace(/^[A-Z_]+: /,''):'Tiền / ghi chú không hợp lệ');continue;}
+        if(info.amount!==undefined)await assertSdkMoneyWrite(current,tx);
         const planned=await planPlacement(tx,scope.projectId,{...vm,operation:null},item.value);if('error' in planned){row('ERROR',planned.error);continue;}
         const stale=staleSdk(planned.plan,item.expectedSdkRevision);if(stale){row('ERROR',stale);continue;}
         const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'},{...vm,operation:null},planned.plan,info);

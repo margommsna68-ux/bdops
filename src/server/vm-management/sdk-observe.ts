@@ -3,7 +3,7 @@ import {prisma} from '@/lib/prisma';
 import {canonicalAmount,parseSdkAmount} from '@/lib/sdk-money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand} from '../business-management/idempotency';
-import {balanceRights} from '../vm-ops/balance';
+import {assertSdkMoneyWrite} from './sdk-money-rights';
 import {authorizeVM} from './repository';
 import {normalizeSdk} from './sdk-parse';
 import {cycleOf,syncMirror,where} from './sdk-store';
@@ -82,7 +82,7 @@ export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:Prism
   const source=(caller.tokenLabel?'AI '+caller.tokenLabel+' · ':'')+request.source;
   return runBusinessCommand(scope,{key:input.key,payload:request,kind:'VM_SDK_OBSERVE',module:'INFRASTRUCTURE',reversible:false},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
-    if(hasAmounts(request.items)&&!(await balanceRights(scope,tx)).write)throw new ProxyDomainError('FORBIDDEN','Ghi tiền tích luỹ SDK cần quyền ghi kiểm tra tiền EarnApp (EARN_BALANCE); gửi mã không kèm tiền hoặc xin cấp quyền');
+    if(hasAmounts(request.items))await assertSdkMoneyWrite(scope,tx);
     const vm=await loadVM(tx,scope.projectId,request.vmId),cycle=cycleOf(vm);
     if(cycle!==request.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW','VM đã sang lượt '+cycle+'; đọc lại VM','CYCLE_CHANGED');
     if(vm.revision!==request.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW',where(vm)+' vừa thay đổi; đọc lại VM rồi gửi lại (không ghi gì)','REVISION_CONFLICT');

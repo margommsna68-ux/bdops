@@ -4,6 +4,7 @@ import {canonicalAmount,parseSdkAmount,SDK_NOTE_MAX} from '@/lib/sdk-money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
 import {authorizeVM,type VMReader} from './repository';
+import {assertSdkMoneyWrite,carriesMoney,maskSdkEventDetail,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
 import {normalizeSdk} from './sdk-parse';
 // SDK store (owner brief 19/10/2026). One rule for every path that writes an SDK: the SDK cell, Kho SDK, Dán bảng, the older
 // sdkApply endpoint, recreating a VM and undo.
@@ -148,7 +149,7 @@ export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaCli
   const code=input.code===null?null:normalizeSdk(input.code);if(input.code!==null&&!code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
   const info=checkInfo({amount:input.amount,note:input.note});
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_RECORD',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     return placeVmSdk(tx,images,current,{...input,code},info);
   },db);
 }
@@ -237,12 +238,14 @@ export interface StoreRow {line:number;code:string;outcome:'NEW'|'UPDATE'|'SAME'
 export async function previewSdkStore(scope:ActorScope,input:{text:string},db:PrismaClient=prisma){
   await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
   const lines=parseStoreLines(input.text);if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng mỗi đợt');
+  const money=await sdkMoneyRights(scope,db);
   const codes=Array.from(new Set(lines.map(l=>l.code))),records=(await db.sdkRecord.findMany({where:{projectId:scope.projectId,code:{in:codes}},include:{vm:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}},holder:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}}}})).map(r=>({...r,vm:r.holder||r.vm}));
   const byCode=new Map(records.map(r=>[r.code,r])),seen=new Map<string,number[]>();for(const l of lines)seen.set(l.code,[...(seen.get(l.code)||[]),l.line]);
   const rows:StoreRow[]=[];
   for(const l of lines){
     const rec=byCode.get(l.code),base:StoreRow={line:l.line,code:l.code,outcome:'ERROR',message:'',sdkId:rec?.id??null,expectedRevision:rec?.revision??null,amount:l.amount,note:l.note,before:rec?{amount:canonicalAmount(rec.amount?.toString()??null),note:rec.note}:null,location:rec?.vm?placeLabel(rec.vm):null,state:rec?.linkState??null};
     if(l.issue){rows.push({...base,message:l.issue});continue;}
+    if(l.amount!==undefined&&!money.write){rows.push({...base,before:null,message:SDK_MONEY_WRITE_REFUSAL});continue;}
     const repeat=seen.get(l.code)!;if(repeat.length>1){rows.push({...base,message:'Mã lặp ở dòng '+repeat.filter(n=>n!==l.line).join(', ')+'; giữ một dòng'});continue;}
     if(!rec){if(await foreignHolder(db,scope.projectId,l.code)){rows.push({...base,message:FOREIGN_CODE});continue;}rows.push({...base,outcome:'NEW',message:'Thêm vào kho'+(l.amount==null?' · chưa ghi tiền':'')});continue;}
     const ch=infoChanges(rec,{amount:l.amount,note:l.note});
@@ -255,7 +258,8 @@ export async function applySdkStore(scope:ActorScope,input:{key:string;rows:{lin
   if(!input.rows.length||input.rows.length>1000||new Set(input.rows.map(r=>r.code)).size!==input.rows.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi mã một dòng, tối đa 1000 dòng');
   for(const r of input.rows){if(normalizeSdk(r.code)!==r.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+r.line);checkInfo(r);}
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_STORE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);const now=new Date(),ctx:WriteCtx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Kho SDK'};
+    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney(input.rows))await assertSdkMoneyWrite(current,tx);
+    const now=new Date(),ctx:WriteCtx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Kho SDK'};
     const out:{line:number;code:string;outcome:'SAVED'|'SAME'|'ERROR';message:string}[]=[];
     for(const r of [...input.rows].sort((a,b)=>a.line-b.line)){
       const info=checkInfo(r),rec=await tx.sdkRecord.findUnique({where:{projectId_code:{projectId:scope.projectId,code:r.code}}});
@@ -280,7 +284,7 @@ export async function applySdkStore(scope:ActorScope,input:{key:string;rows:{lin
 export async function updateSdkInfo(scope:ActorScope,input:{key:string;sdkId:string;expectedRevision:number;amount?:string|null;note?:string|null},db:PrismaClient=prisma){
   const info=checkInfo(input);
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_STORE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     const rec=await tx.sdkRecord.findFirst({where:{id:input.sdkId,projectId:scope.projectId}});if(!rec)throw new ProxyDomainError('NOT_FOUND');
     if(rec.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa thay đổi; tải lại (nội dung đang nhập được giữ)');
     const changed=await applyInfo(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:'Kho SDK'},rec,info);
@@ -289,18 +293,19 @@ export async function updateSdkInfo(scope:ActorScope,input:{key:string;sdkId:str
 }
 // ---- Reads -------------------------------------------------------------------------------------------------------------------------
 export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);
+  await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
   const vmPick={select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}} as const;
   const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,observedAt:r.amountObservedAt?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,
+  // Without the money read right the amount, its times and source are not sent at all (never 0, never "chưa ghi"): `moneyHidden`.
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,
     vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);
+  await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
   const rec=await db.sdkRecord.findFirst({where:{id:sdkId,projectId:scope.projectId},include:{events:{orderBy:[{createdAt:'desc'},{id:'desc'}],take:300},linkedEarnApp:{select:{login:{select:{email:true}}}}}});if(!rec)throw new ProxyDomainError('NOT_FOUND');
   const ids=Array.from(new Set([...rec.events.map(e=>e.actorId),rec.amountById,rec.noteById,rec.linkedById].filter((s):s is string=>!!s))),users=await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}});
   const who=(id:string|null)=>{if(!id)return null;if(id==='migration')return 'Chuyển dữ liệu';const u=users.find(x=>x.id===id);return u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ';};
   return {id:rec.id,code:rec.code,state:rec.linkState,linkedLogin:rec.linkedEarnApp?.login.email??null,linkedAt:rec.linkedAt?.toISOString()??null,linkedBy:who(rec.linkedById),linkedCycle:rec.linkedCycle,amountAt:rec.amountAt?.toISOString()??null,amountBy:who(rec.amountById),noteAt:rec.noteAt?.toISOString()??null,noteBy:who(rec.noteById),
-    events:rec.events.map(e=>({id:e.id,kind:e.kind,from:e.fromLabel,to:e.toLabel,detail:e.detail as Record<string,unknown>|null,at:e.createdAt.toISOString(),by:who(e.actorId)}))};
+    moneyHidden:!money,events:rec.events.map(e=>({id:e.id,kind:e.kind,from:e.fromLabel,to:e.toLabel,detail:money?e.detail as Record<string,unknown>|null:maskSdkEventDetail(e.detail as Record<string,unknown>|null),at:e.createdAt.toISOString(),by:who(e.actorId)}))};
 }
