@@ -61,11 +61,20 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
   `IDEMPOTENCY_CONFLICT`. Key gắn với người dùng + dự án (không gắn token), nên xoay token vẫn chống trùng. Mất phản hồi → gửi lại **cùng key**.
 - Giới hạn (dùng chung mọi instance): 120 đọc / phút và 30 ghi / phút mỗi token; 30 lần xác thực sai / phút mỗi IP; PIN sai 3 lần khoá người dùng
   30 phút (như web; nhiều request cùng lúc được quyết định lần lượt trên trạng thái mới nhất), 5 lần sai / 30 phút khoá riêng token. 429 có `Retry-After`.
-- IP: lấy từ X-Forwarded-For theo số proxy tin cậy (`OPS_TRUSTED_PROXY_HOPS`, mặc định 1 = Railway); phần client tự khai bị bỏ. `GET /health` trả
-  `verifiedIp` để kiểm.
-  **Kiểm trên host 21/10/2026 (deploy 7134f316):** header giả bị bỏ qua, nhưng với mặc định 1 `verifiedIp` là địa chỉ nút biên Railway (đổi theo
-  request), không phải IP thật (HTTP log Railway: srcIp = IP thật). Token đặt giới hạn IP sẽ bị từ chối. Chưa đặt IP cho token cho tới khi kiểm chuỗi
-  header thật và chỉnh số hop / nguồn IP.
+- IP (sửa 21/10/2026, `requestIp` trong src/server/ops-api/safety.ts): **một** địa chỉ dùng chung cho giới hạn IP của token, đếm xác thực sai theo
+  địa chỉ, `OpsAudit.ip` và `lastUsedIp`.
+  - Trên Railway (biến `RAILWAY_ENVIRONMENT_ID` do nền tảng đặt trong tiến trình, không phải từ request; Host / tên miền không bao giờ là bằng chứng):
+    `X-Real-IP`, phải đúng một IPv4 / IPv6 (chuẩn hoá; IPv4-mapped → IPv4); thiếu / sai định dạng / danh sách / có port → không có địa chỉ.
+    `X-Forwarded-For` không dùng trên Railway.
+  - Ngoài Railway: `X-Forwarded-For` đếm từ phải theo `OPS_TRUSTED_PROXY_HOPS` (local / test). `OPS_CLIENT_IP_SOURCE=railway|xff|none` ghi đè.
+  - Token có danh sách IP: không có địa chỉ xác minh được → 403, không bao giờ tự bỏ giới hạn. Luật IP: IPv4 / IPv6 chính xác (so ở dạng chuẩn) hoặc
+    IPv4/nn (0–32); IPv6/nn, octet > 255, `/33`… bị từ chối khi tạo và không bao giờ khớp.
+  - `GET /health` trả `verifiedIp` + `ipSource`; `GET /health?diag=net` thêm đúng các trường mạng của chính request đó (X-Real-IP, chuỗi
+    X-Forwarded-For, X-Railway-Request-Id, X-Railway-Edge; mỗi địa chỉ là IP hợp lệ hoặc `INVALID`), không bao giờ header khác.
+  - **Kiểm trên host 21/10/2026 (deploy b4be51aa):** 6 request ghép theo X-Railway-Request-Id với HTTP log Railway: `srcIp` = `X-Real-IP` = IP
+    công khai thật ở cả 6. Railway thay thế giá trị client tự gửi: `X-Real-IP: 9.9.9.9` / `not-an-ip` → IP thật; `X-Forwarded-For: 1.2.3.4[, 5.6.7.8]`
+    → bị viết lại thành `[IP thật, IP nút biên]`; `X-Railway-Request-Id` giả → id mới. Chưa kiểm trên host: IPv6 (máy kiểm không có IPv6), token có
+    danh sách IP (chưa có token trên host). Lưu ý: dịch vụ khác trong cùng mạng riêng Railway của dự án có thể gọi thẳng container bỏ qua nút biên.
 - Không trả mật khẩu, 2FA, link lấy mã, token, credentials proxy. Proxy: id + host che + port + nhóm. Email đăng nhập che. Email PP nhận tiền đầy đủ cho
   người có quyền rút / ghi khoản nhận. Ghi chú tự do được che link / mật khẩu / mã trước khi lưu và trước khi trả.
 - Nhật ký: `OpsAudit` (requestId, tokenId, userId, projectId, action, objectId, thời gian, IP đã xác minh, HTTP, kết quả, replay) cho mọi lệnh ghi và
