@@ -6,7 +6,7 @@ import {copyVmConfigurations,startInstall,reportInstallFailure,confirmInstalled}
 import {archiveManagedResource,updateManagedVM} from '@/server/vm-management/metadata';
 import {createVMService} from '@/server/vm-management/allocation';
 import type {ActorScope} from '@/server/proxy-management/types';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 // Fixture: moonA VM_001..VM_006, moonB VM_001; proxies TUT ×2, Chung mooon–Genjy ×1, Genjy riêng ×1 (all NEW, full credentials); Gmail g1, g2.
 async function fixture(){
@@ -16,7 +16,7 @@ async function fixture(){
   const a=await db.server.create({data:{projectId,code:'moonA',managed:true}}),b=await db.server.create({data:{projectId,code:'moonB',managed:true}});
   const vm=(serverId:string,code:string)=>db.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});
   const v:Record<string,Awaited<ReturnType<typeof vm>>>={};for(const c of ['VM_001','VM_002','VM_003','VM_004','VM_005','VM_006']) v[c]=await vm(a.id,c);const b1=await vm(b.id,'VM_001');
-  const net='203.4.'+(1+Math.floor(Math.random()*250))+'.';
+  const net=await freeTestNet(db,'203.4.');
   const proxy=async(n:number,owner:'SELF'|'GENJY',subgroup:'PC_CHUNG'|null)=>{const ip=net+n,identity=await db.proxyIdentity.create({data:{ip,owner,subgroup,ownerDecidedAt:owner==='GENJY'?new Date():null}});identities.push(identity.id);return db.proxyIP.create({data:{projectId,identityId:identity.id,address:ip+':8080',host:ip,port:8080,credentialCipher:encrypt(JSON.stringify({username:'u'+n,password:'p'+n})),packageCode:'pkg',inventoryState:'NEW',inventoryKey:identity.id}});};
   const tut1=await proxy(1,'SELF',null),tut2=await proxy(2,'SELF',null),shared=await proxy(3,'GENJY','PC_CHUNG'),genjy=await proxy(4,'GENJY',null);
   const g1=await db.gmailAccount.create({data:{email:'g1-'+tag+'@fixture.invalid',projectId,businessManaged:true}}),g2=await db.gmailAccount.create({data:{email:'g2-'+tag+'@fixture.invalid',projectId,businessManaged:true}});

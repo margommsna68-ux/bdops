@@ -7,12 +7,12 @@ import {createProxyEditService} from '@/server/proxy-management/edits';
 import {createProxyBatchService} from '@/server/proxy-management/batches';
 import {undoOperation} from '@/server/operation-history/undo';
 import type {ActorScope} from '@/server/proxy-management/types';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 const key=()=>'retire-'+randomUUID();
 // moon1: VM_001 holds e1 (Chờ cài, chưa bắt đầu), VM_002 free; moon2/VM_001 has e3 installed. e2/e5 unassigned TUT, g genjy.
 async function fixture(role:'ADMIN'|'USER'='ADMIN'){
-  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net='203.1.'+(1+Math.floor(Math.random()*250))+'.';
+  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net=await freeTestNet(db,'203.1.');
   await db.project.create({data:{id:projectId,code:projectId,name:'Retire fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role,allowedModules:['INFRASTRUCTURE'],capabilities:['COPY_CREDENTIALS','PROXY_IMPORT']}});
   const servers:Record<string,{id:string}>={};for(const code of ['moon1','moon2']) servers[code]=await db.server.create({data:{projectId,code,managed:true}});

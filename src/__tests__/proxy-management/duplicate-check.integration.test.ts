@@ -6,12 +6,12 @@ import {createProxyEditService} from '@/server/proxy-management/edits';
 import {persistSourceSnapshot} from '@/server/proxy-management/sources';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 import type {ActorScope,BatchInput,SourceSnapshot} from '@/server/proxy-management/types';
 const db=testClient();afterAll(()=>db.$disconnect());
 // Two projects share the global identity table; project B exists only to prove cross-project conflicts stay opaque.
 async function fixture(){
-  const projectId=randomUUID(),otherId=randomUUID(),userId=randomUUID(),net='203.2.'+(1+Math.floor(Math.random()*250))+'.',ip=(n:number)=>net+n;
+  const projectId=randomUUID(),otherId=randomUUID(),userId=randomUUID(),net=await freeTestNet(db,'203.2.'),ip=(n:number)=>net+n;
   for(const [id,name] of [[projectId,'Dup fixture'],[otherId,'Other project']]){await db.project.create({data:{id,code:id,name,settings:{businessMode:'PROXY_VM'}}});}
   await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   for(const id of [projectId,otherId]){await db.projectMember.create({data:{userId,projectId:id,role:'ADMIN'}});await db.proxyProviderAccount.create({data:{projectId:id,code:'fixture',label:'Fixture',credentialCipher:encrypt(JSON.stringify({username:'u',password:'secret'}))}});}

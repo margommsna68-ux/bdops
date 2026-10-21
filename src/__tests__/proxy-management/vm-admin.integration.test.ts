@@ -6,7 +6,7 @@ import {createVMService} from '@/server/vm-management/allocation';
 import {undoOperation} from '@/server/operation-history/undo';
 import {saveVmSdk} from '@/server/vm-management/sdk-store';
 import type {ActorScope} from '@/server/proxy-management/types';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 describe('VM code ranges',()=>{
   it('expands a range keeping the prefix and the zero padding of the start code',()=>{
@@ -26,7 +26,7 @@ async function fixture(role:'ADMIN'|'USER'='ADMIN'){
   const s7=await db.server.create({data:{projectId,code:'moon7',managed:true}}),s8=await db.server.create({data:{projectId,code:'moon8',managed:true}});
   const vm=async(serverId:string,code:string,o:{archived?:boolean;sdk?:string}={})=>{const row=await db.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL',archivedAt:o.archived?new Date():null,sdkId:o.sdk||null}});if(o.sdk)await db.sdkRecord.create({data:{projectId,code:o.sdk,vmId:row.id,linkState:'UNLINKED'}});return row;};
   const v1=await vm(s7.id,'VM_001',{sdk:'sdk-'+projectId.slice(0,8)}),v2=await vm(s7.id,'VM_002'),v3=await vm(s7.id,'VM_003'),v4=await vm(s7.id,'VM_004',{archived:true,sdk:'sdk-old-'+projectId.slice(0,8)});
-  const net='203.5.'+(1+Math.floor(Math.random()*250))+'.',identity=await db.proxyIdentity.create({data:{ip:net+'1',owner:'SELF'}});ids.push(identity.id);
+  const net=await freeTestNet(db,'203.5.'),identity=await db.proxyIdentity.create({data:{ip:net+'1',owner:'SELF'}});ids.push(identity.id);
   const ep=await db.proxyIP.create({data:{projectId,identityId:identity.id,address:net+'1:80',host:net+'1',port:80,credentialCipher:encrypt(JSON.stringify({username:'u',password:'p'})),packageCode:'p',inventoryState:'LIVE',inventoryKey:identity.id}});
   const config=await db.vMConfiguration.create({data:{projectId,vmId:v2.id,version:1,endpointId:ep.id,snapshotCipher:encrypt('{}'),configurationHash:'h-'+randomUUID(),createdById:userId,status:'PLANNED'}});
   await db.vMProxyAllocation.create({data:{projectId,vmId:v2.id,endpointId:ep.id,configurationId:config.id,allocationKey:identity.id,role:'DESIRED',createdById:userId}});

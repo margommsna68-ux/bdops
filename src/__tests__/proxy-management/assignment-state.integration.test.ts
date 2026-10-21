@@ -7,14 +7,14 @@ import {createVMService} from '@/server/vm-management/allocation';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 import type {ActorScope} from '@/server/proxy-management/types';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 const key=()=>'state-'+randomUUID();
 // NEW = eligible stock not on a VM; LIVE = assigned to a VM on the web (a Chờ cài or Đã cài hold). Giữ để kiểm tra does not count.
 // Fixture on moon9 (VM_001..VM_006 free): t1,t2,t7 TUT NEW free; t3 BLOCKED free; t4 TUT LIVE free (stale); t5 TUT NEW held on VM_005 (stale);
 // t8 BLOCKED held on VM_006; t9 LIVE with an install-started UNCERTAIN hold on VM_004; t10 LIVE installed on VM_003; s1 shared LIVE free; g1 Genjy riêng LIVE.
 async function fixture(){
-  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net='203.4.'+(1+Math.floor(Math.random()*250))+'.',ip=(n:number)=>net+n;
+  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net=await freeTestNet(db,'203.6.'),ip=(n:number)=>net+n;
   await db.project.create({data:{id:projectId,code:projectId,name:'State fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role:'ADMIN',allowedModules:['INFRASTRUCTURE'],capabilities:['COPY_CREDENTIALS','PROXY_IMPORT']}});
   await db.proxyProviderAccount.create({data:{projectId,code:'231243',label:'231243',credentialCipher:encrypt(JSON.stringify({username:'u',password:'secret'}))}});

@@ -10,12 +10,12 @@ import {undoOperation} from '@/server/operation-history/undo';
 import {listOperations} from '@/server/operation-history/journal';
 import {GROUP_TUT,type ActorScope} from '@/server/proxy-management/types';
 import {appRouter} from '@/server/routers/_app';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 const key=()=>'edit-'+randomUUID();
 // Fixture: moon1 (VM_001 holds e1 Chờ cài, VM_002 free, VM_003 holds e4 Giữ để kiểm tra), moon2 (VM_001 has e3 installed). e2/e5 unassigned TUT, g = genjy.
 async function fixture(role:'ADMIN'|'USER'='ADMIN'){
-  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net='203.0.'+(1+Math.floor(Math.random()*250))+'.';
+  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net=await freeTestNet(db,'203.0.');
   await db.project.create({data:{id:projectId,code:projectId,name:'Edit fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role,allowedModules:['INFRASTRUCTURE'],capabilities:['COPY_CREDENTIALS','PROXY_IMPORT']}});
   const servers:Record<string,{id:string}>={};for(const code of ['moon1','moon2']) servers[code]=await db.server.create({data:{projectId,code,managed:true}});

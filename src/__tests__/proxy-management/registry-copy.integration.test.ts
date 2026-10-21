@@ -4,11 +4,11 @@ import {encrypt} from '@/lib/encryption';
 import {queryRegistry,copyProxyRows,copyProxyEndpoint} from '@/server/proxy-management/history';
 import {UNASSIGNED_SERVER,type ActorScope} from '@/server/proxy-management/types';
 import {appRouter} from '@/server/routers/_app';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 // Fixture: proxies spread over moon2 / moon10 / An-01 plus one unassigned, one bare (no credentials) and one Genjy reserved IP.
 async function fixture(){
-  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net='198.51.'+(1+Math.floor(Math.random()*250))+'.';
+  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net=await freeTestNet(db,'198.51.');
   await db.project.create({data:{id:projectId,code:projectId,name:'Registry fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role:'USER',allowedModules:['INFRASTRUCTURE'],capabilities:['COPY_CREDENTIALS']}});
   const servers:Record<string,{id:string}>={};for(const code of ['moon10','moon2','An-01']) servers[code]=await db.server.create({data:{projectId,code,managed:true}});

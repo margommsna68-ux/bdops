@@ -9,13 +9,13 @@ import {ownerLabel} from '@/server/proxy-management/groups';
 import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,type ActorScope,type RegistryFilter} from '@/server/proxy-management/types';
-import {testClient} from './db-fixture';
+import {freeTestNet,testClient} from './db-fixture';
 const db=testClient();afterAll(()=>db.$disconnect());
 const key=()=>'shared-'+randomUUID();
 // "PC chung" = proxies mooon and Genjy invest in together; stored as owner GENJY + subgroup PC_CHUNG, shown as "Chung mooon–Genjy".
 // Fixture: t1..t3 TUT, s1..s5 shared (endpoints), sx shared reserved IP without endpoint, g1/g2 Genjy riêng, moon1 VM_001 free, VM_002 holds t3.
 async function fixture(){
-  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net='203.3.'+(1+Math.floor(Math.random()*250))+'.',ip=(n:number)=>net+n;
+  const projectId=randomUUID(),userId=randomUUID(),ids:string[]=[],net=await freeTestNet(db,'203.3.'),ip=(n:number)=>net+n;
   await db.project.create({data:{id:projectId,code:projectId,name:'Shared fixture',settings:{businessMode:'PROXY_VM'}}});await db.user.create({data:{id:userId,email:userId+'@fixture.invalid'}});
   await db.projectMember.create({data:{projectId,userId,role:'ADMIN',allowedModules:['INFRASTRUCTURE'],capabilities:['COPY_CREDENTIALS','PROXY_IMPORT']}});
   await db.proxyProviderAccount.create({data:{projectId,code:'231243',label:'231243',credentialCipher:encrypt(JSON.stringify({username:'u',password:'secret'}))}});
