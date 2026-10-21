@@ -293,7 +293,7 @@ export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
   const vmPick={select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}} as const;
   const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,observedAt:(r.amountObservedAt??(r.amount!=null?r.amountAt:null))?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,observedAt:r.amountObservedAt?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,
     vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){

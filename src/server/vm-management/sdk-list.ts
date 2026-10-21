@@ -279,7 +279,7 @@ export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[]){
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
-    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),amountObservedAt:(r.amountObservedAt??(r.amount!=null?r.amountAt:null))?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),amountObservedAt:r.amountObservedAt?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

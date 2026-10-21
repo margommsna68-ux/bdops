@@ -5,7 +5,7 @@ import {ProxyDomainError} from '../proxy-management/types';
 // memory for that call (AsyncLocalStorage): no request field, header or tRPC input can set or change it.
 // runBusinessCommand calls assertOpsToken inside its transaction, before a replay or a write: the token row is read FOR SHARE, so a
 // revoke (UPDATE of that row) either lands before — and the write is refused — or waits until the write has committed.
-/** `also`: more operations this write needs (e.g. SDK_AMOUNT when an SDK observation carries money), checked with `operation`. */
+/** `also`: more operations this write needs (e.g. BALANCE_WRITE when an SDK observation carries money), checked with `operation`. */
 export interface OpsAuth {tokenId:string;userId:string;operation:string;also?:string[]}
 const store=new AsyncLocalStorage<OpsAuth>();
 export const runWithOpsAuth=<T>(auth:OpsAuth,fn:()=>Promise<T>)=>store.run(auth,fn);

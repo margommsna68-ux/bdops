@@ -1,5 +1,4 @@
 import {describe,expect,it} from 'vitest';
-// @ts-expect-error plain ES module without types
 import {checkSdkSurvey} from '../../../scripts/ops-client.mjs';
 // ops-client `sdk-check` / `sdk-observe` (22/10/2026): the survey is checked on the operator's machine before anything is sent.
 describe('checkSdkSurvey',()=>{

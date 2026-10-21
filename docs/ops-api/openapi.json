@@ -113,6 +113,7 @@
          "ACCOUNT_CHANGED",
          "IDEMPOTENCY_CONFLICT",
          "DUPLICATE",
+         "SDK_CONFLICT",
          "VALIDATION",
          "INTERNAL"
         ]
@@ -122,7 +123,7 @@
        },
        "details": {
         "type": "object",
-        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId."
+        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored)."
        }
       },
       "required": [
@@ -978,7 +979,7 @@
        },
        "amountsVisible": {
         "type": "boolean",
-        "description": "amounts / observedAt / source are shown only with SDK_AMOUNT on the token (or the money rights)"
+        "description": "amounts / observedAt / recordedAt / source are shown only with the EarnApp balance read right (money rights, or EARN_BALANCE with BALANCE_WRITE on the token)"
        },
        "items": {
         "type": "array",
@@ -994,7 +995,8 @@
            "type": "string"
           },
           "revision": {
-           "type": "integer"
+           "type": "integer",
+           "description": "send it back as expectedSdkRevision"
           },
           "linkState": {
            "type": "string",
@@ -1020,11 +1022,17 @@
            "type": "string",
            "format": "date-time",
            "nullable": true,
-           "description": "when the amount was seen (not when it was written)"
+           "description": "when the amount was seen on the machine; null = not recorded, hidden, or old money recorded before observation times existed (time unknown, never the write time)"
           },
           "source": {
            "type": "string",
            "nullable": true
+          },
+          "recordedAt": {
+           "type": "string",
+           "format": "date-time",
+           "nullable": true,
+           "description": "when the amount was written on the web (not when it was seen)"
           }
          },
          "required": [
@@ -1036,6 +1044,7 @@
           "amount",
           "currency",
           "observedAt",
+          "recordedAt",
           "source"
          ]
         }
@@ -1460,8 +1469,7 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS",
-          "SDK_AMOUNT"
+          "PROXY_CREDENTIALS"
          ]
         }
        }
@@ -1519,9 +1527,6 @@
           },
           "PROXY_CREDENTIALS": {
            "type": "boolean"
-          },
-          "SDK_AMOUNT": {
-           "type": "boolean"
           }
          },
          "required": [
@@ -1530,8 +1535,7 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS",
-          "SDK_AMOUNT"
+          "PROXY_CREDENTIALS"
          ]
         }
        },
@@ -3944,23 +3948,6 @@
        "source": {
         "type": "string"
        },
-       "currentDiffers": {
-        "nullable": true,
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-         "currentCode": {
-          "type": "string"
-         },
-         "message": {
-          "type": "string"
-         }
-        },
-        "required": [
-         "currentCode",
-         "message"
-        ]
-       },
        "vmRevisionAfter": {
         "type": "integer"
        },
@@ -4009,12 +3996,12 @@
               "UNREADABLE",
               "NOT_SENT"
              ],
-             "description": "OLDER = a newer observation is stored: its money is kept"
+             "description": "SAVED = new figure stored; SAME = same figure, check time moved (or identical replay of the stored time); OLDER = a newer observation is stored, its money is kept; UNREADABLE = could not read (kept, never 0); NOT_SENT = no money in the request"
             },
             "amountUsd": {
              "type": "string",
              "nullable": true,
-             "description": "stored amount after this command; null without SDK_AMOUNT or not recorded"
+             "description": "stored amount after this command; null without the balance read right or not recorded"
             },
             "observedAt": {
              "type": "string",
@@ -4027,6 +4014,10 @@
             "amountUsd",
             "observedAt"
            ]
+          },
+          "revisionAfter": {
+           "type": "integer",
+           "description": "SDK revision after this command (the next expectedSdkRevision)"
           }
          },
          "required": [
@@ -4035,9 +4026,15 @@
           "placed",
           "linkState",
           "current",
+          "revisionAfter",
           "amount"
          ]
         }
+       },
+       "evidence": {
+        "type": "string",
+        "nullable": true,
+        "description": "evidence note sent with the observation (shown with the balance read right)"
        }
       },
       "required": [
@@ -4045,7 +4042,7 @@
        "expectedCycle",
        "observedAt",
        "source",
-       "currentDiffers",
+       "evidence",
        "vmRevisionAfter",
        "sdks"
       ]
@@ -4077,6 +4074,158 @@
      },
      "data": {
       "$ref": "#/components/schemas/SdkObserveAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "SdkPlace": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "vmId": {
+      "type": "string"
+     },
+     "serverCode": {
+      "type": "string"
+     },
+     "vmCode": {
+      "type": "string"
+     },
+     "deleted": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "vmId",
+     "serverCode",
+     "vmCode",
+     "deleted"
+    ]
+   },
+   "SdkLookup": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "amountsVisible": {
+      "type": "boolean"
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "code": {
+         "type": "string"
+        },
+        "found": {
+         "type": "boolean",
+         "description": "false = not stored in this project (a code of another project also reads as not found)"
+        },
+        "sdkId": {
+         "type": "string",
+         "nullable": true
+        },
+        "revision": {
+         "type": "integer",
+         "nullable": true,
+         "description": "send as expectedSdkRevision (null when not found)"
+        },
+        "linkState": {
+         "type": "string",
+         "nullable": true,
+         "enum": [
+          "UNLINKED",
+          "LINKED",
+          "UNCONFIRMED",
+          null
+         ]
+        },
+        "inListOf": {
+         "nullable": true,
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/SdkPlace"
+          }
+         ],
+         "description": "VM whose SDK list holds the code (null = store)"
+        },
+        "currentOf": {
+         "nullable": true,
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/SdkPlace"
+          }
+         ],
+         "description": "VM where it is the current code"
+        },
+        "amount": {
+         "type": "string",
+         "nullable": true
+        },
+        "currency": {
+         "type": "string",
+         "nullable": true
+        },
+        "observedAt": {
+         "type": "string",
+         "format": "date-time",
+         "nullable": true
+        },
+        "recordedAt": {
+         "type": "string",
+         "format": "date-time",
+         "nullable": true
+        },
+        "source": {
+         "type": "string",
+         "nullable": true
+        }
+       },
+       "required": [
+        "code",
+        "found",
+        "sdkId",
+        "revision",
+        "linkState",
+        "inListOf",
+        "currentOf",
+        "amount",
+        "currency",
+        "observedAt",
+        "recordedAt",
+        "source"
+       ]
+      }
+     }
+    },
+    "required": [
+     "amountsVisible",
+     "items"
+    ]
+   },
+   "OkSdkLookup": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SdkLookup"
      },
      "error": {
       "nullable": true,
@@ -4556,6 +4705,92 @@
       }
      }
     }
+   }
+  },
+  "/sdks": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "name": "code",
+      "in": "query",
+      "required": true,
+      "description": "1–20 SDK codes, repeat the parameter (code=A&code=B)",
+      "schema": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      },
+      "style": "form",
+      "explode": true
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkLookup"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "summary": "Look up SDK codes before a survey write: id, revision, state, VM list / current VM; money with the balance read right (scope READ)"
    }
   },
   "/earnapp-accounts/{id}": {
@@ -6151,7 +6386,7 @@
   },
   "/vms/{id}/sdk-observations": {
    "post": {
-    "summary": "SDK codes seen RUNNING on the machine (survey: no install, job or EarnApp account needed), with the accumulated USD read there (needs SDK_AMOUNT). New codes are saved \"Chưa xác nhận\"; codes of this VM keep their state (a used code stays used); a code of another VM, a used / unconfirmed code outside this VM or of another project refuses the whole command (DUPLICATE, nothing written). An older observedAt never replaces a newer stored reading (amount.outcome OLDER). Never an EarnApp balance, income, cost or \"withdrawable\".",
+    "summary": "SDK codes seen RUNNING on the machine (survey: no install, job or EarnApp account needed), with the accumulated USD read there (Tiền tích luỹ SDK; money needs BALANCE_WRITE on the token and EARN_BALANCE on the user). Every code carries the SDK revision read (GET vms/{id} sdk.items[].revision or GET sdks; null only when the code is not stored). New codes are saved \"Chưa xác nhận\"; codes of this VM keep their state (a used code stays used). A code of another VM, a used / unconfirmed code outside this VM or of another project (DUPLICATE), a VM whose current code is another one when current:true (SDK_CONFLICT CURRENT_DIFFERS), the same observedAt with another figure (SDK_CONFLICT SAME_TIME_OTHER_AMOUNT), a stale round / VM / SDK revision refuse the whole command (nothing written). An older observedAt never replaces a newer stored reading (amount.outcome OLDER). Never changes the EarnApp account, the VM status or install marks; never an EarnApp balance, income, cost or \"withdrawable\". recorded is the first acknowledgement (identical on replay); current is the VM now.",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -6207,11 +6442,17 @@
              "minLength": 8,
              "maxLength": 128
             },
+            "expectedSdkRevision": {
+             "type": "integer",
+             "minimum": 0,
+             "nullable": true,
+             "description": "revision of the stored code as read; null = the code was not stored when read (a code created meanwhile is refused, never overwritten)"
+            },
             "amountUsd": {
              "type": "string",
              "nullable": true,
              "pattern": "^\\d{1,10}(\\.\\d{1,6})?$",
-             "description": "USD read (decimals kept; \"0\" is a value). Needs SDK_AMOUNT"
+             "description": "USD read and checked (decimals kept, up to 6; \"0\" is a value). OCR text such as \"5_17\" or \"5,17\" is refused, never guessed. Needs BALANCE_WRITE + EARN_BALANCE"
             },
             "amountRead": {
              "type": "boolean",
@@ -6219,13 +6460,20 @@
             },
             "current": {
              "type": "boolean",
-             "description": "the code the machine runs now: becomes the VM current code only when the VM has none (a different current code is kept and reported)"
+             "description": "the code the machine runs now: becomes the VM current code when the VM has none; a VM with another current code refuses the command (SDK_CONFLICT)"
             }
            },
            "required": [
-            "code"
+            "code",
+            "expectedSdkRevision"
            ]
           }
+         },
+         "evidence": {
+          "type": "string",
+          "maxLength": 300,
+          "nullable": true,
+          "description": "evidence note (e.g. screenshot reference); never passwords, 2FA or links with codes"
          }
         },
         "required": [
@@ -6262,7 +6510,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN (also money without SDK_AMOUNT) / PIN_LOCKED",
+      "description": "FORBIDDEN (also money without BALANCE_WRITE on the token or EARN_BALANCE on the user) / PIN_LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6282,7 +6530,7 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "description": "conflict: REVISION_CONFLICT (round / VM / SDK revision) / CYCLE_CHANGED / DUPLICATE (code held elsewhere) / SDK_CONFLICT / IDEMPOTENCY_CONFLICT",
       "content": {
        "application/json": {
         "schema": {

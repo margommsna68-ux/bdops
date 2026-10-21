@@ -49,7 +49,9 @@ export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{pro
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
   const list=vm.sdks,first=sdkFirst(list),money=currentSdkMoney(list,first);
   // 22/10/2026: money + check time of the current code, readable without opening the frame (never a sum of the VM's codes).
-  const moneyLine=money&&<span className="vm-sdk-money" title={'Tiền tích luỹ đọc trên máy của SDK hiện hành '+money.code+(money.at?', kiểm tra lúc '+when(money.at):'')+' (không phải số dư EarnApp)'}>{money.other?'Hiện hành …'+money.code.slice(-4)+': ':''}{money.amount!==null?<strong>{formatSdkAmount(money.amount)}</strong>:'Chưa ghi tiền'}{money.at?' · lúc '+when(money.at):''}</span>;
+  // "Tích luỹ" = Tiền tích luỹ SDK (read on the machine), never the EarnApp balance; no figure = "chưa kiểm tra", never $0; an old figure
+  // without an observation time says so instead of borrowing the write time.
+  const moneyLine=money&&<span className="vm-sdk-money" title={'Tiền tích luỹ SDK (đọc trên máy) của mã hiện hành '+money.code+(money.amount===null?': chưa kiểm tra':money.at?', kiểm tra lúc '+when(money.at):', chưa rõ giờ kiểm tra')+' — không phải số dư EarnApp'}>{money.other?'Hiện hành …'+money.code.slice(-4)+' · ':''}Tích luỹ {money.amount!==null?<><strong>{formatSdkAmount(money.amount)}</strong>{money.at?' · '+when(money.at):' · chưa rõ giờ'}</>:<span className="pm-muted">chưa kiểm tra</span>}</span>;
   const view=<>{first?<span className="vm-sdk-line"><code className="vm-sdk vm-ellipsis" title={first.code}>{shortCode(first.code)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+vm.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();copyCode(first.code,vm.code);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>}
     {moneyLine}
     {list.length>0&&<span className="vm-sdk-sub">{sdkSummary(list)}</span>}
@@ -118,7 +120,7 @@ function SdkListEditor({projectId,vm,canEdit,draft,onDraft,onBusy,onCancel,embed
     <div className="vm-sdk-editor-body">
       {!embedded&&<p className="vm-status-pop-title"><strong>{here}</strong> · SDK EarnApp · {sdkSummary(vm.sdks)}</p>}
       {!canEdit&&<p className="text-xs pm-muted">Chỉ xem: tài khoản này chưa có quyền ghi SDK.</p>}
-      {vm.sdks.length?<table className="vm-sdk-list"><thead><tr><th>Mã SDK</th><th>Tiền tích luỹ USD</th><th>Ghi chú</th><th>Đã dùng</th></tr></thead>
+      {vm.sdks.length?<table className="vm-sdk-list"><thead><tr><th>Mã SDK</th><th>Tiền tích luỹ SDK (USD)</th><th>Ghi chú</th><th>Đã dùng</th></tr></thead>
         <tbody>{vm.sdks.map(s=><SdkRow key={s.recordId} s={s} vm={vm} canEdit={canEdit} busy={busy} onHistory={()=>setHistory(h=>h===s.recordId?null:s.recordId)} historyOpen={history===s.recordId} projectId={projectId}
           onInfo={(patch)=>run('info:'+s.recordId,()=>info.mutateAsync({projectId,key:crypto.randomUUID(),sdkId:s.recordId,expectedRevision:s.revision,...patch}).then(r=>({...r,message:r.changed?'Đã lưu SDK '+shortCode(s.code):'Giữ nguyên'})))}
           onUsed={()=>{const input={projectId,vmId:vm.id,expectedCycle:vm.cycle,sdkId:s.recordId,expectedRevision:s.revision};return run('used:'+s.recordId,()=>used.mutateAsync({...input,key:crypto.randomUUID()}));}}
@@ -170,7 +172,7 @@ function SdkRow({s,vm,canEdit,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}
       <button type="button" className="vm-cell-icon" aria-label={'Lịch sử SDK '+s.code} aria-expanded={historyOpen} title="Lịch sử mã" onClick={onHistory}><History size={13}/></button></span>
       {s.current&&<span className="vm-sdk-current">hiện hành</span>}</td>
     <td data-sdk-edit>{edit==='amount'?<input autoFocus className="pm-input vm-sdk-inline" inputMode="decimal" aria-label={'Tiền tích luỹ USD '+s.code} value={text} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
-      :<button type="button" className="vm-sdk-value" disabled={!canEdit} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canEdit?'Ghi tiền':'Chưa ghi'}</span>}</button>}{edit!=='amount'&&s.amount!==null&&s.amountObservedAt&&<span className="vm-sdk-seen" title={s.amountSource?'Nguồn: '+s.amountSource:undefined}>Kiểm tra {when(s.amountObservedAt)}</span>}</td>
+      :<button type="button" className="vm-sdk-value" disabled={!canEdit} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canEdit?'Ghi tiền':'Chưa ghi'}</span>}</button>}{edit!=='amount'&&s.amount!==null&&<span className="vm-sdk-seen" title={s.amountSource?'Nguồn: '+s.amountSource:undefined}>{s.amountObservedAt?'Kiểm tra '+when(s.amountObservedAt):'Chưa rõ giờ kiểm tra'}</span>}</td>
     <td data-sdk-edit>{edit==='note'?<textarea autoFocus rows={2} className="pm-input vm-sdk-inline" aria-label={'Ghi chú '+s.code} value={text} maxLength={SDK_NOTE_MAX} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
       :<button type="button" className="vm-sdk-value vm-sdk-note" disabled={!canEdit} onClick={()=>start('note')}>{s.note||<span className="pm-muted">{canEdit?'Thêm ghi chú':'—'}</span>}</button>}
       {err&&<p className="vm-cell-error" role="alert">{err}</p>}</td>

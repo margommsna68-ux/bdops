@@ -17,17 +17,18 @@ import {hit,peek} from './limits';
 import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 import {canonicalAmount} from '@/lib/sdk-money';
+import {normalizeSdk} from '../vm-management/sdk-parse';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
 // Nothing here logs headers or bodies; the audit (OpsAudit) keeps only the allowed fields.
-export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'VALIDATION'|'INTERNAL';
-const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,VALIDATION:422,INTERNAL:500};
+export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'VALIDATION'|'INTERNAL';
+const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,VALIDATION:422,INTERNAL:500};
 export class OpsError extends Error{constructor(public readonly code:OpsCode,message:string,public readonly details?:Record<string,unknown>,public readonly retryAfter?:number){super(message);}}
 const fail=(code:OpsCode,message:string,details?:Record<string,unknown>,retryAfter?:number)=>new OpsError(code,message,details,retryAfter);
 const json=(status:number,body:unknown,headers:Record<string,string>={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 function fromDomain(e:ProxyDomainError):OpsError{
-  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED'};
+  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED',SDK_CONFLICT:'SDK_CONFLICT'};
   const code:OpsCode=e.reason?byReason[e.reason]:e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'?'VALIDATION':e.code==='KEY_PAYLOAD_MISMATCH'?'IDEMPOTENCY_CONFLICT':'REVISION_CONFLICT';
   const message=e.code==='KEY_PAYLOAD_MISMATCH'?'Idempotency-Key này đã dùng cho một nội dung khác; dùng key mới cho lệnh mới':redactSecrets(userMessage(e))!;
   return fail(code,message,e.details);
@@ -44,6 +45,7 @@ const routes:Route[]=[
   {method:'GET',path:/^vms$/,scope:'READ',action:'VMS',run:vms},
   {method:'GET',path:/^vms\/resolve$/,scope:'READ',action:'VM_RESOLVE',run:resolveVm},
   {method:'GET',path:new RegExp('^vms/'+ID+'$'),scope:'READ',action:'VM',run:vmDetail},
+  {method:'GET',path:/^sdks$/,scope:'READ',action:'SDK_LOOKUP',run:sdkLookup},
   {method:'GET',path:new RegExp('^earnapp-accounts/'+ID+'$'),scope:'READ',action:'EARNAPP',run:earnAppDetail},
   {method:'GET',path:/^paypal\/suggest$/,scope:'PAYOUT',action:'PAYPAL_SUGGEST',run:paypalSuggest},
   {method:'GET',path:/^withdrawals$/,scope:'READ',action:'WITHDRAWALS',run:withdrawals},
@@ -59,7 +61,7 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^jobs/'+ID+'/release$'),scope:'VM_OPS',action:'JOB_RELEASE',run:jobRelease},
   {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials},
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk$'),scope:'VM_OPS',action:'VM_SDK',run:vmSdk},
-  // 22/10/2026: SDK codes seen running on the machine (no install), with their money when the token also has SDK_AMOUNT.
+  // 22/10/2026: SDK codes seen running on the machine (no install), with their money when the token also has BALANCE_WRITE.
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-observations$'),scope:'VM_OPS',action:'VM_SDK_OBSERVE',run:vmSdkObserve},
   {method:'POST',path:new RegExp('^vms/'+ID+'/status$'),scope:'VM_OPS',action:'VM_STATUS',run:vmStatus},
   {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-blocked$'),scope:'VM_OPS',action:'VM_PROXY_BLOCKED',run:vmBlocked},
@@ -201,12 +203,12 @@ async function vmDetail(c:Ctx,[id]:string[]){
     c.db.vmCycle.findMany({where:{projectId,vmId:vm.id},select:{id:true,number:true,reason:true,earnAppId:true,loginId:true,payoutRequestId:true,closedAt:true},orderBy:[{number:'desc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})}),
   ]);
   const logins=await c.db.gmailAccount.findMany({where:{id:{in:cycles.map(x=>x.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
-  // SDK money (22/10/2026): per code, never added up into a VM figure; shown with SDK_AMOUNT on the token (or the money rights).
-  const sdkMoney=c.token.scopes.includes('SDK_AMOUNT')||rights.balanceRead||rights.requestMoney;
+  // SDK money (22/10/2026): per code, never added up into a VM figure; shown with the balance read right (as the EarnApp balance).
+  const sdkMoney=rights.balanceRead;
   const pc=paged(cycles,limit),job=(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null;
   return {...view,activeJob:job,
     sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,amountsVisible:sdkMoney,
-      items:sdks.map(s=>({id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:sdkMoney&&s.amount!=null?canonicalAmount(s.amount.toString()):null,currency:s.currency,observedAt:sdkMoney?(s.amountObservedAt??(s.amount!=null?s.amountAt:null))?.toISOString()??null:null,source:sdkMoney?s.amountSource:null})),
+      items:sdks.map(s=>({id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:sdkMoney&&s.amount!=null?canonicalAmount(s.amount.toString()):null,currency:s.currency,observedAt:sdkMoney?s.amountObservedAt?.toISOString()??null:null,recordedAt:sdkMoney?s.amountAt?.toISOString()??null:null,source:sdkMoney?s.amountSource:null})),
       note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
@@ -432,24 +434,42 @@ async function finishProxy(c:Ctx,[id]:string[]){
   const r=await asOps(c,projectId,job.vmId,()=>finishProxyJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,configurationId:b.configurationId,result:b.result,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c)));
   c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,job:r.job},current:await vmNow(c,projectId,job.vmId)};
 }
-// SDK codes running on the machine (owner brief 22/10/2026): no job, no install, no EarnApp needed. Money needs SDK_AMOUNT too, checked
-// again inside the write transaction. A refused code refuses the whole command (nothing written, nothing moved).
-const sdkMoney=z.string().regex(/^\d{1,10}(\.\d{1,6})?$/,'Tiền SDK USD là chuỗi thập phân, ví dụ "12.345"');
-const ObserveBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,observedAt:iso,source:z.string().min(2).max(120),
-  sdks:z.array(z.object({code:z.string().min(8).max(128),amountUsd:sdkMoney.nullish(),amountRead:z.boolean().optional(),current:z.boolean().optional()}).strict()).min(1).max(OBSERVE_MAX)}).strict();
+// SDK codes running on the machine (owner briefs 22/10/2026): no job, no install, no EarnApp needed. Money needs BALANCE_WRITE on the
+// token and the EarnApp balance write right (EARN_BALANCE), checked again inside the write transaction. A refused code refuses the whole
+// command (nothing written, nothing moved).
+const sdkMoney=z.string().regex(/^\d{1,10}(\.\d{1,6})?$/,'Tiền SDK USD là chuỗi thập phân đã kiểm tra, ví dụ "12.345" (OCR lỗi như "5_17" bị từ chối)');
+const ObserveBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,observedAt:iso,source:z.string().min(2).max(120),evidence:z.string().max(300).nullish(),
+  sdks:z.array(z.object({code:z.string().min(8).max(128),expectedSdkRevision:rev.nullable(),amountUsd:sdkMoney.nullish(),amountRead:z.boolean().optional(),current:z.boolean().optional()}).strict()).min(1).max(OBSERVE_MAX)}).strict();
 async function vmSdkObserve(c:Ctx,[vmId]:string[]){
-  const b=ObserveBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const b=ObserveBody.parse(c.body),{projectId,ops}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   // amountRead=false: the money could not be read this time (not 0); amountUsd absent and amountRead absent: no money in this request.
   const items=b.sdks.map(s=>{
     if(s.amountRead===false&&s.amountUsd!=null)throw fail('VALIDATION','amountRead=false không đi cùng amountUsd ('+s.code+')');
     if(s.amountRead===true&&s.amountUsd==null)throw fail('VALIDATION','amountRead=true cần amountUsd ("0" là hợp lệ) ('+s.code+')');
-    return {code:s.code,amount:s.amountRead===false?null:s.amountUsd??undefined,current:s.current};});
+    return {code:s.code,expectedSdkRevision:s.expectedSdkRevision,amount:s.amountRead===false?null:s.amountUsd??undefined,current:s.current};});
   const money=hasAmounts(items);
-  if(money&&!c.token.scopes.includes('SDK_AMOUNT'))throw fail('FORBIDDEN','Token chưa được cấp ghi tiền SDK (SDK_AMOUNT); gửi mã không kèm tiền hoặc xin cấp quyền');
-  const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:money?['SDK_AMOUNT']:[]},()=>
-    observeVmSdks(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt,source:redactSecrets(b.source.trim())??'',items},c.db,{tokenLabel:caller(c).tokenLabel??undefined})));
-  c.audit.replay=!!r.replay;const show=c.token.scopes.includes('SDK_AMOUNT');
-  return {replay:!!r.replay,recorded:{vmId:r.vmId,expectedCycle:r.cycle,observedAt:r.observedAt,source:r.source,currentDiffers:r.currentDiffers,vmRevisionAfter:r.vmRevisionAfter,
-    sdks:r.items.map(x=>({code:x.code,sdkId:x.sdkId,placed:x.placed,linkState:x.state,current:x.current,amount:{outcome:x.amount.outcome,amountUsd:show?x.amount.value:null,observedAt:show?x.amount.observedAt:null}}))},
+  if(money&&!c.token.scopes.includes('BALANCE_WRITE'))throw fail('FORBIDDEN','Token chưa được cấp ghi tiền (BALANCE_WRITE); gửi mã không kèm tiền hoặc xin cấp quyền');
+  if(money&&!ops.BALANCE_WRITE)throw fail('FORBIDDEN','Tài khoản chưa có quyền ghi kiểm tra tiền EarnApp (EARN_BALANCE)');
+  const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:money?['BALANCE_WRITE']:[]},()=>
+    observeVmSdks(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt,source:redactSecrets(b.source.trim())??'',evidence:redactSecrets(b.evidence?.trim()||null),items},c.db,{tokenLabel:caller(c).tokenLabel??undefined})));
+  c.audit.replay=!!r.replay;const show=(await rightsOf(c,projectId)).balanceRead;
+  return {replay:!!r.replay,recorded:{vmId:r.vmId,expectedCycle:r.cycle,observedAt:r.observedAt,source:r.source,evidence:show?r.evidence??null:null,vmRevisionAfter:r.vmRevisionAfter,
+    sdks:r.items.map(x=>({code:x.code,sdkId:x.sdkId,placed:x.placed,linkState:x.state,current:x.current,revisionAfter:x.revisionAfter,amount:{outcome:x.amount.outcome,amountUsd:show?x.amount.value:null,observedAt:show?x.amount.observedAt:null}}))},
     current:await vmNow(c,projectId,vmId)};
+}
+// Look up SDK codes before a survey write (22/10/2026): id, revision, state and where each code is (VM list / current VM) in this project,
+// so the client sends the revision it read (null only when the code is not stored). A code of another project reads as not found.
+async function sdkLookup(c:Ctx){
+  const {projectId}=await projectOf(c,q(c,'projectId')),raw=c.url.searchParams.getAll('code');
+  if(!raw.length||raw.length>OBSERVE_MAX)throw fail('VALIDATION','Gửi 1 đến '+OBSERVE_MAX+' tham số code');
+  const codes=raw.map(x=>{const n=normalizeSdk(x);if(!n)throw fail('VALIDATION','Mã SDK không hợp lệ: '+x.slice(0,20));return n;});
+  const show=(await rightsOf(c,projectId)).balanceRead;
+  const rows=await c.db.sdkRecord.findMany({where:{projectId,code:{in:codes}},select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true}});
+  const vmIds=[...new Set(rows.flatMap(r=>[r.vmId,r.holderVmId]).filter((x):x is string=>!!x))];
+  const vms=await c.db.virtualMachine.findMany({where:{id:{in:vmIds}},select:{id:true,code:true,archivedAt:true,server:{select:{code:true}}}});
+  const at=(id:string|null)=>{const v=id?vms.find(x=>x.id===id):null;return v?{vmId:v.id,serverCode:v.server.code,vmCode:v.code,deleted:!!v.archivedAt}:null;};
+  return {amountsVisible:show,items:[...new Set(codes)].map(code=>{const r=rows.find(x=>x.code===code);
+    if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null};
+    return {code,found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
+      amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null};})};
 }

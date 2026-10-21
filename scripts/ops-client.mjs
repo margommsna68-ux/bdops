@@ -14,6 +14,10 @@
 //                                   # locally (same code on several VMs, two amounts for one code, …); sends nothing
 //   node scripts/ops-client.mjs sdk-observe <one-vm.json> [--key K]
 //                                   # SDK codes running on ONE VM + money read there → POST vms/<vmId>/sdk-observations (22/10/2026)
+//   node scripts/ops-client.mjs sdk-survey <survey.json> [--state <file>] [--redo <vmId>]
+//                                   # the whole survey, VM by VM, with a result per line; a run file keeps each VM's key and body
+//                                   # (default <survey.json>.run.json): a rerun skips VMs already recorded, retries unknown ones with
+//                                   # the SAME key and body, and leaves refused ones for a person (--redo <vmId> after checking)
 //   node scripts/ops-client.mjs proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]
 //                                   # full proxy of the VM in hand → private file for AE Mini Tool (default ~/.mth/proxy/<vmId>.json);
 //                                   # never printed, never in the command log. Delete the file once the machine is configured.
@@ -33,7 +37,8 @@ import {readFileSync,writeFileSync,mkdirSync,existsSync,chmodSync,readdirSync,re
 import {homedir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
 const PREFIX='/api/ops/v1/';
 const FILE=process.env.MTH_SECRET_FILE||join(homedir(),'.mth','ops-secret.json');
 const JOURNAL=process.env.MTH_JOURNAL_DIR||join(homedir(),'.mth','ops-journal');
@@ -187,8 +192,9 @@ async function call(method,path,body,key){
   console.log(JSON.stringify({status:res.status,requestId:res.headers.get('x-request-id'),...out},null,2));
   if(!out.ok)process.exitCode=1;
 }
-// SDK survey (owner brief 22/10/2026). One VM: {projectId, vmId, expectedCycle, expectedVmRevision, observedAt, source,
-// sdks:[{code, amountUsd?, amountRead?, current?}]}. Two files with the same code on one machine are one SDK; the same code on two
+// SDK survey (owner briefs 22/10/2026). One VM: {projectId, vmId, observedAt, source, evidence?, expectedCycle?, expectedVmRevision?,
+// sdks:[{code, expectedSdkRevision?, amountUsd?, amountRead?, current?}]}; round / revisions left out are read from the web just
+// before the first send and then frozen with the key. Two files with the same code on one machine are one SDK; the same code on two
 // VMs, two amounts for one code, more than one current code or a malformed line stop before anything is sent.
 const SDK_CODE=/^[A-Za-z0-9._:-]{8,128}$/,SDK_USD=/^\d{1,10}(\.\d{1,6})?$/;
 export function checkSdkSurvey(list){
@@ -206,7 +212,8 @@ export function checkSdkSurvey(list){
       const prev=byCode.get(code);
       if(prev){if(prev.amountUsd!=null&&s.amountUsd!=null&&Number(prev.amountUsd)!==Number(s.amountUsd))problems.push({vm:at,code,issue:'cùng mã hai số tiền khác nhau trên một máy'});
         prev.amountUsd=prev.amountUsd??s.amountUsd;prev.amountRead=prev.amountRead??s.amountRead;prev.current=prev.current||s.current;continue;}
-      byCode.set(code,{code,...(s.amountUsd!=null?{amountUsd:String(s.amountUsd)}:{}),...(s.amountRead!=null?{amountRead:!!s.amountRead}:{}),...(s.current?{current:true}:{})});
+      if(s.expectedSdkRevision!==undefined&&s.expectedSdkRevision!==null&&!(Number.isInteger(s.expectedSdkRevision)&&s.expectedSdkRevision>=0))problems.push({vm:at,code,issue:'expectedSdkRevision là số nguyên ≥ 0 hoặc null'});
+      byCode.set(code,{code,...(s.expectedSdkRevision!==undefined?{expectedSdkRevision:s.expectedSdkRevision}:{}),...(s.amountUsd!=null?{amountUsd:String(s.amountUsd)}:{}),...(s.amountRead!=null?{amountRead:!!s.amountRead}:{}),...(s.current?{current:true}:{})});
       where.set(code,[...(where.get(code)||[]),at]);
     }
     const sdks=[...byCode.values()];if(sdks.filter(x=>x.current).length>1)problems.push({vm:at,issue:'nhiều hơn một mã current'});
@@ -214,6 +221,70 @@ export function checkSdkSurvey(list){
   }
   for(const [code,vms] of where)if(new Set(vms).size>1)problems.push({code,vms:[...new Set(vms)],issue:'cùng mã SDK ở nhiều VM'});
   return {problems,vms:out,codes:where.size};
+}
+// ─── SDK survey runner (22/10/2026) ─────────────────────────────────────────────────────────────────────────────────────────
+// Reads (GET) go straight to the API; every write goes through this same script as a child `post` / `retry`, so the command log,
+// key-before-send, UNKNOWN on a lost answer and retry rules are exactly those of a single command.
+async function getJson(path){
+  const s=secrets(),res=await fetch(opsUrl(path),{headers:{authorization:'Bearer '+s.token,accept:'application/json'},redirect:'manual'});
+  let out=null;try{out=JSON.parse(await res.text());}catch{/* not JSON */}
+  if(!out||!out.ok)throw new Error('Đọc '+path.split('?')[0]+' thất bại: '+(out?.error?.code||'HTTP_'+res.status)+(out?.error?.message?' — '+out.error.message:''));
+  return out.data;
+}
+/** The body of one VM: round / revisions from the survey when given, else read now from the web (VM detail, then GET sdks for codes
+ *  not in the VM list). Never guessed: a code the web does not have is sent with expectedSdkRevision null. */
+export async function surveyBody(vm,read=getJson){
+  const need=vm.expectedCycle==null||vm.expectedVmRevision==null||vm.sdks.some(s=>s.expectedSdkRevision===undefined);
+  let cycle=vm.expectedCycle,rev=vm.expectedVmRevision;const revs=new Map();
+  if(need){
+    const d=await read('vms/'+encodeURIComponent(vm.vmId)+'?'+new URLSearchParams({projectId:vm.projectId}));
+    cycle??=d.expectedCycle;rev??=d.revision;for(const it of d.sdk?.items||[])revs.set(it.code,it.revision);
+    const missing=vm.sdks.filter(s=>s.expectedSdkRevision===undefined&&!revs.has(s.code)).map(s=>s.code);
+    if(missing.length){const q=new URLSearchParams({projectId:vm.projectId});for(const c of missing)q.append('code',c);
+      for(const it of (await read('sdks?'+q)).items)revs.set(it.code,it.found?it.revision:null);}
+  }
+  const body={projectId:vm.projectId,expectedCycle:cycle,expectedVmRevision:rev,observedAt:vm.observedAt,source:vm.source,...(vm.evidence?{evidence:vm.evidence}:{}),
+    sdks:vm.sdks.map(s=>({...s,expectedSdkRevision:s.expectedSdkRevision!==undefined?s.expectedSdkRevision:revs.get(s.code)??null}))};
+  return {path:'vms/'+encodeURIComponent(vm.vmId)+'/sdk-observations',body};
+}
+const entryHash=vm=>sha(JSON.stringify(vm));
+function child(args){
+  const r=spawnSync(process.execPath,[fileURLToPath(import.meta.url),...args],{env:process.env,encoding:'utf8'});
+  let out=null;try{out=JSON.parse(r.stdout);}catch{/* not JSON */}
+  return {code:r.status,out,err:(r.stderr||'').trim()};
+}
+const STATE_OF={0:'DONE',1:'ANSWERED',3:'UNKNOWN'};
+async function runSurvey(file,stateFile,redo){
+  const r=checkSdkSurvey(JSON.parse(readFileSync(file,'utf8')));
+  if(r.problems.length){console.log(JSON.stringify({ok:false,sent:0,problems:r.problems},null,2));die('Dừng trước khi gửi: sửa các dòng trên (không gửi VM nào)',1);}
+  const runFile=stateFile||file+'.run.json',run=existsSync(runFile)?JSON.parse(readFileSync(runFile,'utf8')):{survey:file,rows:{}};
+  const save=()=>{const tmp=runFile+'.tmp-'+process.pid;writeFileSync(tmp,JSON.stringify(run,null,1),{mode:0o600});renameSync(tmp,runFile);};
+  const bodyDir=runFile+'.bodies';mkdirSync(bodyDir,{recursive:true});
+  const lines=[];
+  for(const [i,vm] of r.vms.entries()){
+    const line=i+1,h=entryHash(vm);let row=run.rows[vm.vmId];
+    // --redo only drops a command that was clearly refused (nothing recorded); DONE / unknown commands are never replaced.
+    if(row&&redo.includes(vm.vmId)&&row.state==='ANSWERED'){delete run.rows[vm.vmId];row=undefined;save();}
+    const changed=!!row&&row.entryHash!==h,note=changed?{note:'Dòng khảo sát đã đổi so với lệnh đã lưu; lệnh đã lưu được giữ nguyên (không gửi nội dung mới). Khảo sát lại thì dùng file khảo sát mới.'}:{};
+    if(row?.state==='DONE'){lines.push({line,vmId:vm.vmId,state:'DONE',key:row.key,message:'Đã ghi (lần trước); không gửi lại',...note});continue;}
+    if(row?.state==='ANSWERED'){lines.push({line,vmId:vm.vmId,state:'ANSWERED',key:row.key,errorCode:row.errorCode,message:(row.message||'Bị từ chối')+' — kiểm tra rồi chạy lại với --redo '+vm.vmId,...note});continue;}
+    if(!row){
+      let plan;try{plan=await surveyBody(vm);}catch(e){lines.push({line,vmId:vm.vmId,state:'NOT_SENT',message:String(e.message||e)});continue;}
+      row={key:'svy-'+randomUUID(),entryHash:h,path:plan.path,body:plan.body,state:'PLANNED',createdAt:new Date().toISOString()};run.rows[vm.vmId]=row;save();
+    }
+    // PLANNED (never reached the log) → post with the planned key and body; SENDING / UNKNOWN → retry the same key.
+    let res;
+    if(readEntry(row.key))res=child(['retry',row.key]);
+    else{const bf=join(bodyDir,row.key+'.json');writeFileSync(bf,JSON.stringify(row.body),{mode:0o600});res=child(['post',row.path,bf,'--key',row.key]);}
+    const state=STATE_OF[res.code]??'UNKNOWN',err=res.out?.error||null;
+    Object.assign(row,{state,lastAt:new Date().toISOString(),errorCode:state==='ANSWERED'?err?.code??null:null,message:state==='ANSWERED'?String(err?.message||'').slice(0,300):null});save();
+    const sdks=res.out?.data?.recorded?.sdks?.map(x=>({code:x.code,placed:x.placed,linkState:x.linkState,current:x.current,amount:x.amount}))??null;
+    lines.push({line,vmId:vm.vmId,state,key:row.key,...(res.out?.data?{replay:res.out.data.replay}:{}),...(sdks?{sdks}:{}),...(state==='ANSWERED'?{errorCode:row.errorCode,message:row.message,details:err?.details??null}:{}),
+      ...(state==='UNKNOWN'?{message:'Chưa xác định kết quả; chạy lại sdk-survey (gửi lại đúng key '+row.key+')'}:{}),...note});
+  }
+  const count=k=>lines.filter(l=>l.state===k).length;
+  console.log(JSON.stringify({runFile,total:lines.length,done:count('DONE'),refused:count('ANSWERED'),unknown:count('UNKNOWN'),notSent:count('NOT_SENT'),lines},null,2));
+  process.exitCode=count('UNKNOWN')?3:count('ANSWERED')||count('NOT_SENT')?1:0;
 }
 const isMain=!!process.argv[1]&&pathToFileURL(process.argv[1]).href===import.meta.url;
 if(isMain){
@@ -236,10 +307,11 @@ if(isMain){
     else if(cmd==='sdk-observe'){const key=flag('--key')||randomUUID();if(args.length!==1)die('sdk-observe <one-vm.json> [--key K]');
       const raw=JSON.parse(readFileSync(args[0],'utf8'));if(Array.isArray(raw))die('sdk-observe gửi MỘT VM; dùng sdk-check cho cả bảng');
       const r=checkSdkSurvey(raw);if(r.problems.length){console.log(JSON.stringify({ok:false,problems:r.problems},null,2));die('Dừng trước khi gửi: sửa các dòng trên',1);}
-      const {vmId,...body}=r.vms[0];await call('POST','vms/'+encodeURIComponent(vmId)+'/sdk-observations',body,key);}
+      const plan=await surveyBody(r.vms[0]);await call('POST',plan.path,plan.body,key);}
+    else if(cmd==='sdk-survey'){const state=flag('--state'),redo=[];for(let x=flag('--redo');x;x=flag('--redo'))redo.push(x);if(args.length!==1)die('sdk-survey <survey.json> [--state <file>] [--redo <vmId>]');await runSurvey(args[0],state,redo);}
     else if(cmd==='retry'&&args.length===1){const key=args[0],e=readEntry(key);if(!e)die('Không có lệnh với key '+key+' trong '+JOURNAL);await call('POST',e.path,e.body,key);}
     else if(cmd==='pending'){const list=allEntries().filter(e=>e.state==='SENDING'||e.state==='UNKNOWN'||e.state==='UNREADABLE');
       console.log(JSON.stringify(list.map(e=>e.state==='UNREADABLE'?{key:null,file:e.file,state:e.state,error:e.error}:{key:e.key,path:e.path,state:e.state,attempts:e.attempts,lastTryAt:e.lastTryAt,...(e.httpStatus?{httpStatus:e.httpStatus}:{})}),null,2));}
-    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | retry <key> | pending | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K]');
+    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | retry <key> | pending | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K] | sdk-survey <survey.json> [--state F] [--redo vmId]');
   }catch(e){die(String(e.message||e));}
 }

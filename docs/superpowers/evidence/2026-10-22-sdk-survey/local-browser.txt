@@ -1,0 +1,7 @@
+PASS U1 Ô SDK VM A: "Tích luỹ 0,21 USD · hh:mm" (mã hiện hành, giờ kiểm tra) không cần mở khung
+PASS U2 Mã khảo sát là Chưa xác nhận, không tính là chưa dùng
+PASS U3 Ô SDK VM C: $0 hiện là số 0, không phải "chưa kiểm tra"
+PASS U4 Cột Tiền / Rút vẫn là số dư tài khoản ("Chưa gán tài khoản"), không lấy tiền SDK
+PASS U5 Khung SDK: cột "Tiền tích luỹ SDK (USD)", giờ kiểm tra của mã
+PASS U6 Kho SDK: 0,21 USD, Kiểm tra <ngày giờ>, Chưa xác nhận
+Lỗi JS trên trang: không

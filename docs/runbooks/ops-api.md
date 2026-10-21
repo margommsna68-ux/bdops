@@ -37,7 +37,7 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 - Không làm qua API: xoá / tạo lại VM, gán / thay proxy, nhóm, liên kết tài khoản, chuyển / xoá / đánh dấu đã dùng SDK, VM deleted, rút / chuyển PayPal, USDT,
   chi phí, cấp lại email đã dùng. (Từ 21/10/2026 API ghi được: nhận việc, bước, SDK của lần cài cho VM đang xử lý, tình trạng quan sát, Blocked, ghi chú.)
 
-- `SDK_AMOUNT` (22/10/2026): ghi / đọc tiền tích luỹ của SDK (`POST vms/{id}/sdk-observations` kèm tiền, `sdk.items[].amount` ở `GET vms/{id}`); cần quyền SDK của Server / VM; không mở số dư EarnApp, rút tiền, PayPal hay chi phí. Ghi mã SDK không kèm tiền chỉ cần `VM_OPS`.
+- SDK khảo sát (22/10/2026): `POST vms/{id}/sdk-observations` ghi mã cần `VM_OPS`; kèm tiền tích luỹ SDK cần thêm `BALANCE_WRITE` (user `EARN_BALANCE`), như ghi số dư EarnApp; đọc tiền SDK (`sdk.items[].amount`, `GET sdks`) cần quyền đọc số dư. Không mở rút tiền, PayPal hay chi phí. Chi tiết: vm-sdk.md (mục cuối).
 
 ## 2. Kích hoạt (chủ dự án làm, theo thứ tự)
 
