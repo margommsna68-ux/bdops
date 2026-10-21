@@ -1,0 +1,10 @@
+     × an old PIN verified just before an admin change must not unlock the NEW PIN version 191ms
+     × a PIN-locked user cannot bypass the lock using setPin with the old PIN 345ms
+     × identical HTTP SDK retry must return original acknowledgement, not a payload mismatch 254ms
+     × releasing a job after the pre-check must refuse without writing an SDK 164ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected { ok: true, …(2) } to match object { ok: true, pinUnlocked: false }
+AssertionError: expected { accepted: true, …(2) } to deeply equal { accepted: false, …(2) }
+AssertionError: expected { status: 409, …(2) } to deeply equal { status: 200, error: null, …(1) }
+AssertionError: expected { rejected: true, sdkCount: 1, …(1) } to deeply equal { rejected: true, sdkCount: +0, …(1) }
+      Tests  4 failed (4)

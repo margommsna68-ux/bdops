@@ -8,7 +8,7 @@ import {loadInfrastructureScope,assertInfrastructureAction} from '../permissions
 import {assertOpsToken} from '../ops-api/context';
 import {authorizeVM} from '../vm-management/repository';
 import {currentProxyOf,pendingApply} from '../vm-management/proxy-change';
-import {saveVmSdk} from '../vm-management/sdk-store';
+import {placeVmSdk} from '../vm-management/sdk-store';
 import {normalizeSdk} from '../vm-management/sdk-parse';
 import {blockCurrentProxy,staleCycle} from './ops';
 // Work on a real machine by an AI operator / person (owner brief 21/10/2026). MoneyToHome never reaches the machine itself: the operator
@@ -152,30 +152,40 @@ export async function proxyForJob(scope:ActorScope,input:{vmId:string;jobId:stri
 }
 // ─── SDK of this install ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 /**
- * Record the SDK read from the machine for the VM in hand: the shared SDK service makes it the VM's current code and puts it in its list
- * (codes of another VM, used or unconfirmed codes are refused as on the web). A code already stored on the web before this attempt
- * started is not the SDK of this install and is refused; the same code again is a read-back (nothing new written).
+ * Record the SDK read from the machine for the VM in hand (review fix 22/10/2026: ONE command, ONE transaction). Inside the command's
+ * transaction: the token and rights again, the caller's job still active on this VM and round, the VM revision, the code rules (a code
+ * stored on the web before this attempt started is not this install's SDK; codes of another VM / used / unconfirmed refused as on the
+ * web), the shared SDK placement (current code + VM list + history: placeVmSdk) and the job's SDK. A refusal anywhere leaves nothing
+ * written. The command identity is the request itself (vm, job, round, VM revision, code): the same key and request return the first
+ * acknowledgement — also after the job expired / was released / finished or the VM changed — once token and rights are checked again;
+ * the same key with another request is refused.
+ * A read-only pre-check (outside the command) refuses early when nothing was recorded under this key yet; the transaction checks everything
+ * again, so a job released / a round changed / a token revoked between the two is refused without any write.
  */
 export async function recordJobSdk(scope:ActorScope,input:{key:string;vmId:string;jobId:string;expectedCycle:number;expectedVmRevision:number;code:string},db:PrismaClient=prisma,caller:OpsCaller={}){
   const code=normalizeSdk(input.code);if(!code)throw invalid('Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
-  const pre=await db.$transaction(async tx=>{
+  const request={vmId:input.vmId,jobId:input.jobId,expectedCycle:input.expectedCycle,expectedVmRevision:input.expectedVmRevision,code};
+  const prior=await db.operationJournal.findUnique({where:{projectId_commandKey:{projectId:scope.projectId,commandKey:input.key}}});
+  if(!prior)await db.$transaction(async tx=>{
     const job=await ownJob(tx,scope.projectId,scope.userId,caller,input.jobId,input.vmId);
+    if(job.cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(job.cycle),'CYCLE_CHANGED');
+  });
+  return runBusinessCommand(scope,{key:input.key,payload:request,kind:'VM_JOB_SDK',module:'INFRASTRUCTURE',reversible:false},async(tx,images,current)=>{
+    await authorizeVM(current,'ASSIGN',tx);
+    const job=await ownJob(tx,scope.projectId,current.userId,caller,input.jobId,input.vmId);
+    if(job.cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(job.cycle),'CYCLE_CHANGED');
     const start=job.resumeOf?(await tx.vmJob.findUnique({where:{id:job.resumeOf},select:{claimedAt:true}}))?.claimedAt??job.claimedAt:job.claimedAt;
     const existing=await tx.sdkRecord.findFirst({where:{projectId:scope.projectId,code}});
     if(existing&&existing.createdAt<start&&existing.id!==job.sdkId)throw invalid('SDK '+code+' đã có trên web từ trước lần cài này; mỗi lần cài EarnApp phải ghi SDK mới lấy từ máy');
-    return {existing};
-  });
-  const saved=await saveVmSdk(scope,{key:input.key,vmId:input.vmId,expectedCycle:input.expectedCycle,expectedVmRevision:input.expectedVmRevision,code,expectedSdkRevision:pre.existing&&pre.existing.vmId===input.vmId?pre.existing.revision:null},db);
-  const sdk=(saved as {sdk?:{id:string;code:string;revision:number}|null}).sdk;
-  if(!sdk||sdk.code!==code)throw conflict('Web chưa lưu SDK '+code+' làm mã hiện hành của VM; đọc lại VM rồi thử lại');
-  return db.$transaction(async tx=>{
-    const job=await ownJob(tx,scope.projectId,scope.userId,caller,input.jobId,input.vmId);
-    const fresh=await tx.sdkRecord.findUniqueOrThrow({where:{id:sdk.id}});
+    // The revision of the code being placed is read here, inside the same transaction (never part of the command identity).
+    const saved=await placeVmSdk(tx,images,current,{vmId:input.vmId,expectedCycle:input.expectedCycle,expectedVmRevision:input.expectedVmRevision,code,expectedSdkRevision:existing&&existing.vmId===input.vmId?existing.revision:null},{});
+    if(!saved.sdk||saved.sdk.code!==code)throw conflict('Web chưa lưu SDK '+code+' làm mã hiện hành của VM; đọc lại VM rồi thử lại');
+    const fresh=await tx.sdkRecord.findUniqueOrThrow({where:{id:saved.sdk.id}});
     if(fresh.vmId!==input.vmId||fresh.holderVmId!==input.vmId)throw conflict('SDK '+code+' không còn là mã hiện hành của VM; đọc lại');
-    const same=job.sdkId===sdk.id;
-    if(!same){await tx.vmJob.update({where:{id:job.id},data:{sdkId:sdk.id,revision:{increment:1}}});await jobEvent(tx,scope.projectId,scope.userId,job,'Ghi SDK của lần cài này: '+code,caller,{sdkId:sdk.id});}
-    return {changed:!!(saved as {changed?:boolean}).changed,readBack:same,sdk:{id:fresh.id,code:fresh.code,revision:fresh.revision,linkState:fresh.linkState,current:true,inList:true},jobId:job.id};
-  });
+    const same=job.sdkId===fresh.id;
+    if(!same){await tx.vmJob.update({where:{id:job.id},data:{sdkId:fresh.id,revision:{increment:1}}});await jobEvent(tx,scope.projectId,current.userId,job,'Ghi SDK của lần cài này: '+code,caller,{sdkId:fresh.id});}
+    return {changed:saved.changed,readBack:same,sdk:{id:fresh.id,code:fresh.code,revision:fresh.revision,linkState:fresh.linkState,current:true,inList:true},jobId:job.id};
+  },db);
 }
 // ─── Finish ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 export interface PrepareChecks {machine:boolean;proxy:boolean;internet:boolean;earnapp:boolean;firefox:boolean}

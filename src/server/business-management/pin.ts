@@ -12,13 +12,18 @@ type Db=PrismaClient|Prisma.TransactionClient;
 // - a PIN changed meanwhile is compared again against the new hash (a result on the old hash is never accepted);
 // - the failure count is written by this short transaction on its own connection: a business transaction that later rolls back
 //   cannot undo it. Callers pass the plain client (never a business transaction).
-export async function checkPin(db:Db,userId:string,pin:string):Promise<PinCheck>{
+export async function checkPin(db:Db,userId:string,pin:string):Promise<PinCheck>{return (await checkPinVersion(db,userId,pin)).result;}
+// Review fix 22/10/2026: the decision is tied to the PIN version it was made on (User.pinVersion read in the same locked step), so a
+// caller that acts on an OK (unlocking a session, changing the PIN) can refuse when the PIN changed afterwards.
+export async function checkPinVersion(db:Db,userId:string,pin:string):Promise<{result:PinCheck;pinVersion:number|null}>{
  for(let attempt=0;attempt<3;attempt++){
-  const user=await db.user.findUnique({where:{id:userId},select:{pin:true,pinLockedAt:true}});if(!user?.pin)return 'NOT_SET';
-  if(user.pinLockedAt&&user.pinLockedAt.getTime()+PIN_LOCK_MS>Date.now())return 'LOCKED';
+  const user=await db.user.findUnique({where:{id:userId},select:{pin:true,pinLockedAt:true,pinVersion:true}});if(!user?.pin)return {result:'NOT_SET',pinVersion:user?.pinVersion??null};
+  if(user.pinLockedAt&&user.pinLockedAt.getTime()+PIN_LOCK_MS>Date.now())return {result:'LOCKED',pinVersion:user.pinVersion};
   const compared=user.pin,valid=await bcrypt.compare(pin,compared);
+  let version:number|null=null;
   const apply=async(tx:Prisma.TransactionClient):Promise<PinCheck|'AGAIN'>=>{
-   const [row]=await tx.$queryRaw<{pin:string|null;pinFailedCount:number;pinLockedAt:Date|null}[]>`SELECT "pin","pinFailedCount","pinLockedAt" FROM "User" WHERE "id"=${userId} FOR UPDATE`;
+   const [row]=await tx.$queryRaw<{pin:string|null;pinFailedCount:number;pinLockedAt:Date|null;pinVersion:number}[]>`SELECT "pin","pinFailedCount","pinLockedAt","pinVersion" FROM "User" WHERE "id"=${userId} FOR UPDATE`;
+   version=row?.pinVersion??null;
    if(!row?.pin)return 'NOT_SET';
    const lockedAt=row.pinLockedAt?new Date(row.pinLockedAt):null;
    if(lockedAt&&lockedAt.getTime()+PIN_LOCK_MS>Date.now())return 'LOCKED';
@@ -29,9 +34,9 @@ export async function checkPin(db:Db,userId:string,pin:string):Promise<PinCheck>
    const next=failed+1;await tx.user.update({where:{id:userId},data:{pinFailedCount:next,pinLockedAt:next>=3?new Date():null}});return next>=3?'LOCKED_NOW':'INVALID';
   };
   const r='$transaction' in db?await (db as PrismaClient).$transaction(apply):await apply(db as Prisma.TransactionClient);
-  if(r!=='AGAIN')return r;
+  if(r!=='AGAIN')return {result:r,pinVersion:version};
  }
- return 'INVALID';
+ return {result:'INVALID',pinVersion:null};
 }
 export async function verifyBusinessPin(db:PrismaClient,userId:string,pin:string){
  const r=await checkPin(db,userId,pin);

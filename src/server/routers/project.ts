@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { bumpPinVersion } from "../users/access";
 import {assertProjectCanBeDestroyed} from '../permissions/legacy-infrastructure';
 import {destroyProject} from '../project-lifecycle/destroy';
 import {publicUserFields} from '../permissions/user-target';
@@ -599,9 +598,8 @@ export const projectRouter = router({
       const hashedPin = await bcrypt.hash(input.pin, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
+        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null, pinVersion: { increment: 1 } },
       });
-      await bumpPinVersion(ctx.prisma, input.userId);
       return { success: true };
     }),
 
@@ -616,9 +614,8 @@ export const projectRouter = router({
     .mutation(async ({ ctx, input }) => {
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { pin: null, pinFailedCount: 0, pinLockedAt: null },
+        data: { pin: null, pinFailedCount: 0, pinLockedAt: null, pinVersion: { increment: 1 } },
       });
-      await bumpPinVersion(ctx.prisma, input.userId);
       return { success: true };
     }),
 

@@ -13,6 +13,7 @@ afterAll(()=>db.$disconnect());
 type Web={sessionId:string;pinUnlocked:boolean};
 const caller=(userId:string,web?:Web)=>appRouter.createCaller({prisma:db,session:{user:{id:userId},expires:'2099-01-01'},...(web?{web}:{})} as unknown as Context);
 async function webOf(userId:string){const s=await openWebSession(db,userId),c=await checkWebSession(db,s.id,userId);if(!c.ok)throw new Error('session');return {sessionId:s.id,pinUnlocked:c.pinUnlocked};}
+const pinVersionOf=async(id:string)=>(await db.user.findUniqueOrThrow({where:{id},select:{pinVersion:true}})).pinVersion;
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 async function cleanupSessions(ids:string[]){await db.userSession.deleteMany({where:{userId:{in:ids}}});}
 // Disabling writes an audit line in every project of the account (the fixture's second project too).
@@ -42,7 +43,7 @@ describe('web session and PIN unlock are held by the server',()=>{
       expect(await checkWebSession(db,s.id,f.ai2)).toMatchObject({ok:true,pinUnlocked:false});
       await expect(caller(f.ai2,{sessionId:s.id,pinUnlocked:false}).user.verifyPin({pin:AI_PIN})).rejects.toBeTruthy();
       await db.user.update({where:{id:f.ai2},data:{pinFailedCount:0,pinLockedAt:null}});
-      await unlockWebSession(db,s.id,f.ai2);expect((await checkWebSession(db,s.id,f.ai2) as Web).pinUnlocked).toBe(true);
+      await unlockWebSession(db,s.id,f.ai2,await pinVersionOf(f.ai2));expect((await checkWebSession(db,s.id,f.ai2) as Web).pinUnlocked).toBe(true);
       // "Xoá PIN" really removes it and ends the unlock.
       await admin.user.resetPin({projectId:f.projectId,userId:f.ai2});
       expect(await checkWebSession(db,s.id,f.ai2)).toMatchObject({ok:true,pinUnlocked:false});
@@ -58,7 +59,7 @@ describe('disabling an account',()=>{
   it('blocks the web session, the ops token and writes; enabling again never brings them back',async()=>{
     const f=await setup();try{
       const token=await f.token(f.ai,['READ','BALANCE_WRITE']),web=await webOf(f.ai);
-      await unlockWebSession(db,web.sessionId,f.ai);
+      await unlockWebSession(db,web.sessionId,f.ai,await pinVersionOf(f.ai));
       await db.vmJob.create({data:{projectId:f.projectId,vmId:f.vms[0].id,cycle:1,kind:'CHECK',claimedById:f.ai,expiresAt:new Date(Date.now()+3600e3)}});
       expect((await api('GET','me',{token})).status).toBe(200);
       const r=await setUserDisabled(db,f.scope.userId,{projectId:f.projectId,userId:f.ai,disabled:true,reason:'thử'});

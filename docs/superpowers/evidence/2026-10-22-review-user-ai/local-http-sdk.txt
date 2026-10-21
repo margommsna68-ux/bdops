@@ -1,0 +1,7 @@
+PASS H1 Ghi SDK qua HTTP → 200
+PASS H2 DB: 1 bản ghi SDK, mã hiện hành của VM, 1 dòng lịch sử, gắn vào việc ({"records":1,"history":1,"vmSdk":"P38SDK-19d019-A0000001","jobSdk":true})
+PASS H3 Gửi lại cùng key + body → 200, replay, recorded y như lần đầu
+PASS H4 Sau khi nhả việc + VM đổi dữ liệu: gửi lại vẫn trả xác nhận cũ
+PASS H5 Cùng key, khác mã SDK → 409 IDEMPOTENCY_CONFLICT
+PASS H6 DB sau các lần gửi lại: không thêm SDK, lịch sử hay đổi mã hiện hành
+PASS H7 Việc đã nhả → 409, DB không có SDK / lịch sử / mã hiện hành ({"records":0,"history":0,"vmSdk":null,"jobSdk":null})

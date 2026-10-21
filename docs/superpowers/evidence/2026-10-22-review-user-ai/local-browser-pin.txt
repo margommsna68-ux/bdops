@@ -1,0 +1,13 @@
+PASS S1 Phiên A: đăng nhập + mở khoá PIN
+PASS L1 Phiên B: sai PIN 3 lần ở màn PIN → bị khoá tạm
+PASS L2 Phiên B: PIN đúng cũng không mở khoá khi đang bị khoá
+PASS L3 Phiên B: gọi thẳng setPin với PIN đúng → bị từ chối (không vượt khoá)
+PASS L4 Đổi PIN ở Thiết lập khi đang khoá → không đổi được, vẫn "Khoá tạm"
+PASS L5 ADMIN "Mở khoá tạm" → Đang hoạt động
+PASS C1 Phiên A đổi PIN của mình (PIN hiện tại đúng) → vẫn mở khoá với PIN mới
+PASS C2 Phiên B: PIN cũ không còn dùng được
+PASS C3 Phiên B: PIN mới mở khoá được
+PASS A1 ADMIN đổi PIN → cả hai phiên phải nhập lại PIN
+PASS A2 PIN trước đó không mở khoá được
+PASS A3 PIN mới do ADMIN đặt mở khoá được
+Lỗi JS: không

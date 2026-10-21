@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { router, protectedProcedure, moderatorProcedure } from "../trpc";
 import bcrypt from "bcryptjs";
-import { checkPin } from "../business-management/pin";
+
 import { createAuditLog } from "@/lib/audit";
 import { LOCK_DURATION_MS } from "../auth";
-import { accountState, bumpPinVersion, setUserDisabled, unlockWebSession } from "../users/access";
+import { accountState, setOwnPin, setUserDisabled, unlockWebSession } from "../users/access";
+import { checkPinVersion } from "../business-management/pin";
 import { adminProcedure } from "../trpc";
 // The web session of an HTTP call (trpc.ts createTRPCContext), when there is one.
 const webSessionId = (ctx: { web?: unknown }) => { const w = ctx.web as { sessionId?: string } | null | undefined; return w && typeof w.sessionId === "string" ? w.sessionId : null; };
@@ -32,29 +33,10 @@ export const userRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
-      const user = await ctx.prisma.user.findUnique({
-        where: { id: userId },
-        select: { pin: true },
-      });
-
-      // If user already has PIN, verify current PIN
-      if (user?.pin) {
-        if (!input.currentPin) {
-          throw new Error("Current PIN required to update");
-        }
-        const valid = await bcrypt.compare(input.currentPin, user.pin);
-        if (!valid) throw new Error("Current PIN is incorrect");
-      }
-
-      const hashedPin = await bcrypt.hash(input.pin, 12);
-      await ctx.prisma.user.update({
-        where: { id: userId },
-        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
-      });
-      // A new PIN ends every older unlock; this session (which just proved it) is unlocked with the new one.
-      await bumpPinVersion(ctx.prisma, userId);
-      const sid = webSessionId(ctx);
-      if (sid) await unlockWebSession(ctx.prisma, sid, userId);
+      // Review fix 22/10/2026: a first PIN or a change proved by the current PIN through the shared PIN rule (count + lock); the new hash and
+      // version are written together on the version that was proved; this session is unlocked with the new version.
+      try { await setOwnPin(ctx.prisma, userId, await bcrypt.hash(input.pin, 12), input.currentPin, webSessionId(ctx)); }
+      catch (e) { throw new Error(e instanceof Error ? e.message : "Không đổi được PIN"); }
       return { success: true };
     }),
 
@@ -64,7 +46,7 @@ export const userRouter = router({
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
       // One rule with the ops API (pin.ts, review fix 21/10/2026): concurrent checks are decided on the user row as it is then.
-      const r = await checkPin(ctx.prisma, userId, input.pin);
+      const { result: r, pinVersion } = await checkPinVersion(ctx.prisma, userId, input.pin);
       if (r === "NOT_SET") throw new Error("PIN not set");
       if (r === "LOCKED") {
         const u = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { pinLockedAt: true } });
@@ -76,9 +58,9 @@ export const userRouter = router({
         const u = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { pinFailedCount: true } });
         throw new Error(`Sai PIN (còn ${Math.max(1, 3 - (u?.pinFailedCount ?? 0))} lần trước khi bị khóa 30 phút)`);
       }
-      // The unlock belongs to this server session and this PIN version (22/10/2026).
+      // The unlock belongs to this server session and to the PIN version just verified (review fix 22/10/2026): a PIN changed meanwhile is refused.
       const sid = webSessionId(ctx);
-      if (sid) await unlockWebSession(ctx.prisma, sid, userId);
+      if (sid && !(await unlockWebSession(ctx.prisma, sid, userId, pinVersion))) throw new Error("PIN vừa được đổi hoặc tài khoản vừa thay đổi; nhập lại PIN");
       return { valid: true };
     }),
 
@@ -143,9 +125,8 @@ export const userRouter = router({
       const hashedPin = await bcrypt.hash(input.newPin, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
+        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null, pinVersion: { increment: 1 } },
       });
-      await bumpPinVersion(ctx.prisma, input.userId);
       await createAuditLog({ action: had ? "CHANGE_PIN" : "SET_PIN", entity: "User", entityId: input.userId, userId: callerId, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
     }),
@@ -397,8 +378,7 @@ export const userRouter = router({
   resetPin: moderatorProcedure
     .input(z.object({ projectId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.prisma.user.update({ where: { id: input.userId }, data: { pin: null, pinFailedCount: 0, pinLockedAt: null } });
-      await bumpPinVersion(ctx.prisma, input.userId);
+      await ctx.prisma.user.update({ where: { id: input.userId }, data: { pin: null, pinFailedCount: 0, pinLockedAt: null, pinVersion: { increment: 1 } } });
       await createAuditLog({ action: "REMOVE_PIN", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
       return { success: true };
     }),

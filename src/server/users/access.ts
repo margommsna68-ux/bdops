@@ -1,5 +1,6 @@
 import type {Prisma,PrismaClient} from '@prisma/client';
 import {ProxyDomainError} from '../proxy-management/types';
+import {checkPinVersion,PIN_LOCK_MS} from '../business-management/pin';
 // Account access (owner brief 22/10/2026).
 // - Disabled (an ADMIN's decision: User.disabledAt) is not the temporary lock after wrong passwords / PINs (loginLockedAt / pinLockedAt).
 // - A web sign-in opens a UserSession; the JWT carries only its id. Every request checks the session is open, belongs to the user, was
@@ -35,14 +36,46 @@ export async function checkWebSession(db:PrismaClient,sid:string|null|undefined,
 export async function revokeWebSession(db:Db,sid:string,reason:string){
   await db.userSession.updateMany({where:{id:sid,revokedAt:null},data:{revokedAt:new Date(),revokeReason:reason}});
 }
-/** The PIN was just proved on this session: unlock it for the user's current PIN version. */
-export async function unlockWebSession(db:Db,sid:string,userId:string){
-  const u=await db.user.findUniqueOrThrow({where:{id:userId},select:{pinVersion:true}});
-  await db.userSession.updateMany({where:{id:sid,userId,revokedAt:null},data:{pinUnlockedAt:new Date(),pinVersion:u.pinVersion}});
+/**
+ * The PIN of version `verifiedVersion` was just proved on this session: unlock it, in one transaction, only while that version is still the
+ * user's PIN, the user is enabled and not PIN-locked, and the session is open under the current authEpoch (review fix 22/10/2026). A PIN
+ * changed / removed meanwhile is refused: the newer version is never used to accept an older result. Returns whether it unlocked.
+ */
+export async function unlockWebSession(db:PrismaClient,sid:string,userId:string,verifiedVersion:number|null){
+  if(verifiedVersion==null)return false;
+  return db.$transaction(async tx=>{
+    const [u]=await tx.$queryRaw<{pin:string|null;pinVersion:number;disabledAt:Date|null;pinLockedAt:Date|null;authEpoch:number}[]>`SELECT "pin","pinVersion","disabledAt","pinLockedAt","authEpoch" FROM "User" WHERE "id"=${userId} FOR SHARE`;
+    if(!u?.pin||u.disabledAt||u.pinVersion!==verifiedVersion)return false;
+    if(u.pinLockedAt&&new Date(u.pinLockedAt).getTime()+PIN_LOCK_MS>Date.now())return false;
+    const n=await tx.userSession.updateMany({where:{id:sid,userId,revokedAt:null,epoch:u.authEpoch},data:{pinUnlockedAt:new Date(),pinVersion:verifiedVersion}});
+    return n.count===1;
+  });
 }
-/** A new / changed / removed PIN: every PIN unlock of the user made before stops counting. Returns the new version. */
-export async function bumpPinVersion(db:Db,userId:string){
-  return (await db.user.update({where:{id:userId},data:{pinVersion:{increment:1}},select:{pinVersion:true}})).pinVersion;
+/**
+ * Set / change the user's own PIN (review fix 22/10/2026). A first PIN needs none; changing an existing one proves the current PIN through the
+ * shared rule (checkPinVersion: wrong-PIN count, 30-minute lock, no unlimited tries) and is applied only on that same PIN version. Hash and
+ * version change in one statement; this session is then unlocked with the new version. Returns the new version.
+ */
+export async function setOwnPin(db:PrismaClient,userId:string,newHash:string,currentPin:string|null|undefined,sid:string|null){
+  const before=await db.user.findUniqueOrThrow({where:{id:userId},select:{pin:true}});
+  let expected:number|null=null;
+  if(before.pin){
+    if(!currentPin)throw new ProxyDomainError('INVALID_INPUT','Cần PIN hiện tại để đổi PIN');
+    const r=await checkPinVersion(db,userId,currentPin);
+    if(r.result==='LOCKED'||r.result==='LOCKED_NOW')throw new ProxyDomainError('FORBIDDEN',r.result==='LOCKED_NOW'?'Sai PIN 3 lần; khoá 30 phút':'PIN đang bị khoá. Liên hệ quản lý hoặc chờ hết 30 phút.');
+    if(r.result==='NOT_SET')throw new ProxyDomainError('STALE_PREVIEW','PIN vừa bị xoá; đặt PIN mới');
+    if(r.result!=='OK')throw new ProxyDomainError('FORBIDDEN','PIN hiện tại chưa đúng');
+    expected=r.pinVersion;
+  }
+  const version=await db.$transaction(async tx=>{
+    const [u]=await tx.$queryRaw<{pin:string|null;pinVersion:number;disabledAt:Date|null;pinLockedAt:Date|null}[]>`SELECT "pin","pinVersion","disabledAt","pinLockedAt" FROM "User" WHERE "id"=${userId} FOR UPDATE`;
+    if(!u||u.disabledAt)throw new ProxyDomainError('FORBIDDEN',DISABLED_MESSAGE);
+    if(expected===null?!!u.pin:(!u.pin||u.pinVersion!==expected))throw new ProxyDomainError('STALE_PREVIEW','PIN vừa được đổi ở nơi khác; tải lại rồi thử lại');
+    if(u.pinLockedAt&&new Date(u.pinLockedAt).getTime()+PIN_LOCK_MS>Date.now())throw new ProxyDomainError('FORBIDDEN','PIN đang bị khoá. Liên hệ quản lý hoặc chờ hết 30 phút.');
+    return (await tx.user.update({where:{id:userId},data:{pin:newHash,pinVersion:{increment:1},pinFailedCount:0,pinLockedAt:null},select:{pinVersion:true}})).pinVersion;
+  });
+  if(sid)await unlockWebSession(db,sid,userId,version);
+  return version;
 }
 // ─── Disable / enable ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /**

@@ -149,6 +149,16 @@ export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaCli
   const info=checkInfo({amount:input.amount,note:input.note});
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_RECORD',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
+    return placeVmSdk(tx,images,current,{...input,code},info);
+  },db);
+}
+/**
+ * The body of saveVmSdk inside the caller's transaction (review fix 22/10/2026): the same checks (round, VM revision, placement rules, code
+ * revision) and writes (record, list, mirror, history), so another command (the AI job's SDK, vm-ops/jobs.ts) can do them in ITS transaction,
+ * together with its own checks and its own idempotency record. The caller has authorized ASSIGN; `input.code` is normalized.
+ */
+export async function placeVmSdk(tx:Tx,images:BusinessCollector,current:ActorScope,input:Omit<SdkSaveInput,'key'>&{code:string|null},info:SdkInfo){
+    const scope=current,code=input.code;
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);
     if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     if(vm.revision!==input.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW',where(vm)+' vừa được thay đổi; tải lại để kiểm tra (nội dung đang nhập được giữ)');
@@ -158,7 +168,6 @@ export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaCli
     const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:input.from?'Chuyển SDK':'Ô SDK'},vm,plan,info);
     const after=await tx.sdkRecord.findUnique({where:{vmId:vm.id}});
     return {changed:r.changed,message:r.message,sdk:after?{id:after.id,code:after.code,revision:after.revision}:null};
-  },db);
 }
 /** "Đã nối EarnApp": the current SDK of the VM was linked to the current EarnApp account of the VM, in the current round. */
 export async function linkVmSdk(scope:ActorScope,input:{key:string;vmId:string;sdkId:string;expectedSdkRevision:number;earnAppId:string;expectedCycle:number},db:PrismaClient=prisma){

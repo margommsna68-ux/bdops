@@ -378,7 +378,8 @@ const SdkBody=z.object({projectId:id64,jobId:id64,expectedCycle:cycleN,expectedV
 async function vmSdk(c:Ctx,[vmId]:string[]){
   const b=SdkBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   const r=await asOps(c,projectId,vmId,()=>recordJobSdk(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,jobId:b.jobId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,code:b.code},c.db,caller(c)));
-  c.audit.replay=r.readBack;return {replay:r.readBack,recorded:{vmId,jobId:r.jobId,sdk:r.sdk,changed:r.changed,readBack:r.readBack},current:await vmNow(c,projectId,vmId)};
+  // replay = the same key and request answered from the first command (recorded identical); readBack = a new command with the code already saved.
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{vmId,jobId:r.jobId,sdk:r.sdk,changed:r.changed,readBack:r.readBack},current:await vmNow(c,projectId,vmId)};
 }
 // Statuses an operator records from what it saw. New VM / Chờ áp dụng proxy end only through finish-prepare / finish-proxy; Blocked has
 // its own endpoint (the proxy it found blocked); VM deleted is the owner's.
