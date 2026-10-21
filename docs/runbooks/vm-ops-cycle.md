@@ -124,7 +124,23 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 - **Lần cấp đầu một email PayPal không hoàn tác được** (gán ở Server/VM, dán liên kết, hay ghi yêu cầu rút với email mới), kể cả khi email chưa có tiền. Email giữ dấu đã dùng vĩnh viễn; muốn gỡ khỏi VM thì dùng **Bỏ gán**. Liên kết không cấp email mới (chỉ tài khoản) vẫn hoàn tác được.
 - Đổi tình trạng vẫn hoàn tác được khi chưa có gì sửa tiếp (trong cùng lượt).
 
-## Tiền / Rút tại VM (chủ dự án 20/10/2026)
+## Tiền VM tại dòng (chủ dự án 22/10/2026)
+
+Cột **Tiền VM** (vị trí của cột Tiền / Rút cũ, ngay sau Tình trạng, trước Proxy; khoá cấu hình cột vẫn là `payout` nên bố cục đã lưu
+giữ nguyên, mục Cột ghi "Tiền VM") hiện **tiền quan sát trên máy của SDK hiện hành** (`src/lib/vm-money.ts`, dữ liệu `sdk-observations`),
+không cần tài khoản EarnApp: dòng chính `$0,21`, dòng phụ "Kiểm tra 10 phút trước" (rê chuột: ngày giờ đầy đủ theo múi giờ ứng dụng);
+trạng thái rút ngắn bên dưới khi có yêu cầu. Trạng thái: **Chưa kiểm tra** (không có SDK hiện hành hoặc chưa đọc được tiền; không
+phải $0), `$0,00` khi đọc được 0, **Kiểm tra lỗi** (lần đọc mới nhất không đọc được: giữ số tốt cuối cùng với giờ cũ, `amountFailedAt`),
+**Số cũ** (quá 24 giờ), **Chưa rõ giờ** (tiền cũ không có giờ quan sát), **Ẩn** (thiếu quyền xem tiền). VM tạo lại hoặc đổi mã hiện hành:
+mã mới "Chưa kiểm tra", tiền mã cũ chỉ còn trong Kho SDK / lịch sử. Chỉ lấy mã hiện hành, không cộng các SDK dự phòng, không lấy số dư
+EarnApp thay. Bấm ô mở khung: Tiền VM (mã, số, giờ, nguồn, Lịch sử kiểm tra) → Số dư EarnApp (nếu có tài khoản) → Rút về PayPal (luồng
+cũ, quyền cũ; chưa có tài khoản thì chỉ giải thích). Lọc Chưa kiểm tra / Số cũ / Kiểm tra lỗi (`money=UNCHECKED|STALE|VM_FAILED`) và
+sắp xếp Tiền VM cao → thấp / kiểm tra lâu nhất (`sort=BALANCE|CHECKED_OLD`) chạy trên toàn bộ kết quả trước phân trang, trong URL. Dòng
+tổng: "Tổng tiền VM đã kiểm tra" + đếm Chưa kiểm tra / Số cũ / Kiểm tra lỗi / Chưa rõ giờ riêng, không cộng với số dư EarnApp hay tiền
+chờ về PP. Bảng tự tải lại dữ liệu mỗi 30 giây khi tab đang mở (và khi quay lại tab) để thấy AI vừa ghi; bộ lọc, trang, lựa chọn và
+nháp giữ nguyên.
+
+## Tiền / Rút tại VM (chủ dự án 20/10/2026 — phần số dư EarnApp và rút nay nằm trong khung của cột Tiền VM)
 
 Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọc trên EarnApp, dòng dưới là yêu cầu rút về PayPal. Hai số hiện cùng lúc, không trừ nhau.
 

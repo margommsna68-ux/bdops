@@ -207,6 +207,7 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .vm-money-line{color:var(--ds-text-secondary);max-width:100%}
 /* A recorded EarnApp balance: the amount itself, readable at a glance, then its condition chip. */
 .vm-money-head{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.vm-money-none{font-size:12px;font-weight:500;color:var(--ds-text-secondary)}
 .vm-money-amount{font-size:14px;font-weight:650;line-height:18px;font-variant-numeric:tabular-nums;color:var(--ds-text-primary);white-space:nowrap}
 .vm-payout-pop{width:380px;max-height:calc(100vh - 16px);overflow-y:auto}
 .vm-pp-info{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 8px;border-radius:8px;background:var(--ds-hover);border:1px solid var(--ds-border)}

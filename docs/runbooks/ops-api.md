@@ -26,7 +26,7 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 - `EARN_PAYOUT` không mở: ghi yêu cầu "đã gửi" trực tiếp, thất bại / huỷ / gửi lại / sửa / chốt thiếu, đối chiếu tài khoản cũ, sổ PayPal, chi phí,
   rút / chuyển. Trên web người có quyền này thấy nút "Chuẩn bị rút (giữ email)" và "Đã gửi trên EarnApp / Chưa xác định kết quả".
 - `PAYPAL_RECEIPT_RECORD` chỉ ghi khoản nhận gắn một yêu cầu rút đã gửi (`recordPayoutReceipt`, chung cho web và API); trên web người có quyền này
-  thấy "Ghi tiền về PP" ở ô Tiền / Rút (chỉ khoản đã nhận, không có Chờ nhận / Khoản riêng). Không mở dán khoản nhận tổng quát, số dư đầu, sửa / thu hồi
+  thấy "Ghi tiền về PP" ở khung của ô Tiền VM (trước là Tiền / Rút; chỉ khoản đã nhận, không có Chờ nhận / Khoản riêng). Không mở dán khoản nhận tổng quát, số dư đầu, sửa / thu hồi
   giao dịch, chuyển / rút PP, chi phí.
 - Đọc tiền: số dư EarnApp cần quyền đọc số dư (đọc Tiền vào PayPal hoặc ghi số dư); tiền của yêu cầu rút cần đọc Tiền vào PayPal hoặc một trong hai
   quyền hẹp; sổ PayPal (số dư theo sổ của PP) chỉ với đọc Tiền vào + Rút / chuyển.

@@ -1563,6 +1563,8 @@ model SdkRecord {
   // observation older than the stored one never replaces it. null on old rows: amountAt stands for both.
   amountObservedAt DateTime?
   amountSource     String?
+  // Tiền VM (22/10/2026): the latest reading that could not read the money (the last good figure keeps its own time; never 0).
+  amountFailedAt   DateTime?
   note            String?
   noteAt          DateTime?
   noteById        String?

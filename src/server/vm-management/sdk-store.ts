@@ -298,7 +298,7 @@ export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
   const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
   // Without the money read right the amount, its times and source are not sent at all (never 0, never "chưa ghi"): `moneyHidden`.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,failedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,
     vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){

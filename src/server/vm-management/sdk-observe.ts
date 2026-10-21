@@ -64,7 +64,11 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
   const now=canonicalAmount(rec.amount?.toString()??null),prev=rec.amountObservedAt;
   const kept={value:now,observedAt:prev?.toISOString()??null,source:rec.amountSource};
   if(amount===undefined)return {outcome:'NOT_SENT',...kept};
-  if(amount===null){await event(tx,ctx,rec.id,'OBSERVE',{detail:{observedAt:observedAt.toISOString(),source,evidence,readable:false}});return {outcome:'UNREADABLE',...kept};}
+  if(amount===null){
+    // Could not read: the figure and its time stay; only the latest failed-reading time moves forward (Tiền VM shows "Kiểm tra lỗi").
+    if(!rec.amountFailedAt||observedAt>rec.amountFailedAt){await ctx.images.remember('SDK',rec.id);const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{amountFailedAt:observedAt,revision:{increment:1}}});
+      if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa được người khác thay đổi; đọc lại VM rồi gửi lại','REVISION_CONFLICT',{code:rec.code});}
+    await event(tx,ctx,rec.id,'OBSERVE',{detail:{observedAt:observedAt.toISOString(),source,evidence,readable:false}});return {outcome:'UNREADABLE',...kept};}
   // A reading older than the one stored never replaces it; the same moment with another figure is a conflict to look at.
   if(prev&&observedAt<prev)return {outcome:'OLDER',...kept};
   if(prev&&observedAt.getTime()===prev.getTime()){

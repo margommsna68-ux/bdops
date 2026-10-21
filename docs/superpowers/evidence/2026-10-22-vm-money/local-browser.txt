@@ -1,0 +1,33 @@
+PASS T1 Cột "Tiền VM" nằm ngay sau Tình trạng, trước Proxy ( | VM | Tình trạng | Tiền VM | Proxy)
+PASS T2 Ở 1280px có sidebar, cột Tiền VM nhìn thấy không cần cuộn ngang (x=595, w=220)
+PASS T3 M1 (chưa gán EarnApp): $0,21 · Kiểm tra … (không "Chưa gán tài khoản")
+PASS T4 M2: $0,00 hiện là số 0
+PASS T5 M3: Chưa kiểm tra (không $0)
+PASS T6 M4: quét lỗi → giữ $3,00 + nhãn Kiểm tra lỗi
+PASS T7 M5: $7,50 · Số cũ, vẫn đọc được thời điểm
+PASS T8 M6: $4,00 · Chưa rõ giờ (không lấy giờ lưu)
+PASS T9 M7 (ba SDK): chỉ tiền mã hiện hành $1,50
+PASS T10 M8 (đổi mã hiện hành): Chưa kiểm tra, không hiện $0,77 của mã cũ
+FAIL T11 Rê chuột thấy ngày giờ đầy đủ (Kiểm tra lúc 20:41 21/10/2026 · SDK P444B33000001)
+PASS T12 Dòng tổng: "Tổng tiền VM đã kiểm tra", đếm chưa kiểm tra / số cũ / lỗi riêng (Tổng tiền VM đã kiểm tra: $16,21 (6/8 VM)
+Chưa kiểm tra: 2 VM
+Số cũ: 1 VM
+Kiểm tra lỗi: 1 VM
+Chưa rõ giờ: 1 VM
+Đang chờ )
+PASS T13 Khung: Tiền VM + Lịch sử kiểm tra + phần rút chỉ giải thích khi chưa có EarnApp
+PASS T14 VM có tài khoản EarnApp: khung vẫn có Số dư EarnApp và luồng Rút về PayPal cũ
+PASS T15 Lọc money=UNCHECKED → đúng 2 VM chưa kiểm tra (M3, M8)
+PASS T16 Sắp xếp Tiền VM cao → thấp trên toàn bộ kết quả: 7,5 > 4 > 3 > 1,5 > 0,21 > 0 > chưa kiểm tra cuối
+PASS T17 Back giữ bộ lọc tiền
+PASS T18 Tải lại giữ bộ lọc tiền
+PASS T19 Mục Cột có lựa chọn "Tiền VM"
+PASS T20 API ghi $0.32 cho M1 khi trang đang mở
+PASS T21 Trang tự cập nhật $0,32 với giờ quan sát mới, không tải lại cả trang, giữ URL
+PASS T22 Theme light: cột Tiền VM đọc được ($0,32)
+PASS T22 Theme dark: cột Tiền VM đọc được ($0,32)
+PASS T22 Theme golden: cột Tiền VM đọc được ($0,32)
+PASS T22 Theme bronze: cột Tiền VM đọc được ($0,32)
+PASS T23 Điện thoại 390px: ô Tiền VM vẫn hiện $0,32
+PASS T24 Không quyền tiền: cột Tiền VM hiện "Ẩn", HTML không chứa số tiền
+Lỗi JS trên trang: không

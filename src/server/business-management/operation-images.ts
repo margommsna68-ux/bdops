@@ -25,7 +25,7 @@ const fields:Record<BusinessResource,string[]>={
  VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
  PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt'],
  VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','closedAt'],
- SDK:['code','vmId','holderVmId','heldAt','heldById','amount','currency','amountAt','amountById','amountObservedAt','amountSource','note','noteAt','noteById','linkState','linkedEarnAppId','linkedVmId','linkedCycle','linkedAt','linkedById','confirmedAt','confirmedById','revision'],
+ SDK:['code','vmId','holderVmId','heldAt','heldById','amount','currency','amountAt','amountById','amountObservedAt','amountSource','amountFailedAt','note','noteAt','noteById','linkState','linkedEarnAppId','linkedVmId','linkedCycle','linkedAt','linkedById','confirmedAt','confirmedById','revision'],
  // The SDK position of a VM (its mirror): lets undo see a code placed on that VM later by someone else.
  SDK_SLOT:['sdkId'],
  ACCOUNT_BATCH:['kind','loginType','code','source','purchasedAt','priceMode','unitPrice','totalPaid','currency','lineCount','paidQuantity','costRecordId','notes','archivedAt','revision'],

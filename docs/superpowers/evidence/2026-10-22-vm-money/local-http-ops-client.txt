@@ -1,0 +1,9 @@
+PASS D1 M1 (chưa gán EarnApp): SDK hiện hành $0.21 ghi qua API
+PASS D2 M2: $0 là một kết quả đọc được
+PASS D3 M3: không có SDK → chưa kiểm tra
+PASS D4 M4: quét lỗi sau số tốt → giữ $3 + thời điểm cũ, có mốc lỗi
+PASS D5 M5: số quan sát 25 giờ trước → số cũ
+PASS D6 M6: tiền cũ không có giờ quan sát
+PASS D7 M7: ba SDK, mã hiện hành $1.5 (mã khác $9 và $0.5 là dự phòng)
+PASS D8 M8: đổi mã hiện hành → mã mới chưa kiểm tra, tiền mã cũ chỉ còn trong lịch sử / kho
+PASS D9 Không phát sinh chi phí / quỹ / rút / số dư EarnApp / yêu cầu rút / tài khoản EarnApp / nhận USDT

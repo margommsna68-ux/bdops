@@ -276,14 +276,14 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
 }
 // ---- Read: the list of every VM, for the grid (unused first, then used; current code marked) --------------------------------------
 const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
-export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountSource:string|null;moneyHidden:boolean;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
+export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountFailedAt:string|null;amountSource:string|null;moneyHidden:boolean;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
 /** `money` = the caller may read SDK money (sdk-money-rights.ts); without it amount / observedAt / source are null and `moneyHidden`. */
 export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[],money=true){
   const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
-    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money?r.amountObservedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money?r.amountObservedAt?.toISOString()??null:null,amountFailedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

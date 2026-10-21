@@ -5,9 +5,10 @@ export type EditField='code'|'sdk'|'notes';
 export interface ColumnDef {key:ColumnKey;label:string;width:number;min:number;optional?:boolean;edit?:EditField}
 // Fixed columns (not movable/hideable): [select] [server, only for all servers] [VM] [Tình trạng] … [⋯]. These are the movable ones.
 export const COLUMNS:ColumnDef[]=[
-  // Tiền / Rút (20/10/2026): EarnApp balance read at the VM + the payout request to PayPal, one column. Right after Tình trạng so VM,
-  // status and money are visible together on a 1280px laptop with the sidebar open (owner brief 20/10/2026).
-  {key:'payout',label:'Tiền / Rút',width:220,min:150},
+  // Tiền VM (22/10/2026; was Tiền / Rút 20/10): the money seen on the machine for the VM's current SDK code, with the payout status
+  // under it; the frame keeps the EarnApp balance and the payout flow. Right after Tình trạng so VM, status and money are visible
+  // together on a 1280px laptop with the sidebar open. The stored key stays `payout` so saved column layouts keep working.
+  {key:'payout',label:'Tiền VM',width:220,min:150},
   // Proxy: the proxy the VM uses (IP:port + copy) and only the warnings Blocked / Cần kiểm tra; a click opens "Thay proxy" next to the
   // cell (owner decision 19/10/2026: no install step). The old "Cài proxy" / "Tiến độ cài" columns are gone; stored settings drop them.
   {key:'proxy',label:'Proxy',width:250,min:160},
@@ -66,7 +67,8 @@ export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS'|'BALANCE'|'CHECKED_O
 // Operating status filter (several at once; NONE = Chưa ghi) and money milestone filter.
 export const OPS_FILTERS=['NONE','OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED','PROXY_PENDING'] as const;
 export type OpsFilter=typeof OPS_FILTERS[number];
-export type MoneyFilter=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'NONE'|'UNCHECKED'|'WITHDRAWABLE'|'RECEIVED'|'CHECK';
+// UNCHECKED / STALE / VM_FAILED (22/10/2026) are about Tiền VM (the current SDK code's money); the others about EarnApp / PayPal.
+export type MoneyFilter=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'NONE'|'UNCHECKED'|'STALE'|'VM_FAILED'|'WITHDRAWABLE'|'RECEIVED'|'CHECK';
 export type PanelTab='overview'|'proxy'|'work'|'account'|'history';
 // Kho SDK (opened in the page with ?sdk=1): its search, filters, sort and page live in the URL too, so Back / Forward and reload return to it.
 export type SdkStateFilter='FREE'|'UNCONFIRMED'|'LINKED'|'ALL';
@@ -80,7 +82,7 @@ function readSdkUrl(p:{get(name:string):string|null}):SdkStoreUrl{
   const pick=<T extends string>(v:string|null,all:T[],d:T)=>(all as string[]).includes(v||'')?v as T:d;
   return {open:p.get('sdk')==='1',q:p.get('sq')||'',state:pick(p.get('sf'),SDK_STATES,'FREE'),place:pick(p.get('sl'),SDK_PLACES,'ALL'),sort:pick(p.get('ss'),SDK_SORTS,'UPDATED'),page:Math.max(1,Math.floor(Number(p.get('sp'))||1))};
 }
-const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED','APPLY','TODO'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
+const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED','APPLY','TODO'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','STALE','VM_FAILED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
 // Links from before 19/10/2026: Chờ cài / Đã cài are now "Có proxy", the orphan install-task view is gone, the install tab is the proxy tab.
 const OLD_VIEW:Record<string,GridView>={PENDING:'ASSIGNED',INSTALLED:'ASSIGNED',TASK_ORPHAN:''};
 export function readGridUrl(p:{get(name:string):string|null}):GridUrl{

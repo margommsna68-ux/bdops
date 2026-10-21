@@ -84,6 +84,11 @@ describe('POST /vms/{id}/sdk-observations',()=>{
       expect((await f.rec(c))!.amount!.toString()).toBe('0');
       const unread=await f.post(t,f.a.id,await f.body(f.a.id,[{code:c,amountRead:false}],T3));
       expect(unread.json.data.recorded.sdks[0].amount.outcome).toBe('UNREADABLE');expect((await f.rec(c))!.amount!.toString()).toBe('0');
+      // Tiền VM: the failed reading is remembered apart (Kiểm tra lỗi), the good figure and its own time stay; an older failure never moves it back.
+      expect((await f.rec(c))!.amountFailedAt!.toISOString()).toBe(T3);
+      await f.post(t,f.a.id,await f.body(f.a.id,[{code:c,amountRead:false}],T2));expect((await f.rec(c))!.amountFailedAt!.toISOString()).toBe(T3);
+      const grid=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.a.id)!.sdks.find(x=>x.code===c)!;
+      expect(grid).toMatchObject({amount:'0',amountObservedAt:T3,amountFailedAt:T3});
       // A new code read as unreadable stays "not checked" (null), never 0.
       const d=f.code('3');await f.post(t,f.a.id,await f.body(f.a.id,[{code:d,amountRead:false}],T1));expect((await f.rec(d))!.amount).toBeNull();
       expect((await f.post(t,f.a.id,await f.body(f.a.id,[{code:d,amountRead:true}],T1))).status).toBe(422);

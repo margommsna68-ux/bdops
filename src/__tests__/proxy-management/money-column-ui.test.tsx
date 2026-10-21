@@ -1,8 +1,8 @@
 import React,{act} from 'react';
 import {JSDOM} from 'jsdom';
 import {afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi} from 'vitest';
-// "Tiền / Rút" at a glance (owner brief 20/10/2026): why there is no money yet (no account / never checked), a recorded balance as a
-// readable $ amount with a short check time, never $0 for missing data. Synthetic ids only.
+// "Tiền VM" at a glance (owner brief 22/10/2026): the current SDK code's money with a short observation time, never $0 for missing
+// data, no account needed; the balance line of the frame keeps its own rules (20/10/2026). Synthetic ids only.
 vi.mock('@/lib/trpc',()=>({trpc:{}}));
 vi.mock('react-hot-toast',()=>({default:{success:vi.fn(),error:vi.fn()}}));
 import {balanceLine} from '@/components/vm-management/vm-grid/MoneyParts';
@@ -26,21 +26,29 @@ const check=(amount:string|null,withdrawable='UNKNOWN')=>({id:'c',checkedAt:at,o
 const ops=(balance:object|null,earnAppId:string|null='ea-synthetic')=>({vmId:'vm-synthetic',cycle:1,earnAppId,status:null,milestone:null,request:null,balance:balance??{latest:null,lastOk:null}}) as never;
 const rights={assign:true,money:false,writeMoney:false,balanceRead:true,balanceWrite:true};
 const render=(n:React.ReactNode)=>act(async()=>root.render(n));
-describe('Tiền / Rút cell: why there is no money yet',()=>{
-  it('no EarnApp account: "Chưa gán tài khoản", a button that opens the account picker for who may assign',async()=>{
-    await render(<PayoutCell projectId="p" vm={vm} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    const b=container.querySelector('button[aria-label="Tài khoản EarnApp VM_001"]') as HTMLButtonElement;
-    expect(b).toBeTruthy();expect(b.getAttribute('aria-haspopup')).toBe('dialog');expect(b.textContent).toContain('Chưa gán tài khoản');
-    expect(container.textContent).not.toMatch(/\$|Chưa kiểm tra/);
+describe('Tiền VM cell (owner brief 22/10/2026): the current SDK code money at the row, with or without an EarnApp account',()=>{
+  const sdk=(o:Partial<{amount:string|null;amountObservedAt:string|null;amountFailedAt:string|null;moneyHidden:boolean;current:boolean}>)=>({recordId:'r1',code:'SDKSYNTH000001',revision:1,amount:'0.21',amountObservedAt:at,amountFailedAt:null,amountSource:'AI · OCR',moneyHidden:false,note:null,state:'UNCONFIRMED',current:true,usedAt:null,usedBy:null,heldAt:null,...o});
+  const withSdks=(sdks:unknown[])=>({...(vm as object),sdks}) as never;
+  it('no EarnApp account and no SDK: "Chưa kiểm tra" (never $0, never "Chưa gán tài khoản"); the button still opens the Tiền VM frame',async()=>{
+    await render(<PayoutCell projectId="p" vm={withSdks([])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
+    const b=container.querySelector('button[aria-label="Tiền VM Sv-synthetic / VM_001"]') as HTMLButtonElement;
+    expect(b).toBeTruthy();expect(b.getAttribute('aria-haspopup')).toBe('dialog');expect(b.textContent).toContain('Chưa kiểm tra');
+    expect(container.textContent).not.toMatch(/\$|Chưa gán tài khoản/);
   });
-  it('no EarnApp account and no assign right: plain text, nothing to click',async()=>{
-    await render(<PayoutCell projectId="p" vm={vm} ops={ops(null,null)} account={undefined} rights={{...rights,assign:false}} onDone={()=>{}} onBusy={()=>{}}/>);
-    expect(container.textContent).toContain('Chưa gán tài khoản');expect(container.querySelector('button')).toBeNull();
+  it('no EarnApp account, current SDK with money: the $ figure and a short observation time; the full time in the title',async()=>{
+    await render(<PayoutCell projectId="p" vm={withSdks([sdk({})])} ops={ops(null,null)} account={undefined} rights={{...rights,assign:false}} onDone={()=>{}} onBusy={()=>{}}/>);
+    expect(container.textContent).toContain('$0,21');expect(container.textContent).toMatch(/Kiểm tra 5 phút trước/);
+    expect(container.querySelector('.vm-money-line')?.getAttribute('title')).toMatch(/Kiểm tra lúc \d\d:\d\d \d\d\/\d\d\/\d{4}/);
   });
-  it('account assigned, never checked: "Chưa kiểm tra", the button opens the balance frame',async()=>{
-    await render(<PayoutCell projectId="p" vm={vm} ops={ops(null)} account={{earnApp:{id:'ea-synthetic',login:{email:'a@example.invalid'}}} as never} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    const b=container.querySelector('button[aria-label="Tiền / Rút Sv-synthetic / VM_001"]') as HTMLButtonElement;
-    expect(b.textContent).toContain('Chưa kiểm tra');expect(b.textContent).not.toContain('$');
+  it('the current code only (never the highest), a failed reading keeps the last figure, hidden money reads "Ẩn", $0 reads $0,00',async()=>{
+    await render(<PayoutCell projectId="p" vm={withSdks([sdk({current:false,amount:'99'}),sdk({recordId:'r2',code:'SDKSYNTH000002',amount:'0.21'} as never)])} ops={ops(null)} account={{earnApp:{id:'ea-synthetic',login:{email:'a@example.invalid'}}} as never} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
+    expect(container.textContent).toContain('$0,21');expect(container.textContent).not.toContain('$99');
+    await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:'3',amountFailedAt:new Date().toISOString()})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
+    expect(container.textContent).toContain('$3,00');expect(container.textContent).toContain('Kiểm tra lỗi');
+    await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:null,amountObservedAt:null,moneyHidden:true})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
+    expect(container.textContent).toContain('Ẩn');
+    await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:'0'})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
+    expect(container.textContent).toContain('$0,00');
   });
 });
 describe('balance line',()=>{

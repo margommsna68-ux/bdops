@@ -240,7 +240,8 @@ node scripts/ops-client.mjs sdk-survey survey.json
   lỗi không làm mất danh sách. Exit 0 tất cả xong / 1 có dòng bị từ chối / 3 có dòng chưa rõ.
 - Một lệnh lẻ mất phản hồi: `retry <key>` (không tạo key mới, không tự sang lượt mới, không tự thay revision để né lỗi).
 - Bảng Server / VM: ô SDK có dòng "Tích luỹ 12,345678 USD · 15:56" của **mã hiện hành** ("chưa kiểm tra" khi chưa có số, "chưa rõ giờ" với
-  tiền cũ); khung SDK và Kho SDK ghi giờ kiểm tra từng mã. Cột Tiền / Rút giữ nghĩa số dư tài khoản EarnApp và yêu cầu rút.
+  tiền cũ); khung SDK và Kho SDK ghi giờ kiểm tra từng mã. Cột **Tiền VM** (22/10/2026, vm-ops-cycle.md) hiện cùng số này của mã
+  hiện hành ngay tại dòng, không cần tài khoản EarnApp. Số dư EarnApp và yêu cầu rút giữ nghĩa số dư tài khoản EarnApp và yêu cầu rút.
 - Migration `20261022150000_sdk_observed` (chỉ thêm cột `SdkRecord.amountObservedAt`, `amountSource`; tiền cũ giữ `null` = chưa biết giờ).
 - Trước khi nhập bảng thật: kiểm lại các dòng OCR nghi sai, `sdk-check` cả bảng, ghi đúng **một** VM chủ giao, đọc lại xác nhận rồi mới
   mở rộng. Việc khảo sát và ghi dữ liệu thật do Claude vận hành làm theo phạm vi chủ giao.

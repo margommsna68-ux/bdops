@@ -11,7 +11,10 @@ import {formatLedger,formatUsd} from '@/lib/money-input';
 import {viMoney} from '@/components/account-store/batch-format';
 import type {ManagedVM} from '../shared';
 import {AccountCell,type VmAccount} from './AccountCell';
-import {BalanceSection,LineView,balanceLine,requestLine} from './MoneyParts';
+import {BalanceSection,LineView,requestLine} from './MoneyParts';
+import {SdkTimeline} from './SdkCell';
+import {shortCode} from './grid-model';
+import {fullTime,relativeTime,vmMoneyState,type VmMoneyState} from '@/lib/vm-money';
 export type OpsRow=inferRouterOutputs<AppRouter>['vmOps']['board']['vms'][number];
 // payout = may prepare a request and record it sent / unknown (managers, or EARN_PAYOUT); writeMoney = every other money action.
 // receipt = may record money received for a sent request (managers, or PAYPAL_RECEIPT_RECORD) through recordPayoutReceipt.
@@ -67,24 +70,21 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
   // The request was saved (here or by someone else) while the form was open: show that request, never a second request form.
   useEffect(()=>{if(r&&mode==='request')setMode(null);},[r,mode]);
   const hasEarnApp=!!account?.earnApp;
-  // "Tiền / Rút" (owner brief 20/10/2026): the balance read on EarnApp, then the payout request; both when both exist.
-  const bal=balanceLine(ops,!!rights.balanceRead),req=requestLine(ops);
-  let face:React.ReactNode;
-  // No account yet (20/10/2026): say so; who may assign opens the existing account picker from here. Never $0, never the SDK money.
-  if(!hasEarnApp&&!r&&!canRecreate)return <div className="vm-payout">{rights.assign?<AccountCell projectId={projectId} vm={vm} link={account} focus="login" canAssign face={<span className="pm-muted text-xs">Chưa gán tài khoản</span>} onSaved={()=>void onDone()} onBusy={onBusy}/>:<span className="pm-muted text-xs">Chưa gán tài khoản</span>}</div>;
-  if(!hasEarnApp&&!r)face=<span className="pm-muted text-xs">{sus?'SUS · ':''}Chưa gán tài khoản</span>;
-  else face=<>{bal&&<LineView line={bal}/>}{req&&<LineView line={req}/>}{!bal&&!req&&<span className="pm-muted text-xs">Chưa kiểm tra</span>}{bal?.text==='Chưa kiểm tra'&&!req&&rights.balanceWrite&&<span className="vm-money-line text-xs">Bấm để ghi số dư</span>}</>;
-  void m;void MILESTONE_LABEL;void formatLedger;
-  const clickable=hasEarnApp||!!r||canRecreate;
-  return <div className="vm-payout">
-    {clickable?<button ref={p.anchor} type="button" className="vm-payout-button" aria-haspopup="dialog" aria-expanded={p.open} aria-label={'Tiền / Rút '+vm.server+' / '+vm.code} onClick={()=>p.open?p.setOpen(false):openWith(null)}>{face}</button>:<div className="vm-payout-face">{face}</div>}
+  // "Tiền VM" (owner brief 22/10/2026): the money seen on the machine for the VM's CURRENT SDK code (vm-money.ts), readable at the row
+  // without an EarnApp account, then the payout status; the frame keeps the EarnApp balance and the payout flow apart from it.
+  const cur=vm.sdks.find(s=>s.current)??null,vmMoney=vmMoneyState(cur?{code:cur.code,amount:cur.amount,observedAt:cur.amountObservedAt,failedAt:cur.amountFailedAt,moneyHidden:cur.moneyHidden}:null),req=requestLine(ops);
+  const face=<><VmMoneyFace s={vmMoney}/>{req&&<LineView line={req}/>}{!req&&sus&&<span className="vm-money vm-money-failed">SUS</span>}</>;
+  void m;void MILESTONE_LABEL;void formatLedger;void AccountCell;void onBusy;
+  return <div className="vm-payout" data-vm-money={vmMoney.kind}>
+    <button ref={p.anchor} type="button" className="vm-payout-button" aria-haspopup="dialog" aria-expanded={p.open} aria-label={'Tiền VM '+vm.server+' / '+vm.code} onClick={()=>p.open?p.setOpen(false):openWith(null)}>{face}</button>
     {canRecreate&&!r&&sus&&<button type="button" className="pm-link text-xs" onClick={()=>openWith('recreate')}>Ghi nhận đã tạo lại (SUS)</button>}
-    {p.open&&typeof document!=='undefined'&&createPortal(<div ref={p.pop} role="dialog" aria-label={'Tiền / Rút '+vm.server+' / '+vm.code} className="vm-status-pop vm-payout-pop" style={{top:p.pos?.top??-9999,left:p.pos?.left??-9999}}>
+    {p.open&&typeof document!=='undefined'&&createPortal(<div ref={p.pop} role="dialog" aria-label={'Tiền VM '+vm.server+' / '+vm.code} className="vm-status-pop vm-payout-pop" style={{top:p.pos?.top??-9999,left:p.pos?.left??-9999}}>
       <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · lượt {cycle}{account?.earnApp?' · '+account.earnApp.login.email:''}</p>
       {mode==='request'?<RequestForm projectId={projectId} vm={vm} cycle={cycle} earnAppId={ops?ops.earnAppId:undefined} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={sus&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode&&(r||actionOpen.current)?<RequestAction projectId={projectId} vm={vm} mode={mode} request={r} narrow={!rights.writeMoney} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}} onBack={()=>setMode(null)}/>
       :<div className="space-y-2">
+        <VmMoneySection projectId={projectId} s={vmMoney} source={cur?.amountSource??null} sdkId={cur?.recordId??null} cycle={cycle}/>
         {ops&&hasEarnApp&&<BalanceSection projectId={projectId} vmCode={vm.code} ops={ops} read={!!rights.balanceRead} write={!!rights.balanceWrite} onSaved={onDone}/>}
         <p className="font-semibold text-xs">Rút về PayPal</p>
         {r?<RequestSummary request={r} milestone={ops?.milestone||''}/>:<p className="text-xs pm-muted">{hasEarnApp?'Chưa ghi yêu cầu rút cho EarnApp này.':'VM chưa có tài khoản EarnApp ở lượt này.'}</p>}
@@ -100,6 +100,31 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
         {!rights.writeMoney&&<p className="text-xs pm-muted">{rights.receipt?'Thất bại, huỷ, gửi lại, chốt thiếu cần quyền ghi Tiền vào PayPal.':rights.payout?'Ghi tiền về, thất bại, huỷ, gửi lại cần quyền ghi Tiền vào PayPal.':'Ghi tiền cần quyền ghi Tiền vào PayPal.'}</p>}
       </div>}
     </div>,document.body)}
+  </div>;
+}
+// The row: the figure large, the observation time (relative; full date-time in the title) under it. "Chưa kiểm tra" is never $0;
+// "Kiểm tra lỗi" keeps the last good figure with its own time; "Số cũ" after 24 h; "Chưa rõ giờ" for money recorded without a time.
+function VmMoneyFace({s}:{s:VmMoneyState}){
+  const at=(iso:string|null,label='Kiểm tra')=>iso?<span className="vm-money-line text-xs" title={label+' lúc '+fullTime(iso)+(s.code?' · SDK '+s.code:'')}>{label} {relativeTime(iso)}</span>:null;
+  if(s.kind==='UNCHECKED')return <span className="vm-money-amount vm-money-none" title={s.code?'SDK '+s.code+' chưa có số tiền kiểm tra ở lượt này':'VM chưa có SDK hiện hành ở lượt này'}>Chưa kiểm tra</span>;
+  if(s.kind==='HIDDEN')return <span className="vm-money-amount vm-money-none" title="Tiền VM: cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Ẩn</span>;
+  if(s.kind==='FAILED')return <><span className="vm-money-head"><span className={'vm-money-amount'+(s.amount==null?' vm-money-none':'')}>{s.amount!=null?formatUsd(s.amount):'Chưa có số'}</span><span className="vm-money vm-money-failed">Kiểm tra lỗi</span></span>
+    <span className="vm-money-line text-xs" title={'Lần đọc lỗi lúc '+fullTime(s.failedAt)+(s.at?' · số gần nhất lúc '+fullTime(s.at):'')+' · SDK '+s.code}>Lỗi {relativeTime(s.failedAt)}{s.at?' · số gần nhất '+relativeTime(s.at):''}</span></>;
+  if(s.kind==='NO_TIME')return <><span className="vm-money-amount">{formatUsd(s.amount)}</span><span className="vm-money-line text-xs" title={'Tiền ghi trước khi có giờ quan sát · SDK '+s.code}>Chưa rõ giờ</span></>;
+  return <><span className="vm-money-head"><span className="vm-money-amount">{formatUsd(s.amount)}</span>{s.kind==='STALE'&&<span className="vm-money vm-money-waiting">Số cũ</span>}</span>{at(s.at)}</>;
+}
+function VmMoneySection({projectId,s,source,sdkId,cycle}:{projectId:string;s:VmMoneyState;source:string|null;sdkId:string|null;cycle:number}){
+  const [open,setOpen]=useState(false);
+  return <div className="space-y-1 text-xs" data-testid="vm-money-section">
+    <p className="font-semibold">Tiền VM (tiền tích luỹ của SDK đang chạy)</p>
+    {s.kind==='UNCHECKED'&&!s.code?<p className="pm-muted">VM chưa có SDK hiện hành ở lượt {cycle}; tiền của lượt / mã trước nằm trong Kho SDK và lịch sử, không tính là tiền hiện tại.</p>
+    :s.kind==='UNCHECKED'?<p>SDK <code>{shortCode(s.code!)}</code> · <span className="pm-muted">chưa có lần kiểm tra nào ghi được tiền.</span></p>
+    :s.kind==='HIDDEN'?<p className="pm-muted">Số tiền ẩn theo quyền (cần quyền tiền hoặc “Ghi kiểm tra tiền EarnApp”).</p>
+    :<p>SDK <code>{shortCode(s.code)}</code> · <strong>{s.amount!=null?formatUsd(s.amount):'chưa có số'}</strong>
+      {s.kind==='FAILED'?<> · <span className="text-red-600">kiểm tra lỗi lúc {fullTime(s.failedAt)}</span>{s.at?' · số gần nhất lúc '+fullTime(s.at):''}</>:s.kind==='NO_TIME'?' · chưa rõ giờ quan sát (tiền ghi trước khi có giờ)':<> · quan sát lúc {fullTime(s.at!)}{s.kind==='STALE'?' · số cũ (hơn 24 giờ)':''}</>}
+      {source?<><br/><span className="pm-muted">Nguồn: {source}</span></>:null}</p>}
+    <p className="pm-muted">Không phải số dư tài khoản EarnApp; các SDK dự phòng không được cộng vào.</p>
+    {sdkId&&<details open={open} onToggle={e=>setOpen((e.target as HTMLDetailsElement).open)}><summary className="cursor-pointer">Lịch sử kiểm tra</summary>{open&&<SdkTimeline projectId={projectId} sdkId={sdkId}/>}</details>}
   </div>;
 }
 function RequestSummary({request:r,milestone}:{request:NonNullable<OpsRow['request']>;milestone:string}){
