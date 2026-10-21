@@ -18,3 +18,6 @@ Hồi quy: user-access, ops-api, SDK (18 file / 116 ca) xanh; cả bộ xanh tr�
 lint (không lỗi), build đạt.
 
 Giới hạn: đây là web / API (thử local + test). AE Mini Tool chưa chạy thật; chưa kích hoạt AI vận hành trên host.
+
+Phát hành: commit 5eb3eda, backup 358bf361 trước deploy 515d7310 (không có migration mới). Host chỉ đọc: số liệu trước / sau giống hệt; gọi API trước PIN →
+PIN_REQUIRED; MOON / AE; trang ai-ops · MOON đủ ba phần. Không thử lỗi trên user / VM thật.
