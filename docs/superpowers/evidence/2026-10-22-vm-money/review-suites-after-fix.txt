@@ -1,0 +1,10 @@
+PLAIN_SDK_WRITE {"denied":true,"amount":"731.25"}
+SDK_UNDO {"oldObservedAt":"2026-10-21T13:33:33.374Z","afterObservedAt":"2026-10-21T13:33:33.374Z","oldSource":"AI SDK review (mth_SFiw_lHP) · Synthetic OCR","afterSource":"AI SDK review (mth_SFiw_lHP) · Synthetic OCR"}
+ ✓ .runtime/review-sdk-survey-20261021.test.ts (4 tests) 912ms
+PREVIEW_READ {"outcome":"SAME","before":{"amount":null,"note":null}}
+PREVIEW_READ {"outcome":"ERROR","before":{"amount":null,"note":null}}
+MONEY_AFTER_RECREATE_REUSE {"cycle":2,"state":{"kind":"UNCHECKED","code":"REVIEW-MONEY-8fea2e2c-27ce-47c6-9c33-8cb4323d0bc3","stored":null}}
+API_MONEY_READBACK {"id":"cmvi7psob00bnaitr53ivvul5","code":"REVIEW-MONEY-dd63cf35-8019-4b82-9b25-91dad5409528","revision":3,"linkState":"UNCONFIRMED","current":true,"amount":"0.21","currency":"USD","observedAt":"2026-10-21T14:23:34.551Z","failedAt":"2026-10-21T14:28:34.551Z","moneyState":"FAILED","recordedAt":"2026-10-21T14:33:34.570Z","source":"AI Money review (mth_k0HpAV_P) · Synthetic independent review","stored":{"amount":"0.21","observedAt":"2026-10-21T14:23:34.551Z","recordedAt":"2026-10-21T14:33:34.570Z","source":"AI Money review (mth_k0HpAV_P) · Synthetic independent review","cycle":1,"vmId":"cmvi7psl5008kaitrjfdhjsqp"}}
+ ✓ .runtime/review-vm-money-eced7af.test.ts (3 tests) 976ms
+     ✓ SDK store preview does not reveal stored money to a user without money rights, even when only a code or a malformed row is pasted  469ms
+      Tests  7 passed (7)

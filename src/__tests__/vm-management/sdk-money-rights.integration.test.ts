@@ -5,6 +5,11 @@ import {loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {observeVmSdks} from '@/server/vm-management/sdk-observe';
 import {applySdkStore,previewSdkStore,readSdkDetail,readSdkStore,saveVmSdk,updateSdkInfo} from '@/server/vm-management/sdk-store';
 import {addVmSdk,applySdkPaste,previewSdkPaste} from '@/server/vm-management/sdk-list';
+import {confirmLegacySdk} from '@/server/vm-management/sdk-store';
+import {recordRecreated,setVmStatus} from '@/server/vm-ops/ops';
+import {api} from '../ops-api/ops-fixture';
+import {createOpsToken} from '@/server/ops-api/tokens';
+import {vmMoneyState} from '@/lib/vm-money';
 import {applyVmBulk,previewVmBulk} from '@/server/vm-management/bulk';
 import {readVMWorkspace} from '@/server/vm-management/repository';
 import {inspectOperation} from '@/server/operation-history/journal';
@@ -39,6 +44,9 @@ describe('SDK money rights on the web services',()=>{
       for(const e of detail.events)for(const k of ['amount','from','to','source','evidence'])expect(e.detail??{},e.kind).not.toHaveProperty(k);
       const ws=await readVMWorkspace(f.plain,db),v=ws.vms.find(x=>x.id===f.vm.id)!;
       expect(ws.sdkMoney).toEqual({read:false,write:false});expect(v.sdks[0]).toMatchObject({code:c,amount:null,amountObservedAt:null,moneyHidden:true});expect(v.sdk?.amount).toBeNull();
+      // Kho SDK preview of an existing code (code only, or a malformed money cell): the stored figure is never sent without the right.
+      for(const text of [c,c+' | not-a-number']){const pv=await previewSdkStore(f.plain,{text},db);expect(pv.rows[0].before?.amount,text).toBeNull();expect(pv.rows[0].moneyHidden).toBe(true);expect(JSON.stringify(pv)).not.toContain('731.25');}
+      expect((await previewSdkStore(f.scope,{text:c},db)).rows[0].before?.amount).toBe('731.25');
       const journal=await db.operationJournal.findFirstOrThrow({where:{projectId:f.P,kind:'VM_SDK_OBSERVE'},orderBy:{createdAt:'desc'}});
       const hist=await inspectOperation(f.plain,journal.id,db);
       for(const [name,data] of Object.entries({store,detail,ws,hist})){const j=JSON.stringify(data);expect(j,name).not.toContain('731.25');expect(j,name).not.toContain('731,25');expect(j,name).not.toContain('ảnh #');}
@@ -96,6 +104,35 @@ describe('SDK money rights on the web services',()=>{
       expect(back.amount!.toString()).toBe('10');expect(back.amountObservedAt!.toISOString()).toBe(T1);expect(back.amountSource).toBe(row.amountSource);expect(back.amountAt!.getTime()).toBe(row.amountAt!.getTime());expect(back.amountById).toBe(row.amountById);
       const next=await f.observe(c,'15',T2);
       expect(next.items[0].amount.outcome).toBe('SAVED');expect((await f.rec(c)).amount!.toString()).toBe('15');
+    }finally{await f.cleanup();}
+  });
+  it('money checked in an earlier round, or on another VM, is history: the new round / the other VM reads Chưa kiểm tra until checked again (web, API, summary alike)',async()=>{
+    const f=await fx();try{
+      const c=f.code('20'),T=ago(1);await f.observe(c,'12.34',T,true);
+      const row=await f.rec(c);await confirmLegacySdk(f.scope,{key:randomUUID(),sdkId:row.id,expectedRevision:row.revision,decision:'UNLINKED'},db);
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vm.id,status:'SUSPENDED',expectedCycle:1}]},db);
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:1},db);
+      const cur=async()=>{const v=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===f.vm.id)!;const s=v.sdks.find(x=>x.current);return {v,s,state:vmMoneyState(s?{code:s.code,amount:s.amount,observedAt:s.amountObservedAt,failedAt:s.amountFailedAt,moneyHidden:s.moneyHidden,stored:s.stored}:null)};};
+      expect((await cur()).state.kind).toBe('UNCHECKED');
+      const v=await f.cur(),vmRow=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),sdk=await f.rec(c);
+      await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:v.cycle,expectedVmRevision:vmRow.revision,code:c,expectedSdkRevision:sdk.revision},db);
+      const back=await cur();
+      expect(back.v.cycle).toBe(2);expect(back.s).toMatchObject({code:c,current:true,amount:null,amountObservedAt:null,stored:{amount:'12.34',observedAt:T,cycle:1,vmId:f.vm.id}});
+      expect(back.state).toMatchObject({kind:'UNCHECKED',stored:{amount:'12.34',cycle:1}});expect((await f.rec(c)).amount!.toString()).toBe('12.34');
+      // The API says the same (moneyState + stored apart).
+      const token=(await createOpsToken(f.scope.userId,{projectId:f.P,userId:f.ai,name:'t',scopes:['READ','VM_OPS','BALANCE_WRITE'],expiresInDays:30,pin:'123456'},db)).token!;
+      const d=(await api('GET','vms/'+f.vm.id+'?projectId='+f.P,{token})).json.data,item=d.sdk.items.find((x:{code:string})=>x.code===c);
+      expect(item).toMatchObject({current:true,amount:null,observedAt:null,moneyState:'UNCHECKED',stored:{amount:'12.34',cycle:1,vmId:f.vm.id}});
+      // Checked again on this VM in round 2: the new figure is this round's money.
+      await f.observe(c,'5',ago(0.5));
+      const again=await cur();expect(again.state).toMatchObject({kind:'OK',amount:'5'});expect(again.s!.stored).toMatchObject({amount:'5',cycle:2});
+      // Moved to another VM: the target reads Chưa kiểm tra with the source reading as history.
+      const c2=f.code('21');await f.observe(c2,'3',ago(0.4));
+      const unconfirmed=await f.rec(c2);await confirmLegacySdk(f.scope,{key:randomUUID(),sdkId:unconfirmed.id,expectedRevision:unconfirmed.revision,decision:'UNLINKED'},db); // only an unused code moves
+      const other=f.vms[1],src=await f.rec(c2),srcVm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),otherOp=await db.virtualMachine.findUniqueOrThrow({where:{id:other.id},include:{operation:true}});
+      await addVmSdk(f.scope,{key:randomUUID(),vmId:other.id,expectedCycle:otherOp.operation?.cycle??1,code:c2,expectedSdkRevision:src.revision,from:{vmId:f.vm.id,expectedRevision:srcVm.revision}},db);
+      const moved=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===other.id)!.sdks.find(x=>x.code===c2)!;
+      expect(moved).toMatchObject({amount:null,amountObservedAt:null,stored:{amount:'3',vmId:f.vm.id}});
     }finally{await f.cleanup();}
   });
   it('an image written before the observation fields existed restores the amount with an unknown time and source (never invented)',async()=>{

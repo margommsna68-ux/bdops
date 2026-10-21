@@ -177,8 +177,10 @@ nhuận, không cộng với số dư tài khoản, không suy ra "Có thể rú
 
 ### Hợp đồng
 - `GET vms/{id}?projectId=` → `expectedCycle`, `revision` (của VM) và `sdk.items[]`: `id`, `code`, `revision`, `linkState`, `current`,
-  `amount`, `observedAt` (giờ thấy trên máy; `null` = chưa biết, kể cả tiền cũ trước 22/10 — không bao giờ lấy giờ ghi thay), `recordedAt`
-  (giờ ghi lên web), `source`.
+  `amount` / `observedAt` / `failedAt` (số và lần đọc lỗi **kiểm tra trên chính VM này ở lượt hiện tại**; `null` = chưa kiểm tra ở
+  đây, kể cả khi mã có số từ lượt / VM khác), `moneyState` (đúng trạng thái web hiện: UNCHECKED / OK / STALE / FAILED / NO_TIME /
+  HIDDEN), `stored` (số gần nhất của mã dù đọc ở đâu: `amount`, `observedAt`, `cycle`, `vmId` — lịch sử, không phải tiền lượt này),
+  `recordedAt`, `source`. Lần đọc `amountRead:false` → `failedAt` mới nhất + `moneyState: FAILED`, số tốt cuối vẫn trong `amount`.
 - `GET sdks?projectId=&code=A&code=B` (1–20 mã) → mã đã có ở đâu (`inListOf`, `currentOf`), `revision`, `linkState`; `found:false` = web
   chưa có mã (mã của dự án khác cũng đọc là không có).
 - `POST vms/{id}/sdk-observations` (Idempotency-Key + X-Ops-Pin), body: `projectId`, `expectedCycle`, `expectedVmRevision`,

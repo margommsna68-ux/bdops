@@ -18,6 +18,7 @@ import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 import {canonicalAmount} from '@/lib/sdk-money';
 import {normalizeSdk} from '../vm-management/sdk-parse';
+import {vmMoneyState} from '@/lib/vm-money';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
@@ -198,7 +199,7 @@ async function vmDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),vm=await loadVm(c,projectId,id),rights=await rightsOf(c,projectId),{limit,cursor}=page(c);c.audit.objectId=vm.id;
   const view=vmView(vm),cycle=view.expectedCycle,earnAppId=view.earnAppAccount?.id??null;
   const [sdks,request,cycles]=await Promise.all([
-    c.db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:vm.id},{vmId:vm.id}]},select:{id:true,code:true,revision:true,vmId:true,linkState:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true},orderBy:{code:'asc'}}),
+    c.db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:vm.id},{vmId:vm.id}]},select:{id:true,code:true,revision:true,vmId:true,linkState:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountVmId:true,amountCycle:true,amountFailedVmId:true,amountFailedCycle:true},orderBy:{code:'asc'}}),
     earnAppId?c.db.earnPayoutRequest.findUnique({where:{earnAppId},select:requestSelect}):Promise.resolve(null),
     c.db.vmCycle.findMany({where:{projectId,vmId:vm.id},select:{id:true,number:true,reason:true,earnAppId:true,loginId:true,payoutRequestId:true,closedAt:true},orderBy:[{number:'desc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})}),
   ]);
@@ -208,7 +209,13 @@ async function vmDetail(c:Ctx,[id]:string[]){
   const pc=paged(cycles,limit),job=(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null;
   return {...view,activeJob:job,
     sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,amountsVisible:sdkMoney,
-      items:sdks.map(s=>({id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:sdkMoney&&s.amount!=null?canonicalAmount(s.amount.toString()):null,currency:s.currency,observedAt:sdkMoney?s.amountObservedAt?.toISOString()??null:null,recordedAt:sdkMoney?s.amountAt?.toISOString()??null:null,source:sdkMoney?s.amountSource:null})),
+      // Each code: the readings checked on THIS VM in THIS round (amount / observedAt / failedAt, moneyState as the web shows it) and the
+      // code's own stored figure apart (`stored`: history, e.g. read in an earlier round or on another VM). Review 22/10/2026.
+      items:sdks.map(s=>{const bound=s.amountVmId===vm.id&&s.amountCycle===cycle,boundFailed=s.amountFailedVmId===vm.id&&s.amountFailedCycle===cycle,stored=canonicalAmount(s.amount?.toString()??null);
+        const src=sdkMoney?{code:s.code,amount:bound?stored:null,observedAt:bound?s.amountObservedAt?.toISOString()??null:null,failedAt:boundFailed?s.amountFailedAt?.toISOString()??null:null,moneyHidden:false,stored:{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,cycle:s.amountCycle,vmId:s.amountVmId}}:{code:s.code,amount:null,observedAt:null,failedAt:null,moneyHidden:true};
+        const st=vmMoneyState(src);
+        return {id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:src.amount,currency:s.currency,observedAt:src.observedAt,failedAt:src.failedAt,moneyState:st.kind,recordedAt:sdkMoney&&bound?s.amountAt?.toISOString()??null:null,source:sdkMoney&&bound?s.amountSource:null,
+          stored:sdkMoney?{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,recordedAt:s.amountAt?.toISOString()??null,source:s.amountSource,cycle:s.amountCycle,vmId:s.amountVmId}:null};}),
       note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
@@ -464,12 +471,12 @@ async function sdkLookup(c:Ctx){
   if(!raw.length||raw.length>OBSERVE_MAX)throw fail('VALIDATION','Gửi 1 đến '+OBSERVE_MAX+' tham số code');
   const codes=raw.map(x=>{const n=normalizeSdk(x);if(!n)throw fail('VALIDATION','Mã SDK không hợp lệ: '+x.slice(0,20));return n;});
   const show=(await rightsOf(c,projectId)).balanceRead;
-  const rows=await c.db.sdkRecord.findMany({where:{projectId,code:{in:codes}},select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true}});
+  const rows=await c.db.sdkRecord.findMany({where:{projectId,code:{in:codes}},select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountVmId:true,amountCycle:true}});
   const vmIds=[...new Set(rows.flatMap(r=>[r.vmId,r.holderVmId]).filter((x):x is string=>!!x))];
   const vms=await c.db.virtualMachine.findMany({where:{id:{in:vmIds}},select:{id:true,code:true,archivedAt:true,server:{select:{code:true}}}});
   const at=(id:string|null)=>{const v=id?vms.find(x=>x.id===id):null;return v?{vmId:v.id,serverCode:v.server.code,vmCode:v.code,deleted:!!v.archivedAt}:null;};
   return {amountsVisible:show,items:[...new Set(codes)].map(code=>{const r=rows.find(x=>x.code===code);
-    if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null};
+    if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null,failedAt:null,observedCycle:null,observedVmId:null};
     return {code,found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
-      amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null};})};
+      amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null,failedAt:show?r.amountFailedAt?.toISOString()??null:null,observedCycle:show?r.amountCycle:null,observedVmId:show?r.amountVmId:null};})};
 }

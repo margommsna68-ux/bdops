@@ -1,25 +1,31 @@
-// Tiền VM (owner brief 22/10/2026): the money seen on the machine for the VM's CURRENT SDK code at the time it was checked. Never a
-// sum of the VM's codes, never the EarnApp balance, never cost / income / PayPal money; nothing is inferred from the figure. One pure
-// state for the cell, the filters, the sorts and the summary strip (the server already hides the money without the read right).
+// Tiền VM (owner brief 22/10/2026): the money seen on the machine for the VM's CURRENT SDK code at the time it was checked, on THIS VM
+// in THIS round (independent review 22/10/2026: a code put back after a recreation or moved from another VM keeps its stored money as
+// history, but the new round reads "Chưa kiểm tra" until it is checked again). Never a sum of the VM's codes, never the EarnApp
+// balance, never cost / income / PayPal money; nothing is inferred from the figure. One pure state for the cell, the filters, the
+// sorts, the summary strip and the API (the server already hides the money without the read right).
 export const VM_MONEY_STALE_HOURS=24;
-export interface VmMoneySource {code:string;amount:string|null;observedAt:string|null;failedAt:string|null;moneyHidden:boolean}
+/** The current code as the server gives it for one VM: amount / observedAt / failedAt are the readings bound to this VM + round (null
+ *  otherwise); `stored` is the code's own latest figure wherever it was read (history for the frame, never the row figure). */
+export interface VmMoneySource {code:string;amount:string|null;observedAt:string|null;failedAt:string|null;moneyHidden:boolean;stored?:{amount:string|null;observedAt:string|null;cycle:number|null;vmId:string|null}|null}
+type Stored=NonNullable<VmMoneySource['stored']>|null;
 export type VmMoneyState=
-  |{kind:'UNCHECKED';code:string|null}
+  |{kind:'UNCHECKED';code:string|null;stored:Stored}
   |{kind:'HIDDEN';code:string}
   |{kind:'FAILED';code:string;amount:string|null;at:string|null;failedAt:string;stale:boolean}
   |{kind:'OK'|'STALE'|'NO_TIME';code:string;amount:string;at:string|null};
 export const isStale=(iso:string,now:Date)=>now.getTime()-Date.parse(iso)>VM_MONEY_STALE_HOURS*3600e3;
 /**
  * `cur` = the VM's current code (null when the VM has none: a recreated VM or a replaced code never shows the old money as current).
- * FAILED = the latest reading could not read the money: the last good figure and its own time are kept, never 0.
+ * FAILED = the latest reading of this round could not read the money: the last good figure of this round and its own time are kept, never 0.
  * NO_TIME = money recorded before observation times existed: the write time is never shown in its place.
  */
 export function vmMoneyState(cur:VmMoneySource|null|undefined,now:Date=new Date()):VmMoneyState{
-  if(!cur)return {kind:'UNCHECKED',code:null};
+  if(!cur)return {kind:'UNCHECKED',code:null,stored:null};
   if(cur.moneyHidden)return {kind:'HIDDEN',code:cur.code};
+  const stored=cur.stored&&cur.stored.amount!=null?cur.stored:null;
   const failedAfter=!!cur.failedAt&&(!cur.observedAt||Date.parse(cur.failedAt)>Date.parse(cur.observedAt));
   if(failedAfter)return {kind:'FAILED',code:cur.code,amount:cur.amount,at:cur.observedAt,failedAt:cur.failedAt!,stale:!!cur.observedAt&&isStale(cur.observedAt,now)};
-  if(cur.amount==null)return {kind:'UNCHECKED',code:cur.code};
+  if(cur.amount==null)return {kind:'UNCHECKED',code:cur.code,stored};
   if(!cur.observedAt)return {kind:'NO_TIME',code:cur.code,amount:cur.amount,at:null};
   return {kind:isStale(cur.observedAt,now)?'STALE':'OK',code:cur.code,amount:cur.amount,at:cur.observedAt};
 }

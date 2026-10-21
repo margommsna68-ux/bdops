@@ -8,26 +8,33 @@ PASS T7 M5: $7,50 · Số cũ, vẫn đọc được thời điểm
 PASS T8 M6: $4,00 · Chưa rõ giờ (không lấy giờ lưu)
 PASS T9 M7 (ba SDK): chỉ tiền mã hiện hành $1,50
 PASS T10 M8 (đổi mã hiện hành): Chưa kiểm tra, không hiện $0,77 của mã cũ
-FAIL T11 Rê chuột thấy ngày giờ đầy đủ (Kiểm tra lúc 20:41 21/10/2026 · SDK P444B33000001)
-PASS T12 Dòng tổng: "Tổng tiền VM đã kiểm tra", đếm chưa kiểm tra / số cũ / lỗi riêng (Tổng tiền VM đã kiểm tra: $16,21 (6/8 VM)
-Chưa kiểm tra: 2 VM
+PASS T11 Rê chuột thấy ngày giờ đầy đủ (Kiểm tra lúc 21:29 21/10/2026 · SDK P44CEFC000001)
+PASS T12 Dòng tổng: "Tổng tiền VM đã kiểm tra", đếm chưa kiểm tra / số cũ / lỗi riêng (Tổng tiền VM đã kiểm tra: $16,21 (6/9 VM)
+Chưa kiểm tra: 3 VM
 Số cũ: 1 VM
 Kiểm tra lỗi: 1 VM
 Chưa rõ giờ: 1 VM
 Đang chờ )
 PASS T13 Khung: Tiền VM + Lịch sử kiểm tra + phần rút chỉ giải thích khi chưa có EarnApp
 PASS T14 VM có tài khoản EarnApp: khung vẫn có Số dư EarnApp và luồng Rút về PayPal cũ
-PASS T15 Lọc money=UNCHECKED → đúng 2 VM chưa kiểm tra (M3, M8)
+PASS T15 Lọc money=UNCHECKED → đúng 3 VM chưa kiểm tra (M3, M8, M9 tạo lại)
 PASS T16 Sắp xếp Tiền VM cao → thấp trên toàn bộ kết quả: 7,5 > 4 > 3 > 1,5 > 0,21 > 0 > chưa kiểm tra cuối
 PASS T17 Back giữ bộ lọc tiền
 PASS T18 Tải lại giữ bộ lọc tiền
 PASS T19 Mục Cột có lựa chọn "Tiền VM"
 PASS T20 API ghi $0.32 cho M1 khi trang đang mở
 PASS T21 Trang tự cập nhật $0,32 với giờ quan sát mới, không tải lại cả trang, giữ URL
-PASS T22 Theme light: cột Tiền VM đọc được ($0,32)
-PASS T22 Theme dark: cột Tiền VM đọc được ($0,32)
-PASS T22 Theme golden: cột Tiền VM đọc được ($0,32)
-PASS T22 Theme bronze: cột Tiền VM đọc được ($0,32)
+PASS T22 Theme Sáng (light): đã áp dụng (data-theme=mặc định, lúc chọn: mặc định), cột Tiền VM đọc được
+PASS T22 Theme Tối (dark): đã áp dụng (data-theme=dark, lúc chọn: dark), cột Tiền VM đọc được
+PASS T22 Theme Vàng kim (golden): đã áp dụng (data-theme=golden, lúc chọn: golden), cột Tiền VM đọc được
+PASS T22 Theme Đồng ấm (bronze): đã áp dụng (data-theme=bronze, lúc chọn: bronze), cột Tiền VM đọc được
 PASS T23 Điện thoại 390px: ô Tiền VM vẫn hiện $0,32
 PASS T24 Không quyền tiền: cột Tiền VM hiện "Ẩn", HTML không chứa số tiền
+PASS T25 Không quyền tiền: xem trước Kho SDK với mã đã có không lộ số tiền (Kho SDK Dùng chung mọi server của dự án, cùng bản ghi với danh sách SDK ở từng V…)
+PASS T26 Sau 36 s tự tải lại: nháp mã SDK còn nguyên, 2 dòng vẫn chọn, bộ lọc money=UNCHECKED và URL giữ nguyên (nháp giữ, chọn 2, dòng 3, URL giữ)
+PASS T27 M9 (tạo lại VM, chọn lại SDK): dòng "Chưa kiểm tra", không hiện $12,34 của lượt 1
+PASS T28 Khung M9 ghi rõ mã có $12,34 đọc ở lượt 1, giữ làm lịch sử
+PASS T29 API GET M9: moneyState UNCHECKED, stored $12.34 lượt 1 tách riêng
+PASS T30 Kiểm tra lại đúng VM + lượt 2 → cột hiện $0,05
+PASS T31 API GET M4: moneyState FAILED, failedAt mới hơn observedAt, số tốt $3 giữ riêng
 Lỗi JS trên trang: không

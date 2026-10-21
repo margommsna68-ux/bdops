@@ -2,11 +2,13 @@ import {describe,expect,it} from 'vitest';
 import {relativeTime,vmMoneySortKey,vmMoneyState,vmMoneySummary} from '@/lib/vm-money';
 // Tiền VM (owner brief 22/10/2026): the current SDK code's money at the row — states, sorts and the total, all pure.
 const now=new Date('2026-10-22T10:00:00Z'),h=(n:number)=>new Date(now.getTime()-n*3600e3).toISOString();
-const src=(o:Partial<{amount:string|null;observedAt:string|null;failedAt:string|null;moneyHidden:boolean}>)=>({code:'SDKAAAA0001',amount:'0.21',observedAt:h(1),failedAt:null,moneyHidden:false,...o});
+const src=(o:Partial<{amount:string|null;observedAt:string|null;failedAt:string|null;moneyHidden:boolean;stored:{amount:string|null;observedAt:string|null;cycle:number|null;vmId:string|null}|null}>)=>({code:'SDKAAAA0001',amount:'0.21',observedAt:h(1),failedAt:null,moneyHidden:false,...o});
 describe('vmMoneyState',()=>{
   it('no current code or no figure = Chưa kiểm tra (never $0); a hidden figure = Ẩn',()=>{
-    expect(vmMoneyState(null,now)).toEqual({kind:'UNCHECKED',code:null});
-    expect(vmMoneyState(src({amount:null,observedAt:null}),now)).toEqual({kind:'UNCHECKED',code:'SDKAAAA0001'});
+    expect(vmMoneyState(null,now)).toEqual({kind:'UNCHECKED',code:null,stored:null});
+    expect(vmMoneyState(src({amount:null,observedAt:null}),now)).toEqual({kind:'UNCHECKED',code:'SDKAAAA0001',stored:null});
+    // A figure read in an earlier round / on another VM is history: the row is unchecked, the frame may say what the code holds.
+    expect(vmMoneyState(src({amount:null,observedAt:null,stored:{amount:'12.34',observedAt:h(5),cycle:1,vmId:'vm-old'}}),now)).toEqual({kind:'UNCHECKED',code:'SDKAAAA0001',stored:{amount:'12.34',observedAt:h(5),cycle:1,vmId:'vm-old'}});
     expect(vmMoneyState(src({moneyHidden:true}),now).kind).toBe('HIDDEN');
   });
   it('$0 is a figure; 24 h makes it Số cũ; money without an observation time is Chưa rõ giờ (never the write time)',()=>{

@@ -1565,6 +1565,13 @@ model SdkRecord {
   amountSource     String?
   // Tiền VM (22/10/2026): the latest reading that could not read the money (the last good figure keeps its own time; never 0).
   amountFailedAt   DateTime?
+  // Independent review 22/10/2026: on which VM and in which round the figure / the failed reading was checked. The row shows a
+  // figure only for that VM + round; elsewhere it is history ("Chưa kiểm tra" until checked again). Old rows: backfilled to the
+  // current VM + round of the code (identity only).
+  amountVmId       String?
+  amountCycle      Int?
+  amountFailedVmId String?
+  amountFailedCycle Int?
   note            String?
   noteAt          DateTime?
   noteById        String?

@@ -6,7 +6,7 @@ import {runBusinessCommand,type BusinessCollector} from '../business-management/
 import {authorizeVM,type VMReader} from './repository';
 import {normalizeSdk} from './sdk-parse';
 import {assertSdkMoneyWrite,carriesMoney,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
-import {checkInfo,cycleOf,FOREIGN_CODE,infoChanges,syncMirror,where,type SdkInfo} from './sdk-store';
+import {checkInfo,cycleOf,FOREIGN_CODE,infoChanges,moneyBinding,syncMirror,where,type SdkInfo} from './sdk-store';
 // SDK list of a VM (owner brief 20/10/2026). A VM keeps many SDK codes, to use now or later (SdkRecord.holderVmId); the store, the VM
 // cell, Dán bảng and Kho SDK all read and write the same records.
 // - Adding never replaces or removes another code of the VM, and never changes its current code (SdkRecord.vmId).
@@ -74,7 +74,7 @@ const hasChanges=(plan:ListPlan,info:SdkInfo)=>{const ch=infoChanges(plan.record
 async function applyInfo(tx:Tx,ctx:Ctx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
-  const n=await tx.sdkRecord.updateMany({where:{id:record.id,revision:record.revision},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
+  const n=await tx.sdkRecord.updateMany({where:{id:record.id,revision:record.revision},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,...await moneyBinding(tx,record)}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
   if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+record.code+' vừa được người khác thay đổi; kiểm tra lại');
   if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:ch.amount});
   if(ch.note)await event(tx,ctx,record.id,'NOTE',{detail:ch.note});
@@ -88,7 +88,7 @@ export async function applyListAdd(tx:Tx,ctx:Ctx,vm:ListVM,plan:ListPlan,info:Sd
   if(plan.kind==='CREATE'){
     const i=checkInfo(info);let row:SdkRecord;
     try{row=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:opts.createState??'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
-      ...(i.amount!=null?{amount:i.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(i.note?{note:i.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});}
+      ...(i.amount!=null?{amount:i.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,amountVmId:vm.id,amountCycle:cycleOf(vm)}:{}),...(i.note?{note:i.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});}
     catch(e){if(e instanceof Prisma.PrismaClientKnownRequestError&&e.code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','SDK '+plan.code+' vừa được người khác ghi; kiểm tra lại');throw e;}
     await ctx.images.remember('SDK',row.id,true);
     await event(tx,ctx,row.id,'CREATE',{detail:{amount:i.amount??null,note:i.note??null}});
@@ -276,14 +276,19 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
 }
 // ---- Read: the list of every VM, for the grid (unused first, then used; current code marked) --------------------------------------
 const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
-export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountFailedAt:string|null;amountSource:string|null;moneyHidden:boolean;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
+/** amount / amountObservedAt / amountFailedAt = readings checked on THIS VM in its current round (null elsewhere); `stored` = the code's
+ *  own latest figure wherever it was read (history for the frame; never the row figure). */
+export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountFailedAt:string|null;amountSource:string|null;moneyHidden:boolean;stored:{amount:string|null;observedAt:string|null;cycle:number|null;vmId:string|null}|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
 /** `money` = the caller may read SDK money (sdk-money-rights.ts); without it amount / observedAt / source are null and `moneyHidden`. */
 export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[],money=true){
   const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
+  const cycles=new Map((await db.vmOperation.findMany({where:{vmId:{in:vmIds}},select:{vmId:true,cycle:true}})).map(o=>[o.vmId,o.cycle]));
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
-  for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
-    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money?r.amountObservedAt?.toISOString()??null:null,amountFailedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+  for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById),cycle=cycles.get(vmId)??1;
+    const bound=r.amountVmId===vmId&&r.amountCycle===cycle,boundFailed=r.amountFailedVmId===vmId&&r.amountFailedCycle===cycle;
+    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money&&bound?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money&&bound?r.amountObservedAt?.toISOString()??null:null,amountFailedAt:money&&boundFailed?r.amountFailedAt?.toISOString()??null:null,amountSource:money&&bound?r.amountSource:null,moneyHidden:!money,
+      stored:money?{amount:canonicalAmount(r.amount?.toString()??null),observedAt:r.amountObservedAt?.toISOString()??null,cycle:r.amountCycle,vmId:r.amountVmId}:null,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

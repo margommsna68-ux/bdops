@@ -1013,7 +1013,7 @@
            "type": "string",
            "nullable": true,
            "pattern": "^\\d{1,10}(\\.\\d{1,6})?$",
-           "description": "latest USD read; null = not recorded or hidden (missing is never 0)"
+           "description": "USD read on this VM in this round; null = not checked here yet (a figure of an earlier round / another VM is in `stored`), not readable, or hidden (missing is never 0)"
           },
           "currency": {
            "type": "string"
@@ -1022,7 +1022,7 @@
            "type": "string",
            "format": "date-time",
            "nullable": true,
-           "description": "when the amount was seen on the machine; null = not recorded, hidden, or old money recorded before observation times existed (time unknown, never the write time)"
+           "description": "when that amount was seen on this VM in this round; null = none / unknown time (old money) / hidden"
           },
           "source": {
            "type": "string",
@@ -1033,6 +1033,68 @@
            "format": "date-time",
            "nullable": true,
            "description": "when the amount was written on the web (not when it was seen)"
+          },
+          "failedAt": {
+           "type": "string",
+           "format": "date-time",
+           "nullable": true,
+           "description": "the latest reading on this VM in this round that could NOT read the money (amountRead:false); the last good figure stays in `amount`. null = none / hidden"
+          },
+          "moneyState": {
+           "type": "string",
+           "enum": [
+            "UNCHECKED",
+            "OK",
+            "STALE",
+            "FAILED",
+            "NO_TIME",
+            "HIDDEN"
+           ],
+           "description": "the same state the web shows at the row (src/lib/vm-money.ts): UNCHECKED = no reading on this VM in this round (never 0); OK; STALE = older than 24 h; FAILED = the latest reading failed, the last good figure kept; NO_TIME = money recorded before observation times existed; HIDDEN = no money read right"
+          },
+          "stored": {
+           "nullable": true,
+           "type": "object",
+           "additionalProperties": false,
+           "description": "the code's own latest figure wherever it was read (null without the read right)",
+           "properties": {
+            "amount": {
+             "type": "string",
+             "nullable": true
+            },
+            "observedAt": {
+             "type": "string",
+             "format": "date-time",
+             "nullable": true
+            },
+            "recordedAt": {
+             "type": "string",
+             "format": "date-time",
+             "nullable": true
+            },
+            "source": {
+             "type": "string",
+             "nullable": true
+            },
+            "cycle": {
+             "type": "integer",
+             "nullable": true,
+             "description": "the VM round it was checked in"
+            },
+            "vmId": {
+             "type": "string",
+             "nullable": true,
+             "description": "the VM it was checked on"
+            }
+           },
+           "required": [
+            "amount",
+            "observedAt",
+            "recordedAt",
+            "source",
+            "cycle",
+            "vmId"
+           ]
           }
          },
          "required": [
@@ -1045,8 +1107,12 @@
           "currency",
           "observedAt",
           "recordedAt",
-          "source"
-         ]
+          "source",
+          "failedAt",
+          "moneyState",
+          "stored"
+         ],
+         "description": "every code of the VM list. amount / observedAt / failedAt / moneyState are the readings checked on THIS VM in ITS CURRENT ROUND (the state the web shows at the row); `stored` is the code's own latest figure wherever it was read (history: an earlier round, another VM); never added up into a VM figure; not the EarnApp balance"
         }
        }
       },
@@ -4190,6 +4256,22 @@
         "source": {
          "type": "string",
          "nullable": true
+        },
+        "failedAt": {
+         "type": "string",
+         "format": "date-time",
+         "nullable": true,
+         "description": "latest failed reading of the code"
+        },
+        "observedCycle": {
+         "type": "integer",
+         "nullable": true,
+         "description": "the VM round the stored amount was checked in"
+        },
+        "observedVmId": {
+         "type": "string",
+         "nullable": true,
+         "description": "the VM the stored amount was checked on"
         }
        },
        "required": [
@@ -4204,7 +4286,10 @@
         "currency",
         "observedAt",
         "recordedAt",
-        "source"
+        "source",
+        "failedAt",
+        "observedCycle",
+        "observedVmId"
        ]
       }
      }

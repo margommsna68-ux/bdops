@@ -80,7 +80,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const moneyRow=(v:ManagedVM):MoneyRow=>{const o=opsOfVm.get(v.id),r=o?.request;return {hasEarnApp:!!o?.earnAppId,balance:o?.balance??{latest:null,lastOk:null},request:r?{submission:r.submission,state:r.state,phase:r.phase,requestedAt:r.requestedAt,submittedAt:r.submittedAt,money:r.money?{remaining:r.money.remaining,currency:r.money.currency}:null}:null};};
   // Tiền VM (22/10/2026): the current SDK code's money of each row; Chưa kiểm tra / Số cũ / Kiểm tra lỗi, the money sorts and the
   // total are about it (the EarnApp balance and the payout stay in the frame and the other chips).
-  const vmMoneyOf=(v:ManagedVM)=>{const c=v.sdks.find(s=>s.current);return vmMoneyState(c?{code:c.code,amount:c.amount,observedAt:c.amountObservedAt,failedAt:c.amountFailedAt,moneyHidden:c.moneyHidden}:null);};
+  const vmMoneyOf=(v:ManagedVM)=>{const c=v.sdks.find(s=>s.current);return vmMoneyState(c?{code:c.code,amount:c.amount,observedAt:c.amountObservedAt,failedAt:c.amountFailedAt,moneyHidden:c.moneyHidden,stored:c.stored}:null);};
   const flagMoney=(m:MoneyFilter):m is MoneyFlag=>(MONEY_FILTERS as readonly string[]).includes(m)&&m!=='WAITING'&&m!=='UNCHECKED';
   const vmMoneyMatch=(v:ManagedVM,m:MoneyFilter)=>{const s=vmMoneyOf(v);return m==='UNCHECKED'?s.kind==='UNCHECKED':m==='STALE'?s.kind==='STALE'||s.kind==='FAILED'&&s.stale:s.kind==='FAILED';};
   const moneyMatch=(v:ManagedVM)=>!url.money||(url.money==='UNCHECKED'||url.money==='STALE'||url.money==='VM_FAILED'?vmMoneyMatch(v,url.money):flagMoney(url.money)?moneyFlags(moneyRow(v))[url.money]:url.money==='NONE'?!milestone(v):milestone(v)===url.money);

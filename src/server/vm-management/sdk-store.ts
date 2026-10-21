@@ -25,6 +25,12 @@ const vmSelect={id:true,code:true,revision:true,archivedAt:true,sdkId:true,serve
 export const where=(vm:{code:string;server:{code:string}})=>vm.server.code+' / '+vm.code;
 const placeLabel=(vm:{code:string;archivedAt:Date|null;server:{code:string;archivedAt?:Date|null}})=>where(vm)+(vm.archivedAt||vm.server.archivedAt?' (đã xoá)':'');
 export const cycleOf=(vm:{operation?:{cycle:number}|null})=>vm.operation?.cycle??1;
+/** Where a money figure written now belongs (review 22/10/2026): the VM whose list holds the code and that VM's current round; a code
+ *  in the store only has no VM. The row of a VM shows a figure only when it was checked on that VM in its current round. */
+export async function moneyBinding(db:VMReader,record:{vmId:string|null;holderVmId:string|null}){
+  const vmId=record.holderVmId??record.vmId;if(!vmId)return {amountVmId:null,amountCycle:null};
+  const op=await db.vmOperation.findUnique({where:{vmId},select:{cycle:true}});return {amountVmId:vmId,amountCycle:op?.cycle??1};
+}
 const staleCycle=(cycle:number)=>'VM đã sang lượt '+cycle+'; lệnh này dành cho lượt cũ. Tải lại rồi làm theo lượt hiện hành';
 /** undefined = keep the stored value; null = clear it (an explicit action); a string = set it. */
 export interface SdkInfo {amount?:string|null;note?:string|null}
@@ -95,7 +101,7 @@ export async function syncMirror(tx:Tx,vmId:string,actorId:string,now:Date):Prom
 async function applyInfo(tx:Tx,ctx:WriteCtx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
-  await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
+  await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,...await moneyBinding(tx,record)}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
   if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:ch.amount});
   if(ch.note)await event(tx,ctx,record.id,'NOTE',{detail:ch.note});
   return true;
@@ -117,7 +123,7 @@ export async function applyPlacement(tx:Tx,ctx:WriteCtx,vm:SdkVM,plan:PlacementP
   if(plan.kind==='CREATE'){
     const info0=checkInfo(info);
     target=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code!,vmId:null,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
-      ...(info0.amount!=null?{amount:info0.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(info0.note?{note:info0.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});
+      ...(info0.amount!=null?{amount:info0.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,amountVmId:vm.id,amountCycle:cycleOf(vm)}:{}),...(info0.note?{note:info0.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});
     await ctx.images.remember('SDK',target.id,true);
     await event(tx,ctx,target.id,'CREATE',{detail:{amount:info0.amount??null,note:info0.note??null}});
   }
@@ -234,7 +240,7 @@ export function parseStoreLines(text:string):StoreLine[]{
   });
   return out;
 }
-export interface StoreRow {line:number;code:string;outcome:'NEW'|'UPDATE'|'SAME'|'ERROR';message:string;sdkId:string|null;expectedRevision:number|null;amount:string|null|undefined;note:string|null|undefined;before:{amount:string|null;note:string|null}|null;location:string|null;state:string|null}
+export interface StoreRow {line:number;code:string;outcome:'NEW'|'UPDATE'|'SAME'|'ERROR';message:string;sdkId:string|null;expectedRevision:number|null;amount:string|null|undefined;note:string|null|undefined;before:{amount:string|null;note:string|null}|null;/** the stored amount is not sent without the money read right (before.amount is then null, never 0) */moneyHidden:boolean;location:string|null;state:string|null}
 export async function previewSdkStore(scope:ActorScope,input:{text:string},db:PrismaClient=prisma){
   await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
   const lines=parseStoreLines(input.text);if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng mỗi đợt');
@@ -243,9 +249,9 @@ export async function previewSdkStore(scope:ActorScope,input:{text:string},db:Pr
   const byCode=new Map(records.map(r=>[r.code,r])),seen=new Map<string,number[]>();for(const l of lines)seen.set(l.code,[...(seen.get(l.code)||[]),l.line]);
   const rows:StoreRow[]=[];
   for(const l of lines){
-    const rec=byCode.get(l.code),base:StoreRow={line:l.line,code:l.code,outcome:'ERROR',message:'',sdkId:rec?.id??null,expectedRevision:rec?.revision??null,amount:l.amount,note:l.note,before:rec?{amount:canonicalAmount(rec.amount?.toString()??null),note:rec.note}:null,location:rec?.vm?placeLabel(rec.vm):null,state:rec?.linkState??null};
+    const rec=byCode.get(l.code),base:StoreRow={line:l.line,code:l.code,outcome:'ERROR',message:'',sdkId:rec?.id??null,expectedRevision:rec?.revision??null,amount:l.amount,note:l.note,before:rec?{amount:money.read?canonicalAmount(rec.amount?.toString()??null):null,note:rec.note}:null,moneyHidden:!money.read,location:rec?.vm?placeLabel(rec.vm):null,state:rec?.linkState??null};
     if(l.issue){rows.push({...base,message:l.issue});continue;}
-    if(l.amount!==undefined&&!money.write){rows.push({...base,before:null,message:SDK_MONEY_WRITE_REFUSAL});continue;}
+    if(l.amount!==undefined&&!money.write){rows.push({...base,message:SDK_MONEY_WRITE_REFUSAL});continue;}
     const repeat=seen.get(l.code)!;if(repeat.length>1){rows.push({...base,message:'Mã lặp ở dòng '+repeat.filter(n=>n!==l.line).join(', ')+'; giữ một dòng'});continue;}
     if(!rec){if(await foreignHolder(db,scope.projectId,l.code)){rows.push({...base,message:FOREIGN_CODE});continue;}rows.push({...base,outcome:'NEW',message:'Thêm vào kho'+(l.amount==null?' · chưa ghi tiền':'')});continue;}
     const ch=infoChanges(rec,{amount:l.amount,note:l.note});
@@ -298,7 +304,7 @@ export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
   const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
   // Without the money read right the amount, its times and source are not sent at all (never 0, never "chưa ghi"): `moneyHidden`.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,failedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,note:r.note,state:r.linkState,
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,failedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,observedCycle:money?r.amountCycle:null,observedVmId:money?r.amountVmId:null,note:r.note,state:r.linkState,
     vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){

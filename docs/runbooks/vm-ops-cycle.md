@@ -131,8 +131,11 @@ giữ nguyên, mục Cột ghi "Tiền VM") hiện **tiền quan sát trên máy
 không cần tài khoản EarnApp: dòng chính `$0,21`, dòng phụ "Kiểm tra 10 phút trước" (rê chuột: ngày giờ đầy đủ theo múi giờ ứng dụng);
 trạng thái rút ngắn bên dưới khi có yêu cầu. Trạng thái: **Chưa kiểm tra** (không có SDK hiện hành hoặc chưa đọc được tiền; không
 phải $0), `$0,00` khi đọc được 0, **Kiểm tra lỗi** (lần đọc mới nhất không đọc được: giữ số tốt cuối cùng với giờ cũ, `amountFailedAt`),
-**Số cũ** (quá 24 giờ), **Chưa rõ giờ** (tiền cũ không có giờ quan sát), **Ẩn** (thiếu quyền xem tiền). VM tạo lại hoặc đổi mã hiện hành:
-mã mới "Chưa kiểm tra", tiền mã cũ chỉ còn trong Kho SDK / lịch sử. Chỉ lấy mã hiện hành, không cộng các SDK dự phòng, không lấy số dư
+**Số cũ** (quá 24 giờ), **Chưa rõ giờ** (tiền cũ không có giờ quan sát), **Ẩn** (thiếu quyền xem tiền). Mỗi số tiền / lần đọc lỗi gắn
+với **VM + lượt** nơi nó được kiểm tra (`SdkRecord.amountVmId/amountCycle`, `amountFailedVmId/amountFailedCycle`, migration
+`20261022230000_sdk_money_binding`, dữ liệu cũ gắn vào VM + lượt hiện tại của mã): dòng chỉ hiện số của đúng VM đó ở đúng lượt hiện tại.
+VM tạo lại rồi chọn lại SDK, hoặc chuyển SDK sang VM khác: dòng mới "Chưa kiểm tra" cho tới khi AI kiểm tra lại đúng VM + lượt + mã;
+số cũ của mã vẫn giữ nguyên (khung ghi "mã này có $… đọc ở lượt N / trên VM khác, giữ làm lịch sử"), không xoá, không bịa giờ mới. Chỉ lấy mã hiện hành, không cộng các SDK dự phòng, không lấy số dư
 EarnApp thay. Bấm ô mở khung: Tiền VM (mã, số, giờ, nguồn, Lịch sử kiểm tra) → Số dư EarnApp (nếu có tài khoản) → Rút về PayPal (luồng
 cũ, quyền cũ; chưa có tài khoản thì chỉ giải thích). Lọc Chưa kiểm tra / Số cũ / Kiểm tra lỗi (`money=UNCHECKED|STALE|VM_FAILED`) và
 sắp xếp Tiền VM cao → thấp / kiểm tra lâu nhất (`sort=BALANCE|CHECKED_OLD`) chạy trên toàn bộ kết quả trước phân trang, trong URL. Dòng

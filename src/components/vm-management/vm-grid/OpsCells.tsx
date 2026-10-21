@@ -72,7 +72,7 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
   const hasEarnApp=!!account?.earnApp;
   // "Tiền VM" (owner brief 22/10/2026): the money seen on the machine for the VM's CURRENT SDK code (vm-money.ts), readable at the row
   // without an EarnApp account, then the payout status; the frame keeps the EarnApp balance and the payout flow apart from it.
-  const cur=vm.sdks.find(s=>s.current)??null,vmMoney=vmMoneyState(cur?{code:cur.code,amount:cur.amount,observedAt:cur.amountObservedAt,failedAt:cur.amountFailedAt,moneyHidden:cur.moneyHidden}:null),req=requestLine(ops);
+  const cur=vm.sdks.find(s=>s.current)??null,vmMoney=vmMoneyState(cur?{code:cur.code,amount:cur.amount,observedAt:cur.amountObservedAt,failedAt:cur.amountFailedAt,moneyHidden:cur.moneyHidden,stored:cur.stored}:null),req=requestLine(ops);
   const face=<><VmMoneyFace s={vmMoney}/>{req&&<LineView line={req}/>}{!req&&sus&&<span className="vm-money vm-money-failed">SUS</span>}</>;
   void m;void MILESTONE_LABEL;void formatLedger;void AccountCell;void onBusy;
   return <div className="vm-payout" data-vm-money={vmMoney.kind}>
@@ -84,7 +84,7 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
       :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={sus&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode&&(r||actionOpen.current)?<RequestAction projectId={projectId} vm={vm} mode={mode} request={r} narrow={!rights.writeMoney} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}} onBack={()=>setMode(null)}/>
       :<div className="space-y-2">
-        <VmMoneySection projectId={projectId} s={vmMoney} source={cur?.amountSource??null} sdkId={cur?.recordId??null} cycle={cycle}/>
+        <VmMoneySection projectId={projectId} s={vmMoney} source={cur?.amountSource??null} sdkId={cur?.recordId??null} cycle={cycle} vmId={vm.id}/>
         {ops&&hasEarnApp&&<BalanceSection projectId={projectId} vmCode={vm.code} ops={ops} read={!!rights.balanceRead} write={!!rights.balanceWrite} onSaved={onDone}/>}
         <p className="font-semibold text-xs">Rút về PayPal</p>
         {r?<RequestSummary request={r} milestone={ops?.milestone||''}/>:<p className="text-xs pm-muted">{hasEarnApp?'Chưa ghi yêu cầu rút cho EarnApp này.':'VM chưa có tài khoản EarnApp ở lượt này.'}</p>}
@@ -113,12 +113,12 @@ function VmMoneyFace({s}:{s:VmMoneyState}){
   if(s.kind==='NO_TIME')return <><span className="vm-money-amount">{formatUsd(s.amount)}</span><span className="vm-money-line text-xs" title={'Tiền ghi trước khi có giờ quan sát · SDK '+s.code}>Chưa rõ giờ</span></>;
   return <><span className="vm-money-head"><span className="vm-money-amount">{formatUsd(s.amount)}</span>{s.kind==='STALE'&&<span className="vm-money vm-money-waiting">Số cũ</span>}</span>{at(s.at)}</>;
 }
-function VmMoneySection({projectId,s,source,sdkId,cycle}:{projectId:string;s:VmMoneyState;source:string|null;sdkId:string|null;cycle:number}){
+function VmMoneySection({projectId,s,source,sdkId,cycle,vmId}:{projectId:string;s:VmMoneyState;source:string|null;sdkId:string|null;cycle:number;vmId:string}){
   const [open,setOpen]=useState(false);
   return <div className="space-y-1 text-xs" data-testid="vm-money-section">
     <p className="font-semibold">Tiền VM (tiền tích luỹ của SDK đang chạy)</p>
     {s.kind==='UNCHECKED'&&!s.code?<p className="pm-muted">VM chưa có SDK hiện hành ở lượt {cycle}; tiền của lượt / mã trước nằm trong Kho SDK và lịch sử, không tính là tiền hiện tại.</p>
-    :s.kind==='UNCHECKED'?<p>SDK <code>{shortCode(s.code!)}</code> · <span className="pm-muted">chưa có lần kiểm tra nào ghi được tiền.</span></p>
+    :s.kind==='UNCHECKED'?<p>SDK <code>{shortCode(s.code!)}</code> · <span className="pm-muted">chưa kiểm tra ở lượt {cycle} trên VM này.</span>{s.stored?<><br/><span className="pm-muted">Mã này có số {formatUsd(s.stored.amount!)} đọc {s.stored.observedAt?'lúc '+fullTime(s.stored.observedAt):'(chưa rõ giờ)'}{s.stored.cycle?' ở lượt '+s.stored.cycle:''}{s.stored.vmId&&s.stored.vmId!==vmId?' trên VM khác':''}: giữ làm lịch sử, không tính là tiền lượt này.</span></>:null}</p>
     :s.kind==='HIDDEN'?<p className="pm-muted">Số tiền ẩn theo quyền (cần quyền tiền hoặc “Ghi kiểm tra tiền EarnApp”).</p>
     :<p>SDK <code>{shortCode(s.code)}</code> · <strong>{s.amount!=null?formatUsd(s.amount):'chưa có số'}</strong>
       {s.kind==='FAILED'?<> · <span className="text-red-600">kiểm tra lỗi lúc {fullTime(s.failedAt)}</span>{s.at?' · số gần nhất lúc '+fullTime(s.at):''}</>:s.kind==='NO_TIME'?' · chưa rõ giờ quan sát (tiền ghi trước khi có giờ)':<> · quan sát lúc {fullTime(s.at!)}{s.kind==='STALE'?' · số cũ (hơn 24 giờ)':''}</>}

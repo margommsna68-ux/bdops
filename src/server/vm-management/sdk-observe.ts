@@ -60,13 +60,13 @@ export function normalizeObservation(input:Omit<ObserveInput,'key'>){
 }
 export const hasAmounts=(items:{amount?:string|null}[])=>items.some(i=>i.amount!==undefined);
 const conflict=(m:string,details:Record<string,unknown>)=>new ProxyDomainError('STALE_PREVIEW',m,'SDK_CONFLICT',details);
-async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null):Promise<ObservedRow['amount']>{
+async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null,at:{vmId:string;cycle:number}):Promise<ObservedRow['amount']>{
   const now=canonicalAmount(rec.amount?.toString()??null),prev=rec.amountObservedAt;
   const kept={value:now,observedAt:prev?.toISOString()??null,source:rec.amountSource};
   if(amount===undefined)return {outcome:'NOT_SENT',...kept};
   if(amount===null){
     // Could not read: the figure and its time stay; only the latest failed-reading time moves forward (Tiền VM shows "Kiểm tra lỗi").
-    if(!rec.amountFailedAt||observedAt>rec.amountFailedAt){await ctx.images.remember('SDK',rec.id);const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{amountFailedAt:observedAt,revision:{increment:1}}});
+    if(!rec.amountFailedAt||observedAt>rec.amountFailedAt){await ctx.images.remember('SDK',rec.id);const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{amountFailedAt:observedAt,amountFailedVmId:at.vmId,amountFailedCycle:at.cycle,revision:{increment:1}}});
       if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa được người khác thay đổi; đọc lại VM rồi gửi lại','REVISION_CONFLICT',{code:rec.code});}
     await event(tx,ctx,rec.id,'OBSERVE',{detail:{observedAt:observedAt.toISOString(),source,evidence,readable:false}});return {outcome:'UNREADABLE',...kept};}
   // A reading older than the one stored never replaces it; the same moment with another figure is a conflict to look at.
@@ -76,7 +76,7 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
     throw conflict('SDK '+rec.code+' đã có số '+now+' USD đọc đúng lúc này; cùng thời điểm khác tiền, đọc lại máy (không ghi gì)',{kind:'SAME_TIME_OTHER_AMOUNT',code:rec.code,sdkId:rec.id,revision:rec.revision,storedAmountUsd:now,observedAt:prev.toISOString()});
   }
   await ctx.images.remember('SDK',rec.id);
-  const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{...(now!==amount?{amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),amountObservedAt:observedAt,amountSource:source,revision:{increment:1}}});
+  const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{...(now!==amount?{amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),amountObservedAt:observedAt,amountSource:source,amountVmId:at.vmId,amountCycle:at.cycle,revision:{increment:1}}});
   if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa được người khác thay đổi; đọc lại VM rồi gửi lại','REVISION_CONFLICT',{code:rec.code});
   await event(tx,ctx,rec.id,now!==amount?'AMOUNT':'OBSERVE',{detail:{from:now,to:amount,observedAt:observedAt.toISOString(),source,evidence}});
   return {outcome:now===amount?'SAME':'SAVED',value:amount,observedAt:observedAt.toISOString(),source};
@@ -107,7 +107,7 @@ export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:Prism
     for(const {it,plan} of plans){
       if(plan.kind!=='SAME')await applyListAdd(tx,ctx,vm,plan,{},{createState:'UNCONFIRMED'});
       let rec=await tx.sdkRecord.findUniqueOrThrow({where:{projectId_code:{projectId:scope.projectId,code:it.code}}});
-      const amount=await observeAmount(tx,ctx,rec,it.amount,observedAt,source,request.evidence);
+      const amount=await observeAmount(tx,ctx,rec,it.amount,observedAt,source,request.evidence,{vmId:vm.id,cycle});
       rec=await tx.sdkRecord.findUniqueOrThrow({where:{id:rec.id}});
       if(it.current&&rec.vmId!==vm.id){
         await images.remember('SDK_SLOT',vm.id);await images.remember('SDK',rec.id);

@@ -6,4 +6,5 @@ PASS D5 M5: số quan sát 25 giờ trước → số cũ
 PASS D6 M6: tiền cũ không có giờ quan sát
 PASS D7 M7: ba SDK, mã hiện hành $1.5 (mã khác $9 và $0.5 là dự phòng)
 PASS D8 M8: đổi mã hiện hành → mã mới chưa kiểm tra, tiền mã cũ chỉ còn trong lịch sử / kho
-PASS D9 Không phát sinh chi phí / quỹ / rút / số dư EarnApp / yêu cầu rút / tài khoản EarnApp / nhận USDT
+PASS D9 M9: tạo lại VM (lượt 2) rồi chọn lại SDK: mã giữ $12.34 của lượt 1, chưa kiểm tra ở lượt 2
+PASS D10 Không phát sinh chi phí / quỹ / rút / số dư EarnApp / yêu cầu rút / tài khoản EarnApp / nhận USDT
