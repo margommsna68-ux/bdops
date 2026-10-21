@@ -42,7 +42,7 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 1. **Cấp quyền** — Kho proxy → Quyền nhân viên (ADMIN): chọn tài khoản (ví dụ `ai-ops`), giữ Hạ tầng, tick các quyền cần
    (Ghi kiểm tra tiền EarnApp / Chuẩn bị rút EarnApp / Ghi khoản nhận PP của yêu cầu rút). Hai quyền mới mặc định tắt.
 2. **Đặt PIN** cho tài khoản đó (Nhân viên → Đặt lại PIN, hoặc người đó tự đặt) — mọi lệnh ghi cần PIN.
-3. **Tạo token** — Thiết lập → Token API vận hành: chọn người, tên, thao tác, hạn (7 / 30 / 90 ngày), IP (tuỳ chọn), nhập PIN của ADMIN →
+3. **Tạo token** — Thiết lập → Token API vận hành: chọn người, tên, thao tác, hạn (7 / 30 / 90 ngày, hoặc **Không hết hạn** — theo yêu cầu chủ 22/10/2026: lưu mốc 9999-12-31, vẫn kết thúc khi thu hồi hoặc user bị vô hiệu hoá, quyền vẫn đọc lại mỗi lệnh; thu hồi ngay khi máy thôi dùng), IP (tuỳ chọn), nhập PIN của ADMIN →
    token `mth_…` hiện **một lần**. Copy ngay vào kho bí mật; không gửi qua chat, không dán vào lệnh, file commit hay ví dụ.
 4. **Nạp bí mật ngoài cuộc chat** — mở terminal của chính bạn (không qua ô chat Claude, không dùng cú pháp `!`), trong thư mục source:
    `node scripts/ops-client.mjs init` → gõ token và PIN (không hiện ký tự) → lưu ở `~/.mth/ops-secret.json`. Hoặc đặt biến môi trường

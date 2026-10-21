@@ -41,12 +41,16 @@ async function adminOf(db:Db,userId:string,projectId:string){
 }
 // createKey (22/10/2026): one key per opened form; a retried or double-clicked create returns the token already made (without the secret,
 // which is shown once) instead of making a second one.
-export interface CreateTokenInput {projectId:string;userId:string;name:string;scopes:OpsScope[];projectIds?:string[];expiresInDays:number;allowedIps?:string[];pin:string;createKey?:string|null}
+/** "Không hết hạn" (owner request 22/10/2026): a fixed far date, so every expiry check stays as it is; revoke, a disabled user and the
+ * user's current rights still end or limit the token. */
+export const NEVER_EXPIRES=Date.UTC(9999,11,31);
+export const neverExpires=(d:Date)=>d.getTime()>=NEVER_EXPIRES;
+export interface CreateTokenInput {projectId:string;userId:string;name:string;scopes:OpsScope[];projectIds?:string[];expiresInDays:number|null;allowedIps?:string[];pin:string;createKey?:string|null}
 export async function createOpsToken(adminId:string,input:CreateTokenInput,db:PrismaClient=prisma){
   const projectIds=Array.from(new Set(input.projectIds?.length?input.projectIds:[input.projectId])),scopes=Array.from(new Set(input.scopes)),ips=Array.from(new Set((input.allowedIps||[]).map(x=>x.trim()).filter(Boolean)));
   const name=input.name.trim();if(!name||name.length>60)throw new ProxyDomainError('INVALID_INPUT','Tên token 1–60 ký tự');
   if(!scopes.length||scopes.some(s=>!OPS_SCOPES.includes(s)))throw new ProxyDomainError('INVALID_INPUT','Chọn ít nhất một thao tác hợp lệ');
-  if(!(input.expiresInDays>=1&&input.expiresInDays<=90))throw new ProxyDomainError('INVALID_INPUT','Hạn token từ 1 đến 90 ngày');
+  if(input.expiresInDays!==null&&!(Number.isInteger(input.expiresInDays)&&input.expiresInDays>=1&&input.expiresInDays<=90))throw new ProxyDomainError('INVALID_INPUT','Hạn token từ 1 đến 90 ngày, hoặc không hết hạn');
   if(ips.length>20||ips.some(x=>!validIpRule(x)))throw new ProxyDomainError('INVALID_INPUT','Danh sách IP không hợp lệ (IP hoặc IPv4/nn, tối đa 20)');
   if(projectIds.length>10)throw new ProxyDomainError('INVALID_INPUT','Tối đa 10 dự án mỗi token');
   for(const id of projectIds)if(!await adminOf(db,adminId,id))throw new ProxyDomainError('FORBIDDEN','Chỉ ADMIN của dự án Proxy / VM được cấp token cho dự án đó');
@@ -62,7 +66,7 @@ export async function createOpsToken(adminId:string,input:CreateTokenInput,db:Pr
   const prev=await same();if(prev)return prev;
   const token='mth_'+randomBytes(32).toString('base64url'),prefix=token.slice(0,12);
   let row;
-  try{row=await db.opsToken.create({data:{name,prefix,tokenHash:hashToken(token),userId:input.userId,projectIds,scopes,allowedIps:ips,expiresAt:new Date(Date.now()+input.expiresInDays*86400000),createdById:adminId,createKey:key}});}
+  try{row=await db.opsToken.create({data:{name,prefix,tokenHash:hashToken(token),userId:input.userId,projectIds,scopes,allowedIps:ips,expiresAt:input.expiresInDays===null?new Date(NEVER_EXPIRES):new Date(Date.now()+input.expiresInDays*86400000),createdById:adminId,createKey:key}});}
   catch(e){if((e as {code?:string}).code==='P2002'&&key){const again=await same();if(again)return again;}throw e;}
   for(const id of projectIds)await db.auditLog.create({data:{projectId:id,userId:adminId,action:'OPS_TOKEN_CREATE',entity:'OpsToken',entityId:row.id,changes:{prefix,user:input.userId,scopes,expiresAt:row.expiresAt.toISOString(),ips:ips.length}}});
   return {id:row.id,prefix,token:token as string|null,expiresAt:row.expiresAt.toISOString(),already:false};
@@ -76,7 +80,7 @@ export async function listOpsTokens(adminId:string,projectId:string,db:PrismaCli
   const who=(id:string)=>{const u=users.find(x=>x.id===id);return u?u.name||u.username||'—':'—';};
   return rows.map(r=>({id:r.id,name:r.name,prefix:r.prefix,user:who(r.userId),username:users.find(u=>u.id===r.userId)?.username??null,projects:r.projectIds.map(id=>{const p=projects.find(x=>x.id===id);return p?p.name||p.code:'—';}),scopes:r.scopes,allowedIps:r.allowedIps,
     expiresAt:r.expiresAt.toISOString(),createdAt:r.createdAt.toISOString(),createdBy:who(r.createdById),lastUsedAt:r.lastUsedAt?.toISOString()??null,lastUsedIp:r.lastUsedIp,revokedAt:r.revokedAt?.toISOString()??null,
-    state:r.revokedAt?'REVOKED':r.expiresAt<new Date()?'EXPIRED':'ACTIVE'}));
+    neverExpires:neverExpires(r.expiresAt),state:r.revokedAt?'REVOKED':r.expiresAt<new Date()?'EXPIRED':'ACTIVE'}));
 }
 export async function revokeOpsToken(adminId:string,input:{projectId:string;tokenId:string},db:PrismaClient=prisma){
   if(!await adminOf(db,adminId,input.projectId))throw new ProxyDomainError('FORBIDDEN');

@@ -8,7 +8,7 @@ export const opsTokenRouter=router({
   // The user page (22/10/2026) lists and creates tokens of the user being viewed, in the project being viewed; filtered on the server.
   list:protectedProcedure.input(forUser).query(({ctx,input})=>domain(()=>listOpsTokens(ctx.user.id,input.projectId,ctx.prisma,{userId:input.userId}))),
   candidates:protectedProcedure.input(forUser).query(({ctx,input})=>domain(()=>tokenCandidates(ctx.user.id,input.projectId,ctx.prisma,{userId:input.userId}))),
-  create:protectedProcedure.input(project.extend({userId:z.string().min(1),name:z.string().min(1).max(60),scopes:z.array(z.enum(OPS_SCOPES)).min(1).max(OPS_SCOPES.length),projectIds:z.array(z.string().min(1)).max(10).optional(),expiresInDays:z.number().int().min(1).max(90),allowedIps:z.array(z.string().max(50)).max(20).optional(),pin:z.string().min(4).max(12),createKey:z.string().min(8).max(80).optional()}))
+  create:protectedProcedure.input(project.extend({userId:z.string().min(1),name:z.string().min(1).max(60),scopes:z.array(z.enum(OPS_SCOPES)).min(1).max(OPS_SCOPES.length),projectIds:z.array(z.string().min(1)).max(10).optional(),expiresInDays:z.number().int().min(1).max(90).nullable(),allowedIps:z.array(z.string().max(50)).max(20).optional(),pin:z.string().min(4).max(12),createKey:z.string().min(8).max(80).optional()}))
     .mutation(({ctx,input})=>domain(()=>createOpsToken(ctx.user.id,input,ctx.prisma))),
   revoke:protectedProcedure.input(project.extend({tokenId:z.string().min(1)})).mutation(({ctx,input})=>domain(()=>revokeOpsToken(ctx.user.id,input,ctx.prisma))),
 });

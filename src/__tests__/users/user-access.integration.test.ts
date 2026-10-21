@@ -112,6 +112,19 @@ describe('disabling an account',()=>{
 });
 
 describe('tokens of one user',()=>{
+  // Owner request 22/10/2026: "Không hết hạn" (expiresInDays null) as an expiry choice; revoke / disable / rights checks still apply.
+  it('a token without expiry works, is listed as such, and still ends when the user is disabled',async()=>{
+    const f=await setup();try{
+      const t=await createOpsToken(f.scope.userId,{projectId:f.projectId,userId:f.ai,name:'Central · AI',scopes:['READ'],expiresInDays:null,pin:ADMIN_PIN},db);
+      expect(new Date(t.expiresAt).getUTCFullYear()).toBe(9999);
+      const [row]=await listOpsTokens(f.scope.userId,f.projectId,db,{userId:f.ai});expect(row).toMatchObject({state:'ACTIVE',neverExpires:true});
+      expect((await api('GET','me',{token:t.token!})).status).toBe(200);
+      await setUserDisabled(db,f.scope.userId,{projectId:f.projectId,userId:f.ai,disabled:true});
+      expect((await api('GET','me',{token:t.token!})).status).toBe(401);
+      await expect(createOpsToken(f.scope.userId,{projectId:f.projectId,userId:f.ai2,name:'x',scopes:['READ'],expiresInDays:0,pin:ADMIN_PIN},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      await expect(caller(f.scope.userId).opsToken.create({projectId:f.projectId,userId:f.ai2,name:'Central · AI 2',scopes:['READ'],expiresInDays:null,pin:ADMIN_PIN})).resolves.toMatchObject({already:false});
+    }finally{await cleanupAccess(f);await f.cleanup();}
+  });
   it('the list is filtered on the server; a repeated / concurrent create with the same key makes one token; non-admins cannot create or grant',async()=>{
     const f=await setup();try{
       await f.token(f.ai2,['READ']);

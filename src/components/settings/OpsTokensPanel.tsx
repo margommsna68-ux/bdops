@@ -31,7 +31,7 @@ export function OpsTokensPanel({projectId,userId,who}:{projectId:string;userId:s
   const can=TOKEN_SCOPES.filter(s=>ops?.[s.value]),cannot=TOKEN_SCOPES.filter(s=>ops&&!ops[s.value]);
   async function submit(){
     if(create.isLoading)return;setError('');
-    try{const r=await create.mutateAsync({projectId,userId,name:name.trim(),scopes,expiresInDays:days,allowedIps:ips.split(/[\s,]+/).filter(Boolean),pin,createKey:key});
+    try{const r=await create.mutateAsync({projectId,userId,name:name.trim(),scopes,expiresInDays:days||null,allowedIps:ips.split(/[\s,]+/).filter(Boolean),pin,createKey:key});
       if(r.token)setShown({token:r.token,prefix:r.prefix});
       else toast('Token '+r.prefix+'… đã được tạo ở lần bấm trước. Token đầy đủ chỉ hiện một lần: nếu chưa lưu, thu hồi rồi tạo token mới.',{duration:9000});
       setPin('');setOpen(false);setName('');setScopes([]);setIps('');setKey(newKey());await utils.opsToken.list.invalidate({projectId,userId});void utils.user.access.invalidate();}
@@ -53,7 +53,7 @@ export function OpsTokensPanel({projectId,userId,who}:{projectId:string;userId:s
         {can.map(s=><label key={s.value} className="flex items-center gap-2"><input type="checkbox" checked={scopes.includes(s.value)} onChange={e=>setScopes(e.target.checked?[...scopes,s.value]:scopes.filter(x=>x!==s.value))}/>{s.label}</label>)}
         {cannot.length>0&&<p className="text-xs text-gray-500 pt-1">Chưa được cấp cho người này: {cannot.map(s=>s.label).join('; ')}. Cấp ở mục Quyền phía trên nếu cần.</p>}
       </fieldset>
-      <label className="space-y-1 block max-w-[12rem]"><span className="text-xs text-gray-600">Hạn dùng</span><select className="w-full border rounded px-2 py-1.5 bg-transparent" value={days} onChange={e=>setDays(Number(e.target.value))}>{[7,30,90].map(d=><option key={d} value={d}>{d} ngày</option>)}</select></label>
+      <label className="space-y-1 block max-w-[12rem]"><span className="text-xs text-gray-600">Hạn dùng</span><select className="w-full border rounded px-2 py-1.5 bg-transparent" value={days} onChange={e=>setDays(Number(e.target.value))}>{[7,30,90].map(d=><option key={d} value={d}>{d} ngày</option>)}<option value={0}>Không hết hạn</option></select>{days===0&&<span className="text-xs text-amber-700 block">Dùng đến khi thu hồi. Thu hồi ngay khi máy không còn dùng token.</span>}</label>
       <details><summary className="text-xs text-gray-600 cursor-pointer">Tuỳ chọn</summary>
         <label className="space-y-1 block mt-2"><span className="text-xs text-gray-600">Chỉ nhận từ IP (cách nhau bằng dấu phẩy; IPv4, IPv6 hoặc IPv4/nn)</span><Input value={ips} placeholder="để trống = không giới hạn IP" onChange={e=>setIps(e.target.value)}/></label></details>
       <label className="space-y-1 block max-w-xs"><span className="text-xs text-gray-600">PIN của bạn (ADMIN) để xác nhận</span><Input type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,''))}/></label>
@@ -66,7 +66,7 @@ export function OpsTokensPanel({projectId,userId,who}:{projectId:string;userId:s
     {!!list.data?.length&&<div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-3">Tên token</th><th className="pr-3">Quyền</th><th className="pr-3">Hết hạn</th><th className="pr-3">Dùng gần nhất</th><th className="pr-3">Tình trạng</th><th/></tr></thead>
       <tbody>{list.data.map(t=><tr key={t.id} className="border-t align-top"><td className="py-2 pr-3"><div className="font-medium">{t.name}</div><code className="text-xs text-gray-500">{t.prefix}…</code></td>
         <td className="pr-3 text-xs">{t.scopes.map(label).join(' · ')}{t.allowedIps.length>0&&<div className="text-gray-500">IP: {t.allowedIps.join(', ')}</div>}</td>
-        <td className="pr-3 text-xs">{when(t.expiresAt)}</td>
+        <td className="pr-3 text-xs">{t.neverExpires?'Không hết hạn':when(t.expiresAt)}</td>
         <td className="pr-3 text-xs">{when(t.lastUsedAt)}{t.lastUsedIp&&<div className="text-gray-500">{t.lastUsedIp}</div>}</td>
         <td className="pr-3 text-xs">{t.state==='REVOKED'?<span className="text-red-600">Đã thu hồi {when(t.revokedAt)}</span>:t.state==='EXPIRED'?<span className="text-gray-500">Hết hạn</span>:<span className="text-green-700">Còn hiệu lực</span>}</td>
         <td className="text-right">{t.state==='ACTIVE'&&<Button size="sm" variant="outline" disabled={revoke.isLoading} onClick={()=>{if(!window.confirm('Thu hồi token '+t.prefix+'…? Lệnh tiếp theo dùng token này sẽ bị từ chối.'))return;void revoke.mutateAsync({projectId,tokenId:t.id}).then(()=>{toast.success('Đã thu hồi');void utils.opsToken.list.invalidate({projectId,userId});void utils.user.access.invalidate();}).catch(e=>toast.error(e instanceof Error?e.message:'Không thu hồi được'));}}>Thu hồi</Button>}</td></tr>)}</tbody></table></div>}
