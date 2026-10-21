@@ -973,18 +973,72 @@
        "unconfirmed": {
         "type": "integer"
        },
-       "referenceMoney": {
-        "type": "object",
-        "additionalProperties": {
-         "type": "string",
-         "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
-         "example": "10.00"
-        },
-        "description": "per currency, money rights only; never the EarnApp balance",
-        "nullable": true
-       },
        "note": {
         "type": "string"
+       },
+       "amountsVisible": {
+        "type": "boolean",
+        "description": "amounts / observedAt / source are shown only with SDK_AMOUNT on the token (or the money rights)"
+       },
+       "items": {
+        "type": "array",
+        "description": "every code of the VM list, each with ITS OWN money (never added up into a VM figure; not the EarnApp balance)",
+        "items": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "id": {
+           "type": "string"
+          },
+          "code": {
+           "type": "string"
+          },
+          "revision": {
+           "type": "integer"
+          },
+          "linkState": {
+           "type": "string",
+           "enum": [
+            "UNLINKED",
+            "LINKED",
+            "UNCONFIRMED"
+           ]
+          },
+          "current": {
+           "type": "boolean"
+          },
+          "amount": {
+           "type": "string",
+           "nullable": true,
+           "pattern": "^\\d{1,10}(\\.\\d{1,6})?$",
+           "description": "latest USD read; null = not recorded or hidden (missing is never 0)"
+          },
+          "currency": {
+           "type": "string"
+          },
+          "observedAt": {
+           "type": "string",
+           "format": "date-time",
+           "nullable": true,
+           "description": "when the amount was seen (not when it was written)"
+          },
+          "source": {
+           "type": "string",
+           "nullable": true
+          }
+         },
+         "required": [
+          "id",
+          "code",
+          "revision",
+          "linkState",
+          "current",
+          "amount",
+          "currency",
+          "observedAt",
+          "source"
+         ]
+        }
        }
       },
       "required": [
@@ -992,8 +1046,9 @@
        "unused",
        "used",
        "unconfirmed",
-       "referenceMoney",
-       "note"
+       "note",
+       "amountsVisible",
+       "items"
       ]
      },
      "balance": {
@@ -1405,7 +1460,8 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS"
+          "PROXY_CREDENTIALS",
+          "SDK_AMOUNT"
          ]
         }
        }
@@ -1463,6 +1519,9 @@
           },
           "PROXY_CREDENTIALS": {
            "type": "boolean"
+          },
+          "SDK_AMOUNT": {
+           "type": "boolean"
           }
          },
          "required": [
@@ -1471,7 +1530,8 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS"
+          "PROXY_CREDENTIALS",
+          "SDK_AMOUNT"
          ]
         }
        },
@@ -3859,6 +3919,177 @@
      "data",
      "error"
     ]
+   },
+   "SdkObserveAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "expectedCycle": {
+        "type": "integer"
+       },
+       "observedAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "source": {
+        "type": "string"
+       },
+       "currentDiffers": {
+        "nullable": true,
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "currentCode": {
+          "type": "string"
+         },
+         "message": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "currentCode",
+         "message"
+        ]
+       },
+       "vmRevisionAfter": {
+        "type": "integer"
+       },
+       "sdks": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "code": {
+           "type": "string"
+          },
+          "sdkId": {
+           "type": "string"
+          },
+          "placed": {
+           "type": "string",
+           "enum": [
+            "CREATED",
+            "TAKEN",
+            "IN_LIST"
+           ],
+           "description": "CREATED = new code, saved \"Chưa xác nhận\"; TAKEN = an unused code of the store joined the VM list; IN_LIST = already in this VM list (state kept)"
+          },
+          "linkState": {
+           "type": "string",
+           "enum": [
+            "UNLINKED",
+            "LINKED",
+            "UNCONFIRMED"
+           ]
+          },
+          "current": {
+           "type": "boolean"
+          },
+          "amount": {
+           "type": "object",
+           "additionalProperties": false,
+           "properties": {
+            "outcome": {
+             "type": "string",
+             "enum": [
+              "SAVED",
+              "SAME",
+              "OLDER",
+              "UNREADABLE",
+              "NOT_SENT"
+             ],
+             "description": "OLDER = a newer observation is stored: its money is kept"
+            },
+            "amountUsd": {
+             "type": "string",
+             "nullable": true,
+             "description": "stored amount after this command; null without SDK_AMOUNT or not recorded"
+            },
+            "observedAt": {
+             "type": "string",
+             "format": "date-time",
+             "nullable": true
+            }
+           },
+           "required": [
+            "outcome",
+            "amountUsd",
+            "observedAt"
+           ]
+          }
+         },
+         "required": [
+          "code",
+          "sdkId",
+          "placed",
+          "linkState",
+          "current",
+          "amount"
+         ]
+        }
+       }
+      },
+      "required": [
+       "vmId",
+       "expectedCycle",
+       "observedAt",
+       "source",
+       "currentDiffers",
+       "vmRevisionAfter",
+       "sdks"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkSdkObserveAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SdkObserveAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -5867,6 +6098,171 @@
      },
      "403": {
       "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/sdk-observations": {
+   "post": {
+    "summary": "SDK codes seen RUNNING on the machine (survey: no install, job or EarnApp account needed), with the accumulated USD read there (needs SDK_AMOUNT). New codes are saved \"Chưa xác nhận\"; codes of this VM keep their state (a used code stays used); a code of another VM, a used / unconfirmed code outside this VM or of another project refuses the whole command (DUPLICATE, nothing written). An older observedAt never replaces a newer stored reading (amount.outcome OLDER). Never an EarnApp balance, income, cost or \"withdrawable\".",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer",
+          "minimum": 1
+         },
+         "expectedVmRevision": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "when the machine was read (not when this is sent); not in the future"
+         },
+         "source": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "where it was read, e.g. \"AE Mini Tool · màn hình EarnApp\""
+         },
+         "sdks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "description": "one entry per code; the same code twice (two files on the machine) is one SDK; two different amounts for it are refused",
+          "items": {
+           "type": "object",
+           "additionalProperties": false,
+           "properties": {
+            "code": {
+             "type": "string",
+             "minLength": 8,
+             "maxLength": 128
+            },
+            "amountUsd": {
+             "type": "string",
+             "nullable": true,
+             "pattern": "^\\d{1,10}(\\.\\d{1,6})?$",
+             "description": "USD read (decimals kept; \"0\" is a value). Needs SDK_AMOUNT"
+            },
+            "amountRead": {
+             "type": "boolean",
+             "description": "false = the money could not be read this time (the stored amount is kept, never 0); true needs amountUsd; absent with no amountUsd = no money in this request"
+            },
+            "current": {
+             "type": "boolean",
+             "description": "the code the machine runs now: becomes the VM current code only when the VM has none (a different current code is kept and reported)"
+            }
+           },
+           "required": [
+            "code"
+           ]
+          }
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "expectedVmRevision",
+         "observedAt",
+         "source",
+         "sdks"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkObserveAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN (also money without SDK_AMOUNT) / PIN_LOCKED",
       "content": {
        "application/json": {
         "schema": {

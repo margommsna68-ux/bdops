@@ -165,3 +165,36 @@ Migration `20261019150000_sdk_store` (chỉ thêm), đã chạy thử trên bả
   ưu tiên mã thật sự chưa dùng; danh sách xếp Chưa dùng → Chưa xác nhận → Đã dùng. Không đổi trạng thái dữ liệu cũ.
 - Test: `src/__tests__/proxy-management/sdk-list-review.integration.test.ts`. Phát hành: commit e85a82f, backup host 97a9cf96, deploy 73622735, không
   migration; host chỉ đọc trước / sau giống hệt, chỉ xem trước bản dán. Evidence docs/superpowers/evidence/2026-10-20-sdk-review-fixes/.
+
+## Ghi nhận SDK đang chạy trên máy + tiền tích luỹ (yêu cầu chủ dự án 22/10/2026)
+
+Dùng khi khảo sát máy đang chạy (ví dụ Central đọc 31 VM trên vt-01): **không** phải lần cài, không cần việc (job), không cần cài lại
+EarnApp hay gán tài khoản. Luồng "mỗi lần cài phải ghi SDK mới" (`POST vms/{id}/sdk` trong việc cài) giữ nguyên, riêng.
+
+- API: `POST /api/ops/v1/vms/{id}/sdk-observations` (OpenAPI `docs/ops-api/openapi.json`), body: `projectId`, `expectedCycle`,
+  `expectedVmRevision`, `observedAt` (giờ đọc trên máy, không ở tương lai), `source` (nơi đọc, ví dụ "AE Mini Tool · màn hình
+  EarnApp"), `sdks[]` gồm `code`, `amountUsd` (chuỗi USD, giữ số lẻ, "0" là một giá trị), `amountRead:false` (lần này không đọc được,
+  khác 0, tiền cũ giữ nguyên), `current:true` (mã máy đang chạy; chỉ thành mã hiện hành khi VM chưa có mã nào).
+- Quyền: ghi mã cần `VM_OPS`; có tiền thì cần thêm `SDK_AMOUNT` trên token (kiểm lại trong giao dịch). Phía user là quyền SDK của web
+  (Server / VM, ASSIGN). `SDK_AMOUNT` không mở số dư EarnApp, rút tiền, PayPal hay chi phí. Đọc tiền SDK ở `GET vms/{id}` cũng cần
+  `SDK_AMOUNT` (hoặc quyền tiền sẵn có); mỗi mã một số riêng (`sdk.items[]`), **không cộng** thành số của VM (trường cũ
+  `referenceMoney` đã bỏ).
+- Một lệnh = một giao dịch: token, PIN, quyền, lượt, revision VM, chống lưu lặp (cùng `Idempotency-Key` + cùng nội dung → trả xác nhận
+  đầu; khác nội dung → `IDEMPOTENCY_CONFLICT`). Một mã bị từ chối thì **cả lệnh** không ghi gì.
+- Mã:
+  - đã trong danh sách của VM → giữ trạng thái (Đã dùng vẫn Đã dùng, Chưa xác nhận vẫn Chưa xác nhận), chỉ cập nhật tiền;
+  - mã mới → tạo **Chưa xác nhận** (không tự là "Chưa dùng" chỉ vì web chưa có tài khoản hay ứng dụng hiện Sign in); người xác nhận ở Kho SDK;
+  - mã chưa dùng đang trong kho → vào danh sách của VM;
+  - mã ở danh sách VM khác, mã Đã dùng / Chưa xác nhận ngoài VM này, mã của dự án khác → `409 DUPLICATE`, không chuyển, không ghi;
+  - hai file cùng mã trên một máy = một SDK; cùng mã hai số tiền khác nhau → `422`.
+- Tiền nằm trên chính mã SDK: `amount` (giá trị gần nhất, không cộng dồn), `amountObservedAt` (giờ thấy trên máy) khác `amountAt` (giờ
+  ghi), `amountSource`. Quan sát cũ hơn bản đã lưu → `amount.outcome = OLDER`, giữ số mới. Không tạo chi phí, thu PayPal, lợi nhuận,
+  số dư EarnApp; không suy ra "Có thể rút". Sửa tay trên web cũng ghi giờ quan sát = lúc sửa, nguồn "Web · …".
+- ops-client: `sdk-check <survey.json>` kiểm cả bảng tại máy (trùng mã giữa VM, hai số cho một mã, dạng tiền…; không gửi gì);
+  `sdk-observe <one-vm.json>` gửi một VM (key in trước khi gửi, `retry <key>` khi mất phản hồi).
+- Bảng Server / VM: ô SDK có dòng tiền + "Kiểm tra hh:mm" của **mã hiện hành** (ghi "Hiện hành …abcd:" khi mã hiện hành khác mã ô đang
+  hiện); không có mã hiện hành thì không có dòng tiền. Khung SDK ghi giờ kiểm tra từng mã; Kho SDK hiện giờ kiểm tra. Cột Tiền / Rút giữ
+  nghĩa số dư tài khoản EarnApp và yêu cầu rút.
+- Migration `20261022150000_sdk_observed` (chỉ thêm cột `SdkRecord.amountObservedAt`, `amountSource`).
+- Trước khi nhập bảng thật: kiểm lại các dòng OCR nghi sai, `sdk-check` cả bảng, ghi đúng **một** VM chủ giao, đọc lại (`vm <projectId>
+  <vmId>`) xác nhận rồi mới mở rộng.

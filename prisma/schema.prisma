@@ -1559,6 +1559,10 @@ model SdkRecord {
   currency        String          @default("USD")
   amountAt        DateTime?
   amountById      String?
+  // 22/10/2026 (AI SDK money): when the amount was seen on the machine (amountAt = when it was written) and where it was read. An
+  // observation older than the stored one never replaces it. null on old rows: amountAt stands for both.
+  amountObservedAt DateTime?
+  amountSource     String?
   note            String?
   noteAt          DateTime?
   noteById        String?

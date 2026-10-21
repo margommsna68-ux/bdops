@@ -94,7 +94,7 @@ export async function syncMirror(tx:Tx,vmId:string,actorId:string,now:Date):Prom
 async function applyInfo(tx:Tx,ctx:WriteCtx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
-  await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
+  await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
   if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:ch.amount});
   if(ch.note)await event(tx,ctx,record.id,'NOTE',{detail:ch.note});
   return true;
@@ -116,7 +116,7 @@ export async function applyPlacement(tx:Tx,ctx:WriteCtx,vm:SdkVM,plan:PlacementP
   if(plan.kind==='CREATE'){
     const info0=checkInfo(info);
     target=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code!,vmId:null,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
-      ...(info0.amount!=null?{amount:info0.amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),...(info0.note?{note:info0.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});
+      ...(info0.amount!=null?{amount:info0.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(info0.note?{note:info0.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});
     await ctx.images.remember('SDK',target.id,true);
     await event(tx,ctx,target.id,'CREATE',{detail:{amount:info0.amount??null,note:info0.note??null}});
   }
@@ -262,7 +262,7 @@ export async function applySdkStore(scope:ActorScope,input:{key:string;rows:{lin
       if(!rec){
         if(r.expectedRevision!==null){out.push({line:r.line,code:r.code,outcome:'ERROR',message:'Mã vừa bị xoá hoặc đổi; kiểm tra lại'});continue;}
         if(await foreignHolder(tx,scope.projectId,r.code)){out.push({line:r.line,code:r.code,outcome:'ERROR',message:FOREIGN_CODE});continue;}
-        const created=await tx.sdkRecord.create({data:{projectId:scope.projectId,code:r.code,linkState:'UNLINKED',createdById:current.userId,createdAt:now,...(info.amount!=null?{amount:info.amount,amountAt:now,amountById:current.userId}:{}),...(info.note?{note:info.note,noteAt:now,noteById:current.userId}:{})}});
+        const created=await tx.sdkRecord.create({data:{projectId:scope.projectId,code:r.code,linkState:'UNLINKED',createdById:current.userId,createdAt:now,...(info.amount!=null?{amount:info.amount,amountAt:now,amountById:current.userId,amountObservedAt:now,amountSource:'Web · Kho SDK'}:{}),...(info.note?{note:info.note,noteAt:now,noteById:current.userId}:{})}});
         await images.remember('SDK',created.id,true);await event(tx,ctx,created.id,'CREATE',{detail:{amount:info.amount??null,note:info.note??null}});
         out.push({line:r.line,code:r.code,outcome:'SAVED',message:'Đã thêm vào kho'});continue;
       }
@@ -293,7 +293,7 @@ export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
   const vmPick={select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}} as const;
   const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,note:r.note,state:r.linkState,
+  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),currency:r.currency,amountAt:r.amountAt?.toISOString()??null,observedAt:(r.amountObservedAt??(r.amount!=null?r.amountAt:null))?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,
     vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){

@@ -12,7 +12,8 @@ import {localDate} from '@/components/proxy-management/HistoryPanel';
 import {errorMessage,useVMRefresh,type ManagedVM} from '../shared';
 import type {VmAccount} from './AccountCell';
 import {shortCode} from './grid-model';
-import {sdkFirst,sdkSummary} from './sdk-summary';
+import {currentSdkMoney,sdkFirst,sdkSummary} from './sdk-summary';
+import {when} from './MoneyParts';
 export type StoreSdk=inferRouterOutputs<AppRouter>['vmManagement']['sdkStore'][number];
 type VmSdk=ManagedVM['sdks'][number];
 /** The "add a code" form of the frame kept as a draft while the frame is closed (per person, project, VM and round). `pending` = the
@@ -46,8 +47,11 @@ export function SdkCell({projectId,vm,account,canEdit,draft,onDraft,onBusy}:{pro
   useEffect(()=>{if(!open)return;const down=(e:MouseEvent)=>{if(!pop.current?.contains(e.target as Node)&&!anchor.current?.contains(e.target as Node))closeRef.current(false);};
     const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.isComposing&&!(e.target as HTMLElement)?.closest?.('[data-sdk-edit]')){e.stopPropagation();e.preventDefault();closeRef.current();}};
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
-  const list=vm.sdks,first=sdkFirst(list);
+  const list=vm.sdks,first=sdkFirst(list),money=currentSdkMoney(list,first);
+  // 22/10/2026: money + check time of the current code, readable without opening the frame (never a sum of the VM's codes).
+  const moneyLine=money&&<span className="vm-sdk-money" title={'Tiền tích luỹ đọc trên máy của SDK hiện hành '+money.code+(money.at?', kiểm tra lúc '+when(money.at):'')+' (không phải số dư EarnApp)'}>{money.other?'Hiện hành …'+money.code.slice(-4)+': ':''}{money.amount!==null?<strong>{formatSdkAmount(money.amount)}</strong>:'Chưa ghi tiền'}{money.at?' · lúc '+when(money.at):''}</span>;
   const view=<>{first?<span className="vm-sdk-line"><code className="vm-sdk vm-ellipsis" title={first.code}>{shortCode(first.code)}</code><button type="button" className="vm-cell-icon" aria-label={'Copy SDK '+vm.code} title="Copy SDK đầy đủ" onClick={e=>{e.stopPropagation();copyCode(first.code,vm.code);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button></span>:<span className="vm-sdk-missing">Chưa có SDK</span>}
+    {moneyLine}
     {list.length>0&&<span className="vm-sdk-sub">{sdkSummary(list)}</span>}
     {draft&&<span className="vm-sdk-draft" title="Có mã đang nhập chưa lưu; mở ô để lưu hoặc huỷ">● Nháp chưa lưu</span>}</>;
   if(vm.archivedAt)return <div className="vm-sdk-cell2">{view}</div>;
@@ -166,7 +170,7 @@ function SdkRow({s,vm,canEdit,busy,onInfo,onUsed,onRemove,onHistory,historyOpen}
       <button type="button" className="vm-cell-icon" aria-label={'Lịch sử SDK '+s.code} aria-expanded={historyOpen} title="Lịch sử mã" onClick={onHistory}><History size={13}/></button></span>
       {s.current&&<span className="vm-sdk-current">hiện hành</span>}</td>
     <td data-sdk-edit>{edit==='amount'?<input autoFocus className="pm-input vm-sdk-inline" inputMode="decimal" aria-label={'Tiền tích luỹ USD '+s.code} value={text} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
-      :<button type="button" className="vm-sdk-value" disabled={!canEdit} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canEdit?'Ghi tiền':'Chưa ghi'}</span>}</button>}</td>
+      :<button type="button" className="vm-sdk-value" disabled={!canEdit} onClick={()=>start('amount')}>{s.amount!==null?formatSdkAmount(s.amount):<span className="pm-muted">{canEdit?'Ghi tiền':'Chưa ghi'}</span>}</button>}{edit!=='amount'&&s.amount!==null&&s.amountObservedAt&&<span className="vm-sdk-seen" title={s.amountSource?'Nguồn: '+s.amountSource:undefined}>Kiểm tra {when(s.amountObservedAt)}</span>}</td>
     <td data-sdk-edit>{edit==='note'?<textarea autoFocus rows={2} className="pm-input vm-sdk-inline" aria-label={'Ghi chú '+s.code} value={text} maxLength={SDK_NOTE_MAX} disabled={rowBusy} onChange={e=>{setText(e.target.value);setErr('');}} onKeyDown={keys}/>
       :<button type="button" className="vm-sdk-value vm-sdk-note" disabled={!canEdit} onClick={()=>start('note')}>{s.note||<span className="pm-muted">{canEdit?'Thêm ghi chú':'—'}</span>}</button>}
       {err&&<p className="vm-cell-error" role="alert">{err}</p>}</td>

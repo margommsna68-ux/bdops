@@ -18,7 +18,7 @@ import {checkInfo,cycleOf,FOREIGN_CODE,infoChanges,syncMirror,where,type SdkInfo
 //   replays instead of writing twice.
 type Tx=Prisma.TransactionClient;
 const vmSelect={id:true,code:true,revision:true,archivedAt:true,managed:true,server:{select:{id:true,code:true,archivedAt:true}},operation:{select:{cycle:true}}} as const;
-type ListVM=Prisma.VirtualMachineGetPayload<{select:typeof vmSelect}>;
+export type ListVM=Prisma.VirtualMachineGetPayload<{select:typeof vmSelect}>;
 const label=(vm:{code:string;archivedAt:Date|null;server:{code:string;archivedAt:Date|null}})=>where(vm)+(vm.archivedAt||vm.server.archivedAt?' (đã xoá)':'');
 export const RECREATED_LINE='VM đã được tạo lại, kiểm tra lại dòng này';
 const staleCycle=(cycle:number)=>'VM đã sang lượt '+cycle+'; lệnh này dành cho lượt cũ. Tải lại rồi làm theo lượt hiện hành';
@@ -27,13 +27,13 @@ const UNCONFIRMED_REFUSAL=(code:string)=>'SDK '+code+' là dữ liệu cũ chưa
 async function foreign(db:VMReader,projectId:string,code:string){
   return !!(await db.sdkRecord.findFirst({where:{code,projectId:{not:projectId}},select:{id:true}})||await db.virtualMachine.findFirst({where:{sdkId:code,managed:true,server:{projectId:{not:projectId}}},select:{id:true}}));
 }
-async function loadVM(db:VMReader,projectId:string,vmId:string):Promise<ListVM>{
+export async function loadVM(db:VMReader,projectId:string,vmId:string):Promise<ListVM>{
   const vm=await db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});
   if(!vm)throw new ProxyDomainError('NOT_FOUND','VM không thuộc dự án này');
   if(vm.archivedAt||vm.server.archivedAt)throw new ProxyDomainError('INVALID_INPUT',where(vm)+' đã xoá; khôi phục VM trước khi ghi SDK');
   return vm;
 }
-const holderOf=(r:{holderVmId:string|null;vmId:string|null})=>r.holderVmId??r.vmId;
+export const holderOf=(r:{holderVmId:string|null;vmId:string|null})=>r.holderVmId??r.vmId;
 export type ListPlan={kind:'CREATE'|'SAME'|'TAKE'|'MOVE';code:string;record:SdkRecord|null;source:ListVM|null};
 /**
  * What adding `code` to the list of `vm` means, without writing. Errors come back as text (a paste reports them at the line).
@@ -53,8 +53,8 @@ export async function planListAdd(db:VMReader,projectId:string,vm:ListVM,code:st
   if(source.revision!==from.expectedRevision)return {error:label(source)+' vừa được thay đổi; tải lại rồi chọn lại',code:'STALE_PREVIEW'};
   return {plan:{kind:'MOVE',code,record,source}};
 }
-interface Ctx {projectId:string;actorId:string;images:BusinessCollector;now:Date;via:string}
-async function event(tx:Tx,ctx:Ctx,sdkId:string,kind:string,data:{fromVmId?:string|null;toVmId?:string|null;fromLabel?:string|null;toLabel?:string|null;detail?:Prisma.InputJsonValue}={}){
+export interface Ctx {projectId:string;actorId:string;images:BusinessCollector;now:Date;via:string}
+export async function event(tx:Tx,ctx:Ctx,sdkId:string,kind:string,data:{fromVmId?:string|null;toVmId?:string|null;fromLabel?:string|null;toLabel?:string|null;detail?:Prisma.InputJsonValue}={}){
   await tx.sdkEvent.create({data:{projectId:ctx.projectId,sdkId,kind,actorId:ctx.actorId,createdAt:ctx.now,...data,detail:{via:ctx.via,...(data.detail as object||{})}}});
 }
 /**
@@ -73,20 +73,21 @@ const hasChanges=(plan:ListPlan,info:SdkInfo)=>{const ch=infoChanges(plan.record
 async function applyInfo(tx:Tx,ctx:Ctx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
-  const n=await tx.sdkRecord.updateMany({where:{id:record.id,revision:record.revision},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
+  const n=await tx.sdkRecord.updateMany({where:{id:record.id,revision:record.revision},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
   if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+record.code+' vừa được người khác thay đổi; kiểm tra lại');
   if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:ch.amount});
   if(ch.note)await event(tx,ctx,record.id,'NOTE',{detail:ch.note});
   return true;
 }
 /** Write one add. Concurrent adds of the same code: the unique code / the conditional update lets exactly one win. */
-export async function applyListAdd(tx:Tx,ctx:Ctx,vm:ListVM,plan:ListPlan,info:SdkInfo):Promise<{changed:boolean;message:string}>{
+/** `createState`: the state of a code created here (UNCONFIRMED for a code surveyed on a machine with unknown history, sdk-observe.ts). */
+export async function applyListAdd(tx:Tx,ctx:Ctx,vm:ListVM,plan:ListPlan,info:SdkInfo,opts:{createState?:'UNLINKED'|'UNCONFIRMED'}={}):Promise<{changed:boolean;message:string}>{
   const here=where(vm);
   if(plan.kind==='SAME'){const changed=await applyInfo(tx,ctx,plan.record!,info);return {changed,message:changed?'Đã lưu tiền / ghi chú SDK':'Đã có trong danh sách của VM; giữ nguyên'};}
   if(plan.kind==='CREATE'){
     const i=checkInfo(info);let row:SdkRecord;
-    try{row=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
-      ...(i.amount!=null?{amount:i.amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),...(i.note?{note:i.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});}
+    try{row=await tx.sdkRecord.create({data:{projectId:ctx.projectId,code:plan.code,holderVmId:vm.id,heldAt:ctx.now,heldById:ctx.actorId,linkState:opts.createState??'UNLINKED',createdById:ctx.actorId,createdAt:ctx.now,
+      ...(i.amount!=null?{amount:i.amount,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via}:{}),...(i.note?{note:i.note,noteAt:ctx.now,noteById:ctx.actorId}:{})}});}
     catch(e){if(e instanceof Prisma.PrismaClientKnownRequestError&&e.code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','SDK '+plan.code+' vừa được người khác ghi; kiểm tra lại');throw e;}
     await ctx.images.remember('SDK',row.id,true);
     await event(tx,ctx,row.id,'CREATE',{detail:{amount:i.amount??null,note:i.note??null}});
@@ -272,13 +273,13 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
 }
 // ---- Read: the list of every VM, for the grid (unused first, then used; current code marked) --------------------------------------
 const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
-export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
+export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountSource:string|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
 export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[]){
   const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById);
-    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+    list.push({recordId:r.id,code:r.code,revision:r.revision,amount:canonicalAmount(r.amount?.toString()??null),amountObservedAt:(r.amountObservedAt??(r.amount!=null?r.amountAt:null))?.toISOString()??null,amountSource:r.amountSource,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

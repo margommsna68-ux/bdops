@@ -67,6 +67,11 @@ sang tài khoản khác.
 
 **Ghi chú** — `post vms/<vmId>/notes {projectId, expectedCycle, note, jobId?}`: vào lịch sử VM (người, token, giờ); ghi chú của chủ không bị đụng.
 
+### Khảo sát SDK đang chạy (22/10/2026)
+Không phải lần cài: `node scripts/ops-client.mjs sdk-check <survey.json>` (cả bảng, không gửi) rồi `sdk-observe <one-vm.json>` từng VM →
+`POST vms/{id}/sdk-observations` (token cần `VM_OPS`, thêm `SDK_AMOUNT` khi kèm tiền). Mã mới = Chưa xác nhận; mã ở VM khác bị từ chối
+cả lệnh; tiền là số đọc gần nhất kèm `observedAt`, không cộng, không phải số dư EarnApp. Chi tiết: docs/runbooks/vm-sdk.md (mục cuối).
+
 ## 4. Chống lệnh cũ / làm trùng
 
 Lệnh mang dự án, VM, lượt (`expectedCycle`), phiên bản tình trạng (`expectedStatusRevision` / việc nhớ phiên bản lúc nhận), cấu hình proxy (`configurationId`),

@@ -1,0 +1,6 @@
+PASS U1 Ô SDK hiện tiền của SDK hiện hành (12,345678 USD) không cần mở khung
+PASS U2 Ô SDK hiện giờ kiểm tra (lúc hh:mm)
+PASS U3 Mã khảo sát là Chưa xác nhận, không tính là chưa dùng
+PASS U4 Cột Tiền / Rút vẫn là số dư tài khoản ("Chưa gán tài khoản"), không lấy tiền SDK
+PASS U5 Khung SDK ghi giờ kiểm tra của mã
+Lỗi JS: không

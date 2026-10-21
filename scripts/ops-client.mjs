@@ -10,6 +10,10 @@
 //   node scripts/ops-client.mjs post <path> <body.json> [--key <Idempotency-Key>]
 //   node scripts/ops-client.mjs retry <Idempotency-Key>  # send the SAME command again (same path, body and key) after a lost answer
 //   node scripts/ops-client.mjs pending                  # commands whose result is not known yet
+//   node scripts/ops-client.mjs sdk-check <survey.json>  # SDK survey of many VMs ([{vmId, sdks:[…]}, …]): checks codes and money
+//                                   # locally (same code on several VMs, two amounts for one code, …); sends nothing
+//   node scripts/ops-client.mjs sdk-observe <one-vm.json> [--key K]
+//                                   # SDK codes running on ONE VM + money read there → POST vms/<vmId>/sdk-observations (22/10/2026)
 //   node scripts/ops-client.mjs proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]
 //                                   # full proxy of the VM in hand → private file for AE Mini Tool (default ~/.mth/proxy/<vmId>.json);
 //                                   # never printed, never in the command log. Delete the file once the machine is configured.
@@ -183,6 +187,34 @@ async function call(method,path,body,key){
   console.log(JSON.stringify({status:res.status,requestId:res.headers.get('x-request-id'),...out},null,2));
   if(!out.ok)process.exitCode=1;
 }
+// SDK survey (owner brief 22/10/2026). One VM: {projectId, vmId, expectedCycle, expectedVmRevision, observedAt, source,
+// sdks:[{code, amountUsd?, amountRead?, current?}]}. Two files with the same code on one machine are one SDK; the same code on two
+// VMs, two amounts for one code, more than one current code or a malformed line stop before anything is sent.
+const SDK_CODE=/^[A-Za-z0-9._:-]{8,128}$/,SDK_USD=/^\d{1,10}(\.\d{1,6})?$/;
+export function checkSdkSurvey(list){
+  const problems=[],where=new Map(),out=[];
+  for(const [i,vm] of (Array.isArray(list)?list:[list]).entries()){
+    const at=vm?.vmId||'#'+(i+1),byCode=new Map();
+    if(!vm?.vmId)problems.push({vm:at,issue:'thiếu vmId'});
+    if(!Array.isArray(vm?.sdks)||!vm.sdks.length){problems.push({vm:at,issue:'thiếu danh sách sdks'});continue;}
+    for(const s of vm.sdks){
+      const code=String(s?.code??'').trim();
+      if(!SDK_CODE.test(code)){problems.push({vm:at,code,issue:'mã SDK không hợp lệ'});continue;}
+      if(s.amountUsd!=null&&!SDK_USD.test(String(s.amountUsd)))problems.push({vm:at,code,issue:'tiền USD không đúng dạng "12.345"'});
+      if(s.amountRead===false&&s.amountUsd!=null)problems.push({vm:at,code,issue:'amountRead=false nhưng có amountUsd'});
+      if(s.amountRead===true&&s.amountUsd==null)problems.push({vm:at,code,issue:'amountRead=true cần amountUsd'});
+      const prev=byCode.get(code);
+      if(prev){if(prev.amountUsd!=null&&s.amountUsd!=null&&Number(prev.amountUsd)!==Number(s.amountUsd))problems.push({vm:at,code,issue:'cùng mã hai số tiền khác nhau trên một máy'});
+        prev.amountUsd=prev.amountUsd??s.amountUsd;prev.amountRead=prev.amountRead??s.amountRead;prev.current=prev.current||s.current;continue;}
+      byCode.set(code,{code,...(s.amountUsd!=null?{amountUsd:String(s.amountUsd)}:{}),...(s.amountRead!=null?{amountRead:!!s.amountRead}:{}),...(s.current?{current:true}:{})});
+      where.set(code,[...(where.get(code)||[]),at]);
+    }
+    const sdks=[...byCode.values()];if(sdks.filter(x=>x.current).length>1)problems.push({vm:at,issue:'nhiều hơn một mã current'});
+    out.push({...vm,sdks});
+  }
+  for(const [code,vms] of where)if(new Set(vms).size>1)problems.push({code,vms:[...new Set(vms)],issue:'cùng mã SDK ở nhiều VM'});
+  return {problems,vms:out,codes:where.size};
+}
 const isMain=!!process.argv[1]&&pathToFileURL(process.argv[1]).href===import.meta.url;
 if(isMain){
   const [cmd,...args]=process.argv.slice(2);
@@ -200,9 +232,14 @@ if(isMain){
     else if(cmd==='post'){const key=flag('--key')||randomUUID();if(args.length!==2)die('post <path> <body.json> [--key K]');await call('POST',args[0],JSON.parse(readFileSync(args[1],'utf8')),key);}
     else if(cmd==='proxy'){const out=flag('--out'),pkey=flag('--key')||randomUUID();if(args.length!==4||!/^\d+$/.test(args[3]))die('proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]');proxyOut=out;
       await call('POST','vms/'+encodeURIComponent(args[1])+'/proxy-credentials',{projectId:args[0],jobId:args[2],expectedCycle:Number(args[3])},pkey);}
+    else if(cmd==='sdk-check'&&args.length===1){const r=checkSdkSurvey(JSON.parse(readFileSync(args[0],'utf8')));console.log(JSON.stringify({ok:!r.problems.length,vms:r.vms.length,codes:r.codes,problems:r.problems},null,2));if(r.problems.length)process.exitCode=1;}
+    else if(cmd==='sdk-observe'){const key=flag('--key')||randomUUID();if(args.length!==1)die('sdk-observe <one-vm.json> [--key K]');
+      const raw=JSON.parse(readFileSync(args[0],'utf8'));if(Array.isArray(raw))die('sdk-observe gửi MỘT VM; dùng sdk-check cho cả bảng');
+      const r=checkSdkSurvey(raw);if(r.problems.length){console.log(JSON.stringify({ok:false,problems:r.problems},null,2));die('Dừng trước khi gửi: sửa các dòng trên',1);}
+      const {vmId,...body}=r.vms[0];await call('POST','vms/'+encodeURIComponent(vmId)+'/sdk-observations',body,key);}
     else if(cmd==='retry'&&args.length===1){const key=args[0],e=readEntry(key);if(!e)die('Không có lệnh với key '+key+' trong '+JOURNAL);await call('POST',e.path,e.body,key);}
     else if(cmd==='pending'){const list=allEntries().filter(e=>e.state==='SENDING'||e.state==='UNKNOWN'||e.state==='UNREADABLE');
       console.log(JSON.stringify(list.map(e=>e.state==='UNREADABLE'?{key:null,file:e.file,state:e.state,error:e.error}:{key:e.key,path:e.path,state:e.state,attempts:e.attempts,lastTryAt:e.lastTryAt,...(e.httpStatus?{httpStatus:e.httpStatus}:{})}),null,2));}
-    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | retry <key> | pending');
+    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | retry <key> | pending | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K]');
   }catch(e){die(String(e.message||e));}
 }

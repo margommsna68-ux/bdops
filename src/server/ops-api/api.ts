@@ -12,9 +12,11 @@ import {hashToken,memberOps,userActive,OPS_SCOPES,type OpsScope} from './tokens'
 import {activeJobs,addVmOpsNote,claimVmJob,finishPrepareJob,finishProxyJob,jobView,proxyForJob,recordJobSdk,releaseVmJob,stepVmJob,APPLY_RESULTS,JOB_KINDS,type OpsCaller} from '../vm-ops/jobs';
 import {setVmStatus} from '../vm-ops/ops';
 import {runWithOpsAuth} from './context';
+import {hasAmounts,observeVmSdks,OBSERVE_MAX} from '../vm-management/sdk-observe';
 import {hit,peek} from './limits';
 import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
+import {canonicalAmount} from '@/lib/sdk-money';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
@@ -57,6 +59,8 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^jobs/'+ID+'/release$'),scope:'VM_OPS',action:'JOB_RELEASE',run:jobRelease},
   {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials},
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk$'),scope:'VM_OPS',action:'VM_SDK',run:vmSdk},
+  // 22/10/2026: SDK codes seen running on the machine (no install), with their money when the token also has SDK_AMOUNT.
+  {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-observations$'),scope:'VM_OPS',action:'VM_SDK_OBSERVE',run:vmSdkObserve},
   {method:'POST',path:new RegExp('^vms/'+ID+'/status$'),scope:'VM_OPS',action:'VM_STATUS',run:vmStatus},
   {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-blocked$'),scope:'VM_OPS',action:'VM_PROXY_BLOCKED',run:vmBlocked},
   {method:'POST',path:new RegExp('^vms/'+ID+'/notes$'),scope:'VM_OPS',action:'VM_NOTE',run:vmNote},
@@ -192,17 +196,18 @@ async function vmDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),vm=await loadVm(c,projectId,id),rights=await rightsOf(c,projectId),{limit,cursor}=page(c);c.audit.objectId=vm.id;
   const view=vmView(vm),cycle=view.expectedCycle,earnAppId=view.earnAppAccount?.id??null;
   const [sdks,request,cycles]=await Promise.all([
-    c.db.sdkRecord.findMany({where:{projectId,holderVmId:vm.id},select:{linkState:true,amount:true,currency:true}}),
+    c.db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:vm.id},{vmId:vm.id}]},select:{id:true,code:true,revision:true,vmId:true,linkState:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true},orderBy:{code:'asc'}}),
     earnAppId?c.db.earnPayoutRequest.findUnique({where:{earnAppId},select:requestSelect}):Promise.resolve(null),
     c.db.vmCycle.findMany({where:{projectId,vmId:vm.id},select:{id:true,number:true,reason:true,earnAppId:true,loginId:true,payoutRequestId:true,closedAt:true},orderBy:[{number:'desc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})}),
   ]);
   const logins=await c.db.gmailAccount.findMany({where:{id:{in:cycles.map(x=>x.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
-  const money=rights.balanceRead||rights.requestMoney,ref:Record<string,string>={};
-  // SDK money is a note an operator kept on the code (reference only): never added to the EarnApp balance, shown with money rights.
-  if(money)for(const s of sdks)if(s.amount!=null)ref[s.currency]=(Number(ref[s.currency]||0)+Number(s.amount)).toFixed(2);
+  // SDK money (22/10/2026): per code, never added up into a VM figure; shown with SDK_AMOUNT on the token (or the money rights).
+  const sdkMoney=c.token.scopes.includes('SDK_AMOUNT')||rights.balanceRead||rights.requestMoney;
   const pc=paged(cycles,limit),job=(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null;
   return {...view,activeJob:job,
-    sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,referenceMoney:money?ref:null,note:'Tiền SDK là ghi chú tham khảo, không phải số dư EarnApp'},
+    sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,amountsVisible:sdkMoney,
+      items:sdks.map(s=>({id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:sdkMoney&&s.amount!=null?canonicalAmount(s.amount.toString()):null,currency:s.currency,observedAt:sdkMoney?(s.amountObservedAt??(s.amount!=null?s.amountAt:null))?.toISOString()??null:null,source:sdkMoney?s.amountSource:null})),
+      note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
     pastCycles:{items:pc.items.map(x=>({number:x.number,reason:x.reason,earnAppAccountId:x.earnAppId,login:maskEmail(logins.find(l=>l.id===x.loginId)?.email),withdrawalId:x.payoutRequestId,closedAt:x.closedAt.toISOString()})),nextCursor:pc.nextCursor}};
@@ -426,4 +431,25 @@ async function finishProxy(c:Ctx,[id]:string[]){
   const b=FinishProxyBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
   const r=await asOps(c,projectId,job.vmId,()=>finishProxyJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,configurationId:b.configurationId,result:b.result,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c)));
   c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,job:r.job},current:await vmNow(c,projectId,job.vmId)};
+}
+// SDK codes running on the machine (owner brief 22/10/2026): no job, no install, no EarnApp needed. Money needs SDK_AMOUNT too, checked
+// again inside the write transaction. A refused code refuses the whole command (nothing written, nothing moved).
+const sdkMoney=z.string().regex(/^\d{1,10}(\.\d{1,6})?$/,'Tiền SDK USD là chuỗi thập phân, ví dụ "12.345"');
+const ObserveBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,observedAt:iso,source:z.string().min(2).max(120),
+  sdks:z.array(z.object({code:z.string().min(8).max(128),amountUsd:sdkMoney.nullish(),amountRead:z.boolean().optional(),current:z.boolean().optional()}).strict()).min(1).max(OBSERVE_MAX)}).strict();
+async function vmSdkObserve(c:Ctx,[vmId]:string[]){
+  const b=ObserveBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  // amountRead=false: the money could not be read this time (not 0); amountUsd absent and amountRead absent: no money in this request.
+  const items=b.sdks.map(s=>{
+    if(s.amountRead===false&&s.amountUsd!=null)throw fail('VALIDATION','amountRead=false không đi cùng amountUsd ('+s.code+')');
+    if(s.amountRead===true&&s.amountUsd==null)throw fail('VALIDATION','amountRead=true cần amountUsd ("0" là hợp lệ) ('+s.code+')');
+    return {code:s.code,amount:s.amountRead===false?null:s.amountUsd??undefined,current:s.current};});
+  const money=hasAmounts(items);
+  if(money&&!c.token.scopes.includes('SDK_AMOUNT'))throw fail('FORBIDDEN','Token chưa được cấp ghi tiền SDK (SDK_AMOUNT); gửi mã không kèm tiền hoặc xin cấp quyền');
+  const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:money?['SDK_AMOUNT']:[]},()=>
+    observeVmSdks(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt,source:redactSecrets(b.source.trim())??'',items},c.db,{tokenLabel:caller(c).tokenLabel??undefined})));
+  c.audit.replay=!!r.replay;const show=c.token.scopes.includes('SDK_AMOUNT');
+  return {replay:!!r.replay,recorded:{vmId:r.vmId,expectedCycle:r.cycle,observedAt:r.observedAt,source:r.source,currentDiffers:r.currentDiffers,vmRevisionAfter:r.vmRevisionAfter,
+    sdks:r.items.map(x=>({code:x.code,sdkId:x.sdkId,placed:x.placed,linkState:x.state,current:x.current,amount:{outcome:x.amount.outcome,amountUsd:show?x.amount.value:null,observedAt:show?x.amount.observedAt:null}}))},
+    current:await vmNow(c,projectId,vmId)};
 }

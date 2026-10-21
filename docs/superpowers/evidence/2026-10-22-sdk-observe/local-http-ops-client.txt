@@ -1,0 +1,10 @@
+PASS C1 sdk-check báo cùng mã ở hai VM, không gửi gì
+PASS C2 DB chưa có mã sau sdk-check
+PASS C3 VM thử chưa gán EarnApp
+PASS C4 sdk-observe → 200, một SDK mới
+PASS C5 DB: Chưa xác nhận, ở VM A (hiện hành), 12.345678 USD, giờ quan sát ≠ giờ ghi, có nguồn
+PASS C6 retry cùng key → replay, xác nhận như lần đầu, không ghi thêm
+PASS C7 kết quả cũ đến muộn → OLDER, giữ 12.345678
+PASS C8 mã của VM A gửi cho VM B → 409 DUPLICATE, không chuyển, không ghi mã kia
+PASS C9 GET vm: tiền từng mã kèm giờ quan sát, không có số cộng
+PASS C10 Không phát sinh quỹ / chi phí / số dư EarnApp / yêu cầu rút / tài khoản EarnApp

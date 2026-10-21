@@ -7,13 +7,14 @@ import {Input} from '@/components/ui/input';
 // Kết nối API of ONE user in ONE project (owner brief 22/10/2026; was the project-wide panel in Thiết lập, 21/10/2026). ADMIN only,
 // Proxy / VM projects. The list comes filtered from the server (user + project). The full token is shown once right after creation;
 // the form keeps one request key until it succeeds, so a double click or a lost answer never makes a second token.
-type Scope='READ'|'BALANCE_WRITE'|'PAYOUT'|'RECEIPT'|'VM_OPS'|'PROXY_CREDENTIALS';
+type Scope='READ'|'BALANCE_WRITE'|'PAYOUT'|'RECEIPT'|'VM_OPS'|'PROXY_CREDENTIALS'|'SDK_AMOUNT';
 // The operations the API really has (src/server/ops-api/tokens.ts OPS_SCOPES); only those this user can do now are offered.
 export const TOKEN_SCOPES:{value:Scope;label:string}[]=[
   {value:'READ',label:'Đọc dữ liệu (dự án, server, VM, yêu cầu rút)'},
   {value:'BALANCE_WRITE',label:'Ghi số dư EarnApp'},
   {value:'VM_OPS',label:'Vận hành VM: nhận việc, tình trạng, Blocked, ghi SDK, ghi chú'},
   {value:'PROXY_CREDENTIALS',label:'Lấy proxy của đúng VM đang xử lý'},
+  {value:'SDK_AMOUNT',label:'Ghi / đọc tiền tích luỹ của SDK (không phải số dư EarnApp)'},
   {value:'PAYOUT',label:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ'},
   {value:'RECEIPT',label:'Ghi khoản nhận PP của yêu cầu rút'},
 ];
