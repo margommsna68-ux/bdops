@@ -4,6 +4,6 @@ PASS U3 R1 sau Dán bảng: mã mới trong danh sách với $4,56 gắn R1 · l
 PASS U4 Khung T1: chọn mã X đang ở S1 → nút "Dùng cho VM này" (chuyển rõ nguồn → đích)
 PASS U5 T1 sau chuyển kèm $20 qua khung: mã X trong danh sách T1 với $20 gắn T1 · lượt 1 (API stored.vmId = T1), không còn gắn S1
 PASS U6 S1 (nguồn, không còn mã hiện hành): "Chưa kiểm tra", không giữ $10 làm tiền hiện tại
-PASS U7 Khung L1: ghi "mã này có số $7,00 … giữ làm lịch sử" không gắn lượt (Tiền VM (tiền tích luỹ của SDK đang chạy) SDK P45303700000Y · chưa kiểm tra ở lượt 2 trên VM này. Mã này có số $7,00 đọc lúc 22:15 21/10/2026: giữ làm lịch sử, )
+PASS U7 Khung L1: ghi "mã này có số $7,00 … giữ làm lịch sử" không gắn lượt (Tiền VM (tiền tích luỹ của SDK đang chạy) SDK P459A2B00000Y · chưa kiểm tra ở lượt 2 trên VM này. Mã này có số $7,00 đọc lúc 22:52 21/10/2026: giữ làm lịch sử, )
 PASS U8 API L1: moneyState UNCHECKED, stored $7 không gắn lượt (liên kết chưa xác định)
 Lỗi JS trên trang: không

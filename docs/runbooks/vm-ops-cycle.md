@@ -134,9 +134,12 @@ phải $0), `$0,00` khi đọc được 0, **Kiểm tra lỗi** (lần đọc m�
 **Số cũ** (quá 24 giờ), **Chưa rõ giờ** (tiền cũ không có giờ quan sát), **Ẩn** (thiếu quyền xem tiền). Mỗi số tiền / lần đọc lỗi gắn
 với **VM + lượt** nơi nó được kiểm tra (`SdkRecord.amountVmId/amountCycle`, `amountFailedVmId/amountFailedCycle`, migration
 `20261022230000_sdk_money_binding`): dòng chỉ hiện số của đúng VM đó ở đúng lượt hiện tại. Dữ liệu cũ (trước khi có bốn cột) chỉ được
-gắn khi có bằng chứng: số được ghi (`amountAt`) sau khi lượt trước của VM đóng (`VmCycle.closedAt`) và mã không đổi vị trí từ đó
-(không có SdkEvent MOVE / HOLD / PLACE / REMOVE / RECREATE sau lúc ghi); không đủ bằng chứng thì giữ nguyên tiền + lịch sử trên mã,
-liên kết để trống → "Chưa kiểm tra" (migration `20261023000000_sdk_money_binding_evidence` sửa lại các DB đã chạy bản gắn theo vị trí).
+gắn khi có bằng chứng: thời điểm lệnh ghi số (sự kiện AMOUNT / OBSERVE có `observedAt` = `amountObservedAt` — lần đọc cùng số chỉ dời
+`amountObservedAt`, không dời `amountAt`; sửa tay trên web thì là `amountAt`) sau khi lượt trước của VM đóng (`VmCycle.closedAt`) và không
+có SdkEvent MOVE / HOLD / PLACE / REMOVE / RECREATE **sau** thời điểm đó (sự kiện cùng lệnh cùng mốc giờ không tính); lần đọc lỗi chỉ gắn
+qua chính sự kiện OBSERVE `readable:false` của nó. Không đủ bằng chứng thì giữ nguyên tiền + lịch sử trên mã, liên kết để trống → "Chưa
+kiểm tra". DB đã chạy bản gắn theo vị trí được sửa bằng `20261023000000_sdk_money_binding_evidence` (gỡ liên kết không bằng chứng) và
+`20261023010000_sdk_money_binding_rebind` (trả lại liên kết mà lệnh quan sát đã ghi đúng); host chưa chạy bản nào nên chỉ chạy bản đã sửa.
 Tiền nhập kèm lệnh chuyển SDK gắn vào VM đích + lượt đích trong cùng giao dịch; chỉ chuyển không nhập tiền thì số cũ vẫn là lịch sử của
 nơi đã kiểm tra. Dán bảng → SDK (kind SDK của Dán bảng) ghi đúng lượt thật của VM và mang `expectedCycle` của lần xem trước: bản dán
 trước khi tạo lại VM bị từ chối từng dòng ("VM đã được tạo lại, kiểm tra lại dòng này").

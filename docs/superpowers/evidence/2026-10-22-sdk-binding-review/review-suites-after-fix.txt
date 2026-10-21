@@ -1,7 +1,11 @@
- ✓ .runtime/review-sdk-survey-20261021.test.ts (4 tests) 912ms
- ✓ .runtime/review-vm-money-eced7af.test.ts (3 tests) 789ms
+ ✓ .runtime/review-sdk-survey-20261021.test.ts (4 tests) 1121ms
+     ✓ an old survey missing capture-time identity must not be rebound to the latest VM cycle by the client  414ms
+ ✓ .runtime/review-vm-money-eced7af.test.ts (3 tests) 793ms
 MIGRATION_BINDING {"actualObservationCycle":1,"currentCycle":2,"backfilledMoneyCycle":null,"backfilledFailureCycle":null,"state":"UNCHECKED","amount":"12.34"}
 MOVE_BINDING {"holderIsTarget":true,"moneyIsTarget":true,"moneyIsSource":false,"amount":"20","state":"OK"}
 BULK_BINDING {"currentCycle":2,"recordedCycle":2,"amount":"4.56","state":"OK"}
- ✓ .runtime/review-sdk-binding-12ba8af.test.ts (3 tests) 677ms
-      Tests  10 passed (10)
+ ✓ .runtime/review-sdk-binding-12ba8af.test.ts (3 tests) 669ms
+FRESH_SAME_AMOUNT_AFTER_MIGRATION {"beforeCycle":2,"afterCycle":2,"amount":"12.34","amountAt":"2026-10-21T15:53:12.450Z","observedAt":"2026-10-21T15:53:12.493Z","state":"OK"}
+FRESH_FAILED_AFTER_MIGRATION {"beforeCycle":1,"afterCycle":1,"failedAt":"2026-10-21T15:53:12.688Z","state":"FAILED"}
+ ✓ .runtime/review-sdk-evidence-abf6c12.test.ts (2 tests) 468ms
+      Tests  12 passed (12)

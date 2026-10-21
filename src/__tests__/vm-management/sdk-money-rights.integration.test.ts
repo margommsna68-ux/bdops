@@ -184,6 +184,27 @@ describe('SDK money rights on the web services',()=>{
       expect(vmMoneyState({code:s.code,amount:s.amount,observedAt:s.amountObservedAt,failedAt:s.amountFailedAt,moneyHidden:false,stored:s.stored})).toMatchObject({kind:'UNCHECKED',stored:{amount:'12.34',cycle:null}});
     }finally{await f.cleanup();}
   });
+  it('the correction / rebind migrations keep bindings written by observation commands: a same-figure re-check after a recreation and a failed reading on a new code',async()=>{
+    const f=await fx();try{
+      const files=['20261022230000_sdk_money_binding','20261023000000_sdk_money_binding_evidence','20261023010000_sdk_money_binding_rebind'];
+      const run=async(id:string)=>{for(const file of files){const updates=readFileSync('prisma/migrations/'+file+'/migration.sql','utf8').match(/UPDATE "SdkRecord"[\s\S]*?;/g)!;expect(updates).toHaveLength(2);for(const sql of updates)await db.$executeRawUnsafe(sql.replace(/;\s*$/,' AND s."id" = $1;'),id);}};
+      const cur=async(vmId:string)=>{const v=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===vmId)!,s=v.sdks.find(x=>x.current);return vmMoneyState(s?{code:s.code,amount:s.amount,observedAt:s.amountObservedAt,failedAt:s.amountFailedAt,moneyHidden:s.moneyHidden,stored:s.stored}:null);};
+      // (1) $12.34 in round 1, recreated, the AI reads the same $12.34 in round 2: amountAt never moved, the binding came from the command.
+      const c=f.code('40');await f.observe(c,'12.34',ago(2),true);const r=await f.rec(c);await confirmLegacySdk(f.scope,{key:randomUUID(),sdkId:r.id,expectedRevision:r.revision,decision:'UNLINKED'},db);
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vm.id,status:'SUSPENDED',expectedCycle:1}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:1},db);
+      await f.observe(c,'12.34',ago(0.5),true);
+      const bound=await f.rec(c);expect(bound).toMatchObject({amountVmId:f.vm.id,amountCycle:2});expect(bound.amountAt!.getTime()).toBe(r.amountAt!.getTime());
+      await run(bound.id);expect(await f.rec(c)).toMatchObject({amountVmId:f.vm.id,amountCycle:2});expect((await cur(f.vm.id)).kind).toBe('OK');
+      // Lost by the first correction (local databases): the rebind migration gives it back from the command's event.
+      await db.sdkRecord.update({where:{id:bound.id},data:{amountVmId:null,amountCycle:null}});await run(bound.id);expect(await f.rec(c)).toMatchObject({amountVmId:f.vm.id,amountCycle:2});
+      // (2) a new code recorded with an unreadable money in one command (HOLD / PLACE after the observation moment): the failure stays bound.
+      const d=f.code('41'),other=f.vms[3];const v=await db.virtualMachine.findUniqueOrThrow({where:{id:other.id},include:{operation:true}});
+      await observeVmSdks(f.aiScope,{key:randomUUID(),vmId:other.id,expectedCycle:v.operation?.cycle??1,expectedVmRevision:v.revision,observedAt:ago(0.2),source:'thử',items:[{code:d,expectedSdkRevision:null,amount:null,current:true}]},db);
+      const fr=await f.rec(d);expect(fr).toMatchObject({amountFailedVmId:other.id,amountFailedCycle:1});
+      await run(fr.id);expect(await f.rec(d)).toMatchObject({amountFailedVmId:other.id,amountFailedCycle:1});expect((await cur(other.id)).kind).toBe('FAILED');
+      await db.sdkRecord.update({where:{id:fr.id},data:{amountFailedVmId:null,amountFailedCycle:null}});await run(fr.id);expect(await f.rec(d)).toMatchObject({amountFailedVmId:other.id,amountFailedCycle:1});
+    }finally{await f.cleanup();}
+  });
   it('an image written before the observation fields existed restores the amount with an unknown time and source (never invented)',async()=>{
     const f=await fx();try{
       const c=f.code('9');await f.observe(c,'10',T1,true);const row=await f.rec(c);
