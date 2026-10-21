@@ -131,7 +131,7 @@ export default function AdminUsersPage() {
   const [editUsername, setEditUsername] = useState("");
 
   // Admin reset dialogs
-  const [resetPinDialog, setResetPinDialog] = useState<{ userId: string; name: string } | null>(null);
+  const [resetPinDialog, setResetPinDialog] = useState<{ userId: string; name: string; hasPin?: boolean } | null>(null);
   const [resetPassDialog, setResetPassDialog] = useState<{ userId: string; name: string } | null>(null);
   const [newPin, setNewPin] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -270,6 +270,8 @@ export default function AdminUsersPage() {
     onlineMap.set(u.userId, {
       isOnline: u.isOnline,
       hasPin: u.hasPin,
+      disabled: u.disabled,
+      activeTokens: u.activeTokens,
       lastActiveAt: u.lastActiveAt ? new Date(u.lastActiveAt) : null,
       managerId: u.managerId,
       canManageUsers: u.canManageUsers,
@@ -414,9 +416,13 @@ export default function AdminUsersPage() {
               <div className="flex items-center gap-2">
                 <span className={`inline-block w-2 h-2 rounded-full ${isOnline ? "bg-green-500" : "bg-gray-300"}`} />
                 <a href={`/users/${m.user.id}`} className="font-medium text-sm text-blue-700 hover:underline">{capitalName(m.user.name || m.user.username || m.user.email)}</a>
-                {!hasPin && (
-                  <Badge variant="outline" className="text-[10px] border-orange-300 text-orange-600">{t("user_no_pin")}</Badge>
-                )}
+                {/* Short state (22/10/2026): role, account, PIN, tokens; the user page holds the actions. */}
+                <Badge variant="outline" className="text-[10px]">{m.role}</Badge>
+                {userStatus?.disabled ? <Badge variant="outline" className="text-[10px] border-red-300 text-red-600">Đã vô hiệu hoá</Badge>
+                  : (isLoginLocked || isPinLocked) ? <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">Khoá tạm</Badge> : null}
+                <Badge variant="outline" className={`text-[10px] ${hasPin ? "border-gray-300 text-gray-600" : "border-orange-300 text-orange-600"}`}>{hasPin ? "PIN đã đặt" : "Chưa đặt PIN"}</Badge>
+                {(userStatus?.activeTokens ?? 0) > 0 && <Badge variant="outline" className="text-[10px] border-teal-300 text-teal-700">{userStatus.activeTokens} token</Badge>}
+                <a href={`/users/${m.user.id}`} className="text-[11px] text-blue-600 hover:underline whitespace-nowrap">Quyền · PIN · API →</a>
                 {/* Admin: show canManageUsers badge for moderators */}
                 {isAdmin && m.role === "MODERATOR" && memberCanManage && (
                   <Badge className="text-[10px] bg-purple-100 text-purple-700">Quản lý user</Badge>
@@ -582,8 +588,8 @@ export default function AdminUsersPage() {
               {(canEditThis || (isAdmin && !isSelf)) && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => startEdit(m)}>{t("edit")}</Button>
-                  <Button size="sm" variant="outline" onClick={() => setResetPinDialog({ userId: m.user.id, name: m.user.name || m.user.username || m.user.email })}>
-                    {t("user_reset_pin")}
+                  <Button size="sm" variant="outline" onClick={() => setResetPinDialog({ userId: m.user.id, name: m.user.name || m.user.username || m.user.email, hasPin })}>
+                    {hasPin ? "Đổi PIN" : "Đặt PIN"}
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setResetPassDialog({ userId: m.user.id, name: m.user.name || m.user.username || m.user.email })}>
                     {t("user_reset_pass")}
@@ -833,7 +839,7 @@ export default function AdminUsersPage() {
       <Dialog open={!!resetPinDialog} onOpenChange={(v) => { if (!v) { setResetPinDialog(null); setNewPin(""); } }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>{t("user_reset_pin_title")} - {resetPinDialog?.name}</DialogTitle>
+            <DialogTitle>{resetPinDialog?.hasPin ? "Đổi PIN" : "Đặt PIN"} · {resetPinDialog?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <Input
@@ -851,7 +857,7 @@ export default function AdminUsersPage() {
               <Button className="flex-1" disabled={newPin.length < 4 || adminResetPin.isLoading} onClick={() => {
                 if (resetPinDialog) adminResetPin.mutate({ projectId: projectId!, userId: resetPinDialog.userId, newPin });
               }}>
-                {adminResetPin.isLoading ? "..." : t("user_reset_pin")}
+                {adminResetPin.isLoading ? "..." : "Lưu"}
               </Button>
             </div>
             {adminResetPin.error && <p className="text-sm text-red-600 text-center">{adminResetPin.error.message}</p>}

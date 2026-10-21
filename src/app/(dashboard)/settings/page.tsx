@@ -16,7 +16,7 @@ import { useSettingsStore, TIMEZONE_OPTIONS, type AppTheme } from "@/lib/setting
 import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { OpsTokensPanel } from "@/components/settings/OpsTokensPanel";
+import Link from "next/link";
 
 const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; descVi: string; preview: { bg: string; card: string; accent: string; text: string; sidebar: string; line: string; head: string; ring: string } }[] = [
   {
@@ -57,8 +57,8 @@ export default function SettingsPage() {
   const projectId = useProjectStore((s) => s.currentProjectId);
   const currentRole = useProjectStore((s) => s.currentRole);
   const currentModules = useProjectStore((s) => s.currentModules);
-  const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
-  const currentProjectCode = useProjectStore((s) => s.currentProjectCode);
+  const renameCurrentProject = useProjectStore((s) => s.renameCurrentProject);
+  const utils = trpc.useUtils();
   const proxyMode = useProjectStore((s) => s.currentBusinessMode) === "PROXY_VM";
   const t = useT();
 
@@ -84,10 +84,9 @@ export default function SettingsPage() {
       toast.success(language === "vi" ? "Đã cập nhật tên dự án" : "Project name updated");
       setEditingName(false);
       refetch();
-      if (projectId && currentProjectCode) {
-        const currentType = useProjectStore.getState().currentProjectType || "FULL";
-        setCurrentProject(projectId, currentProjectCode, updated.name, currentType, currentRole || "USER", currentModules);
-      }
+      // Only the name changes in the store (22/10/2026): mode, role and rights stay, so Proxy / VM parts never disappear.
+      if (projectId) renameCurrentProject(projectId, updated.name);
+      void utils.project.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -457,7 +456,7 @@ export default function SettingsPage() {
         )}
 
         {/* ─── Token API vận hành (ADMIN, Proxy / VM) ─── */}
-        {isAdmin && proxyMode && projectId && <OpsTokensPanel projectId={projectId} />}
+        {isAdmin && proxyMode && projectId && <div className="bg-white rounded-lg border border-gray-200 p-6 lg:col-span-2" data-testid="ops-tokens-moved"><h2 className="text-lg font-semibold text-gray-900">Token API vận hành</h2><p className="text-sm text-gray-600 mt-1">Quản lý token, PIN và quyền theo từng người: <Link className="text-blue-600 hover:underline" href="/admin/users">Nhân viên</Link> → bấm tên người (ví dụ ai-ops) → Kết nối API.</p></div>}
       </div>
     </div>
   );

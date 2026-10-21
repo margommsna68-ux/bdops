@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
  * PinGate - Shows full-screen overlay after login.
  * - If user has no PIN → forces them to create one
  * - If user has PIN → requires PIN entry to access site
- * - Stores verification in sessionStorage (cleared on tab close)
+ * - 22/10/2026: the unlock is held by the SERVER on this sign-in session (user.verifyPin), for the current PIN version. Nothing is kept
+ *   in the browser; a PIN change, sign-out or disabling the account locks again, and any call refused with PIN_REQUIRED re-locks here.
  */
 export function PinGate({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
@@ -18,22 +19,25 @@ export function PinGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"loading" | "verify" | "setup">("loading");
 
-  const { data: pinStatus, isLoading } = trpc.user.hasPin.useQuery(undefined, {
+  const utils = trpc.useUtils();
+  const { data: pinStatus, isLoading, refetch } = trpc.user.hasPin.useQuery(undefined, {
     retry: false,
   });
   const verifyPin = trpc.user.verifyPin.useMutation();
   const setupPin = trpc.user.setPin.useMutation();
 
   useEffect(() => {
-    // Check sessionStorage
-    if (typeof window !== "undefined" && sessionStorage.getItem("bdops-pin-ok") === "1") {
-      setUnlocked(true);
-      return;
-    }
+    if (typeof window !== "undefined") sessionStorage.removeItem("bdops-pin-ok"); // the old client flag proves nothing
     if (!isLoading && pinStatus) {
+      setUnlocked(!!pinStatus.unlocked);
       setMode(pinStatus.hasPin ? "verify" : "setup");
     }
   }, [isLoading, pinStatus]);
+  useEffect(() => {
+    const relock = () => { setUnlocked(false); void refetch(); };
+    window.addEventListener("mth:pin-required", relock);
+    return () => window.removeEventListener("mth:pin-required", relock);
+  }, [refetch]);
 
   // Heartbeat for online tracking
   const heartbeat = trpc.user.heartbeat.useMutation();
@@ -59,8 +63,10 @@ export function PinGate({ children }: { children: React.ReactNode }) {
     setError("");
     try {
       await verifyPin.mutateAsync({ pin });
-      sessionStorage.setItem("bdops-pin-ok", "1");
+      setPin("");
+      await refetch();
       setUnlocked(true);
+      void utils.invalidate();
     } catch (e: any) {
       setError(e.message || "Incorrect PIN");
       setPin("");
@@ -79,8 +85,10 @@ export function PinGate({ children }: { children: React.ReactNode }) {
     }
     try {
       await setupPin.mutateAsync({ pin });
-      sessionStorage.setItem("bdops-pin-ok", "1");
+      setPin(""); setConfirmPin("");
+      await refetch();
       setUnlocked(true);
+      void utils.invalidate();
     } catch (e: any) {
       setError(e.message || "Failed to set PIN");
     }

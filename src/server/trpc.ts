@@ -8,6 +8,7 @@ import { type ProjectRole } from "@prisma/client";
 import {assertLegacyInfrastructureTargets} from './permissions/legacy-infrastructure';
 import {assertUserTarget} from './permissions/user-target';
 import {loadInfrastructureScope} from './permissions/infrastructure';
+import {checkWebSession} from './users/access';
 
 export const APP_MODULES = [
   "FUNDS",
@@ -22,15 +23,24 @@ export const APP_MODULES = [
 
 export type AppModule = (typeof APP_MODULES)[number];
 
+// web: set for HTTP requests (22/10/2026): the server session behind the JWT and whether its PIN unlock holds. Server-side callers
+// (createCaller in jobs / tests) have no web session and are checked by the services themselves.
 export type Context = {
   session: Session | null;
   prisma: typeof prisma;
+  web?: { sessionId: string; pinUnlocked: boolean } | { ended: string } | null;
 };
 
 export const createTRPCContext = async (): Promise<Context> => {
   const session = await getServerSession(authOptions);
-  return { session, prisma };
+  const userId = (session?.user as any)?.id as string | undefined;
+  if (!session?.user || !userId) return { session: null, prisma, web: null };
+  const check = await checkWebSession(prisma, (session as any).sid, userId);
+  if (!check.ok) return { session: null, prisma, web: { ended: check.reason } };
+  return { session, prisma, web: { sessionId: check.sessionId, pinUnlocked: check.pinUnlocked } };
 };
+// Calls allowed before the PIN of this session is proved (they are how it gets proved / set).
+const PIN_FREE = new Set(["user.hasPin", "user.verifyPin", "user.setPin"]);
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
@@ -49,9 +59,13 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-const enforceAuth = t.middleware(({ ctx, next }) => {
+const enforceAuth = t.middleware(({ ctx, next, path }) => {
   if (!ctx.session?.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED" });
+    const ended = ctx.web && "ended" in ctx.web ? ctx.web.ended : null;
+    throw new TRPCError({ code: "UNAUTHORIZED", message: ended ? "SESSION_ENDED: " + (ended === "DISABLED" ? "Tài khoản đã bị vô hiệu hoá" : "Phiên đăng nhập đã hết; đăng nhập lại") : undefined });
+  }
+  if (ctx.web && "pinUnlocked" in ctx.web && !ctx.web.pinUnlocked && !PIN_FREE.has(path)) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "PIN_REQUIRED: Nhập PIN để tiếp tục" });
   }
   return next({
     ctx: {
@@ -117,7 +131,7 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});
   }
   if(/^(proxy|vm|server)\./.test(path)) await assertLegacyInfrastructureTargets(ctx.prisma,projectId,path,input);
-  if(typeof input.userId==='string'&&(/^user\.(getDetail|adminResetPin|adminResetPassword|resetPin|resetPassword|adminUnlockAccount|kickAutotypeSession|kickAllAutotypeSessions)$/.test(path)||/^project\.(updateUserInfo|setPin|removePin)$/.test(path)))await assertUserTarget(ctx.prisma,membership,input.userId,type==='mutation');
+  if(typeof input.userId==='string'&&(/^user\.(getDetail|adminResetPin|adminResetPassword|resetPin|resetPassword|adminUnlockAccount|kickAutotypeSession|kickAllAutotypeSessions|setDisabled|access)$/.test(path)||/^project\.(updateUserInfo|setPin|removePin)$/.test(path)))await assertUserTarget(ctx.prisma,membership,input.userId,type==='mutation');
   return next({
     ctx: {
       ...ctx,

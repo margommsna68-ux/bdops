@@ -22,7 +22,7 @@ async function work(){
   const vmRow=(id:string)=>db.virtualMachine.findUniqueOrThrow({where:{id},include:{operation:true}});
   const change=async(vmId:string,endpointId:string)=>{const v=await vmRow(vmId);return changeVmProxy(f.scope,{key:randomUUID(),vmId,expectedVmRevision:v.revision,expectedCycle:v.operation?.cycle??1,endpointId},db);};
   const ownerStatus=async(vmId:string,status:'OK'|'OFF'|'PROXY_BLOCKED'|'NEW_VM'|'NOT_LINKED')=>{const v=await vmRow(vmId);return setVmStatus(f.scope,{key:randomUUID(),items:[{vmId,status,expectedCycle:v.operation?.cycle??1}]},db);};
-  const tok=async(scopes:string[],userId=f.ai,name='SERVER-01 · AI')=>(await createOpsToken(f.scope.userId,{projectId:f.projectId,userId,name,scopes:scopes as never,expiresInDays:30,pin:'123456'},db)).token;
+  const tok=async(scopes:string[],userId=f.ai,name='SERVER-01 · AI')=>(await createOpsToken(f.scope.userId,{projectId:f.projectId,userId,name,scopes:scopes as never,expiresInDays:30,pin:'123456'},db)).token!;
   // Every answer is checked against docs/ops-api/openapi.json (closed schemas).
   const P=f.projectId,get=async(t:string,path:string)=>{const r=await api('GET',path+(path.includes('?')?'&':'?')+'projectId='+P,{token:t});expectConforms('GET',path,r);return r;};
   const post=async(t:string,path:string,body:Record<string,unknown>,o:{key?:string;pin?:string}={})=>{const r=await api('POST',path,{token:t,body:{projectId:P,...body},key:o.key,pin:o.pin??AI_PIN});expectConforms('POST',path,r);return r;};

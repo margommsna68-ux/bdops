@@ -18,6 +18,7 @@ export async function assertOpsToken(tx:Prisma.TransactionClient,scope:{userId:s
   if(t.userId!==auth.userId||scope.userId!==auth.userId)throw new ProxyDomainError('FORBIDDEN','Token không thuộc người dùng này','UNAUTHORIZED');
   if(!t.projectIds.includes(scope.projectId))throw new ProxyDomainError('FORBIDDEN','Dự án không nằm trong phạm vi token');
   if(!t.scopes.includes(auth.operation))throw new ProxyDomainError('FORBIDDEN','Token không được cấp thao tác này');
-  const [u]=await tx.$queryRaw<{password:string|null;loginLockedAt:Date|null}[]>`SELECT "password","loginLockedAt" FROM "User" WHERE "id"=${auth.userId}`;
+  const [u]=await tx.$queryRaw<{password:string|null;loginLockedAt:Date|null;disabledAt:Date|null}[]>`SELECT "password","loginLockedAt","disabledAt" FROM "User" WHERE "id"=${auth.userId} FOR SHARE`;
+  if(u?.disabledAt)throw new ProxyDomainError('FORBIDDEN','Tài khoản của token đã bị vô hiệu hoá','UNAUTHORIZED');
   if(!u?.password||u.loginLockedAt&&new Date(u.loginLockedAt).getTime()+30*60000>Date.now())throw new ProxyDomainError('FORBIDDEN','Tài khoản của token đang bị khoá hoặc không còn đăng nhập được');
 }

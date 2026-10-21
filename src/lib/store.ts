@@ -14,6 +14,8 @@ interface ProjectState {
   canManageUsers: boolean;
   currentMemberId: string | null;
   setCurrentProject: (id: string, code: string, name: string, type: string, role: string, modules: string[], canManageUsers?: boolean, memberId?: string, businessMode?:string|null) => void;
+  // The current project was renamed (22/10/2026): only the name changes; mode, role and rights stay (they were lost before).
+  renameCurrentProject: (id: string, name: string) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -32,6 +34,7 @@ export const useProjectStore = create<ProjectState>()(
       // those pages are not open), so coming back never ticks them again. Re-reading the same project keeps them.
       setCurrentProject: (id, code, name, type, role, modules, canManageUsers = false, memberId = undefined, businessMode=null) =>
         { const prev = get().currentProjectId; if (prev && prev !== id) clearProjectSelections(prev); set({ currentProjectId: id, currentProjectCode: code, currentProjectName: name, currentProjectType: type, currentRole: role, currentModules: modules, canManageUsers, currentMemberId: memberId ?? null, currentBusinessMode:businessMode }); },
+      renameCurrentProject: (id, name) => { if (get().currentProjectId === id) set({ currentProjectName: name }); },
     }),
     {
       name: "bdops-project",

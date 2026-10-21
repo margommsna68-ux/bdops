@@ -25,10 +25,11 @@ function checkRateLimit(key: string): { allowed: boolean; remaining: number; ret
 
 // --- Token helpers ---
 
-function createToken(userId: string, projectIds: string[]): string {
+function createToken(userId: string, projectIds: string[], epoch = 0): string {
   const payload = JSON.stringify({
     userId,
     projectIds,
+    epoch,
     exp: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
   });
   const key = process.env.ENCRYPTION_KEY!;
@@ -38,7 +39,7 @@ function createToken(userId: string, projectIds: string[]): string {
 
 function verifyToken(
   token: string
-): { userId: string; projectIds: string[] } | null {
+): { userId: string; projectIds: string[]; epoch?: number } | null {
   try {
     const [payloadB64, hmac] = token.split(".");
     const payload = Buffer.from(payloadB64, "base64").toString();
@@ -58,6 +59,16 @@ function verifyToken(
   } catch {
     return null;
   }
+}
+
+// A signed token is used only while its user is enabled and the account epoch it was made under still holds (22/10/2026): disabling
+// (and enabling again) bumps the epoch, so tokens issued before never work again.
+async function verifyActiveToken(token: string) {
+  const data = verifyToken(token);
+  if (!data) return null;
+  const u = await prisma.user.findUnique({ where: { id: data.userId }, select: { disabledAt: true, authEpoch: true } });
+  if (!u || u.disabledAt || (data.epoch ?? 0) !== u.authEpoch) return null;
+  return data;
 }
 
 // --- Helpers ---
@@ -131,6 +142,10 @@ export async function POST(request: Request) {
           { error: "Invalid credentials" },
           { status: 401 }
         );
+      }
+
+      if (user.disabledAt) {
+        return NextResponse.json({ error: "Account disabled" }, { status: 403 });
       }
 
       // Verify PIN
@@ -217,7 +232,7 @@ export async function POST(request: Request) {
         role: m.role,
       }));
 
-      const token = createToken(user.id, projectIds);
+      const token = createToken(user.id, projectIds, user.authEpoch);
 
       return NextResponse.json({
         token,
@@ -248,7 +263,7 @@ export async function POST(request: Request) {
       }
 
       // Verify token
-      const tokenData = verifyToken(token);
+      const tokenData = await verifyActiveToken(token);
       if (!tokenData) {
         return NextResponse.json(
           { error: "Invalid or expired token" },
@@ -383,7 +398,7 @@ export async function POST(request: Request) {
       if (!token || !projectId) {
         return NextResponse.json({ error: "Missing token or projectId" }, { status: 400 });
       }
-      const tokenData = verifyToken(token);
+      const tokenData = await verifyActiveToken(token);
       if (!tokenData) {
         return NextResponse.json({ error: "Token expired" }, { status: 401 });
       }
@@ -431,7 +446,7 @@ export async function POST(request: Request) {
       }
 
       // Verify token
-      const tokenData = verifyToken(token);
+      const tokenData = await verifyActiveToken(token);
       if (!tokenData) {
         return NextResponse.json(
           { error: "Token het han, dang nhap lai" },
@@ -533,7 +548,7 @@ export async function POST(request: Request) {
       if (!token || !logoutDeviceId) {
         return NextResponse.json({ error: "Missing token or deviceId" }, { status: 400 });
       }
-      const tokenData = verifyToken(token);
+      const tokenData = await verifyActiveToken(token);
       if (tokenData) {
         await prisma.autotypeSession.deleteMany({
           where: { userId: tokenData.userId, deviceId: logoutDeviceId },

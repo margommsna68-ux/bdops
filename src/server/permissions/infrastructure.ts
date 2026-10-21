@@ -1,5 +1,6 @@
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import type {PrismaClient,Prisma} from '@prisma/client';
+import {assertUserEnabled} from '../users/access';
 export type InfrastructureAction='READ'|'BLOCK'|'IMPORT'|'REPLACE'|'ASSIGN'|'CONFIRM'|'COPY_CREDENTIALS'|'MANAGE';
 export function assertInfrastructureAction(scope:ActorScope,action:InfrastructureAction){
   const denied=()=>{throw new ProxyDomainError('FORBIDDEN','Không có quyền thao tác trong dự án này');};
@@ -15,6 +16,8 @@ export function assertInfrastructureAction(scope:ActorScope,action:Infrastructur
   if(action==='REPLACE'&&!scope.capabilities.includes('PROXY_REPLACE')) denied();
 }
 export async function loadInfrastructureScope(db:PrismaClient|Prisma.TransactionClient,userId:string,projectId:string):Promise<ActorScope>{
+  // A disabled account acts nowhere (22/10/2026); inside a write transaction this also orders the write against the disabling.
+  await assertUserEnabled(db,userId);
   const member=await db.projectMember.findUnique({where:{userId_projectId:{userId,projectId}},include:{project:{select:{settings:true}}}});
   if(!member) throw new ProxyDomainError('FORBIDDEN','Không có quyền truy cập dự án');
   const settings=member.project.settings as {businessMode?:string;teamCashEnabled?:boolean}|null;

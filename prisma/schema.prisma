@@ -25,6 +25,15 @@ model User {
   loginLockedAt          DateTime?
   pinFailedCount         Int                      @default(0)
   pinLockedAt            DateTime?
+  // Owner brief 22/10/2026: disabled by an ADMIN (not the temporary lock after wrong passwords / PINs). Kept with its history; blocks
+  // sign-in, web sessions, ops tokens and writes. authEpoch / pinVersion change on disable / enable / PIN change so older sessions,
+  // PIN unlocks and autotype tokens never come back.
+  disabledAt             DateTime?
+  disabledById           String?
+  disabledReason         String?
+  authEpoch              Int                      @default(0)
+  pinVersion             Int                      @default(0)
+  webSessions            UserSession[]
   memberships            ProjectMember[]
   auditLogs              AuditLog[]
   proxyAssignments       ProxyAssignmentHistory[] @relation("AssignedByUser")
@@ -1638,6 +1647,8 @@ model OpsToken {
   revokedById String?
   lastUsedAt  DateTime?
   lastUsedIp  String?
+  // The request that created it (owner brief 22/10/2026): a retried / double-clicked create never makes a second token.
+  createKey   String?   @unique
 
   @@index([userId])
 }
@@ -1666,4 +1677,22 @@ model OpsAudit {
 
   @@index([tokenId, at])
   @@index([projectId, at])
+}
+
+// A signed-in web session (owner brief 22/10/2026). The JWT carries only its id; every request checks it is not revoked, belongs to the
+// user, matches the user's authEpoch and that the user is enabled. The PIN unlock belongs to this session and to the PIN version it
+// was made with: a PIN change, sign-out or disabling the user ends it.
+model UserSession {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  epoch         Int
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  revokedAt     DateTime?
+  revokeReason  String?
+  pinUnlockedAt DateTime?
+  pinVersion    Int?
+
+  @@index([userId, revokedAt])
 }

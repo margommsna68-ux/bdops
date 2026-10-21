@@ -39,7 +39,9 @@ function LoginForm() {
     if (res?.error) {
       // Extract server error message (e.g. ACCOUNT_LOCKED, INVALID_CREDENTIALS)
       const raw = res.error || "";
-      if (raw.startsWith("ACCOUNT_LOCKED:")) {
+      if (raw.startsWith("ACCOUNT_DISABLED:")) {
+        setError(raw.replace("ACCOUNT_DISABLED: ", ""));
+      } else if (raw.startsWith("ACCOUNT_LOCKED:")) {
         setError(raw.replace("ACCOUNT_LOCKED: ", ""));
       } else if (raw.startsWith("INVALID_CREDENTIALS:")) {
         setError(raw.replace("INVALID_CREDENTIALS: ", ""));

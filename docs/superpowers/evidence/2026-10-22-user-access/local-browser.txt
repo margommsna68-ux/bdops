@@ -1,0 +1,31 @@
+PASS P1 Trước khi nhập PIN, gọi API trực tiếp bị từ chối (PIN_REQUIRED)
+PASS P2 Sau khi nhập PIN đúng, API trả dữ liệu
+PASS P3 ai (user thử) đăng nhập + mở khoá PIN
+PASS U1 Nhân viên: dòng ai có vai trò, PIN đã đặt (AI Vận Hành (thử Local) USER PIN đã đặt Quyền · PIN · API → @p36-ai-782f56Proxy )
+PASS U2 Trang user: "p36-ai-782f56 · Proxy & VM — Bản thử"
+PASS U3 Ba phần Quyền / PIN và truy cập / Kết nối API cùng trang
+PASS U4 Nhãn PIN: "Đổi PIN" + "Xoá PIN", không còn "Reset PIN"
+PASS T1 Form token: chỉ quyền dùng được (đọc, vận hành VM, lấy proxy), quyền chưa cấp ghi riêng
+PASS T2 Không phải chọn lại người: mặc định đúng user đang xem
+PASS T3 Token đầy đủ hiện một lần (không in ra đây)
+PASS T4 Bấm nhanh 3 lần → đúng 1 token mới (8 → 9)
+PASS T5 Token mới dùng được (/me 200)
+PASS T6 Tải lại: token không hiện lại, danh sách vẫn có token
+PASS T7 Thu hồi → yêu cầu tiếp theo bị từ chối (401)
+PASS K1 Sau khi đổi PIN, phiên mở khoá cũ của ai bị chặn (PIN_REQUIRED)
+PASS K2 PIN cũ không mở khoá được
+PASS K3 PIN mới mở khoá lại được
+PASS D1 Trang user hiện "Đã vô hiệu hoá"
+PASS D2 Phiên web đang mở của ai bị chặn (SESSION_ENDED)
+PASS D3 Token đang hiệu lực bị chặn (401)
+PASS D4 Đăng nhập lại bị chặn: "Tài khoản đã bị vô hiệu hoá"
+PASS D5 Bật lại: cookie phiên cũ gửi lại vẫn bị từ chối (401 SESSION_ENDED)
+PASS D6 Bật lại: token cũ vẫn bị chặn
+PASS D7 Bật lại: đăng nhập mới dùng được
+PASS J1 Dự án: tiêu đề là tên, nhãn "Proxy / VM", mã nội bộ chỉ trong chi tiết kỹ thuật
+PASS J2 Vào từ Dự án: đúng chế độ Proxy/VM và quyền của người đăng nhập (ADMIN, PROXY_VM)
+PASS J3 Sau khi đi qua Dự án: khung Kết nối API vẫn có
+PASS J4 Back / Forward: đúng user, dự án và khung API
+PASS J5 Thiết lập: không còn form token riêng, chỉ dẫn tới Nhân viên
+PASS M1 Điện thoại 390px: không tràn ngang, nút Đổi PIN trong màn (0px)
+Lỗi JS: không

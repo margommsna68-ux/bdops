@@ -13,6 +13,7 @@ import { useProjectStore } from "@/lib/store";
 import { useT } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/utils";
 import toast from "react-hot-toast";
+import { UserAccessSections } from "@/components/users/UserAccessSections";
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-red-100 text-red-800", MODERATOR: "bg-blue-100 text-blue-800", USER: "bg-green-100 text-green-800",
@@ -33,14 +34,14 @@ export default function UserDetailPage() {
   const params = useParams();
   const t = useT();
   const storeProjectId = useProjectStore((s) => s.currentProjectId);
-  const currentRole = useProjectStore((s) => s.currentRole);
-  const isAdmin = currentRole === "ADMIN";
   const userId = params.id as string;
 
   // Local project selection — admin can switch project to see user's data in different projects
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const projectId = selectedProjectId ?? storeProjectId;
 
+  const access = trpc.user.access.useQuery({ projectId: projectId!, userId }, { enabled: !!projectId && !!userId });
+  const isAdmin = access.data?.viewerRole === "ADMIN";
   const { data, isLoading, refetch } = trpc.user.getDetail.useQuery(
     { projectId: projectId!, userId },
     { enabled: !!projectId && !!userId }
@@ -67,10 +68,6 @@ export default function UserDetailPage() {
 
   const updateMember = trpc.project.updateMember.useMutation({
     onSuccess: () => { refetch(); setDirty(false); toast.success(t("toast_updated")); },
-    onError: (e) => toast.error(e.message),
-  });
-  const resetPin = trpc.user.resetPin.useMutation({
-    onSuccess: () => { refetch(); toast.success(t("admin_pin_reset")); },
     onError: (e) => toast.error(e.message),
   });
   const resetPassword = trpc.user.resetPassword.useMutation({
@@ -122,16 +119,16 @@ export default function UserDetailPage() {
         <span className="font-medium text-gray-900">{user.name || user.username}</span>
       </nav>
 
-      {/* Header */}
-      <div className="flex items-center gap-4">
+      {/* Header (wraps on a phone, 22/10/2026) */}
+      <div className="flex flex-wrap items-center gap-4">
         <div className="w-14 h-14 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-xl font-bold">
           {(user.name || user.username || "?").charAt(0).toUpperCase()}
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{user.name || user.username}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900 break-words">{user.name || user.username}</h1>
           <p className="text-sm text-gray-500">{user.email} • @{user.username}</p>
         </div>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           {/* Project selector — pill buttons, click to switch */}
           {user.memberships && user.memberships.length > 0 && (
             <div className="flex gap-1.5 items-center">
@@ -155,9 +152,12 @@ export default function UserDetailPage() {
             </div>
           )}
           {membership && <Badge className={ROLE_COLORS[membership.role]}>{membership.role}</Badge>}
-          <Badge variant="outline">{user.hasPin ? "PIN ✓" : t("user_no_pin_badge")}</Badge>
+          <Badge variant="outline">{user.hasPin ? "PIN đã đặt" : "Chưa đặt PIN"}</Badge>
         </div>
       </div>
+
+      {/* ═══ Rights · PIN and access · API connection (22/10/2026), for the project being viewed ═══ */}
+      <UserAccessSections key={projectId + ":" + user.id} projectId={projectId} userId={user.id} login={user.username || user.name || user.email} />
 
       {/* ═══ Config Section ═══ */}
       <div className="bg-white rounded-lg border p-5 space-y-5">
@@ -201,16 +201,12 @@ export default function UserDetailPage() {
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions (PIN moved to "PIN và truy cập" above, 22/10/2026) */}
         {isAdmin && (
           <div className="flex gap-2 pt-3 border-t">
-            <Button variant="outline" size="sm" className="text-xs h-7 border-orange-300 text-orange-600 hover:bg-orange-50"
-              onClick={() => { if (confirm("Reset PIN?")) resetPin.mutate({ projectId: projectId!, userId: user.id }); }}>
-              Reset PIN
-            </Button>
             <Button variant="outline" size="sm" className="text-xs h-7 border-red-300 text-red-600 hover:bg-red-50"
-              onClick={() => { if (confirm("Reset mật khẩu? Mật khẩu mới sẽ được hiện lên.")) resetPassword.mutate({ projectId: projectId!, userId: user.id }); }}>
-              Reset Password
+              onClick={() => { if (confirm("Đặt lại mật khẩu? Mật khẩu mới sẽ được hiện lên.")) resetPassword.mutate({ projectId: projectId!, userId: user.id }); }}>
+              Đặt lại mật khẩu
             </Button>
           </div>
         )}

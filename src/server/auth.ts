@@ -2,6 +2,7 @@ import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { openWebSession, revokeWebSession } from "./users/access";
 
 // Lock duration — 30 minutes. Admin can still unlock earlier via adminUnlockAccount.
 export const LOCK_DURATION_MS = 30 * 60 * 1000;
@@ -62,6 +63,9 @@ export const authOptions: NextAuthOptions = {
           throw new Error(`INVALID_CREDENTIALS: Sai mật khẩu (còn ${3 - newCount} lần trước khi bị khóa 30 phút)`);
         }
 
+        // Disabled by an ADMIN (22/10/2026): said only after the right password, never unlocked by time.
+        if (user.disabledAt) throw new Error("ACCOUNT_DISABLED: Tài khoản đã bị vô hiệu hoá. Liên hệ quản trị.");
+
         // Success — reset counter
         if (currentFailedCount > 0) {
           await prisma.user.update({
@@ -82,12 +86,15 @@ export const authOptions: NextAuthOptions = {
         // Name and login come from the DB on every refresh, so a rename shows without signing in again.
         if (session.user) session.user.name = (token.name as string | null | undefined) ?? session.user.name;
         (session.user as any).username = token.username ?? null;
+        (session as any).sid = token.sid ?? null;
       }
       return session;
     },
     async jwt({ token, user }) {
       // Always refresh memberships from DB to get latest role/modules
       const userId = (user as any)?.id ?? token.userId;
+      // A new sign-in opens its server session (22/10/2026); the token carries only its id. Checked on every request (trpc.ts).
+      if ((user as any)?.id) token.sid = (await openWebSession(prisma, (user as any).id)).id;
       if (userId) {
         const dbUser = await prisma.user.findUnique({
           where: { id: userId as string },
@@ -106,6 +113,12 @@ export const authOptions: NextAuthOptions = {
         }
       }
       return token;
+    },
+  },
+  events: {
+    async signOut({ token }) {
+      const sid = (token as any)?.sid;
+      if (sid) await revokeWebSession(prisma, sid, "SIGN_OUT");
     },
   },
   pages: {

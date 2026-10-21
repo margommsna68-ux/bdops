@@ -26,7 +26,8 @@ export function ProjectPickerGate({ children }: { children: React.ReactNode }) {
         membership?.role || "USER",
         membership?.allowedModules || [],
         membership?.canManageUsers || false,
-        membership?.id
+        membership?.id,
+        (project.settings as {businessMode?:string}|null)?.businessMode||null
       );
       setDismissed(true);
     }

@@ -32,14 +32,16 @@ export async function memberOps(db:Db,userId:string,projectId:string):Promise<Re
 }
 /** A user can still act through a token: has a password and is not locked out of signing in. */
 export async function userActive(db:Db,userId:string){
-  const u=await db.user.findUnique({where:{id:userId},select:{password:true,loginLockedAt:true}});
-  return !!u?.password&&!(u.loginLockedAt&&u.loginLockedAt.getTime()+30*60000>Date.now());
+  const u=await db.user.findUnique({where:{id:userId},select:{password:true,loginLockedAt:true,disabledAt:true}});
+  return !!u?.password&&!u.disabledAt&&!(u.loginLockedAt&&u.loginLockedAt.getTime()+30*60000>Date.now());
 }
 async function adminOf(db:Db,userId:string,projectId:string){
   const m=await db.projectMember.findUnique({where:{userId_projectId:{userId,projectId}},include:{project:{select:{settings:true}}}});
   return !!m&&m.role==='ADMIN'&&(m.project.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM';
 }
-export interface CreateTokenInput {projectId:string;userId:string;name:string;scopes:OpsScope[];projectIds?:string[];expiresInDays:number;allowedIps?:string[];pin:string}
+// createKey (22/10/2026): one key per opened form; a retried or double-clicked create returns the token already made (without the secret,
+// which is shown once) instead of making a second one.
+export interface CreateTokenInput {projectId:string;userId:string;name:string;scopes:OpsScope[];projectIds?:string[];expiresInDays:number;allowedIps?:string[];pin:string;createKey?:string|null}
 export async function createOpsToken(adminId:string,input:CreateTokenInput,db:PrismaClient=prisma){
   const projectIds=Array.from(new Set(input.projectIds?.length?input.projectIds:[input.projectId])),scopes=Array.from(new Set(input.scopes)),ips=Array.from(new Set((input.allowedIps||[]).map(x=>x.trim()).filter(Boolean)));
   const name=input.name.trim();if(!name||name.length>60)throw new ProxyDomainError('INVALID_INPUT','Tên token 1–60 ký tự');
@@ -52,14 +54,23 @@ export async function createOpsToken(adminId:string,input:CreateTokenInput,db:Pr
     if(missing.length)throw new ProxyDomainError('FORBIDDEN','Người nhận chưa có quyền: '+missing.map(s=>SCOPE_LABEL[s]).join(', ')+' — cấp quyền ở Kho proxy → Quyền nhân viên trước');}
   if(!await userActive(db,input.userId))throw new ProxyDomainError('FORBIDDEN','Tài khoản nhận token đang khoá hoặc chưa có mật khẩu');
   await verifyBusinessPin(db,adminId,input.pin);
+  const key=input.createKey?.trim()||null;
+  if(key&&!/^[A-Za-z0-9_-]{8,80}$/.test(key))throw new ProxyDomainError('INVALID_INPUT','Mã yêu cầu không hợp lệ');
+  const same=async()=>{const prev=key?await db.opsToken.findUnique({where:{createKey:key}}):null;if(!prev)return null;
+    if(prev.createdById!==adminId||prev.userId!==input.userId)throw new ProxyDomainError('FORBIDDEN','Mã yêu cầu đã dùng cho token khác');
+    return {id:prev.id,prefix:prev.prefix,token:null as string|null,expiresAt:prev.expiresAt.toISOString(),already:true};};
+  const prev=await same();if(prev)return prev;
   const token='mth_'+randomBytes(32).toString('base64url'),prefix=token.slice(0,12);
-  const row=await db.opsToken.create({data:{name,prefix,tokenHash:hashToken(token),userId:input.userId,projectIds,scopes,allowedIps:ips,expiresAt:new Date(Date.now()+input.expiresInDays*86400000),createdById:adminId}});
+  let row;
+  try{row=await db.opsToken.create({data:{name,prefix,tokenHash:hashToken(token),userId:input.userId,projectIds,scopes,allowedIps:ips,expiresAt:new Date(Date.now()+input.expiresInDays*86400000),createdById:adminId,createKey:key}});}
+  catch(e){if((e as {code?:string}).code==='P2002'&&key){const again=await same();if(again)return again;}throw e;}
   for(const id of projectIds)await db.auditLog.create({data:{projectId:id,userId:adminId,action:'OPS_TOKEN_CREATE',entity:'OpsToken',entityId:row.id,changes:{prefix,user:input.userId,scopes,expiresAt:row.expiresAt.toISOString(),ips:ips.length}}});
-  return {id:row.id,prefix,token,expiresAt:row.expiresAt.toISOString()};
+  return {id:row.id,prefix,token:token as string|null,expiresAt:row.expiresAt.toISOString(),already:false};
 }
-export async function listOpsTokens(adminId:string,projectId:string,db:PrismaClient=prisma){
+/** Tokens of one project (ADMIN), and of one user when userId is given (the user page, 22/10/2026): filtered here, never in the browser. */
+export async function listOpsTokens(adminId:string,projectId:string,db:PrismaClient=prisma,opts:{userId?:string|null}={}){
   if(!await adminOf(db,adminId,projectId))throw new ProxyDomainError('FORBIDDEN');
-  const rows=await db.opsToken.findMany({where:{projectIds:{has:projectId}},orderBy:{createdAt:'desc'},take:200});
+  const rows=await db.opsToken.findMany({where:{projectIds:{has:projectId},...(opts.userId?{userId:opts.userId}:{})},orderBy:{createdAt:'desc'},take:200});
   const ids=Array.from(new Set(rows.flatMap(r=>[r.userId,r.createdById]))),users=await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}});
   const projects=await db.project.findMany({where:{id:{in:Array.from(new Set(rows.flatMap(r=>r.projectIds)))}},select:{id:true,name:true,code:true}});
   const who=(id:string)=>{const u=users.find(x=>x.id===id);return u?u.name||u.username||'—':'—';};
@@ -76,8 +87,8 @@ export async function revokeOpsToken(adminId:string,input:{projectId:string;toke
   return {revoked:true,already:false};
 }
 /** Members an ADMIN may give a token to in this project, with what each can do now. */
-export async function tokenCandidates(adminId:string,projectId:string,db:PrismaClient=prisma){
+export async function tokenCandidates(adminId:string,projectId:string,db:PrismaClient=prisma,opts:{userId?:string|null}={}){
   if(!await adminOf(db,adminId,projectId))throw new ProxyDomainError('FORBIDDEN');
-  const members=await db.projectMember.findMany({where:{projectId},select:{userId:true,role:true,user:{select:{name:true,username:true}}},orderBy:{createdAt:'asc'}});
+  const members=await db.projectMember.findMany({where:{projectId,...(opts.userId?{userId:opts.userId}:{})},select:{userId:true,role:true,user:{select:{name:true,username:true}}},orderBy:{createdAt:'asc'}});
   return Promise.all(members.map(async m=>({userId:m.userId,role:m.role,name:m.user.name||m.user.username||'—',username:m.user.username,ops:await memberOps(db,m.userId,projectId)})));
 }

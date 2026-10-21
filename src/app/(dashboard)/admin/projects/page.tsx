@@ -12,13 +12,18 @@ import {
 } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { useProjectStore } from "@/lib/store";
+import { useSelectProject } from "@/lib/project-switch";
+import { projectLabel } from "@/lib/utils";
+// The kind of project as it really works (22/10/2026): Proxy / VM projects say so; never "Full" by default.
+const modeOf = (p: { type?: string | null; settings?: unknown }) => (p.settings as { businessMode?: string } | null)?.businessMode === "PROXY_VM" ? { label: "Proxy / VM", tone: "bg-teal-100 text-teal-700" } : p.type === "PAYPAL_ONLY" ? { label: "Chỉ PayPal", tone: "bg-amber-100 text-amber-700" } : { label: "Đầy đủ (VM + PayPal)", tone: "bg-blue-100 text-blue-700" };
 import toast from "react-hot-toast";
 import { useT } from "@/lib/i18n";
 
 export default function AdminProjectsPage() {
   const t = useT();
   const router = useRouter();
-  const { currentRole, currentProjectId, setCurrentProject } = useProjectStore();
+  const { currentRole, currentProjectId } = useProjectStore();
+  const selectProject = useSelectProject();
   const noProject = !currentProjectId;
   const isAdmin = currentRole === "ADMIN" || noProject; // allow when no projects exist
 
@@ -33,7 +38,7 @@ export default function AdminProjectsPage() {
   const [wipeConfirm, setWipeConfirm] = useState<{ id: string; code: string; name: string } | null>(null);
   const [wipeInput, setWipeInput] = useState("");
 
-  const [addMemberFor, setAddMemberFor] = useState<{ id: string; code: string } | null>(null);
+  const [addMemberFor, setAddMemberFor] = useState<{ id: string; code: string; name?: string } | null>(null);
   const [addRole, setAddRole] = useState<"ADMIN" | "MODERATOR" | "USER">("USER");
 
   // Edit project
@@ -64,8 +69,8 @@ export default function AdminProjectsPage() {
       setNewCode("");
       setNewName("");
       setNewDesc("");
-      toast.success(`Tạo dự án ${p.code} thành công`);
-      setCurrentProject(p.id, p.code, p.name, p.type || "FULL", "ADMIN", [], false,undefined,(p.settings as {businessMode?:string}|null)?.businessMode||null);
+      toast.success(`Tạo dự án ${projectLabel(p)} thành công`);
+      selectProject(p as never);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -192,17 +197,14 @@ export default function AdminProjectsPage() {
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-gray-900">{p.code}</h2>
-                  <span className="text-gray-500">—</span>
-                  <span className="text-gray-700">{p.name}</span>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${(p as any).type === "PAYPAL_ONLY" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
-                    {(p as any).type === "PAYPAL_ONLY" ? "PayPal Only" : "Full"}
-                  </span>
+                  {/* 22/10/2026: the name is the title; the internal code and id only in the technical details. */}
+                  <h2 className="text-lg font-bold text-gray-900">{projectLabel(p)}</h2>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${modeOf(p).tone}`}>{modeOf(p).label}</span>
                 </div>
                 {p.description && <p className="text-sm text-gray-500 mt-1">{p.description}</p>}
-                <p className="text-[10px] text-gray-400 mt-1">
-                  ID: {p.id} | Tạo: {new Date(p.createdAt).toLocaleDateString("vi-VN")}
-                </p>
+                <details className="mt-1"><summary className="text-[10px] text-gray-400 cursor-pointer">Chi tiết kỹ thuật</summary>
+                  <p className="text-[10px] text-gray-400">Mã nội bộ: {p.code} · ID: {p.id} · Tạo: {new Date(p.createdAt).toLocaleDateString("vi-VN")}</p>
+                </details>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" className="text-blue-600 hover:bg-blue-50 border-blue-200"
@@ -247,8 +249,7 @@ export default function AdminProjectsPage() {
               ] as [string, number, string, string][]).map(([label, count, cls, href]) => (
                 <button key={label} onClick={() => {
                   // Switch to this project then navigate
-                  const membership = (p as any).members?.[0];
-                  setCurrentProject(p.id, p.code, p.name, (p as any).type || "FULL", membership?.role || "ADMIN", membership?.allowedModules || [], membership?.canManageUsers || false, membership?.id);
+                  selectProject(p as never);
                   router.push(href);
                 }} className={`px-3 py-1.5 rounded-lg border cursor-pointer transition-colors ${cls}`}>
                   <span className="text-xs font-medium">{label} </span>
@@ -263,11 +264,10 @@ export default function AdminProjectsPage() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Thành viên ({(p as any).members.length})</span>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => setAddMemberFor({ id: p.id, code: p.code })}
+                    <button onClick={() => setAddMemberFor({ id: p.id, code: p.code, name: p.name })}
                       className="text-[10px] text-green-600 hover:text-green-800 font-semibold">+ Thêm nhanh</button>
                     <button onClick={() => {
-                      const membership = (p as any).members?.[0];
-                      setCurrentProject(p.id, p.code, p.name, (p as any).type || "FULL", membership?.role || "ADMIN", membership?.allowedModules || [], false, membership?.id);
+                      selectProject(p as never);
                       router.push("/admin/users");
                     }} className="text-[10px] text-blue-600 hover:text-blue-800 font-medium">Quản lý →</button>
                   </div>
@@ -352,7 +352,7 @@ export default function AdminProjectsPage() {
       <Dialog open={!!wipeConfirm} onOpenChange={(v) => { if (!v) { setWipeConfirm(null); setWipeInput(""); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-orange-600">Xóa dữ liệu {wipeConfirm?.code}</DialogTitle>
+            <DialogTitle className="text-orange-600">Xóa dữ liệu {projectLabel(wipeConfirm)}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
@@ -390,7 +390,7 @@ export default function AdminProjectsPage() {
       <Dialog open={!!deleteConfirm} onOpenChange={(v) => { if (!v) { setDeleteConfirm(null); setDeleteInput(""); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-red-600">Xóa dự án {deleteConfirm?.code}</DialogTitle>
+            <DialogTitle className="text-red-600">Xóa dự án {projectLabel(deleteConfirm)}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -439,7 +439,7 @@ export default function AdminProjectsPage() {
       <Dialog open={!!editProject} onOpenChange={(v) => { if (!v) setEditProject(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Sửa dự án {editProject?.code}</DialogTitle>
+            <DialogTitle>Sửa dự án {projectLabel(editProject)}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div>
@@ -490,7 +490,7 @@ export default function AdminProjectsPage() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 py-3 border-b flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-gray-900">Thêm thành viên vào {addMemberFor.code}</h3>
+                <h3 className="text-sm font-bold text-gray-900">Thêm thành viên vào {projectLabel(addMemberFor)}</h3>
                 <p className="text-[10px] text-gray-400">Chọn user có sẵn trong hệ thống</p>
               </div>
               <div className="flex items-center gap-2">

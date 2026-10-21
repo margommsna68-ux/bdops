@@ -4,6 +4,10 @@ import bcrypt from "bcryptjs";
 import { checkPin } from "../business-management/pin";
 import { createAuditLog } from "@/lib/audit";
 import { LOCK_DURATION_MS } from "../auth";
+import { accountState, bumpPinVersion, setUserDisabled, unlockWebSession } from "../users/access";
+import { adminProcedure } from "../trpc";
+// The web session of an HTTP call (trpc.ts createTRPCContext), when there is one.
+const webSessionId = (ctx: { web?: unknown }) => { const w = ctx.web as { sessionId?: string } | null | undefined; return w && typeof w.sessionId === "string" ? w.sessionId : null; };
 
 export const userRouter = router({
   // Check if current user has PIN set
@@ -13,7 +17,9 @@ export const userRouter = router({
       where: { id: userId },
       select: { pin: true },
     });
-    return { hasPin: !!user?.pin };
+    // unlocked: the PIN was proved on THIS server session for the current PIN version (22/10/2026); never a client flag.
+    const w = (ctx as { web?: unknown }).web as { pinUnlocked?: boolean } | null | undefined;
+    return { hasPin: !!user?.pin, unlocked: !!user?.pin && (w && "pinUnlocked" in w ? !!w.pinUnlocked : true) };
   }),
 
   // Set or update own PIN
@@ -45,6 +51,10 @@ export const userRouter = router({
         where: { id: userId },
         data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
       });
+      // A new PIN ends every older unlock; this session (which just proved it) is unlocked with the new one.
+      await bumpPinVersion(ctx.prisma, userId);
+      const sid = webSessionId(ctx);
+      if (sid) await unlockWebSession(ctx.prisma, sid, userId);
       return { success: true };
     }),
 
@@ -66,6 +76,9 @@ export const userRouter = router({
         const u = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { pinFailedCount: true } });
         throw new Error(`Sai PIN (còn ${Math.max(1, 3 - (u?.pinFailedCount ?? 0))} lần trước khi bị khóa 30 phút)`);
       }
+      // The unlock belongs to this server session and this PIN version (22/10/2026).
+      const sid = webSessionId(ctx);
+      if (sid) await unlockWebSession(ctx.prisma, sid, userId);
       return { valid: true };
     }),
 
@@ -125,12 +138,15 @@ export const userRouter = router({
           throw new Error("Bạn chỉ reset PIN cho user trong nhóm của mình");
         }
       }
+      // "Đặt PIN" / "Đổi PIN" (22/10/2026): the new PIN replaces the old one; older PIN unlocks of that user stop working.
+      const had = !!(await ctx.prisma.user.findUnique({ where: { id: input.userId }, select: { pin: true } }))?.pin;
       const hashedPin = await bcrypt.hash(input.newPin, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { pin: hashedPin },
+        data: { pin: hashedPin, pinFailedCount: 0, pinLockedAt: null },
       });
-      await createAuditLog({ action: "RESET_PIN", entity: "User", entityId: input.userId, userId: callerId, projectId: input.projectId, changes: { targetUserId: input.userId } });
+      await bumpPinVersion(ctx.prisma, input.userId);
+      await createAuditLog({ action: had ? "CHANGE_PIN" : "SET_PIN", entity: "User", entityId: input.userId, userId: callerId, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
     }),
 
@@ -206,10 +222,13 @@ export const userRouter = router({
               name: true,
               lastActiveAt: true,
               pin: true,
+              disabledAt: true,
             },
           },
         },
       });
+      // Ops tokens in force in this project, per user (22/10/2026: shown on Nhân viên).
+      const tokenRows = await ctx.prisma.opsToken.groupBy({ by: ["userId"], where: { projectIds: { has: input.projectId }, revokedAt: null, expiresAt: { gt: new Date() } }, _count: { _all: true } });
 
       // Get autotype session counts for all users in this project
       const userIds = members.map((m) => m.user.id);
@@ -244,6 +263,8 @@ export const userRouter = router({
           maxAutotypeDevices: m.maxAutotypeDevices,
           agentFeePercent: m.agentFeePercent != null ? Number(m.agentFeePercent) : null,
           hasPin: !!m.user.pin,
+          disabled: !!m.user.disabledAt,
+          activeTokens: tokenRows.find((t) => t.userId === m.user.id)?._count._all ?? 0,
           isOnline: m.user.lastActiveAt ? m.user.lastActiveAt > fiveMinAgo : false,
           lastActiveAt: m.user.lastActiveAt,
           autotypeActiveDevices: sessions.length,
@@ -371,12 +392,14 @@ export const userRouter = router({
       };
     }),
 
-  // Reset PIN for a user
+  // "Xoá PIN" (22/10/2026: this removes the PIN; it is not a change). Without a PIN nothing that needs one goes through until a new PIN
+  // is set; older PIN unlocks stop working.
   resetPin: moderatorProcedure
     .input(z.object({ projectId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.prisma.user.update({ where: { id: input.userId }, data: { pin: null } });
-      await createAuditLog({ action: "RESET_PIN", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
+      await ctx.prisma.user.update({ where: { id: input.userId }, data: { pin: null, pinFailedCount: 0, pinLockedAt: null } });
+      await bumpPinVersion(ctx.prisma, input.userId);
+      await createAuditLog({ action: "REMOVE_PIN", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
       return { success: true };
     }),
 
@@ -480,5 +503,28 @@ export const userRouter = router({
           };
         })
         .filter((u) => u.active);
+    }),
+  // ─── Account access (owner brief 22/10/2026) ───
+  // Short state of a member of this project for the user page: role, account state, PIN set, ops tokens in force (this project).
+  access: moderatorProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: input.userId }, select: { pin: true, disabledAt: true, disabledReason: true, loginLockedAt: true, pinLockedAt: true, memberships: { select: { projectId: true } } } });
+      const tokens = await ctx.prisma.opsToken.count({ where: { userId: input.userId, projectIds: { has: input.projectId }, revokedAt: null, expiresAt: { gt: new Date() } } });
+      const otherProjects = u.memberships.filter((m) => m.projectId !== input.projectId).length;
+      // The viewer's own role and the project's mode, in THIS project (never the project picked elsewhere in the browser).
+      const project = await ctx.prisma.project.findUniqueOrThrow({ where: { id: input.projectId }, select: { name: true, code: true, settings: true } });
+      const target = await ctx.prisma.projectMember.findUnique({ where: { userId_projectId: { userId: input.userId, projectId: input.projectId } }, select: { id: true, role: true } });
+      return { hasPin: !!u.pin, state: accountState(u, LOCK_DURATION_MS), loginLocked: !!u.loginLockedAt && u.loginLockedAt.getTime() + LOCK_DURATION_MS > Date.now(), pinLocked: !!u.pinLockedAt && u.pinLockedAt.getTime() + LOCK_DURATION_MS > Date.now(),
+        disabledAt: u.disabledAt?.toISOString() ?? null, disabledReason: u.disabledReason, activeTokens: tokens, otherProjects, self: input.userId === (ctx.user as any).id,
+        viewerRole: ctx.role, memberId: target?.id ?? null, memberRole: target?.role ?? null, project: { name: project.name, code: project.code, businessMode: (project.settings as { businessMode?: string } | null)?.businessMode ?? null },
+        canDisable: ctx.role === "ADMIN" && input.userId !== (ctx.user as any).id };
+    }),
+  // Disable / enable the whole account (ADMIN of every project of the user: assertUserTarget in trpc.ts).
+  setDisabled: adminProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string(), disabled: z.boolean(), reason: z.string().max(300).nullish() }))
+    .mutation(async ({ ctx, input }) => {
+      try { return await setUserDisabled(ctx.prisma, (ctx.user as any).id, input); }
+      catch (e) { throw new Error(e instanceof Error ? e.message : "Không thực hiện được"); }
     }),
 });
