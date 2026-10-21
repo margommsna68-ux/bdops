@@ -3,6 +3,7 @@ import {useEffect,useState} from 'react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {trpc} from '@/lib/trpc';
 import toast from 'react-hot-toast';
+import {Button} from '@/components/ui/button';
 type Capability='COPY_CREDENTIALS'|'PROXY_IMPORT'|'PROXY_REPLACE'|'EARN_BALANCE'|'EARN_PAYOUT'|'PAYPAL_RECEIPT_RECORD'|'VM_PROXY_FOR_OPS';
 export const CAPABILITY_CHOICES:{value:Capability;label:string}[]=[{value:'COPY_CREDENTIALS',label:'Xem / copy thông tin đăng nhập'},{value:'PROXY_IMPORT',label:'Nhập proxy mới'},{value:'PROXY_REPLACE',label:'Nhận proxy replace'},{value:'EARN_BALANCE',label:'Ghi kiểm tra tiền EarnApp (số dư tại VM)'},{value:'EARN_PAYOUT',label:'Chuẩn bị rút EarnApp (giữ email PP, ghi đã gửi / chưa rõ)'},{value:'PAYPAL_RECEIPT_RECORD',label:'Ghi khoản nhận PP của yêu cầu rút'},{value:'VM_PROXY_FOR_OPS',label:'Lấy proxy của VM đang xử lý (AI, chỉ VM đã nhận việc)'}];
 /**
@@ -26,7 +27,8 @@ export function MemberRightsForm({projectId,memberId,onCancel,onSaved}:{projectI
     <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={allowInfrastructure} disabled={fixed||!selected||save.isLoading} onChange={e=>{setAllowInfrastructure(e.target.checked);if(!e.target.checked)setCapabilities([]);}}/>Được truy cập Proxy / Server / VM</label>
     <div className="space-y-3 border-t pt-3">{CAPABILITY_CHOICES.map(c=><label key={c.value} className="flex items-center gap-3 text-sm"><input type="checkbox" checked={fixed||capabilities.includes(c.value)} disabled={fixed||viewer||!allowInfrastructure||save.isLoading} onChange={e=>setCapabilities(e.target.checked?[...capabilities,c.value]:capabilities.filter(v=>v!==c.value))}/>{c.label}</label>)}</div>
     <p className="pm-muted text-xs">{fixed?'ADMIN có toàn bộ quyền trong dự án.':viewer?'Chỉ xem: không thay đổi dữ liệu và không copy mật khẩu.':'Báo BLOCKED và thao tác VM đi theo quyền vận hành; các quyền trên cấp riêng.'}</p>
-    <div className="flex justify-end gap-2">{onCancel&&<button className="pm-button" disabled={save.isLoading} onClick={onCancel}>Đóng</button>}<button className={'pm-button'+(changed?' pm-button-primary':'')} disabled={!selected||fixed||!changed||save.isLoading} onClick={()=>save.mutate({projectId,memberId:id,capabilities,allowInfrastructure})}>Lưu quyền</button></div>
+    {/* Shared buttons (22/10/2026): readable on the user page and in the dialog, in every theme; muted until something changes. */}
+    <div className="flex justify-end gap-2">{onCancel&&<Button size="sm" variant="outline" disabled={save.isLoading} onClick={onCancel}>Đóng</Button>}<Button size="sm" variant={changed?'default':'outline'} disabled={!selected||fixed||!changed||save.isLoading} onClick={()=>save.mutate({projectId,memberId:id,capabilities,allowInfrastructure})}>Lưu quyền</Button></div>
   </div>;
 }
 export function MemberRightsDialog({projectId,onClose}:{projectId:string;onClose:()=>void}){

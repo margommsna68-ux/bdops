@@ -15,7 +15,7 @@ import { useProjectStore } from "@/lib/store";
 import { useSelectProject } from "@/lib/project-switch";
 import { projectLabel } from "@/lib/utils";
 // The kind of project as it really works (22/10/2026): Proxy / VM projects say so; never "Full" by default.
-const modeOf = (p: { type?: string | null; settings?: unknown }) => (p.settings as { businessMode?: string } | null)?.businessMode === "PROXY_VM" ? { label: "Proxy / VM", tone: "bg-teal-100 text-teal-700" } : p.type === "PAYPAL_ONLY" ? { label: "Chỉ PayPal", tone: "bg-amber-100 text-amber-700" } : { label: "Đầy đủ (VM + PayPal)", tone: "bg-blue-100 text-blue-700" };
+const modeOf = (p: { type?: string | null; settings?: unknown }) => (p.settings as { businessMode?: string } | null)?.businessMode === "PROXY_VM" ? { label: "Proxy / VM", tone: "bg-teal-600 text-white" } : p.type === "PAYPAL_ONLY" ? { label: "Chỉ PayPal", tone: "bg-amber-600 text-white" } : { label: "Đầy đủ (VM + PayPal)", tone: "bg-blue-600 text-white" };
 import toast from "react-hot-toast";
 import { useT } from "@/lib/i18n";
 
