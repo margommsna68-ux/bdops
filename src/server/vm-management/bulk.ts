@@ -9,13 +9,16 @@ import {assignableReason,endpointInclude,occupantOf,placeOnVm,vmInclude,type End
 import {authorizeVM,type VMReader} from './repository';
 import {normalizeSdk} from './sdk-parse';
 import {assertSdkMoneyWrite,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
-import {planPlacement,applyPlacement,checkInfo,infoChanges,staleSdk,type SdkInfo} from './sdk-store';
+import {planPlacement,applyPlacement,checkInfo,cycleOf,infoChanges,staleSdk,type SdkInfo} from './sdk-store';
+import {RECREATED_LINE} from './sdk-list';
 import {parseSdkAmount,formatSdkAmount,SDK_NOTE_MAX} from '@/lib/sdk-money';
 // "Dán bảng" and the bulk bar on Server/VM: one kind of update per batch (SDK, proxy, existing Gmail or note), matched by server + VM
 // code (never by line order). Preview reports every line; apply re-checks every row inside one transaction, saves the rows that are
 // still valid and reports the rest one by one. A retry of the same list finds the saved rows unchanged ("giữ nguyên") and writes nothing.
 export type BulkKind='SDK'|'PROXY'|'GMAIL'|'NOTE';
 export interface BulkRow {line:number;server:string|null;vm:string;vmId:string|null;before:string|null;after:string|null;value:string|null;outcome:'READY'|'SKIP'|'ERROR';message:string;expectedRevision:number|null;
+  /** SDK only: the VM's round at the check (review 22/10/2026); apply refuses the line after a recreation, never moves it to the new round. */
+  expectedCycle?:number|null;
   /** SDK only: money / note of the target code (undefined = keep, null = clear with "-") and the old → new text shown at the line. */
   amount?:string|null;note?:string|null;info?:string|null;
   /** SDK only: revision of the stored target code at the check (null = not stored); apply refuses the line when it changed. */
@@ -48,8 +51,10 @@ export function parseBulkLines(kind:BulkKind,text:string,serverCode:string|null)
   });
   return out;
 }
-type ActiveVM=VMRow&{gmailId:string|null;sdkId:string|null;notes:string|null};
-async function activeVMs(projectId:string,db:VMReader){return await db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null}},include:vmInclude}) as ActiveVM[];}
+type ActiveVM=VMRow&{gmailId:string|null;sdkId:string|null;notes:string|null;operation?:{cycle:number}|null};
+// `operation` (round) travels with the VM: the SDK branch binds money to the real round and refuses a stale paste (review 22/10/2026).
+const bulkInclude={...vmInclude,operation:{select:{cycle:true}}} as const;
+async function activeVMs(projectId:string,db:VMReader){return await db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null}},include:bulkInclude}) as ActiveVM[];}
 const at=(vm:{code:string;server:{code:string}})=>vm.server.code+'/'+vm.code;
 // Current value of a VM for the chosen kind, shown as "cũ".
 function shown(kind:BulkKind,vm:ActiveVM,gmails:Map<string,string>,occupant:string|null){
@@ -125,10 +130,10 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
       const other=twice(sdk);if(other){rows.push({...found,after:sdk,message:'Cùng SDK với dòng '+other.join(', ')+'; mỗi SDK một VM'});continue;}
       const cell=sdkCells(l);if('error' in cell){rows.push({...found,after:sdk,message:cell.error});continue;}
       if(cell.info.amount!==undefined&&!money.write){rows.push({...found,after:sdk,message:SDK_MONEY_WRITE_REFUSAL});continue;}
-      const planned=await planPlacement(db,scope.projectId,{...vm,operation:null},sdk);if('error' in planned){rows.push({...found,after:sdk,message:planned.error});continue;}
+      const planned=await planPlacement(db,scope.projectId,vm,sdk);if('error' in planned){rows.push({...found,after:sdk,message:planned.error});continue;}
       const {plan}=planned,record=plan.kind==='SAME'?plan.current:plan.target,ch=infoChanges(record,cell.info),info=infoText(ch);
       if(plan.kind==='SAME'&&!ch.amount&&!ch.note){rows.push({...found,after:sdk,outcome:'SKIP',message:'Giữ nguyên: cùng SDK hiện tại'});continue;}
-      rows.push({...found,after:sdk,value:sdk,outcome:'READY',...cell.info,info,expectedSdkRevision:record?.revision??null,message:plan.kind==='SAME'?'Cập nhật tiền / ghi chú SDK':plan.kind==='PLACE'?'Dùng SDK trong kho':vm.sdkId?'Đổi SDK (mã cũ giữ lại)':'Ghi SDK mới'});
+      rows.push({...found,after:sdk,value:sdk,outcome:'READY',...cell.info,info,expectedSdkRevision:record?.revision??null,expectedCycle:cycleOf(vm),message:plan.kind==='SAME'?'Cập nhật tiền / ghi chú SDK':plan.kind==='PLACE'?'Dùng SDK trong kho':vm.sdkId?'Đổi SDK (mã cũ giữ lại)':'Ghi SDK mới'});
     }else if(kind==='NOTE'){
       if(raw.length>NOTE_MAX){rows.push({...found,message:'Ghi chú tối đa '+NOTE_MAX+' ký tự'});continue;}
       if(raw===(vm.notes||'').trim()){rows.push({...found,after:raw,outcome:'SKIP',message:'Giữ nguyên: cùng ghi chú'});continue;}
@@ -146,7 +151,7 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
   }
   return {kind,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
-export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;expectedSdkRevision?:number|null;value:string|null;amount?:string|null;note?:string|null}[]},db:PrismaClient=prisma){
+export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;expectedCycle?:number|null;expectedSdkRevision?:number|null;value:string|null;amount?:string|null;note?:string|null}[]},db:PrismaClient=prisma){
   refuseGmail(input.kind);
   const kind=input.kind;if(!RIGHT[kind]||!input.items.length||input.items.length>MAX_ROWS||new Set(input.items.map(i=>i.vmId)).size!==input.items.length) throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM mỗi đợt');
   for(const i of input.items){
@@ -158,7 +163,7 @@ export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:stri
     await authorizeVM(current,RIGHT[kind],tx);
     const rows:BulkApplyRow[]=[],now=new Date(),usedSdk=new Map<string,string>(),usedProxy=new Set<string>();
     for(const item of [...input.items].sort((a,b)=>a.line-b.line)){
-      const vm=await tx.virtualMachine.findFirst({where:{id:item.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:vmInclude}) as ActiveVM|null;
+      const vm=await tx.virtualMachine.findFirst({where:{id:item.vmId,managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:bulkInclude}) as ActiveVM|null;
       const row=(outcome:BulkApplyRow['outcome'],message:string)=>rows.push({line:item.line,vmId:item.vmId,server:vm?.server.code||'',vm:vm?.code||'',outcome,message});
       if(!vm){row('ERROR','VM không còn hoạt động (đã xoá hoặc không thuộc dự án)');continue;}
       if(vm.revision!==item.expectedRevision){row('ERROR','VM vừa được thay đổi sau khi xem trước; kiểm tra lại dòng này');continue;}
@@ -166,9 +171,12 @@ export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:stri
         if(item.value){const dup=usedSdk.get(item.value);if(dup){row('ERROR','Cùng SDK với '+dup);continue;}usedSdk.set(item.value,at(vm));}
         let info:SdkInfo;try{info=checkInfo({amount:item.amount,note:item.note});}catch(e){row('ERROR',e instanceof Error?e.message.replace(/^[A-Z_]+: /,''):'Tiền / ghi chú không hợp lệ');continue;}
         if(info.amount!==undefined)await assertSdkMoneyWrite(current,tx);
-        const planned=await planPlacement(tx,scope.projectId,{...vm,operation:null},item.value);if('error' in planned){row('ERROR',planned.error);continue;}
+        // The line was checked for one round of this VM (the preview carries it); after a recreation it is an old paste: refused, never
+        // moved to the new round. A caller that sends no round gets the VM's real round (never a default of 1).
+        if(item.expectedCycle!=null&&cycleOf(vm)!==item.expectedCycle){row('ERROR',RECREATED_LINE);continue;}
+        const planned=await planPlacement(tx,scope.projectId,vm,item.value);if('error' in planned){row('ERROR',planned.error);continue;}
         const stale=staleSdk(planned.plan,item.expectedSdkRevision);if(stale){row('ERROR',stale);continue;}
-        const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'},{...vm,operation:null},planned.plan,info);
+        const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'},vm,planned.plan,info);
         row(r.changed?'APPLIED':'SKIP',r.message);
       }else if(kind==='NOTE'){
         const next=item.value?.trim()||null;if(next===(vm.notes?.trim()||null)){row('SKIP','Giữ nguyên');continue;}

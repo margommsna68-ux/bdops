@@ -138,7 +138,9 @@ export async function applyPlacement(tx:Tx,ctx:WriteCtx,vm:SdkVM,plan:PlacementP
     await tx.sdkRecord.update({where:{id:target.id},data:{vmId:vm.id,holderVmId:vm.id,...(held?{}:{heldAt:ctx.now,heldById:ctx.actorId}),placedAt:ctx.now,placedById:ctx.actorId,revision:{increment:1}}});
     if(plan.kind!=='CREATE')await event(tx,ctx,target.id,plan.kind==='MOVE'?'MOVE':'PLACE',{fromVmId:plan.source?.id??null,fromLabel:plan.source?placeLabel(plan.source):null,toVmId:vm.id,toLabel:here});
     else await event(tx,ctx,target.id,'PLACE',{toVmId:vm.id,toLabel:here});
-    if(plan.kind!=='CREATE')await applyInfo(tx,ctx,{...target,vmId:vm.id},info);
+    // Money / note entered with this placement belong to the destination VM (review 22/10/2026): the record passed on carries the new
+    // position, so moneyBinding sees vm.id, never the old holder.
+    if(plan.kind!=='CREATE')await applyInfo(tx,ctx,{...target,vmId:vm.id,holderVmId:vm.id},info);
   }
   await syncMirror(tx,vm.id,ctx.actorId,ctx.now);
   await tx.vMSdkHistory.create({data:{projectId:ctx.projectId,vmId:vm.id,previousSdk:previous?.code??null,newSdk:target?.code??null,actorId:ctx.actorId,recordedAt:ctx.now,note:plan.kind==='MOVE'?'Chuyển từ '+placeLabel(plan.source!):plan.kind==='REMOVE'?'Gỡ SDK khỏi VM (mã vẫn giữ)':ctx.via}});

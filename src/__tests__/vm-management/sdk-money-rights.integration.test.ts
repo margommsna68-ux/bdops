@@ -10,6 +10,7 @@ import {recordRecreated,setVmStatus} from '@/server/vm-ops/ops';
 import {api} from '../ops-api/ops-fixture';
 import {createOpsToken} from '@/server/ops-api/tokens';
 import {vmMoneyState} from '@/lib/vm-money';
+import {readFileSync} from 'node:fs';
 import {applyVmBulk,previewVmBulk} from '@/server/vm-management/bulk';
 import {readVMWorkspace} from '@/server/vm-management/repository';
 import {inspectOperation} from '@/server/operation-history/journal';
@@ -133,6 +134,54 @@ describe('SDK money rights on the web services',()=>{
       await addVmSdk(f.scope,{key:randomUUID(),vmId:other.id,expectedCycle:otherOp.operation?.cycle??1,code:c2,expectedSdkRevision:src.revision,from:{vmId:f.vm.id,expectedRevision:srcVm.revision}},db);
       const moved=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===other.id)!.sdks.find(x=>x.code===c2)!;
       expect(moved).toMatchObject({amount:null,amountObservedAt:null,stored:{amount:'3',vmId:f.vm.id}});
+    }finally{await f.cleanup();}
+  });
+  it('money entered with a move binds to the destination; a plain move keeps the source reading as history',async()=>{
+    const f=await fx();try{
+      const c=f.code('30');await f.observe(c,'10',ago(2),true);
+      const unconfirmed=await f.rec(c);await confirmLegacySdk(f.scope,{key:randomUUID(),sdkId:unconfirmed.id,expectedRevision:unconfirmed.revision,decision:'UNLINKED'},db);
+      const to=f.vms[1],src=await f.rec(c),from=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),dest=await db.virtualMachine.findUniqueOrThrow({where:{id:to.id},include:{operation:true}});
+      await saveVmSdk(f.scope,{key:randomUUID(),vmId:to.id,expectedCycle:dest.operation?.cycle??1,expectedVmRevision:dest.revision,code:c,expectedSdkRevision:src.revision,amount:'20',from:{vmId:f.vm.id,expectedRevision:from.revision}},db);
+      const moved=await f.rec(c);expect(moved).toMatchObject({vmId:to.id,holderVmId:to.id,amountVmId:to.id,amountCycle:dest.operation?.cycle??1});expect(moved.amount!.toString()).toBe('20');
+      const row=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===to.id)!.sdks.find(x=>x.code===c)!;expect(row).toMatchObject({current:true,amount:'20'});
+    }finally{await f.cleanup();}
+  });
+  it('Dán bảng → SDK binds money to the real round and refuses a paste checked before a recreation',async()=>{
+    const f=await fx();try{
+      const c=f.code('31'),v0=await f.cur();
+      const stale=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:f.vm.code+' | '+c+' | 4.56'},db);expect(stale.rows[0]).toMatchObject({outcome:'READY',expectedCycle:v0.cycle});
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vm.id,status:'SUSPENDED',expectedCycle:v0.cycle}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedCycle:v0.cycle},db);
+      const item=(r:typeof stale.rows[number],rev:number)=>({line:r.line,vmId:r.vmId!,expectedRevision:rev,expectedCycle:r.expectedCycle,expectedSdkRevision:r.expectedSdkRevision,value:r.value,amount:r.amount});
+      const vmNow=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});
+      const refused=await applyVmBulk(f.scope,{kind:'SDK',key:randomUUID(),items:[item(stale.rows[0],vmNow.revision)]},db);
+      expect(refused.rows[0]).toMatchObject({outcome:'ERROR',message:'VM đã được tạo lại, kiểm tra lại dòng này'});expect(await db.sdkRecord.count({where:{projectId:f.P,code:c}})).toBe(0);
+      const fresh=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:f.vm.code+' | '+c+' | 4.56'},db);expect(fresh.rows[0].expectedCycle).toBe(2);
+      const ok=await applyVmBulk(f.scope,{kind:'SDK',key:randomUUID(),items:[item(fresh.rows[0],vmNow.revision)]},db);expect(ok.applied).toBe(1);
+      expect(await f.rec(c)).toMatchObject({amountVmId:f.vm.id,amountCycle:2});
+      const s=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===f.vm.id)!.sdks.find(x=>x.current)!;expect(vmMoneyState({code:s.code,amount:s.amount,observedAt:s.amountObservedAt,failedAt:s.amountFailedAt,moneyHidden:false,stored:s.stored})).toMatchObject({kind:'OK',amount:'4.56'});
+    }finally{await f.cleanup();}
+  });
+  it('the binding backfill binds a figure only with evidence (written in the current round, code not moved since); a round-1 figure on a recreated VM stays history',async()=>{
+    const f=await fx();try{
+      const migration=readFileSync('prisma/migrations/20261022230000_sdk_money_binding/migration.sql','utf8'),updates=migration.match(/UPDATE "SdkRecord"[\s\S]*?;/g)!;expect(updates).toHaveLength(2);
+      const run=async(id:string)=>{for(const sql of updates)await db.$executeRawUnsafe(sql.replace(/;\s*$/,' AND s."id" = $1;'),id);};
+      // Proven: written in the current round, still on that VM, nothing moved since → bound to the current VM + round.
+      const good=f.code('32');await f.observe(good,'1.5',ago(1),true);const g=await f.rec(good);
+      await db.sdkRecord.update({where:{id:g.id},data:{amountVmId:null,amountCycle:null}});await run(g.id);
+      expect(await f.rec(good)).toMatchObject({amountVmId:f.vm.id,amountCycle:1});
+      // Not proven: a round-1 figure + failed reading, VM recreated, code chosen again in round 2 → stays unbound (history), never round 2.
+      const old=f.code('33'),other=f.vms[2];const op=await db.virtualMachine.findUniqueOrThrow({where:{id:other.id},include:{operation:true}});
+      const observeOn=async(vmId:string,amount:string|null,at:string)=>{const v=await db.virtualMachine.findUniqueOrThrow({where:{id:vmId},include:{operation:true}}),r=await db.sdkRecord.findUnique({where:{projectId_code:{projectId:f.P,code:old}}});
+        return observeVmSdks(f.aiScope,{key:randomUUID(),vmId,expectedCycle:v.operation?.cycle??1,expectedVmRevision:v.revision,observedAt:at,source:'thử',items:[{code:old,expectedSdkRevision:r?.revision??null,amount,current:true}]},db);};
+      await observeOn(other.id,'12.34',ago(3));await observeOn(other.id,null,ago(2.5));
+      const o=await f.rec(old);await confirmLegacySdk(f.scope,{key:randomUUID(),sdkId:o.id,expectedRevision:o.revision,decision:'UNLINKED'},db);
+      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:other.id,status:'SUSPENDED',expectedCycle:op.operation?.cycle??1}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:other.id,expectedCycle:op.operation?.cycle??1},db);
+      const o2=await f.rec(old),v2=await db.virtualMachine.findUniqueOrThrow({where:{id:other.id},include:{operation:true}});
+      await saveVmSdk(f.scope,{key:randomUUID(),vmId:other.id,expectedCycle:v2.operation!.cycle,expectedVmRevision:v2.revision,code:old,expectedSdkRevision:o2.revision},db);
+      await db.sdkRecord.update({where:{id:o.id},data:{amountVmId:null,amountCycle:null,amountFailedVmId:null,amountFailedCycle:null}});await run(o.id);
+      const after=await f.rec(old);expect(after).toMatchObject({amountVmId:null,amountCycle:null,amountFailedVmId:null,amountFailedCycle:null});expect(after.amount!.toString()).toBe('12.34');
+      const s=(await readVMWorkspace(f.scope,db)).vms.find(x=>x.id===other.id)!.sdks.find(x=>x.current)!;
+      expect(vmMoneyState({code:s.code,amount:s.amount,observedAt:s.amountObservedAt,failedAt:s.amountFailedAt,moneyHidden:false,stored:s.stored})).toMatchObject({kind:'UNCHECKED',stored:{amount:'12.34',cycle:null}});
     }finally{await f.cleanup();}
   });
   it('an image written before the observation fields existed restores the amount with an unknown time and source (never invented)',async()=>{

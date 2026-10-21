@@ -13,7 +13,7 @@ type PasteKind=Exclude<BulkKind,'GMAIL'>|'ACCOUNT'|'BALANCE';
 const KIND_LABEL:Record<PasteKind,string>={SDK:'SDK',PROXY:'Proxy',ACCOUNT:'Tài khoản + PP',BALANCE:'Số dư EarnApp',NOTE:'Ghi chú'};
 const HINT:Record<Exclude<BulkKind,'GMAIL'>,string>={SDK:'Mã SDK, có thể thêm Tiền tích luỹ USD | Ghi chú SDK (của chính mã đó). Mã đang ở VM khác không bị lấy: dùng Chọn SDK đã lưu ở ô SDK để chuyển.',PROXY:'IP, IP:port hoặc IP:port:user:pass (TUT hoặc Chung mooon–Genjy). Chỉ giao vào VM đang trống.',NOTE:'Ghi chú tối đa 1000 ký tự; phần sau cột VM là ghi chú.'};
 type Input={kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]};
-const itemsOf=(p:BulkPreview)=>p.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,expectedSdkRevision:r.expectedSdkRevision,value:r.value,amount:r.amount,note:r.note}));
+const itemsOf=(p:BulkPreview)=>p.rows.filter(r=>r.outcome==='READY'&&r.vmId).map(r=>({line:r.line,vmId:r.vmId!,expectedRevision:r.expectedRevision!,expectedCycle:r.expectedCycle,expectedSdkRevision:r.expectedSdkRevision,value:r.value,amount:r.amount,note:r.note}));
 /** The exact content a check was made for: a result is used only while the panel still shows that content. */
 export const inputSig=(input:Input)=>JSON.stringify(input);
 // The server re-checks every row on save; rows changed since the check or in conflict stay unchanged and are listed at their line.

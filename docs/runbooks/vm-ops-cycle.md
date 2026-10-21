@@ -133,7 +133,13 @@ trạng thái rút ngắn bên dưới khi có yêu cầu. Trạng thái: **Chư
 phải $0), `$0,00` khi đọc được 0, **Kiểm tra lỗi** (lần đọc mới nhất không đọc được: giữ số tốt cuối cùng với giờ cũ, `amountFailedAt`),
 **Số cũ** (quá 24 giờ), **Chưa rõ giờ** (tiền cũ không có giờ quan sát), **Ẩn** (thiếu quyền xem tiền). Mỗi số tiền / lần đọc lỗi gắn
 với **VM + lượt** nơi nó được kiểm tra (`SdkRecord.amountVmId/amountCycle`, `amountFailedVmId/amountFailedCycle`, migration
-`20261022230000_sdk_money_binding`, dữ liệu cũ gắn vào VM + lượt hiện tại của mã): dòng chỉ hiện số của đúng VM đó ở đúng lượt hiện tại.
+`20261022230000_sdk_money_binding`): dòng chỉ hiện số của đúng VM đó ở đúng lượt hiện tại. Dữ liệu cũ (trước khi có bốn cột) chỉ được
+gắn khi có bằng chứng: số được ghi (`amountAt`) sau khi lượt trước của VM đóng (`VmCycle.closedAt`) và mã không đổi vị trí từ đó
+(không có SdkEvent MOVE / HOLD / PLACE / REMOVE / RECREATE sau lúc ghi); không đủ bằng chứng thì giữ nguyên tiền + lịch sử trên mã,
+liên kết để trống → "Chưa kiểm tra" (migration `20261023000000_sdk_money_binding_evidence` sửa lại các DB đã chạy bản gắn theo vị trí).
+Tiền nhập kèm lệnh chuyển SDK gắn vào VM đích + lượt đích trong cùng giao dịch; chỉ chuyển không nhập tiền thì số cũ vẫn là lịch sử của
+nơi đã kiểm tra. Dán bảng → SDK (kind SDK của Dán bảng) ghi đúng lượt thật của VM và mang `expectedCycle` của lần xem trước: bản dán
+trước khi tạo lại VM bị từ chối từng dòng ("VM đã được tạo lại, kiểm tra lại dòng này").
 VM tạo lại rồi chọn lại SDK, hoặc chuyển SDK sang VM khác: dòng mới "Chưa kiểm tra" cho tới khi AI kiểm tra lại đúng VM + lượt + mã;
 số cũ của mã vẫn giữ nguyên (khung ghi "mã này có $… đọc ở lượt N / trên VM khác, giữ làm lịch sử"), không xoá, không bịa giờ mới. Chỉ lấy mã hiện hành, không cộng các SDK dự phòng, không lấy số dư
 EarnApp thay. Bấm ô mở khung: Tiền VM (mã, số, giờ, nguồn, Lịch sử kiểm tra) → Số dư EarnApp (nếu có tài khoản) → Rút về PayPal (luồng

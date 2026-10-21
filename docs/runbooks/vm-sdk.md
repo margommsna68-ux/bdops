@@ -79,6 +79,10 @@ Nút **Kho SDK** ở đầu trang Server / VM (không có mục ở sidebar). Kh
 
 ## Dán SDK theo VM (Dán bảng → SDK)
 
+> 22/10/2026 (rà soát): cả hai đường dán (`sdkPasteApply` và kind SDK của `bulkApply`) mang lượt VM của lần xem trước (`expectedCycle`),
+> kiểm lại trong giao dịch, ghi tiền kèm theo vào đúng VM + lượt thật; bản dán cũ sau khi tạo lại VM bị từ chối từng dòng.
+
+
 - **Một server:** `VM | SDK | Tiền tích luỹ USD | Ghi chú SDK`. **Nhiều server:** `Server | VM | SDK | …`. Hai cột cuối là tuỳ chọn.
 - **Ghép dòng:** theo đúng server + mã VM; không ghép theo thứ tự, không tự tạo VM.
 - **Tiền / ghi chú** là của mã SDK đích, không lấy từ mã bị thay.

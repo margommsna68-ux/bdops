@@ -1,0 +1,4 @@
+PASS B1 R1 đã tạo lại, đang ở lượt 2
+PASS B2 S1: mã X có $10 kiểm tra tại S1 (lượt 1), chưa dùng
+PASS B3 L1 (dữ liệu dạng cũ, $7 + lỗi ở lượt 1, tạo lại, chọn lại): chuyển dữ liệu không gắn sang lượt 2, giữ $7 làm lịch sử
+PASS B4 Dòng có bằng chứng (ghi trong lượt hiện tại, chưa chuyển): chuyển dữ liệu gắn đúng VM + lượt
