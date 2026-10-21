@@ -8,7 +8,9 @@ import {checkPin} from '../business-management/pin';
 import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
-import {hashToken,memberOps,userActive,type OpsScope} from './tokens';
+import {hashToken,memberOps,userActive,OPS_SCOPES,type OpsScope} from './tokens';
+import {activeJobs,addVmOpsNote,claimVmJob,finishPrepareJob,finishProxyJob,jobView,proxyForJob,recordJobSdk,releaseVmJob,stepVmJob,APPLY_RESULTS,JOB_KINDS,type OpsCaller} from '../vm-ops/jobs';
+import {setVmStatus} from '../vm-ops/ops';
 import {runWithOpsAuth} from './context';
 import {hit,peek} from './limits';
 import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
@@ -48,6 +50,18 @@ const routes:Route[]=[
   {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt},
+  // Real machines (21/10/2026): take a VM in hand, steps, the full proxy of that VM, the SDK of this install, status, Blocked, notes.
+  {method:'GET',path:new RegExp('^jobs/'+ID+'$'),scope:'READ',action:'JOB',run:jobDetail},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/claim$'),scope:'VM_OPS',action:'VM_CLAIM',run:claim},
+  {method:'POST',path:new RegExp('^jobs/'+ID+'/step$'),scope:'VM_OPS',action:'JOB_STEP',run:jobStep},
+  {method:'POST',path:new RegExp('^jobs/'+ID+'/release$'),scope:'VM_OPS',action:'JOB_RELEASE',run:jobRelease},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/sdk$'),scope:'VM_OPS',action:'VM_SDK',run:vmSdk},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/status$'),scope:'VM_OPS',action:'VM_STATUS',run:vmStatus},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-blocked$'),scope:'VM_OPS',action:'VM_PROXY_BLOCKED',run:vmBlocked},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/notes$'),scope:'VM_OPS',action:'VM_NOTE',run:vmNote},
+  {method:'POST',path:new RegExp('^jobs/'+ID+'/finish-prepare$'),scope:'VM_OPS',action:'JOB_FINISH_PREPARE',run:finishPrepare},
+  {method:'POST',path:new RegExp('^jobs/'+ID+'/finish-proxy$'),scope:'VM_OPS',action:'JOB_FINISH_PROXY',run:finishProxy},
 ];
 const KEY=/^[A-Za-z0-9._:-]{8,100}$/;
 const ipOrInvalid=(v:string)=>normalIp(v)??'INVALID',idOrNull=(v:string|null)=>v&&/^[A-Za-z0-9_.:-]{1,80}$/.test(v)?v:null;
@@ -144,8 +158,8 @@ async function me(c:Ctx){
   const u=await c.db.user.findUniqueOrThrow({where:{id:c.token.userId},select:{id:true,username:true,name:true}});
   const projects=await c.db.project.findMany({where:{id:{in:c.token.projectIds},members:{some:{userId:u.id}}},select:{id:true,code:true,name:true},orderBy:{name:'asc'}});
   const list=await Promise.all(projects.map(async p=>{const can=await memberOps(c.db,u.id,p.id),m=await c.db.projectMember.findUniqueOrThrow({where:{userId_projectId:{userId:u.id,projectId:p.id}}});
-    return {projectId:p.id,code:p.code,name:p.name,role:m.role,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD'].includes(x)),
-      effective:Object.fromEntries((['READ','BALANCE_WRITE','PAYOUT','RECEIPT'] as const).map(s=>[s,can[s]&&c.token.scopes.includes(s)]))};}));
+    return {projectId:p.id,code:p.code,name:p.name,role:m.role,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'].includes(x)),
+      effective:Object.fromEntries((OPS_SCOPES).map(s=>[s,can[s]&&c.token.scopes.includes(s)]))};}));
   return {user:{id:u.id,username:u.username,name:u.name},token:{id:c.token.id,prefix:c.token.prefix,name:c.token.name,expiresAt:c.token.expiresAt.toISOString(),scopes:c.token.scopes},projects:list};
 }
 async function projects(c:Ctx){
@@ -186,8 +200,8 @@ async function vmDetail(c:Ctx,[id]:string[]){
   const money=rights.balanceRead||rights.requestMoney,ref:Record<string,string>={};
   // SDK money is a note an operator kept on the code (reference only): never added to the EarnApp balance, shown with money rights.
   if(money)for(const s of sdks)if(s.amount!=null)ref[s.currency]=(Number(ref[s.currency]||0)+Number(s.amount)).toFixed(2);
-  const pc=paged(cycles,limit);
-  return {...view,
+  const pc=paged(cycles,limit),job=(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null;
+  return {...view,activeJob:job,
     sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,referenceMoney:money?ref:null,note:'Tiền SDK là ghi chú tham khảo, không phải số dư EarnApp'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
@@ -316,4 +330,99 @@ async function receipt(c:Ctx,[id]:string[]){
   return {replay:!!c.audit.replay,
     recorded:{receiptId:rec.receiptId,withdrawalId:rec.requestId,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,receivedOn:rec.receivedOn,receivedAt:rec.receivedAt,transactionId:rec.transactionId},
     current:{withdrawal:withdrawalView(r,rights,{currentCycle:cycle,history:true})}};
+}
+
+// ─── Real machines (21/10/2026) ──────────────────────────────────────────────────────────────────────────────────────────────────
+// MoneyToHome never reaches the machine: the operator works with AE Mini Tool and records here what it observed (vm-ops/jobs.ts).
+const caller=(c:Ctx):OpsCaller=>({tokenId:c.token.id,tokenLabel:c.token.name+' ('+c.token.prefix+')'});
+const cycleN=z.number().int().min(1),rev=z.number().int().min(0),opsNote=z.string().max(500).nullish();
+async function vmNow(c:Ctx,projectId:string,vmId:string){
+  const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)return null;
+  return {...vmView(vm),activeJob:(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null};
+}
+async function jobOf(c:Ctx,projectId:string,id:string){const job=await c.db.vmJob.findFirst({where:{id,projectId}});if(!job)throw fail('NOT_FOUND','Không có việc này trong dự án');return job;}
+async function asOps<T>(c:Ctx,projectId:string,vmId:string,fn:()=>Promise<T>):Promise<T>{try{return await fn();}catch(e){throw await withCurrentVm(c,projectId,vmId,e);}}
+async function jobDetail(c:Ctx,[id]:string[]){
+  const {projectId}=await projectOf(c,q(c,'projectId')),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
+  const sdk=job.sdkId?await c.db.sdkRecord.findUnique({where:{id:job.sdkId},select:{code:true}}):null;
+  return {...jobView(job,{sdkCode:sdk?.code}),current:await vmNow(c,projectId,job.vmId)};
+}
+const ClaimBody=z.object({projectId:id64,expectedCycle:cycleN,kind:z.enum(JOB_KINDS),ttlMinutes:z.number().int().min(5).max(240).nullish()}).strict();
+async function claim(c:Ctx,[vmId]:string[]){
+  const b=ClaimBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const r=await asOps(c,projectId,vmId,()=>claimVmJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,kind:b.kind,ttlMinutes:b.ttlMinutes??null},c.db,caller(c)));
+  c.audit.replay=!!r.replay;c.audit.objectId=r.job.id;
+  return {replay:!!r.replay,recorded:{job:r.job,vm:r.vm,resumed:r.resumed,already:r.already},current:await vmNow(c,projectId,vmId)};
+}
+const StepBody=z.object({projectId:id64,step:z.string().min(2).max(40),note:opsNote,machineRef:z.string().max(120).nullish(),ttlMinutes:z.number().int().min(5).max(240).nullish()}).strict();
+async function jobStep(c:Ctx,[id]:string[]){
+  const b=StepBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
+  const r=await stepVmJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,step:b.step,note:redactSecrets(b.note?.trim()||null),machineRef:b.machineRef??null,ttlMinutes:b.ttlMinutes??null},c.db,caller(c));
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:r.job,current:await vmNow(c,projectId,job.vmId)};
+}
+const ReleaseBody=z.object({projectId:id64,note:opsNote}).strict();
+async function jobRelease(c:Ctx,[id]:string[]){
+  const b=ReleaseBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
+  const r=await releaseVmJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c));
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:r.job,current:await vmNow(c,projectId,job.vmId)};
+}
+// The only answer of the API with a full proxy: the VM in hand (active job of this token), its current configuration. Not journaled;
+// audited as VM_PROXY_FOR_OPS (who, token, VM, proxy id, configuration) without the credentials.
+const ProxyBody=z.object({projectId:id64,jobId:id64,expectedCycle:cycleN}).strict();
+async function proxyCredentials(c:Ctx,[vmId]:string[]){
+  const b=ProxyBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const r=await asOps(c,projectId,vmId,()=>proxyForJob(scopeOf(c,projectId),{vmId,jobId:b.jobId,expectedCycle:b.expectedCycle},c.db,caller(c)));
+  return {replay:false,recorded:{vmId:r.vmId,cycle:r.cycle,configurationId:r.configurationId,endpointId:r.endpointId},proxy:r.proxy};
+}
+const SdkBody=z.object({projectId:id64,jobId:id64,expectedCycle:cycleN,expectedVmRevision:rev,code:z.string().min(8).max(128)}).strict();
+async function vmSdk(c:Ctx,[vmId]:string[]){
+  const b=SdkBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const r=await asOps(c,projectId,vmId,()=>recordJobSdk(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,jobId:b.jobId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,code:b.code},c.db,caller(c)));
+  c.audit.replay=r.readBack;return {replay:r.readBack,recorded:{vmId,jobId:r.jobId,sdk:r.sdk,changed:r.changed,readBack:r.readBack},current:await vmNow(c,projectId,vmId)};
+}
+// Statuses an operator records from what it saw. New VM / Chờ áp dụng proxy end only through finish-prepare / finish-proxy; Blocked has
+// its own endpoint (the proxy it found blocked); VM deleted is the owner's.
+const AI_STATUSES=['OK','NOT_LINKED','LINKED','EARN_ERROR','OFF','SUSPENDED','MAIL_LOGGED'] as const;
+const StatusBodyVm=z.object({projectId:id64,expectedCycle:cycleN,expectedStatusRevision:rev,status:z.enum(AI_STATUSES),note:opsNote}).strict();
+async function statusRow(c:Ctx,projectId:string,vmId:string,r:{rows:{outcome:string;message:string;status:string|null}[];replay?:boolean}){
+  const row=r.rows[0];
+  if(row.outcome==='ERROR'){
+    const reason=/lượt/.test(row.message)?'CYCLE_CHANGED':/quyền/i.test(row.message)?null:'REVISION_CONFLICT';
+    throw await withCurrentVm(c,projectId,vmId,reason?new ProxyDomainError('STALE_PREVIEW',row.message,reason):new ProxyDomainError('FORBIDDEN',row.message));
+  }
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{vmId,outcome:row.outcome,status:row.status,message:row.message},current:await vmNow(c,projectId,vmId)};
+}
+async function vmStatus(c:Ctx,[vmId]:string[]){
+  const b=StatusBodyVm.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  if((b.status==='EARN_ERROR'||b.status==='SUSPENDED')&&!b.note?.trim())throw fail('VALIDATION','Ghi lý do khi báo '+b.status);
+  const r=await asOps(c,projectId,vmId,()=>setVmStatus(scopeOf(c,projectId),{key:serviceKey(c,projectId),items:[{vmId,status:b.status,expectedCycle:b.expectedCycle,expectedRevision:b.expectedStatusRevision}],note:redactSecrets(b.note?.trim()||null)},c.db,{operator:true}));
+  return statusRow(c,projectId,vmId,r);
+}
+const BlockedBody=z.object({projectId:id64,expectedCycle:cycleN,expectedStatusRevision:rev,configurationId:id64,evidence:z.string().min(3).max(300),observedAt:iso.nullish()}).strict();
+async function vmBlocked(c:Ctx,[vmId]:string[]){
+  const b=BlockedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const cfg=await c.db.vMConfiguration.findFirst({where:{id:b.configurationId,projectId,vmId},select:{endpointId:true}});
+  if(!cfg?.endpointId)throw fail('NOT_FOUND','Không có cấu hình proxy này của VM');
+  const note='AI báo Blocked'+(b.observedAt?' lúc '+b.observedAt:'')+': '+redactSecrets(b.evidence.trim());
+  const r=await asOps(c,projectId,vmId,()=>setVmStatus(scopeOf(c,projectId),{key:serviceKey(c,projectId),items:[{vmId,status:'PROXY_BLOCKED',expectedCycle:b.expectedCycle,expectedRevision:b.expectedStatusRevision,expectedEndpointId:cfg.endpointId}],note},c.db,{operator:true}));
+  return statusRow(c,projectId,vmId,r);
+}
+const NoteBody=z.object({projectId:id64,expectedCycle:cycleN,note:z.string().min(1).max(500),jobId:id64.nullish()}).strict();
+async function vmNote(c:Ctx,[vmId]:string[]){
+  const b=NoteBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const r=await asOps(c,projectId,vmId,()=>addVmOpsNote(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,note:b.note,jobId:b.jobId??null},c.db,caller(c),t=>redactSecrets(t)??''));
+  c.audit.replay=!!r.replay;c.audit.objectId=r.recorded.noteId;return {replay:!!r.replay,recorded:r.recorded,current:await vmNow(c,projectId,vmId)};
+}
+const Checks=z.object({machine:z.boolean(),proxy:z.boolean(),internet:z.boolean(),earnapp:z.boolean(),firefox:z.boolean()}).strict();
+const FinishPrepareBody=z.object({projectId:id64,configurationId:id64,checks:Checks,note:opsNote}).strict();
+async function finishPrepare(c:Ctx,[id]:string[]){
+  const b=FinishPrepareBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
+  const r=await asOps(c,projectId,job.vmId,()=>finishPrepareJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,configurationId:b.configurationId,checks:b.checks,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c)));
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,job:r.job},current:await vmNow(c,projectId,job.vmId)};
+}
+const FinishProxyBody=z.object({projectId:id64,configurationId:id64,result:z.enum(APPLY_RESULTS),note:opsNote}).strict();
+async function finishProxy(c:Ctx,[id]:string[]){
+  const b=FinishProxyBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
+  const r=await asOps(c,projectId,job.vmId,()=>finishProxyJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,configurationId:b.configurationId,result:b.result,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c)));
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,job:r.job},current:await vmNow(c,projectId,job.vmId)};
 }

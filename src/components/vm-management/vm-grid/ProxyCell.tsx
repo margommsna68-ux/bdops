@@ -43,6 +43,7 @@ export function ProxyCell({projectId,vm,rights,onCopy,onBusy}:{projectId:string;
         :shown?<div className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={proxyAddress(shown)}>{proxyAddress(shown)}</span>{rights.copy&&info.current&&<button type="button" className="vm-cell-icon" aria-label={'Copy proxy '+vm.code} title="Copy proxy (chỉ copy)" onClick={e=>{e.stopPropagation();onCopy(vm);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button>}</div>
         :<span className="pm-muted vm-proxy-line">—</span>}
       {info.warning&&<span className={'vm-proxy-state vm-proxy-state-'+(info.tone==='blocked'?'review':'failed')}>{info.warning}</span>}
+      {vm.applyPending&&vm.ops!=='PROXY_PENDING'&&<span className="vm-apply-mark" title="Web đã có proxy mới; máy thật chưa áp dụng / chưa kiểm tra">Chờ áp dụng trên máy</span>}
     </div>
     {open&&typeof document!=='undefined'&&createPortal(<div ref={pop} role="dialog" aria-label={`Thay proxy ${vm.server} / ${vm.code}`} className="vm-status-pop vm-proxy-pop" style={{top:pos?.top??-9999,left:pos?.left??-9999,maxHeight:pos?.maxHeight}}>
       <ChangeProxy projectId={projectId} vm={vm} info={info} rights={rights} onBusy={b=>{busy.current=b;onBusy(vm.id,b);}} onDone={()=>{setOpen(false);anchor.current?.focus({preventScroll:true});}} onCancel={()=>close()}/>

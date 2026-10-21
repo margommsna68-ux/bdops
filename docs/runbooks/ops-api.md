@@ -20,6 +20,8 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 | POST /vms/{id}/balance-check | BALANCE_WRITE | ADMIN / MODERATOR có ghi Server / VM, hoặc USER có **EARN_BALANCE** ("Ghi kiểm tra tiền EarnApp") |
 | GET /paypal/suggest, POST /withdrawals/prepare, POST /withdrawals/{id}/status | PAYOUT | Người ghi Tiền vào PayPal (quản lý), hoặc USER (không phải VIEWER) có Hạ tầng + **EARN_PAYOUT** ("Chuẩn bị rút EarnApp") |
 | POST /withdrawals/{id}/receipts | RECEIPT | Người ghi Tiền vào PayPal (quản lý), hoặc USER có Hạ tầng + **PAYPAL_RECEIPT_RECORD** ("Ghi khoản nhận PP của yêu cầu rút") |
+| GET /jobs/{id}, POST /vms/{id}/claim, /jobs/{id}/step, /jobs/{id}/release, /vms/{id}/sdk, /vms/{id}/status, /vms/{id}/proxy-blocked, /vms/{id}/notes, /jobs/{id}/finish-prepare, /jobs/{id}/finish-proxy (21/10/2026) | READ (GET) / **VM_OPS** | USER (không phải VIEWER) có Server / VM (quyền ASSIGN / BLOCK hiện có). Xem docs/runbooks/ai-vm-ops.md |
+| POST /vms/{id}/proxy-credentials (21/10/2026) | **PROXY_CREDENTIALS** | ADMIN, hoặc USER có **VM_PROXY_FOR_OPS** ("Lấy proxy của VM đang xử lý (AI)"), **và** việc đang giữ (claim) của chính token đó trên VM đó |
 
 - `EARN_PAYOUT` không mở: ghi yêu cầu "đã gửi" trực tiếp, thất bại / huỷ / gửi lại / sửa / chốt thiếu, đối chiếu tài khoản cũ, sổ PayPal, chi phí,
   rút / chuyển. Trên web người có quyền này thấy nút "Chuẩn bị rút (giữ email)" và "Đã gửi trên EarnApp / Chưa xác định kết quả".
@@ -30,7 +32,10 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
   quyền hẹp; sổ PayPal (số dư theo sổ của PP) chỉ với đọc Tiền vào + Rút / chuyển.
   Qua token, quyền đi kèm một thao tác ghi (EARN_BALANCE, EARN_PAYOUT, PAYPAL_RECEIPT_RECORD) chỉ mở dữ liệu khi token có thao tác đó: token chỉ READ
   của cùng người không thấy số dư / tiền yêu cầu / email PP đầy đủ nếu quyền đọc đó chỉ đến từ quyền hẹp.
-- Không làm qua API: xoá / tạo lại VM, proxy, nhóm, liên kết tài khoản, SDK, tình trạng VM, rút / chuyển PayPal, USDT, chi phí, cấp lại email đã dùng.
+- Proxy đầy đủ (21/10/2026, ngoại lệ hẹp): danh sách / chi tiết vẫn che; chỉ `POST /vms/{id}/proxy-credentials` trả IP:port:user:pass của cấu hình hiện
+  hành của VM đang xử lý (PIN, token, đúng dự án / VM / lượt / việc); audit `VM_PROXY_FOR_OPS` (người, token, VM, proxy id, cấu hình), không user / pass.
+- Không làm qua API: xoá / tạo lại VM, gán / thay proxy, nhóm, liên kết tài khoản, chuyển / xoá / đánh dấu đã dùng SDK, VM deleted, rút / chuyển PayPal, USDT,
+  chi phí, cấp lại email đã dùng. (Từ 21/10/2026 API ghi được: nhận việc, bước, SDK của lần cài cho VM đang xử lý, tình trạng quan sát, Blocked, ghi chú.)
 
 ## 2. Kích hoạt (chủ dự án làm, theo thứ tự)
 

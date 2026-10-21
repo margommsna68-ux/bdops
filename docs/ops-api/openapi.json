@@ -195,13 +195,18 @@
      },
      "group": {
       "type": "string"
+     },
+     "configurationId": {
+      "type": "string",
+      "description": "the configuration of this proxy on the VM: send back to proxy-blocked / finish-*"
      }
     },
     "required": [
      "id",
      "host",
      "port",
-     "group"
+     "group",
+     "configurationId"
     ]
    },
    "EarnAppRef": {
@@ -257,6 +262,10 @@
       "type": "integer",
       "description": "VirtualMachine.revision → expectedVmRevision"
      },
+     "statusRevision": {
+      "type": "integer",
+      "description": "VmOperation.revision → expectedStatusRevision (0 = never recorded)"
+     },
      "proxyState": {
       "type": "string",
       "enum": [
@@ -272,6 +281,56 @@
         "$ref": "#/components/schemas/Proxy"
        }
       ]
+     },
+     "applyPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "configurationId": {
+        "type": "string"
+       },
+       "since": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       }
+      },
+      "required": [
+       "configurationId",
+       "since"
+      ],
+      "description": "the web has this proxy configuration; the real machine has not applied it yet",
+      "nullable": true
+     },
+     "currentSdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "revision": {
+        "type": "integer"
+       },
+       "linkState": {
+        "type": "string",
+        "enum": [
+         "UNLINKED",
+         "LINKED",
+         "UNCONFIRMED"
+        ]
+       }
+      },
+      "required": [
+       "id",
+       "code",
+       "revision",
+       "linkState"
+      ],
+      "nullable": true
      },
      "earnAppAccount": {
       "nullable": true,
@@ -292,8 +351,11 @@
      "statusLabel",
      "expectedCycle",
      "revision",
+     "statusRevision",
      "proxyState",
      "proxy",
+     "applyPending",
+     "currentSdk",
      "earnAppAccount"
     ]
    },
@@ -737,6 +799,43 @@
      "history"
     ]
    },
+   "ActiveJob": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "PREPARE",
+       "PROXY_APPLY",
+       "CHECK"
+      ]
+     },
+     "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "step": {
+      "type": "string",
+      "nullable": true
+     },
+     "by": {
+      "type": "string",
+      "nullable": true
+     },
+     "token": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "kind",
+     "expiresAt",
+     "step",
+     "by",
+     "token"
+    ]
+   },
    "VmDetail": {
     "type": "object",
     "additionalProperties": false,
@@ -772,6 +871,10 @@
       "type": "integer",
       "description": "VirtualMachine.revision → expectedVmRevision"
      },
+     "statusRevision": {
+      "type": "integer",
+      "description": "VmOperation.revision → expectedStatusRevision (0 = never recorded)"
+     },
      "proxyState": {
       "type": "string",
       "enum": [
@@ -788,11 +891,69 @@
        }
       ]
      },
+     "applyPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "configurationId": {
+        "type": "string"
+       },
+       "since": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       }
+      },
+      "required": [
+       "configurationId",
+       "since"
+      ],
+      "description": "the web has this proxy configuration; the real machine has not applied it yet",
+      "nullable": true
+     },
+     "currentSdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "revision": {
+        "type": "integer"
+       },
+       "linkState": {
+        "type": "string",
+        "enum": [
+         "UNLINKED",
+         "LINKED",
+         "UNCONFIRMED"
+        ]
+       }
+      },
+      "required": [
+       "id",
+       "code",
+       "revision",
+       "linkState"
+      ],
+      "nullable": true
+     },
      "earnAppAccount": {
       "nullable": true,
       "allOf": [
        {
         "$ref": "#/components/schemas/EarnAppRef"
+       }
+      ]
+     },
+     "activeJob": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/ActiveJob"
        }
       ]
      },
@@ -915,9 +1076,13 @@
      "statusLabel",
      "expectedCycle",
      "revision",
+     "statusRevision",
      "proxyState",
      "proxy",
+     "applyPending",
+     "currentSdk",
      "earnAppAccount",
+     "activeJob",
      "sdk",
      "balance",
      "withdrawal",
@@ -1238,7 +1403,9 @@
           "READ",
           "BALANCE_WRITE",
           "PAYOUT",
-          "RECEIPT"
+          "RECEIPT",
+          "VM_OPS",
+          "PROXY_CREDENTIALS"
          ]
         }
        }
@@ -1290,13 +1457,21 @@
           },
           "RECEIPT": {
            "type": "boolean"
+          },
+          "VM_OPS": {
+           "type": "boolean"
+          },
+          "PROXY_CREDENTIALS": {
+           "type": "boolean"
           }
          },
          "required": [
           "READ",
           "BALANCE_WRITE",
           "PAYOUT",
-          "RECEIPT"
+          "RECEIPT",
+          "VM_OPS",
+          "PROXY_CREDENTIALS"
          ]
         }
        },
@@ -1833,6 +2008,870 @@
      "current"
     ]
    },
+   "VmNow": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "serverId": {
+      "type": "string"
+     },
+     "serverCode": {
+      "type": "string"
+     },
+     "deleted": {
+      "type": "boolean"
+     },
+     "status": {
+      "type": "string",
+      "description": "recorded operating status; null = Chưa ghi",
+      "nullable": true
+     },
+     "statusLabel": {
+      "type": "string"
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "description": "VmOperation.cycle → send back as expectedCycle"
+     },
+     "revision": {
+      "type": "integer",
+      "description": "VirtualMachine.revision → expectedVmRevision"
+     },
+     "statusRevision": {
+      "type": "integer",
+      "description": "VmOperation.revision → expectedStatusRevision (0 = never recorded)"
+     },
+     "proxyState": {
+      "type": "string",
+      "enum": [
+       "ASSIGNED",
+       "MISSING",
+       "REVIEW"
+      ]
+     },
+     "proxy": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/Proxy"
+       }
+      ]
+     },
+     "applyPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "configurationId": {
+        "type": "string"
+       },
+       "since": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       }
+      },
+      "required": [
+       "configurationId",
+       "since"
+      ],
+      "description": "the web has this proxy configuration; the real machine has not applied it yet",
+      "nullable": true
+     },
+     "currentSdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "code": {
+        "type": "string"
+       },
+       "revision": {
+        "type": "integer"
+       },
+       "linkState": {
+        "type": "string",
+        "enum": [
+         "UNLINKED",
+         "LINKED",
+         "UNCONFIRMED"
+        ]
+       }
+      },
+      "required": [
+       "id",
+       "code",
+       "revision",
+       "linkState"
+      ],
+      "nullable": true
+     },
+     "earnAppAccount": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/EarnAppRef"
+       }
+      ]
+     },
+     "activeJob": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/ActiveJob"
+       }
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "code",
+     "serverId",
+     "serverCode",
+     "deleted",
+     "status",
+     "statusLabel",
+     "expectedCycle",
+     "revision",
+     "statusRevision",
+     "proxyState",
+     "proxy",
+     "applyPending",
+     "currentSdk",
+     "earnAppAccount",
+     "activeJob"
+    ]
+   },
+   "Job": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "PREPARE",
+       "PROXY_APPLY",
+       "CHECK"
+      ]
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "ACTIVE",
+       "DONE",
+       "RELEASED"
+      ]
+     },
+     "claimedAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "step": {
+      "type": "string",
+      "nullable": true
+     },
+     "stepNote": {
+      "type": "string",
+      "nullable": true
+     },
+     "stepAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "machineRef": {
+      "type": "string",
+      "nullable": true
+     },
+     "configurationId": {
+      "type": "string",
+      "nullable": true
+     },
+     "sdkId": {
+      "type": "string",
+      "nullable": true
+     },
+     "sdkCode": {
+      "type": "string",
+      "nullable": true
+     },
+     "resumeOf": {
+      "type": "string",
+      "nullable": true
+     },
+     "result": {
+      "type": "string",
+      "nullable": true
+     },
+     "finishedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "statusRevision": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "id",
+     "vmId",
+     "cycle",
+     "kind",
+     "state",
+     "claimedAt",
+     "expiresAt",
+     "step",
+     "stepNote",
+     "stepAt",
+     "machineRef",
+     "configurationId",
+     "sdkId",
+     "sdkCode",
+     "resumeOf",
+     "result",
+     "finishedAt",
+     "statusRevision"
+    ]
+   },
+   "JobDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "PREPARE",
+       "PROXY_APPLY",
+       "CHECK"
+      ]
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "ACTIVE",
+       "DONE",
+       "RELEASED"
+      ]
+     },
+     "claimedAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "step": {
+      "type": "string",
+      "nullable": true
+     },
+     "stepNote": {
+      "type": "string",
+      "nullable": true
+     },
+     "stepAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "machineRef": {
+      "type": "string",
+      "nullable": true
+     },
+     "configurationId": {
+      "type": "string",
+      "nullable": true
+     },
+     "sdkId": {
+      "type": "string",
+      "nullable": true
+     },
+     "sdkCode": {
+      "type": "string",
+      "nullable": true
+     },
+     "resumeOf": {
+      "type": "string",
+      "nullable": true
+     },
+     "result": {
+      "type": "string",
+      "nullable": true
+     },
+     "finishedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "statusRevision": {
+      "type": "integer"
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "id",
+     "vmId",
+     "cycle",
+     "kind",
+     "state",
+     "claimedAt",
+     "expiresAt",
+     "step",
+     "stepNote",
+     "stepAt",
+     "machineRef",
+     "configurationId",
+     "sdkId",
+     "sdkCode",
+     "resumeOf",
+     "result",
+     "finishedAt",
+     "statusRevision",
+     "current"
+    ]
+   },
+   "JobVm": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "vmId": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string"
+     },
+     "serverCode": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "status": {
+      "type": "string",
+      "nullable": true
+     },
+     "statusLabel": {
+      "type": "string"
+     },
+     "statusRevision": {
+      "type": "integer"
+     },
+     "vmRevision": {
+      "type": "integer"
+     },
+     "configurationId": {
+      "type": "string",
+      "nullable": true
+     },
+     "proxyReview": {
+      "type": "boolean"
+     },
+     "pendingConfigurationId": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "vmId",
+     "code",
+     "serverCode",
+     "cycle",
+     "status",
+     "statusLabel",
+     "statusRevision",
+     "vmRevision",
+     "configurationId",
+     "proxyReview",
+     "pendingConfigurationId"
+    ]
+   },
+   "ClaimAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "job": {
+        "$ref": "#/components/schemas/Job"
+       },
+       "vm": {
+        "$ref": "#/components/schemas/JobVm"
+       },
+       "resumed": {
+        "type": "boolean",
+        "description": "true: an unfinished attempt (its step / machine / SDK) — check the real machine first"
+       },
+       "already": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "job",
+       "vm",
+       "resumed",
+       "already"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "JobAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/Job"
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "ProxyCredentials": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "configurationId": {
+        "type": "string"
+       },
+       "endpointId": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "vmId",
+       "cycle",
+       "configurationId",
+       "endpointId"
+      ]
+     },
+     "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "host": {
+        "type": "string"
+       },
+       "port": {
+        "type": "integer"
+       },
+       "username": {
+        "type": "string"
+       },
+       "password": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "host",
+       "port",
+       "username",
+       "password"
+      ],
+      "description": "secret: give it to AE Mini Tool only (file / pipe); never print or log it"
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "proxy"
+    ]
+   },
+   "SdkAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "jobId": {
+        "type": "string"
+       },
+       "sdk": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "id": {
+          "type": "string"
+         },
+         "code": {
+          "type": "string"
+         },
+         "revision": {
+          "type": "integer"
+         },
+         "linkState": {
+          "type": "string"
+         },
+         "current": {
+          "type": "boolean"
+         },
+         "inList": {
+          "type": "boolean"
+         }
+        },
+        "required": [
+         "id",
+         "code",
+         "revision",
+         "linkState",
+         "current",
+         "inList"
+        ]
+       },
+       "changed": {
+        "type": "boolean"
+       },
+       "readBack": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "vmId",
+       "jobId",
+       "sdk",
+       "changed",
+       "readBack"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "VmStatusAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "outcome": {
+        "type": "string",
+        "enum": [
+         "APPLIED",
+         "SKIP"
+        ]
+       },
+       "status": {
+        "type": "string",
+        "nullable": true
+       },
+       "message": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "vmId",
+       "outcome",
+       "status",
+       "message"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "NoteAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "noteId": {
+        "type": "string"
+       },
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "note": {
+        "type": "string"
+       },
+       "recordedAt": {
+        "type": "string",
+        "format": "date-time"
+       }
+      },
+      "required": [
+       "noteId",
+       "vmId",
+       "cycle",
+       "note",
+       "recordedAt"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "PrepareDoneAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "status": {
+        "type": "string",
+        "enum": [
+         "NOT_LINKED"
+        ]
+       },
+       "statusLabel": {
+        "type": "string"
+       },
+       "sdkCode": {
+        "type": "string"
+       },
+       "configurationId": {
+        "type": "string"
+       },
+       "machineRef": {
+        "type": "string",
+        "nullable": true
+       },
+       "job": {
+        "$ref": "#/components/schemas/Job"
+       }
+      },
+      "required": [
+       "vmId",
+       "cycle",
+       "status",
+       "statusLabel",
+       "sdkCode",
+       "configurationId",
+       "machineRef",
+       "job"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "ProxyDoneAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "result": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "NOT_LINKED",
+         "EARN_ERROR",
+         "PROXY_BLOCKED"
+        ]
+       },
+       "status": {
+        "type": "string",
+        "nullable": true
+       },
+       "statusLabel": {
+        "type": "string"
+       },
+       "configurationId": {
+        "type": "string"
+       },
+       "message": {
+        "type": "string"
+       },
+       "job": {
+        "$ref": "#/components/schemas/Job"
+       }
+      },
+      "required": [
+       "vmId",
+       "cycle",
+       "result",
+       "status",
+       "statusLabel",
+       "configurationId",
+       "message",
+       "job"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
    "OkProject": {
     "type": "object",
     "additionalProperties": false,
@@ -2131,6 +3170,32 @@
      },
      "data": {
       "$ref": "#/components/schemas/WithdrawalDetail"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkActiveJob": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ActiveJob"
      },
      "error": {
       "nullable": true,
@@ -2469,6 +3534,318 @@
      },
      "data": {
       "$ref": "#/components/schemas/ReceiptAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVmNow": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/VmNow"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkJob": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/Job"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkJobDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/JobDetail"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkJobVm": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/JobVm"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkClaimAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ClaimAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkJobAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/JobAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkProxyCredentials": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ProxyCredentials"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkSdkAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SdkAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVmStatusAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/VmStatusAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkNoteAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/NoteAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkPrepareDoneAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/PrepareDoneAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkProxyDoneAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ProxyDoneAck"
      },
      "error": {
       "nullable": true,
@@ -3794,6 +5171,1342 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/OkReceiptAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/jobs/{id}": {
+   "get": {
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/projectId"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkJobDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/claim": {
+   "post": {
+    "summary": "Take a VM in hand (operation VM_OPS): one active job per VM; PREPARE needs New VM, PROXY_APPLY a proxy waiting",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "kind": {
+          "type": "string",
+          "enum": [
+           "PREPARE",
+           "PROXY_APPLY",
+           "CHECK"
+          ]
+         },
+         "ttlMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 240,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "kind"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkClaimAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/jobs/{id}/step": {
+   "post": {
+    "summary": "Record the step reached (and the machine made) — also extends the job",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "step": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,39}$"
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true
+         },
+         "machineRef": {
+          "type": "string",
+          "maxLength": 120,
+          "nullable": true
+         },
+         "ttlMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 240,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "step"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkJobAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/jobs/{id}/release": {
+   "post": {
+    "summary": "Give the VM back unfinished",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkJobAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/proxy-credentials": {
+   "post": {
+    "summary": "Full proxy of the VM in hand (operation PROXY_CREDENTIALS + right VM_PROXY_FOR_OPS + an active job of this token); audited without the credentials",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "jobId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         }
+        },
+        "required": [
+         "projectId",
+         "jobId",
+         "expectedCycle"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkProxyCredentials"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/sdk": {
+   "post": {
+    "summary": "SDK read from the machine after this install: becomes the current code and joins the VM list (codes of other VMs / used / stored before this attempt refused); same code again = read-back",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "jobId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "code": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+         }
+        },
+        "required": [
+         "projectId",
+         "jobId",
+         "expectedCycle",
+         "expectedVmRevision",
+         "code"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/status": {
+   "post": {
+    "summary": "Status observed (OK, NOT_LINKED, LINKED, EARN_ERROR, OFF, SUSPENDED, MAIL_LOGGED); never leaves New VM / Chờ áp dụng proxy (use finish-*)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "expectedStatusRevision": {
+          "type": "integer"
+         },
+         "status": {
+          "type": "string",
+          "enum": [
+           "OK",
+           "NOT_LINKED",
+           "LINKED",
+           "EARN_ERROR",
+           "OFF",
+           "SUSPENDED",
+           "MAIL_LOGGED"
+          ]
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "required for EARN_ERROR / SUSPENDED",
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "expectedStatusRevision",
+         "status"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVmStatusAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/proxy-blocked": {
+   "post": {
+    "summary": "The proxy of this configuration is really blocked: VM Blocked + proxy BLOCKED in Kho proxy; refused when the proxy changed meanwhile",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "expectedStatusRevision": {
+          "type": "integer"
+         },
+         "configurationId": {
+          "type": "string"
+         },
+         "evidence": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300
+         },
+         "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "expectedStatusRevision",
+         "configurationId",
+         "evidence"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVmStatusAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/notes": {
+   "post": {
+    "summary": "Operating note in the VM history (person, token, time); the owner note is never touched",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500
+         },
+         "jobId": {
+          "type": "string",
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "note"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkNoteAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/jobs/{id}/finish-prepare": {
+   "post": {
+    "summary": "New VM → Chưa nối: only with the SDK of this install saved, the proxy fetched = current configuration, every check true",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "configurationId": {
+          "type": "string"
+         },
+         "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+           "machine": {
+            "type": "boolean"
+           },
+           "proxy": {
+            "type": "boolean"
+           },
+           "internet": {
+            "type": "boolean"
+           },
+           "earnapp": {
+            "type": "boolean"
+           },
+           "firefox": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "machine",
+           "proxy",
+           "internet",
+           "earnapp",
+           "firefox"
+          ]
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "configurationId",
+         "checks"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkPrepareDoneAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / PIN_LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/jobs/{id}/finish-proxy": {
+   "post": {
+    "summary": "Proxy applied on the machine and checked: OK / NOT_LINKED / EARN_ERROR / PROXY_BLOCKED; only for the current configuration; OFF / SUS / deleted kept",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/pin"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "configurationId": {
+          "type": "string"
+         },
+         "result": {
+          "type": "string",
+          "enum": [
+           "OK",
+           "NOT_LINKED",
+           "EARN_ERROR",
+           "PROXY_BLOCKED"
+          ]
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "required for EARN_ERROR / PROXY_BLOCKED",
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "configurationId",
+         "result"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkProxyDoneAck"
         }
        }
       }

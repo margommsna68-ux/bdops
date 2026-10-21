@@ -1,7 +1,7 @@
 import {formatUsd} from './money-input';
 // VM operation cycle (owner brief 18/10/2026), shared by the Server/VM grid, Kho tài khoản and the server so labels, priority and
 // money states are computed the same way everywhere. Pure functions, exact cents (no floating point).
-export const VM_OPS_STATUSES=['OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED'] as const;
+export const VM_OPS_STATUSES=['OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED','PROXY_PENDING'] as const;
 export type VmOpsStatus=typeof VM_OPS_STATUSES[number];
 // Label and tone (CSS class suffix). The text always says the state; colour only helps.
 export const VM_OPS:Record<VmOpsStatus,{label:string;tone:string;hint:string}>={
@@ -15,6 +15,8 @@ export const VM_OPS:Record<VmOpsStatus,{label:string;tone:string;hint:string}>={
   DELETED:{label:'VM deleted',tone:'muted',hint:'Máy thực tế đã xoá; vị trí và lịch sử vẫn giữ trên web'},
   NEW_VM:{label:'New VM',tone:'fresh',hint:'Máy mới / tạo lại, đang chuẩn bị cài'},
   MAIL_LOGGED:{label:'Đã login mail',tone:'violet',hint:'Đã đăng nhập Gmail / Apple ID; bước tiếp là tạo EarnApp'},
+  // 21/10/2026: the web has the new proxy (replaced after Blocked); the real machine still has to apply it and be checked.
+  PROXY_PENDING:{label:'Chờ áp dụng proxy',tone:'pending',hint:'Web đã có proxy mới; máy thật chưa áp dụng / chưa kiểm tra'},
 };
 export const NO_STATUS_LABEL='Chưa ghi';
 export const opsLabel=(s:VmOpsStatus|null|undefined)=>s?VM_OPS[s].label:NO_STATUS_LABEL;
@@ -25,6 +27,7 @@ export const MILESTONE_LABEL:Record<Exclude<Milestone,''>,string>={WAITING:'Ch�
 export function opsPriority(v:{status:VmOpsStatus|null;proxyBlocked:boolean;milestone:Milestone}){
   if(v.status==='SUSPENDED')return 0;
   if(v.proxyBlocked||v.status==='PROXY_BLOCKED')return 1;
+  if(v.status==='PROXY_PENDING')return 1;
   if(v.status==='EARN_ERROR'||v.milestone==='MONEY_REVIEW'||v.milestone==='UNKNOWN')return 2;
   if(v.milestone==='RECREATE')return 3;
   if(v.status==='OFF'||v.status==='DELETED')return 4;

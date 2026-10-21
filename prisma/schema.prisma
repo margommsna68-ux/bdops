@@ -1368,29 +1368,68 @@ enum VmOpsStatus {
   DELETED
   NEW_VM
   MAIL_LOGGED
+  PROXY_PENDING
 }
 
 model VmOperation {
-  id                String         @id @default(cuid())
-  projectId         String
-  vmId              String         @unique
-  vm                VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Restrict)
-  cycle             Int            @default(1)
-  status            VmOpsStatus?
-  statusAt          DateTime?
-  statusById        String?
+  id                   String         @id @default(cuid())
+  projectId            String
+  vmId                 String         @unique
+  vm                   VirtualMachine @relation(fields: [vmId], references: [id], onDelete: Restrict)
+  cycle                Int            @default(1)
+  status               VmOpsStatus?
+  statusAt             DateTime?
+  statusById           String?
   // Status before "Blocked" (owner decision 19/10/2026): which proxy caused it, in which round, and the status to bring back when
   // that proxy is replaced. blockedFromKnown=false: the earlier status could not be found in this round's history (restore = Chưa ghi).
-  blockedFrom       VmOpsStatus?
-  blockedFromKnown  Boolean        @default(false)
-  blockedEndpointId String?
-  blockedCycle      Int?
-  blockedAt         DateTime?
-  revision          Int            @default(0)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  blockedFrom          VmOpsStatus?
+  blockedFromKnown     Boolean        @default(false)
+  blockedEndpointId    String?
+  blockedCycle         Int?
+  blockedAt            DateTime?
+  // Proxy on the real machine (owner brief 21/10/2026): the configuration the machine still has to apply after a proxy change on the web,
+  // and the last one confirmed applied. Not part of the status revision.
+  proxyPendingConfigId String?
+  proxyPendingAt       DateTime?
+  proxyAppliedConfigId String?
+  proxyAppliedAt       DateTime?
+  proxyAppliedById     String?
+  revision             Int            @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@index([projectId])
+}
+
+// One active piece of work on a VM by a person / AI (owner brief 21/10/2026): who took it, until when, the step reached, the machine
+// it made and the SDK / proxy configuration of this attempt. At most one ACTIVE, unexpired job per VM (checked under the VmOperation row
+// lock). Not a schedule: a job exists only because someone took the VM in hand.
+model VmJob {
+  id              String    @id @default(cuid())
+  projectId       String
+  vmId            String
+  cycle           Int
+  kind            String // PREPARE | PROXY_APPLY | CHECK
+  state           String    @default("ACTIVE") // ACTIVE | DONE | RELEASED
+  claimedById     String
+  tokenId         String?
+  claimedAt       DateTime  @default(now())
+  expiresAt       DateTime
+  step            String?
+  stepNote        String?
+  stepAt          DateTime?
+  machineRef      String?
+  configurationId String?
+  sdkId           String?
+  resumeOf        String?
+  // VmOperation.revision when the job was taken: a status changed by someone else meanwhile is never overwritten by the job's result.
+  statusRevision  Int       @default(0)
+  result          String?
+  finishedAt      DateTime?
+  revision        Int       @default(0)
+
+  @@index([vmId, state])
+  @@index([projectId, state])
 }
 
 // What happened to a VM position: status changes (old → new), recreations, undo. Append-only.
@@ -1558,23 +1597,23 @@ model SdkEvent {
 // History only (never edited); the current figure is the newest check (by checkedAt) of the VM's current EarnApp in its current
 // round, so an older check arriving late never replaces a newer one. A failed check keeps the last good figure. Never income or cost.
 model EarnBalanceCheck {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   projectId    String
   vmId         String
   cycle        Int
   earnAppId    String
   checkedAt    DateTime
-  outcome      String    // OK | FAILED
-  amount       Decimal?  @db.Decimal(12, 2)
-  currency     String    @default("USD")
+  outcome      String // OK | FAILED
+  amount       Decimal? @db.Decimal(12, 2)
+  currency     String   @default("USD")
   // Withdrawal condition as observed on EarnApp: YES (the app offers the payout), NO, UNKNOWN (only the balance was read).
-  withdrawable String    @default("UNKNOWN")
+  withdrawable String   @default("UNKNOWN")
   condition    String?
   failure      String?
-  evidence     String?   // a reference (file name, note); never a password, 2FA link or code
-  source       String    // CELL | PASTE | AI | OTHER
+  evidence     String? // a reference (file name, note); never a password, 2FA link or code
+  source       String // CELL | PASTE | AI | OTHER
   recordedById String
-  recordedAt   DateTime  @default(now())
+  recordedAt   DateTime @default(now())
 
   @@index([projectId, vmId, checkedAt])
   @@index([earnAppId, checkedAt])
@@ -1602,12 +1641,14 @@ model OpsToken {
 
   @@index([userId])
 }
+
 // Fixed-window counters shared by every instance (rate limits, failed PINs per token).
 model OpsRateBucket {
   key         String   @id
   windowStart DateTime
   count       Int
 }
+
 // Audit of every API call that reached a decision (allowed fields only: never headers, body, PIN or token).
 model OpsAudit {
   id         String   @id @default(cuid())

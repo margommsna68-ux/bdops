@@ -10,6 +10,9 @@
 //   node scripts/ops-client.mjs post <path> <body.json> [--key <Idempotency-Key>]
 //   node scripts/ops-client.mjs retry <Idempotency-Key>  # send the SAME command again (same path, body and key) after a lost answer
 //   node scripts/ops-client.mjs pending                  # commands whose result is not known yet
+//   node scripts/ops-client.mjs proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]
+//                                   # full proxy of the VM in hand → private file for AE Mini Tool (default ~/.mth/proxy/<vmId>.json);
+//                                   # never printed, never in the command log. Delete the file once the machine is configured.
 //
 // Writes (review fix 21/10/2026): the key and the body are written to a local command log (~/.mth/ops-journal, or MTH_JOURNAL_DIR;
 // never the token or PIN) and the key is printed BEFORE the request is sent. If the answer is lost the result is "Chưa xác định kết
@@ -113,6 +116,16 @@ export function nextState(before,attempt){
   if(attempt==='UNCLEAR')return 'UNKNOWN';
   return before==='SENDING'||before==='UNKNOWN'?'UNKNOWN':'ANSWERED';
 }
+// The full proxy of a VM (vms/{id}/proxy-credentials, 21/10/2026) only ever goes to a private file, also on a retry: stdout, the command
+// log and the chat never see the user / password.
+const PROXY_PATH=/^vms\/[A-Za-z0-9_-]{1,64}\/proxy-credentials$/;
+const PROXY_DIR=process.env.MTH_PROXY_DIR||join(homedir(),'.mth','proxy');
+function writeProxyFile(out,vmId,file){
+  const target=file||join(PROXY_DIR,vmId+'.json');mkdirSync(dirname(target),{recursive:true});
+  const tmp=target+'.tmp-'+process.pid;writeFileSync(tmp,JSON.stringify({vmId,configurationId:out.data.recorded.configurationId,...out.data.proxy},null,1),{mode:0o600});renameSync(tmp,target);try{chmodSync(target,0o600);}catch{/* Windows keeps the user's ACL */}
+  return {...out,data:{...out.data,proxy:'[đã ghi vào file '+target+'; không in user / pass]'},proxyFile:target};
+}
+let proxyOut=null;
 async function call(method,path,body,key){
   const url=opsUrl(path),s=secrets(),headers={authorization:'Bearer '+s.token,accept:'application/json'};
   let entry=null,before=null;
@@ -162,6 +175,7 @@ async function call(method,path,body,key){
     if(!definiteAnswer(res.status,out))unsettled('UNCLEAR',{status:res.status,why:out===null?'not-json':res.status>=500?'server':'envelope'});
     if(!out.ok&&nextState(before,'REFUSED')!=='ANSWERED')unsettled('REFUSED',{status:res.status,out});
     const {state}=settle(out.ok?'OK':'REFUSED',{status:res.status,out});
+    if(PROXY_PATH.test(path)&&out.ok&&out.data?.proxy)out=writeProxyFile(out,path.split('/')[1],proxyOut);
     console.log(JSON.stringify({status:res.status,requestId:res.headers.get('x-request-id'),idempotencyKey:key,commandState:state,...out},null,2));
     process.exitCode=exitFor(state);return;
   }
@@ -184,6 +198,8 @@ if(isMain){
     else if(cmd==='vm'&&args.length===2)await call('GET','vms/'+encodeURIComponent(args[1])+'?'+new URLSearchParams({projectId:args[0]}));
     else if(cmd==='get'&&args.length===1)await call('GET',args[0]);
     else if(cmd==='post'){const key=flag('--key')||randomUUID();if(args.length!==2)die('post <path> <body.json> [--key K]');await call('POST',args[0],JSON.parse(readFileSync(args[1],'utf8')),key);}
+    else if(cmd==='proxy'){const out=flag('--out'),pkey=flag('--key')||randomUUID();if(args.length!==4||!/^\d+$/.test(args[3]))die('proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]');proxyOut=out;
+      await call('POST','vms/'+encodeURIComponent(args[1])+'/proxy-credentials',{projectId:args[0],jobId:args[2],expectedCycle:Number(args[3])},pkey);}
     else if(cmd==='retry'&&args.length===1){const key=args[0],e=readEntry(key);if(!e)die('Không có lệnh với key '+key+' trong '+JOURNAL);await call('POST',e.path,e.body,key);}
     else if(cmd==='pending'){const list=allEntries().filter(e=>e.state==='SENDING'||e.state==='UNKNOWN'||e.state==='UNREADABLE');
       console.log(JSON.stringify(list.map(e=>e.state==='UNREADABLE'?{key:null,file:e.file,state:e.state,error:e.error}:{key:e.key,path:e.path,state:e.state,attempts:e.attempts,lastTryAt:e.lastTryAt,...(e.httpStatus?{httpStatus:e.httpStatus}:{})}),null,2));}

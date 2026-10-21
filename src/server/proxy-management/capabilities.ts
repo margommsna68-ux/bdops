@@ -8,8 +8,10 @@ import {captureMember} from '../operation-history/snapshot';
 // EARN_BALANCE (20/10/2026): record EarnApp balance checks without being a manager (e.g. a dedicated AI account).
 // EARN_PAYOUT (21/10/2026): prepare a payout request (hold an email) and record it sent / unknown on EarnApp; nothing else of money.
 // PAYPAL_RECEIPT_RECORD (21/10/2026): record money received on PayPal for a payout request already sent; no other ledger write.
-// Both are off by default and given by an ADMIN; they are checked in the payout services (vm-ops/payout.ts), not only at the API.
-export const proxyCapabilities=['COPY_CREDENTIALS','PROXY_IMPORT','PROXY_REPLACE','EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD'] as const;
+// VM_PROXY_FOR_OPS (21/10/2026): read the full proxy (IP:port:user:pass) of the one VM the operator has taken in hand (an active job),
+// to configure the real machine; never the registry, never another VM (vm-ops/jobs.ts).
+// They are off by default and given by an ADMIN; they are checked in the payout services (vm-ops/payout.ts), not only at the API.
+export const proxyCapabilities=['COPY_CREDENTIALS','PROXY_IMPORT','PROXY_REPLACE','EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'] as const;
 async function administrator(scope:ActorScope,db:Parameters<typeof loadInfrastructureScope>[0]){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
   if(current.role!=='ADMIN'||current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN');

@@ -19,7 +19,7 @@ export const COLUMNS:ColumnDef[]=[
   {key:'version',label:'Cấu hình',width:120,min:90,optional:true},
   {key:'sdkMeta',label:'SDK ghi bởi',width:170,min:110,optional:true},
 ];
-export const FIXED={select:40,server:96,vm:118,ops:124,menu:48};
+export const FIXED={select:40,server:96,vm:118,ops:148,menu:48};
 // v: layout version of the stored order. 2 = Tiền / Rút right after Tình trạng (20/10/2026).
 export interface GridPrefs {order:ColumnKey[];hidden:ColumnKey[];widths:Partial<Record<ColumnKey|'server'|'vm',number>>;v?:number}
 export const PREFS_VERSION=2;
@@ -59,10 +59,12 @@ export function nextCell(rowIds:string[],fields:EditField[],at:{vmId:string;fiel
   return {vmId:rowIds[Math.floor(i/fields.length)],field:fields[i%fields.length]};
 }
 // URL state: everything the user picked survives reload and Back/Forward. The server is in the path.
-export type GridView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED';
+// APPLY (21/10/2026): the web has a new proxy the real machine has not applied yet. TODO: what needs a hand on the machine (New VM, Chờ
+// áp dụng proxy, Blocked, Earn/VM lỗi, a proxy still to apply).
+export type GridView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED'|'APPLY'|'TODO';
 export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS'|'BALANCE'|'CHECKED_OLD'|'WAITING_OLD';
 // Operating status filter (several at once; NONE = Chưa ghi) and money milestone filter.
-export const OPS_FILTERS=['NONE','OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED'] as const;
+export const OPS_FILTERS=['NONE','OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED','PROXY_PENDING'] as const;
 export type OpsFilter=typeof OPS_FILTERS[number];
 export type MoneyFilter=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'NONE'|'UNCHECKED'|'WITHDRAWABLE'|'RECEIVED'|'CHECK';
 export type PanelTab='overview'|'proxy'|'work'|'account'|'history';
@@ -78,7 +80,7 @@ function readSdkUrl(p:{get(name:string):string|null}):SdkStoreUrl{
   const pick=<T extends string>(v:string|null,all:T[],d:T)=>(all as string[]).includes(v||'')?v as T:d;
   return {open:p.get('sdk')==='1',q:p.get('sq')||'',state:pick(p.get('sf'),SDK_STATES,'FREE'),place:pick(p.get('sl'),SDK_PLACES,'ALL'),sort:pick(p.get('ss'),SDK_SORTS,'UPDATED'),page:Math.max(1,Math.floor(Number(p.get('sp'))||1))};
 }
-const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
+const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','DELETED','APPLY','TODO'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
 // Links from before 19/10/2026: Chờ cài / Đã cài are now "Có proxy", the orphan install-task view is gone, the install tab is the proxy tab.
 const OLD_VIEW:Record<string,GridView>={PENDING:'ASSIGNED',INSTALLED:'ASSIGNED',TASK_ORPHAN:''};
 export function readGridUrl(p:{get(name:string):string|null}):GridUrl{

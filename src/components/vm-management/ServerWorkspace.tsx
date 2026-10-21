@@ -64,7 +64,9 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;
-  const inView=(v:ManagedVM)=>!url.view||(url.view==='SDK_MISSING'?!v.sdks.length&&!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
+  const TODO:(VmOpsStatus|null)[]=['NEW_VM','PROXY_PENDING','PROXY_BLOCKED','EARN_ERROR'];
+  const todo=(v:ManagedVM)=>v.applyPending||vmView(v)==='BLOCKED'||TODO.includes((opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null);
+  const inView=(v:ManagedVM)=>!url.view||(url.view==='APPLY'?v.applyPending:url.view==='TODO'?todo(v):url.view==='SDK_MISSING'?!v.sdks.length&&!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
   // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
   const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
   const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
@@ -185,7 +187,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
   const openBulk=(panel:BulkPanel,toggle=false)=>{if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
   useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
-  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
+  const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','APPLY','TODO'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
   if(current?.archivedAt)return <div className="proxy-workspace space-y-4"><div className="pm-heading"><div><h1>{current.code}</h1><p className="pm-muted">Server đã xoá. Dữ liệu và lịch sử vẫn được giữ.</p></div>{rights.manage&&<button className="pm-button pm-button-primary" disabled={busy} onClick={()=>void bringBackServer(current.id)}><RotateCcw size={16}/>Khôi phục server</button>}</div><Link className="pm-button pm-button-quiet w-fit" href="/infrastructure/servers">Về danh sách server</Link></div>;
@@ -205,7 +207,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         </DropdownMenuContent></DropdownMenu></div>
     </div>
     {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
-    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('ASSIGNED','Có proxy',counts.assigned)}{chip('BLOCKED','Proxy Blocked',counts.blocked)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{chip('DELETED','Đã xoá',deleted.length)}</div>
+    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('ASSIGNED','Có proxy',counts.assigned)}{chip('BLOCKED','Proxy Blocked',counts.blocked)}{chip('APPLY','Chờ áp dụng trên máy',active.filter(v=>v.applyPending).length)}{chip('TODO','Cần xử lý',active.filter(todo).length)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{chip('DELETED','Đã xoá',deleted.length)}</div>
     <div className="vm-chips vm-chips-ops" role="group" aria-label="Lọc theo tình trạng vận hành"><span className="pm-muted text-xs">Tình trạng:</span>
       {OPS_FILTERS.map(k=>{const n=active.filter(v=>opsKey(v)===k).length,on=url.st.includes(k);if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{n}</strong></button>;})}
       <span className="pm-muted text-xs ml-2">Proxy / tiền:</span>

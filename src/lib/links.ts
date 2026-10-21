@@ -1,7 +1,7 @@
 // One builder for in-app links. Dashboard cards, charts, alerts, table buttons and side panels all open the same filtered list
 // through these functions, so a count and the list it opens always use the same URL (and therefore the same rule on the page).
 // Pure: used by server code (notifications) and client components alike.
-export type VmView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED';
+export type VmView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'PAYPAL_MISSING'|'DELETED'|'APPLY'|'TODO';
 export type VmTab='overview'|'proxy'|'work'|'account'|'history';
 export type ProxyGroupKey='TUT'|'SHARED'|'GENJY'|'UNKNOWN';
 export type ProxyStateKey='NEW'|'LIVE'|'BLOCKED'|'OTHER'|'REPLACED'|'DIE'|'QUARANTINED'|'VOID'|'RETIRED';

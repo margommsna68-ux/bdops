@@ -39,7 +39,8 @@ async function event(tx:Tx,ctx:ChangeCtx,endpoint:{id:string;identityId:string|n
  * back to stock by the NEW / LIVE rule, a BLOCKED one stays BLOCKED for the provider), the chosen proxy gets a fresh assigned
  * configuration and becomes LIVE. Choosing the current proxy again writes nothing. The caller has checked rights, project, revisions
  * and that the proxy may be placed (eligibility, not held by another VM). SDK, EarnApp, PayPal and the VM round are never touched.
- * The VM status set "Blocked" for one of the released proxies is restored (restoreAfterBlocked).
+ * The VM status set "Blocked" for one of the released proxies becomes "Chờ áp dụng proxy" (restoreAfterBlocked), and the new configuration
+ * is marked as still to be applied on the real machine (markProxyPending), whatever the status (owner brief 21/10/2026).
  */
 export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:string,endpointId:string){
   const vm=await loadChangeVM(tx,vmId),cur=currentProxyOf(vm);
@@ -83,15 +84,16 @@ export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:
   await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await syncAssignmentState(tx,endpoint.id);
   await event(tx,ctx,endpoint,'ASSIGNED','Dùng cho '+here+(from.length?' (thay '+from.length+' proxy cũ)':''));
   await restoreAfterBlocked(tx,images,ctx,vm,from);
+  await markProxyPending(tx,images,ctx,vm.id,configId!);
   return {changed:true,from,vm};
 }
-// ─── Blocked and the VM status (owner decision 19/10/2026) ────────────────────────────────────────────────────────────────────
+// ─── Blocked and the VM status (owner decisions 19/10/2026 and 21/10/2026) ───────────────────────────────────────────────────
 // A proxy reported BLOCKED (in Kho proxy or by choosing "Blocked" at the VM) sets the VM using it to "Blocked" and remembers the
-// status before it, for that VM, round and proxy. Replacing the proxy brings the remembered status back, only while the VM still
-// carries the Blocked of that same proxy and round; a status chosen by a person meanwhile is kept. SUS / OFF VM / Earn-VM lỗi /
-// VM deleted are never overwritten by Blocked (the proxy cell still shows it).
+// status before it, for that VM, round and proxy (kept as history). Replacing that proxy, while the VM still carries its Blocked of the
+// same round, sets "Chờ áp dụng proxy" (21/10/2026, REPLACES "the remembered status comes back"): the web has the new proxy, the real
+// machine has not applied it yet; the AI / person who applies and checks it records the result. A status chosen by a person meanwhile is
+// kept. SUS / OFF VM / Earn-VM lỗi / VM deleted are never overwritten by Blocked (the proxy cell still shows it).
 const KEEP:VmOpsStatus[]=['SUSPENDED','OFF','EARN_ERROR','DELETED'];
-const opsLabel=(s:VmOpsStatus|null|undefined)=>s?VM_OPS[s].label:'Chưa ghi';
 async function ensureOps(tx:Tx,images:Collector,projectId:string,vmId:string){
   const row=await tx.vmOperation.findUnique({where:{vmId}});if(row){await images.remember('VM_OPS',row.id);return row;}
   const created=await tx.vmOperation.create({data:{projectId,vmId}});await images.remember('VM_OPS',created.id,true);return created;
@@ -140,7 +142,7 @@ export async function blockedSource(db:Pick<Tx,'vmOpsEvent'>,vmId:string,ops:Ops
   }
   return {known:false,from:null,legacy:true};
 }
-/** After the proxies `oldIds` left the VM: bring back the status before Blocked when the VM still carries that Blocked. */
+/** After the proxies `oldIds` left the VM: "Chờ áp dụng proxy" when the VM still carries the Blocked of one of them. */
 export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vm:{id:string;operation:OpsRow|null},oldIds:string[]){
   const ops=vm.operation;if(!ops)return null;
   const row=await tx.vmOperation.findUniqueOrThrow({where:{id:ops.id}});
@@ -152,8 +154,22 @@ export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,v
     return null;
   }
   await images.remember('VM_OPS',row.id);
-  const to=source.known?source.from:null,where=source.legacy?' (theo lịch sử lượt này)':'';
-  await tx.vmOperation.update({where:{id:row.id},data:{...clear,status:to,statusAt:ctx.now,statusById:ctx.actorId,revision:{increment:1}}});
-  await tx.vmOpsEvent.create({data:{projectId:ctx.projectId,vmId:vm.id,cycle:row.cycle,kind:'STATUS',fromStatus:'PROXY_BLOCKED',toStatus:to,note:source.known?'Đã thay proxy · trở về '+opsLabel(to)+' (tình trạng trước Blocked'+where+')':'Đã thay proxy · không xác định được tình trạng trước Blocked trong lịch sử lượt này nên để Chưa ghi',actorId:ctx.actorId}});
-  return {restored:to};
+  const before=source.known&&source.from?VM_OPS[source.from].label:'Chưa ghi';
+  // A machine still being prepared (New VM before Blocked) stays New VM: the preparation applies the new proxy.
+  const next:VmOpsStatus=source.known&&source.from==='NEW_VM'?'NEW_VM':'PROXY_PENDING';
+  await tx.vmOperation.update({where:{id:row.id},data:{...clear,status:next,statusAt:ctx.now,statusById:ctx.actorId,revision:{increment:1}}});
+  await tx.vmOpsEvent.create({data:{projectId:ctx.projectId,vmId:vm.id,cycle:row.cycle,kind:'STATUS',fromStatus:'PROXY_BLOCKED',toStatus:next,note:'Đã thay proxy ('+ctx.via+') · '+(next==='NEW_VM'?'tiếp tục chuẩn bị máy với proxy mới':'chờ áp dụng trên máy thật')+' (trước Blocked: '+before+(source.legacy?', theo lịch sử lượt này':'')+')',actorId:ctx.actorId}});
+  return {restored:next};
+}
+
+/**
+ * The real machine still has to apply `configId` (any proxy change on the web). Not part of the status revision and not an undo image:
+ * the mark counts only while it names the VM's current configuration (pendingApply), so an undone change leaves no stale mark.
+ */
+export async function markProxyPending(tx:Tx,_images:Collector,ctx:ChangeCtx,vmId:string,configId:string){
+  await tx.vmOperation.upsert({where:{vmId},create:{projectId:ctx.projectId,vmId,proxyPendingConfigId:configId,proxyPendingAt:ctx.now},update:{proxyPendingConfigId:configId,proxyPendingAt:ctx.now}});
+}
+/** The configuration the real machine still has to apply, or null: the mark names the VM's current configuration. */
+export function pendingApply(vm:{desiredConfigurationId:string|null;operation:{proxyPendingConfigId:string|null}|null}){
+  const id=vm.operation?.proxyPendingConfigId??null;return id&&id===vm.desiredConfigurationId?id:null;
 }

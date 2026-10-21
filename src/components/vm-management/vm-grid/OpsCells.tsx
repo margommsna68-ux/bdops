@@ -29,14 +29,16 @@ export function OpsStatusCell({vm,ops,canEdit,onSet}:{vm:ManagedVM;ops:{status:V
     setPicked(next);setSaving(true);setError('');
     try{await onSet(vm,next,ops?.cycle??1);}catch(e){setError(message(e));}finally{setSaving(false);}
   }
-  if(!canEdit)return <span className={'vm-ops vm-ops-'+tone} title={shown?VM_OPS[shown].hint:'Chưa ghi tình trạng'}>{shown?VM_OPS[shown].label:NO_STATUS_LABEL}</span>;
+  // Work in hand on the real machine (21/10/2026): who / which token, until when; nothing to click.
+  const job=vm.job?<span className="vm-job-mark" title={'Việc '+vm.job.kind+(vm.job.step?' · bước '+vm.job.step:'')+' · giữ đến '+new Date(vm.job.expiresAt).toLocaleString('vi-VN')}>{(vm.job.token?'AI':'Đang')+' xử lý · '+(vm.job.token??vm.job.by??'')+' · đến '+new Date(vm.job.expiresAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'})}</span>:null;
+  if(!canEdit)return <div className="vm-ops-cell"><span className={'vm-ops vm-ops-'+tone} title={shown?VM_OPS[shown].hint:'Chưa ghi tình trạng'}>{shown?VM_OPS[shown].label:NO_STATUS_LABEL}</span>{job}</div>;
   return <div className="vm-ops-cell">
     <span className={'vm-ops vm-ops-'+tone+' vm-ops-pick'}>{saving&&<Loader2 size={11} className="animate-spin"/>}
       <select aria-label={'Tình trạng '+vm.server+' / '+vm.code} title={shown?VM_OPS[shown].hint:'Chưa ghi tình trạng; bấm để chọn'} value={shown??''} disabled={saving} onChange={e=>void pick(e.target.value as VmOpsStatus)}>
         {!shown&&<option value="" disabled>{NO_STATUS_LABEL}</option>}
         {VM_OPS_STATUSES.map(s=><option key={s} value={s}>{VM_OPS[s].label}</option>)}
       </select><ChevronDown size={11} aria-hidden/></span>
-    {error&&<span role="alert" className="vm-cell-error">{error}</span>}
+    {job}{error&&<span role="alert" className="vm-cell-error">{error}</span>}
   </div>;
 }
 // Small popover anchored to a cell, rendered in a portal (never clipped by the table scroll), closed by Escape / click outside.

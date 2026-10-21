@@ -13,19 +13,22 @@ import {validIpRule} from './safety';
 //   user's membership and rights, so a lowered right or a removed membership applies to the next request.
 // - An ADMIN creates it from Thiết lập (session + PIN) only for projects they administer and only for operations the user can do now.
 //   The full token is returned once; listing never shows it. Revoking applies to the next request.
-export const OPS_SCOPES=['READ','BALANCE_WRITE','PAYOUT','RECEIPT'] as const;
+// VM_OPS / PROXY_CREDENTIALS (21/10/2026): work on real machines — take a VM, record steps, SDK, status, Blocked, notes; and read the
+// full proxy of the VM in hand (right VM_PROXY_FOR_OPS).
+export const OPS_SCOPES=['READ','BALANCE_WRITE','PAYOUT','RECEIPT','VM_OPS','PROXY_CREDENTIALS'] as const;
 export type OpsScope=typeof OPS_SCOPES[number];
-export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút'};
+export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút',VM_OPS:'Vận hành VM: nhận việc, ghi bước, SDK, tình trạng, Blocked, ghi chú',PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM đang xử lý'};
 export const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
 type Db=PrismaClient|Prisma.TransactionClient;
 /** Which operations this member can do now in this project (the same rules the services check). */
 export async function memberOps(db:Db,userId:string,projectId:string):Promise<Record<OpsScope,boolean>>{
-  const none={READ:false,BALANCE_WRITE:false,PAYOUT:false,RECEIPT:false};
+  const none={READ:false,BALANCE_WRITE:false,PAYOUT:false,RECEIPT:false,VM_OPS:false,PROXY_CREDENTIALS:false};
   let current;try{current=await loadInfrastructureScope(db,userId,projectId);}catch{return none;}
   if(current.businessMode!=='PROXY_VM')return none;
   let read=true;try{assertInfrastructureAction(current,'READ');}catch{read=false;}if(!read)return none;
   const [b,p]=await Promise.all([balanceRights(current,db),payoutRights(current,db)]);
-  return {READ:true,BALANCE_WRITE:b.write,PAYOUT:p.payout,RECEIPT:p.receipt};
+  let assign=true;try{assertInfrastructureAction(current,'ASSIGN');}catch{assign=false;}
+  return {READ:true,BALANCE_WRITE:b.write,PAYOUT:p.payout,RECEIPT:p.receipt,VM_OPS:assign,PROXY_CREDENTIALS:assign&&(current.role==='ADMIN'||current.capabilities.includes('VM_PROXY_FOR_OPS'))};
 }
 /** A user can still act through a token: has a password and is not locked out of signing in. */
 export async function userActive(db:Db,userId:string){

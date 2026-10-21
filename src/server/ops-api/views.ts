@@ -2,7 +2,7 @@ import type {Prisma,PrismaClient} from '@prisma/client';
 import {moneyOfRequest} from '../vm-ops/ops';
 import {neutralHistory} from '../vm-ops/payout';
 import {currentBalances} from '../vm-ops/balance';
-import {currentProxyOf} from '../vm-management/proxy-change';
+import {currentProxyOf,pendingApply} from '../vm-management/proxy-change';
 import {dayText} from '../business-management/money';
 import {opsLabel} from '@/lib/vm-ops';
 import {maskEmail,maskHost,redactSecrets} from './safety';
@@ -12,23 +12,28 @@ import {maskEmail,maskHost,redactSecrets} from './safety';
 export interface ViewRights {balanceRead:boolean;requestMoney:boolean;payoutEmail:boolean}
 type Db=PrismaClient|Prisma.TransactionClient;
 const endpointSelect={id:true,host:true,port:true,groupId:true,group:{select:{name:true}},identity:{select:{owner:true,subgroup:true}}} as const;
-export const vmSelect={id:true,code:true,revision:true,archivedAt:true,server:{select:{id:true,code:true,archivedAt:true}},operation:{select:{cycle:true,status:true,revision:true}},
+export const vmSelect={id:true,code:true,revision:true,archivedAt:true,desiredConfigurationId:true,server:{select:{id:true,code:true,archivedAt:true}},operation:{select:{cycle:true,status:true,revision:true,proxyPendingConfigId:true,proxyPendingAt:true}},
+  sdkRecord:{select:{id:true,code:true,revision:true,linkState:true}},
   // Only holds still in force decide the current proxy (released ones stay as history), the same rule as Server / VM.
   earnApp:{select:{id:true,closedAt:true,login:{select:{email:true}}}},allocations:{where:{releasedAt:null},select:{endpointId:true,role:true}},
-  desiredConfiguration:{select:{endpointId:true,endpoint:{select:endpointSelect}}},installedConfiguration:{select:{endpointId:true,endpoint:{select:endpointSelect}}}} as const;
+  desiredConfiguration:{select:{id:true,endpointId:true,endpoint:{select:endpointSelect}}},installedConfiguration:{select:{id:true,endpointId:true,endpoint:{select:endpointSelect}}}} as const;
 type VmRow=Prisma.VirtualMachineGetPayload<{select:typeof vmSelect}>;
 type EndpointRow=Prisma.ProxyIPGetPayload<{select:typeof endpointSelect}>;
 const groupOf=(e:EndpointRow)=>e.identity?.owner==='GENJY'?(e.identity.subgroup==='PC_CHUNG'?'Chung mooon–Genjy':'Genjy riêng'):e.groupId?e.group?.name??'Nhóm khác':'TUT';
 export function proxyView(vm:VmRow){
   const c=currentProxyOf({desiredConfiguration:vm.desiredConfiguration,installedConfiguration:vm.installedConfiguration,allocations:vm.allocations});
   if(c.review)return {state:'REVIEW' as const,proxy:null};
-  const e=[vm.desiredConfiguration?.endpoint,vm.installedConfiguration?.endpoint].find(x=>x&&x.id===c.endpointId);
-  return e?{state:'ASSIGNED' as const,proxy:{id:e.id,host:maskHost(e.host),port:e.port,group:groupOf(e)}}:{state:'MISSING' as const,proxy:null};
+  const cfg=[vm.desiredConfiguration,vm.installedConfiguration].find(x=>x&&x.endpoint&&x.endpoint.id===c.endpointId),e=cfg?.endpoint;
+  return e&&cfg?{state:'ASSIGNED' as const,proxy:{id:e.id,host:maskHost(e.host),port:e.port,group:groupOf(e),configurationId:cfg.id}}:{state:'MISSING' as const,proxy:null};
 }
 export function vmView(vm:VmRow){
-  const ea=vm.earnApp&&!vm.earnApp.closedAt?vm.earnApp:null,p=proxyView(vm);
+  const ea=vm.earnApp&&!vm.earnApp.closedAt?vm.earnApp:null,p=proxyView(vm),pend=pendingApply({desiredConfigurationId:vm.desiredConfigurationId,operation:vm.operation?{proxyPendingConfigId:vm.operation.proxyPendingConfigId}:null});
   return {id:vm.id,code:vm.code,serverId:vm.server.id,serverCode:vm.server.code,deleted:!!vm.archivedAt||!!vm.server.archivedAt,status:vm.operation?.status??null,statusLabel:vm.operation?.status?opsLabel(vm.operation.status):'Chưa ghi',
-    expectedCycle:vm.operation?.cycle??1,revision:vm.revision,proxyState:p.state,proxy:p.proxy,earnAppAccount:ea?{id:ea.id,login:maskEmail(ea.login.email)}:null};
+    expectedCycle:vm.operation?.cycle??1,revision:vm.revision,statusRevision:vm.operation?.revision??0,proxyState:p.state,proxy:p.proxy,
+    // 21/10/2026: the configuration the real machine still has to apply (null = nothing waiting), and the VM's current SDK code.
+    applyPending:pend?{configurationId:pend,since:vm.operation?.proxyPendingAt?.toISOString()??null}:null,
+    currentSdk:vm.sdkRecord?{id:vm.sdkRecord.id,code:vm.sdkRecord.code,revision:vm.sdkRecord.revision,linkState:vm.sdkRecord.linkState}:null,
+    earnAppAccount:ea?{id:ea.id,login:maskEmail(ea.login.email)}:null};
 }
 export const requestSelect={id:true,revision:true,vmId:true,cycle:true,earnAppId:true,paypalId:true,paypalEmailId:true,currency:true,amount:true,requestedAt:true,state:true,stateNote:true,submission:true,submittedAt:true,settledAt:true,shortfall:true,consumedAt:true,history:true,createdAt:true,
   paypal:{select:{code:true}},paypalEmail:{select:{email:true}},earnApp:{select:{vmId:true,closedAt:true}},

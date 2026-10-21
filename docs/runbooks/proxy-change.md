@@ -11,7 +11,7 @@ Quyết định của chủ dự án ngày 19/10/2026. **Thay thế** quy trình
 | Dải lọc: Tất cả · Thiếu proxy · **Có proxy** · **Proxy Blocked** · Cần kiểm tra · … | Thiếu proxy · Chờ cài · Đã cài · Cần kiểm tra · Việc cài bị bỏ lại. |
 | Nhận replace ở Kho proxy đổi luôn VM đang dùng proxy cũ trong cùng giao dịch. | Replace chỉ đổi kho; VM vẫn giữ proxy cũ cho tới khi gán lại và xác nhận. |
 | Báo BLOCKED ở Kho proxy chuyển VM đang dùng sang Blocked; chọn Blocked tại VM ghi BLOCKED cho proxy hiện hành (cần quyền Báo BLOCKED). | Hai trang độc lập; chọn Blocked tại VM không chạm proxy. |
-| Thay proxy đưa VM về tình trạng trước Blocked của đúng VM, lượt và proxy đó. | Thay proxy không đổi tình trạng. |
+| Thay proxy đưa VM đang Blocked (đúng VM, lượt, proxy) sang Chờ áp dụng proxy (21/10/2026; trước đó: về tình trạng trước Blocked). | Thay proxy không đổi tình trạng; ô Proxy hiện “Chờ áp dụng trên máy”. |
 | `/vm-tasks` và link cũ mở Server / VM; menu, thông báo, Tổng quan không còn Chờ cài / Việc cài. | Trang Việc cài proxy (ẩn hoặc bật bằng biến môi trường), cảnh báo "N VM chờ cài". |
 | `vmManagement.start / copy / confirm / reportFailure` trả lỗi rõ ("không còn bước cài"). | Các lệnh cài. |
 
@@ -49,7 +49,8 @@ Quyết định của chủ dự án ngày 19/10/2026. **Thay thế** quy trình
   - VM đang SUS / OFF VM / Earn-VM lỗi / VM deleted giữ tình trạng đó; ô Proxy vẫn báo Blocked.
   - Chọn Blocked tại VM khi VM chưa có proxy rõ ràng bị từ chối tại dòng; không có quyền Báo BLOCKED cũng bị từ chối.
   - Dữ liệu cũ đang Blocked mà thiếu mốc (hoặc mốc của lượt khác): xử lý ngay trong lần thay proxy, không cần đánh dấu Blocked lại. Lịch sử tình trạng của **lượt hiện tại** còn kết thúc ở Blocked → trở về tình trạng ngay trước lần chuyển sang Blocked gần nhất (ghi "theo lịch sử lượt này"); không xác định được → **Chưa ghi**, ghi rõ lý do trong lịch sử. Không đoán thành OK, không dùng lịch sử lượt trước. Đúng cho cả thay tại ô Proxy và Nhận replace ở Kho proxy; khung Thay proxy báo trước tình trạng sẽ trở về. (Sửa sau kiểm tra độc lập 19/10/2026: trước đó các VM này giữ nguyên Blocked sau khi thay.) Hàm `blockedSource` (`proxy-change.ts`) dùng chung cho kiểm tra và lưu.
-- Thay proxy (ô Proxy hoặc replace ở Kho) → nếu VM **vẫn** đang Blocked của đúng proxy và lượt đó thì trở về tình trạng đã nhớ (OK → OK, Chưa nối → Chưa nối, LINKED → LINKED, Chưa ghi → Chưa ghi). Người vận hành đã đổi sang tình trạng khác trong lúc chờ (SUS, OFF…) thì giữ quyết định mới hơn. Mốc của lượt cũ không dùng cho lượt mới.
+- **Thay thế 21/10/2026 (brief AI vận hành):** thay proxy (ô Proxy hoặc replace ở Kho) → nếu VM **vẫn** đang Blocked của đúng proxy và lượt đó thì thành **Chờ áp dụng proxy** (web đã có proxy mới, máy thật chưa áp dụng); không còn tự trở về tình trạng đã nhớ (tình trạng trước Blocked chỉ còn ghi trong lịch sử). New VM bị Blocked khi đang chuẩn bị thì vẫn là New VM. Người vận hành đã đổi sang tình trạng khác trong lúc chờ (SUS, OFF…) thì giữ quyết định mới hơn. Mốc của lượt cũ không dùng cho lượt mới.
+- Mọi lần proxy của VM thật sự đổi đều ghi dấu **chờ áp dụng trên máy** (`VmOperation.proxyPendingConfigId`, chỉ tính khi còn là cấu hình hiện hành). Dấu gỡ khi AI / người xác nhận đã áp dụng đúng cấu hình đó (finish-proxy / finish-prepare), hoặc khi người chọn OK / Chưa nối / LINKED từ Chờ áp dụng proxy. Xem docs/runbooks/ai-vm-ops.md.
 - Ghi nhận tạo lại VM: proxy hợp lệ được giữ cho vị trí ở lượt mới (gán là xong); proxy BLOCKED vẫn ở vị trí, ô Proxy báo Blocked và vẫn phải thay; mốc Blocked bị xoá vì sang lượt mới.
 
 ## Copy proxy Blocked

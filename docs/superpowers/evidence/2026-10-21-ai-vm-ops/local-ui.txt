@@ -1,0 +1,9 @@
+PASS U1 VM_001 OK, chủ đổi proxy lần nữa: giữ OK, ô Proxy hiện "Chờ áp dụng trên máy"
+PASS U1b Giá trị tình trạng: NEW_A1 Chưa nối, NEW_A2 New VM
+PASS U2 NEW_A1 chuẩn bị xong: Chưa nối, SDK của lần cài này
+PASS U3 NEW_A2 New VM + "AI xử lý · LOCAL · AI thử · đến hh:mm"
+PASS U4 Có chip "Chờ áp dụng trên máy" và "Cần xử lý"
+PASS U5 Lọc "Cần xử lý" giữ trong URL (?view=TODO)
+PASS U6 Cần xử lý: có VM_001 (proxy chờ áp dụng) và NEW_A2 (New VM), không có NEW_A1 (Chưa nối)
+PASS U7 Tải lại vẫn giữ bộ lọc
+Lỗi JS: không

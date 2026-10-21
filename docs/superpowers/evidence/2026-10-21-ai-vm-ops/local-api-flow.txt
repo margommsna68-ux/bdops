@@ -1,0 +1,17 @@
+PASS A1 NEW_A1 là New VM, có proxy chờ áp dụng (New VM)
+PASS A2 Nhận việc PREPARE
+PASS A3 Ghi bước MACHINE_CREATED + tên máy (giả lập)
+PASS A4 Lấy proxy của VM đang xử lý → chỉ vào file riêng, stdout không có user / pass
+PASS A5 Chưa có SDK của lần cài này → từ chối, giữ New VM: Chưa có SDK của lần cài này được lưu làm mã hiện hành của VM; ghi SDK (vms/{id}/
+PASS A6 Ghi SDK (giả lập) → mã hiện hành + trong danh sách
+PASS A7 Đọc lại: SDK hiện hành = SIMSDK-782f56-A1000001
+PASS A8 Hoàn tất → Chưa nối, hết dấu chờ áp dụng
+PASS B1 AI báo Blocked đúng proxy hiện hành
+INFO chạy p36-owner-replace.ts (chủ thay proxy) rồi phase 2
+PASS C1 NEW_A2 đang được AI giữ (để xem trên bảng)
+PASS S Không lệnh nào in token / PIN ra stdout
+PASS B2 Sau khi chủ thay proxy: Chờ áp dụng proxy (không tự về OK)
+PASS B3 Nhận việc PROXY_APPLY
+PASS B4 Áp dụng (giả lập) + kiểm tra → OK, hết dấu chờ áp dụng
+PASS B5 Nhật ký lệnh không có token / PIN / mật khẩu proxy
+PASS S Không lệnh nào in token / PIN ra stdout

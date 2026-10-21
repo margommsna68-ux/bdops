@@ -29,8 +29,13 @@ async function ensureOps(tx:Tx,images:BusinessCollector,projectId:string,vmId:st
   const row=await tx.vmOperation.findUnique({where:{vmId}});if(row){await images.remember('VM_OPS',row.id);return row;}
   const created=await tx.vmOperation.create({data:{projectId,vmId}});await images.remember('VM_OPS',created.id,true);return created;
 }
-export interface StatusItem {vmId:string;status:VmOpsStatus;expectedCycle:number}
-export async function setVmStatus(scope:ActorScope,input:{key:string;items:StatusItem[];note?:string|null},db:PrismaClient=prisma){
+// expectedRevision: the status version the writer saw (VmOperation.revision; 0 = never recorded); a status changed meanwhile is refused.
+// expectedEndpointId (Blocked only): the proxy the writer found blocked; a proxy replaced meanwhile is never marked BLOCKED instead.
+export interface StatusItem {vmId:string;status:VmOpsStatus;expectedCycle:number;expectedRevision?:number|null;expectedEndpointId?:string|null}
+// An AI operator through the ops API (21/10/2026) never leaves New VM or "Chờ áp dụng proxy" with a plain status: those end through the
+// job that prepared the machine / applied the proxy (vm-ops/jobs.ts), which checks the SDK and the configuration.
+const JOB_ONLY:VmOpsStatus[]=['NEW_VM','PROXY_PENDING'];
+export async function setVmStatus(scope:ActorScope,input:{key:string;items:StatusItem[];note?:string|null},db:PrismaClient=prisma,opts:{operator?:boolean}={}){
   if(!input.items.length||input.items.length>1000||new Set(input.items.map(i=>i.vmId)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM');
   if(input.items.some(i=>!VM_OPS_STATUSES.includes(i.status as never)))throw new ProxyDomainError('INVALID_INPUT','Trạng thái không hợp lệ');
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_STATUS',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
@@ -43,30 +48,46 @@ export async function setVmStatus(scope:ActorScope,input:{key:string;items:Statu
       if(vm.archivedAt||vm.server.archivedAt){rows.push({...base,outcome:'ERROR',message:'Bản ghi VM đã xoá khỏi web; khôi phục trước khi ghi tình trạng',status:vm.operation?.status??null,cycle});continue;}
       if(cycle!==item.expectedCycle){rows.push({...base,outcome:'ERROR',message:staleCycle(cycle),status:vm.operation?.status??null,cycle});continue;}
       if(vm.operation?.status===item.status){rows.push({...base,outcome:'SKIP',message:'Giữ nguyên '+opsLabel(item.status),status:item.status,cycle});continue;}
+      if(item.expectedRevision!=null&&(vm.operation?.revision??0)!==item.expectedRevision){rows.push({...base,outcome:'ERROR',message:'Tình trạng vừa được đổi thành '+opsLabel(vm.operation?.status??null)+'; không ghi đè. Tải lại rồi quyết định',status:vm.operation?.status??null,cycle});continue;}
+      if(opts.operator&&vm.operation?.status&&JOB_ONLY.includes(vm.operation.status)&&item.status!=='PROXY_BLOCKED'){rows.push({...base,outcome:'ERROR',message:opsLabel(vm.operation.status)+' chỉ kết thúc qua việc đã nhận (finish-prepare / finish-proxy), sau khi SDK / proxy được kiểm',status:vm.operation.status,cycle});continue;}
+      if(opts.operator&&JOB_ONLY.includes(item.status)){rows.push({...base,outcome:'ERROR',message:'AI không tự đặt '+opsLabel(item.status),status:vm.operation?.status??null,cycle});continue;}
       // "Blocked" at the VM is the current proxy reported BLOCKED in Kho proxy too (BLOCK right), one fact on both pages; the status
       // before it is remembered for the replacement (owner decision 19/10/2026).
       if(item.status==='PROXY_BLOCKED'){
-        const change=await loadChangeVM(tx,vm.id),cur=currentProxyOf(change);
-        if(!cur.endpointId){rows.push({...base,outcome:'ERROR',message:cur.review?'VM có proxy cần đối chiếu; chọn proxy đang dùng ở ô Proxy trước khi báo Blocked':'VM chưa có proxy; không có proxy nào để báo Blocked',status:vm.operation?.status??null,cycle});continue;}
-        if(!canBlock(infra)){rows.push({...base,outcome:'ERROR',message:'Cần quyền Báo BLOCKED proxy để ghi Blocked',status:vm.operation?.status??null,cycle});continue;}
-        const endpoint=await tx.proxyIP.findUniqueOrThrow({where:{id:cur.endpointId}});
-        if(endpoint.inventoryState!=='BLOCKED'){
-          if(endpoint.retiredAt||!['NEW','LIVE'].includes(endpoint.inventoryState)){rows.push({...base,outcome:'ERROR',message:'Proxy đang '+endpoint.inventoryState+'; không báo BLOCKED được',status:vm.operation?.status??null,cycle});continue;}
-          await images.remember('ENDPOINT',endpoint.id);
-          await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:now,revision:{increment:1}}});
-          if(endpoint.identityId)await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:endpoint.identityId,endpointId:endpoint.id,ip:endpoint.host!,kind:'BLOCKED',occurredAt:now,actorId:current.userId,reason:'Báo tại '+where(vm)}});
-        }
-        const r=await markVmBlocked(tx,images,{projectId:scope.projectId,actorId:current.userId,now,via:'Server/VM'},vm.id,endpoint.id,(input.note?.trim()?input.note.trim()+' · ':'')+'Proxy '+endpoint.host+(endpoint.port?':'+endpoint.port:'')+' BLOCKED');
-        rows.push({...base,outcome:'APPLIED',message:r==='KEPT'?'Proxy '+endpoint.host+' đã BLOCKED; giữ tình trạng '+opsLabel(vm.operation?.status??null):opsLabel(vm.operation?.status??null)+' → Blocked (proxy '+endpoint.host+' BLOCKED)',status:r==='KEPT'?vm.operation?.status??null:'PROXY_BLOCKED',cycle});continue;
+        const r=await blockCurrentProxy(tx,images,{projectId:scope.projectId,actorId:current.userId,now,canBlock:canBlock(infra)},vm,item.expectedEndpointId??null,input.note??null);
+        rows.push({...base,...r,cycle});continue;
       }
       const ops=await ensureOps(tx,images,scope.projectId,vm.id);
       // A status chosen by a person replaces a pending Blocked: the replacement will then keep this newer decision.
-      await tx.vmOperation.update({where:{id:ops.id},data:{status:item.status,statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1}}});
+      // A person who moves "Chờ áp dụng proxy" to a working status has dealt with the machine: the apply mark goes with it.
+      const handled=ops.status==='PROXY_PENDING'&&['OK','NOT_LINKED','LINKED'].includes(item.status)&&!opts.operator;
+      await tx.vmOperation.update({where:{id:ops.id},data:{status:item.status,statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1},
+        ...(handled?{proxyAppliedConfigId:ops.proxyPendingConfigId,proxyAppliedAt:now,proxyAppliedById:current.userId,proxyPendingConfigId:null,proxyPendingAt:null}:{})}});
       await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,kind:'STATUS',fromStatus:ops.status,toStatus:item.status,note:input.note?.trim().slice(0,500)||null,actorId:current.userId}});
       rows.push({...base,outcome:'APPLIED',message:opsLabel(ops.status)+' → '+VM_OPS[item.status].label,status:item.status,cycle});
     }
     return {rows,applied:rows.filter(r=>r.outcome==='APPLIED').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
   },db);
+}
+/**
+ * "Blocked" at the VM = its current proxy reported BLOCKED in Kho proxy too (BLOCK right), one fact on both pages; the status before it
+ * is remembered for the replacement (owner decision 19/10/2026). expectedEndpointId: the proxy the reporter found blocked; when the
+ * VM's proxy changed meanwhile nothing is marked (the new proxy is never blocked by an old report, 21/10/2026).
+ */
+export async function blockCurrentProxy(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string;now:Date;canBlock:boolean},vm:{id:string;code:string;server:{code:string};operation:{status:VmOpsStatus|null}|null},expectedEndpointId:string|null,note:string|null):Promise<{outcome:'APPLIED'|'ERROR';message:string;status:VmOpsStatus|null}>{
+  const was=vm.operation?.status??null,change=await loadChangeVM(tx,vm.id),cur=currentProxyOf(change);
+  if(expectedEndpointId&&cur.endpointId!==expectedEndpointId)return {outcome:'ERROR',message:'Proxy của VM đã đổi sau khi kiểm; không báo Blocked cho proxy mới. Kiểm lại proxy hiện hành',status:was};
+  if(!cur.endpointId)return {outcome:'ERROR',message:cur.review?'VM có proxy cần đối chiếu; chọn proxy đang dùng ở ô Proxy trước khi báo Blocked':'VM chưa có proxy; không có proxy nào để báo Blocked',status:was};
+  if(!ctx.canBlock)return {outcome:'ERROR',message:'Cần quyền Báo BLOCKED proxy để ghi Blocked',status:was};
+  const endpoint=await tx.proxyIP.findUniqueOrThrow({where:{id:cur.endpointId}});
+  if(endpoint.inventoryState!=='BLOCKED'){
+    if(endpoint.retiredAt||!['NEW','LIVE'].includes(endpoint.inventoryState))return {outcome:'ERROR',message:'Proxy đang '+endpoint.inventoryState+'; không báo BLOCKED được',status:was};
+    await images.remember('ENDPOINT',endpoint.id);
+    await tx.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED',status:'BLOCKED',statusAt:ctx.now,revision:{increment:1}}});
+    if(endpoint.identityId)await tx.proxyStatusEvent.create({data:{projectId:ctx.projectId,identityId:endpoint.identityId,endpointId:endpoint.id,ip:endpoint.host!,kind:'BLOCKED',occurredAt:ctx.now,actorId:ctx.actorId,reason:('Báo tại '+where(vm)+(note?.trim()?' · '+note.trim():'')).slice(0,300)}});
+  }
+  const r=await markVmBlocked(tx,images,{projectId:ctx.projectId,actorId:ctx.actorId,now:ctx.now,via:'Server/VM'},vm.id,endpoint.id,(note?.trim()?note.trim()+' · ':'')+'Proxy '+endpoint.host+(endpoint.port?':'+endpoint.port:'')+' BLOCKED');
+  return {outcome:'APPLIED',message:r==='KEPT'?'Proxy '+endpoint.host+' đã BLOCKED; giữ tình trạng '+opsLabel(was):opsLabel(was)+' → Blocked (proxy '+endpoint.host+' BLOCKED)',status:r==='KEPT'?was:'PROXY_BLOCKED'};
 }
 // Payout state of the current round of a VM (no amounts here: the money itself is shown only with the finance rights).
 export async function currentRoundPayout(tx:Tx|PrismaClient,projectId:string,vm:{id:string;operation:{cycle:number}|null}){

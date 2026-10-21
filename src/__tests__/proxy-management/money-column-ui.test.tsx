@@ -54,6 +54,6 @@ describe('balance line',()=>{
   });
   it('without the balance read right: checked, no amount',()=>{
     const l=balanceLine(ops({latest:check('12.40','YES'),lastOk:check('12.40','YES')}),false)!;
-    expect(l.lead).toBeUndefined();expect(JSON.stringify(l)).not.toMatch(/12/);
+    expect(l.lead).toBeUndefined();expect(JSON.stringify(l)).not.toMatch(/12[.,]40/); // the amount, not the check time (12:xx)
   });
 });

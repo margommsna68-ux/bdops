@@ -180,13 +180,17 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .vm-ops-severe{background:#991b1b;color:#fff;border-color:#7f1d1d}
 .vm-ops-fresh{background:rgba(14,165,233,.12);color:#0369a1;border-color:rgba(14,165,233,.35)}
 .vm-ops-violet{background:rgba(124,58,237,.12);color:#6d28d9;border-color:rgba(124,58,237,.35)}
+.vm-ops-pending{background:rgba(13,148,136,.13);color:#0f766e;border-color:rgba(13,148,136,.45);border-style:dashed}
+[data-theme="dark"] .vm-ops-pending,[data-theme="golden"] .vm-ops-pending{color:#5eead4}
+.vm-apply-mark{font-size:11px;font-weight:600;color:#0f766e}[data-theme="dark"] .vm-apply-mark,[data-theme="golden"] .vm-apply-mark{color:#5eead4}
+.vm-job-mark{font-size:11px;color:var(--ds-text-secondary)}
 [data-theme="dark"] .vm-ops-ok,[data-theme="golden"] .vm-ops-ok{color:#4ade80}[data-theme="dark"] .vm-ops-warn,[data-theme="golden"] .vm-ops-warn{color:#fde047}
 [data-theme="dark"] .vm-ops-muted,[data-theme="golden"] .vm-ops-muted{color:#cbd5e1}[data-theme="dark"] .vm-ops-danger,[data-theme="golden"] .vm-ops-danger{color:#fca5a5}
 [data-theme="dark"] .vm-ops-info,[data-theme="golden"] .vm-ops-info{color:#93c5fd}[data-theme="dark"] .vm-ops-orange,[data-theme="golden"] .vm-ops-orange{color:#fdba74}
 [data-theme="dark"] .vm-ops-fresh,[data-theme="golden"] .vm-ops-fresh{color:#7dd3fc}[data-theme="dark"] .vm-ops-violet,[data-theme="golden"] .vm-ops-violet{color:#c4b5fd}
 .vm-ops-cell{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
 .vm-ops-pick{position:relative;cursor:pointer;padding-right:6px}.vm-ops-pick:hover{filter:brightness(1.06)}.vm-ops-pick:focus-within{outline:2px solid #3b82f6;outline-offset:2px}
-.vm-ops-pick select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;padding:0;margin:0;cursor:pointer;max-width:92px;text-overflow:ellipsis}
+.vm-ops-pick select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;padding:0;margin:0;cursor:pointer;max-width:124px;text-overflow:ellipsis}
 .vm-ops-pick select:focus{outline:none}.vm-ops-pick select option{color:var(--ds-text-primary);background:var(--ds-card);font-weight:500}
 .vm-ops-pick select:disabled{cursor:progress}
 .vm-chip-ops.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff}.vm-chips-ops{align-items:center}

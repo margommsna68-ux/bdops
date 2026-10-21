@@ -73,27 +73,28 @@ describe('Gán proxy là xong, thay proxy tại VM',()=>{
   });
 });
 describe('Blocked và khôi phục tình trạng VM',()=>{
-  it('OK → Blocked (Kho proxy) → change to a stock proxy → OK; the old proxy stays BLOCKED and still copies for the provider',async()=>{
+  it('OK → Blocked (Kho proxy) → change to a stock proxy → Chờ áp dụng proxy (21/10/2026), marked for the machine; the old proxy stays BLOCKED and still copies for the provider',async()=>{
     const f=await setup();try{
       const a=await f.proxy(),spare=await f.proxy();await f.change(0,a.id);await f.status(0,'OK');
       await f.batch({kind:'BLOCKED',text:a.host});
       expect(await f.state(a.id)).toBe('BLOCKED');expect(await f.ops(0)).toMatchObject({status:'PROXY_BLOCKED',blockedFrom:'OK',blockedEndpointId:a.id,blockedCycle:1});
       // A repeated report (at the VM this time) never overwrites the first mark.
       expect((await f.status(0,'PROXY_BLOCKED')).rows[0].outcome).toBe('SKIP');expect((await f.ops(0))?.blockedFrom).toBe('OK');
-      const check=await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:spare.id},db);expect(check).toMatchObject({outcome:'READY',restore:'OK'});
+      const check=await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:spare.id},db);expect(check).toMatchObject({outcome:'READY',restore:'Chờ áp dụng proxy'});
       await f.change(0,spare.id);
-      expect(await f.ops(0)).toMatchObject({status:'OK',blockedEndpointId:null});expect(await f.state(a.id)).toBe('BLOCKED');expect(await f.state(spare.id)).toBe('LIVE');
+      const v0=await f.vm(0);expect(await f.ops(0)).toMatchObject({status:'PROXY_PENDING',blockedEndpointId:null,proxyPendingConfigId:v0.desiredConfigurationId});expect(await f.state(a.id)).toBe('BLOCKED');expect(await f.state(spare.id)).toBe('LIVE');
       const copy=await copyProxyRows(f.scope,{endpointIds:[a.id,spare.id,a.id]},db,{onlyBlocked:true});expect(copy.proxies).toEqual([`${a.host}:${a.port}:u:p`]);
-      const history=await db.vmOpsEvent.findMany({where:{vmId:f.vms[0].id},orderBy:{createdAt:'asc'}});expect(history.map(h=>[h.fromStatus,h.toStatus])).toEqual([[null,'OK'],['OK','PROXY_BLOCKED'],['PROXY_BLOCKED','OK']]);
+      const history=await db.vmOpsEvent.findMany({where:{vmId:f.vms[0].id},orderBy:{createdAt:'asc'}});expect(history.map(h=>[h.fromStatus,h.toStatus])).toEqual([[null,'OK'],['OK','PROXY_BLOCKED'],['PROXY_BLOCKED','PROXY_PENDING']]);
+      expect(history.at(-1)!.note).toMatch(/chờ áp dụng trên máy thật \(trước Blocked: OK\)/);
     }finally{await f.cleanup();}
   });
-  it('Chưa ghi / Chưa nối / LINKED come back as they were; Blocked chosen at the VM blocks the proxy in Kho proxy too',async()=>{
+  it('Chưa ghi / Chưa nối → Blocked → replaced → Chờ áp dụng proxy; New VM stays New VM; Blocked chosen at the VM blocks the proxy in Kho proxy too',async()=>{
     const f=await setup();try{
-      const cases:(VmOpsStatus|null)[]=[null,'NOT_LINKED','LINKED'];
+      const cases:(VmOpsStatus|null)[]=[null,'NOT_LINKED','NEW_VM'];
       for(let i=0;i<3;i++){
         const a=await f.proxy(),spare=await f.proxy();await f.change(i,a.id);if(cases[i])await f.status(i,cases[i]!);
         const r=await f.status(i,'PROXY_BLOCKED');expect(r.rows[0].outcome).toBe('APPLIED');expect(await f.state(a.id)).toBe('BLOCKED');
-        await f.change(i,spare.id);expect((await f.ops(i))?.status??null).toBe(cases[i]);
+        await f.change(i,spare.id);expect((await f.ops(i))?.status??null).toBe(cases[i]==='NEW_VM'?'NEW_VM':'PROXY_PENDING');
       }
     }finally{await f.cleanup();}
   });
@@ -108,11 +109,11 @@ describe('Blocked và khôi phục tình trạng VM',()=>{
       // has no history of the Blocked either, so the replacement leaves Chưa ghi with the reason, never OK (independent review 19/10).
       await f.change(2,d.id);await f.status(2,'OK');await f.batch({kind:'BLOCKED',text:d.host});
       const o=await f.ops(2);await db.vmOperation.update({where:{id:o!.id},data:{cycle:2}});
-      await f.change(2,e.id);expect(await f.ops(2)).toMatchObject({status:null,blockedEndpointId:null});
-      expect((await db.vmOpsEvent.findFirstOrThrow({where:{vmId:f.vms[2].id,cycle:2},orderBy:[{createdAt:'desc'},{id:'desc'}]})).note).toMatch(/không xác định/);
+      await f.change(2,e.id);expect(await f.ops(2)).toMatchObject({status:'PROXY_PENDING',blockedEndpointId:null});
+      expect((await db.vmOpsEvent.findFirstOrThrow({where:{vmId:f.vms[2].id,cycle:2},orderBy:[{createdAt:'desc'},{id:'desc'}]})).note).toMatch(/trước Blocked: Chưa ghi/);
     }finally{await f.cleanup();}
   });
-  it('a provider replacement in Kho proxy changes the VM in the same save, restores its status, leaves the Blocked list; undo puts everything back',async()=>{
+  it('a provider replacement in Kho proxy changes the VM in the same save, sets Chờ áp dụng proxy, leaves the Blocked list; undo puts everything back',async()=>{
     const f=await setup();try{
       const a=await f.proxy(),b=await f.proxy();await f.change(0,a.id);await f.change(1,b.id);await f.status(0,'LINKED');await f.status(1,'OK');
       await f.batch({kind:'BLOCKED',text:[a.host,b.host].join('\n')});
@@ -123,7 +124,7 @@ describe('Blocked và khôi phục tình trạng VM',()=>{
       const [na,nb]=await Promise.all([n1,n2].map(ip=>db.proxyIP.findFirstOrThrow({where:{projectId:f.scope.projectId,host:ip}})));
       expect([await f.state(a.id),na.inventoryState,nb.inventoryState]).toEqual(['REPLACED','LIVE','LIVE']);expect(na.port).toBe(a.port);
       expect((await f.current(0)).desired?.ip).toBe(n1);expect((await f.current(1)).desired?.ip).toBe(n2);
-      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['LINKED','OK']);
+      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['PROXY_PENDING','PROXY_PENDING']);
       expect((await copyProxyRows(f.scope,{endpointIds:[a.id,b.id]},db,{onlyBlocked:true})).proxies).toEqual([]);
       const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,kind:'REPLACE'}});
       await undoOperation(f.scope,op.id,'',db);
@@ -140,17 +141,17 @@ describe('Blocked cũ (chưa có mốc) khi thay proxy',()=>{
     if(history!=='none')await db.vmOpsEvent.create({data:{projectId:f.scope.projectId,vmId:f.vms[i].id,cycle,kind:'STATUS',fromStatus:history,toStatus:'PROXY_BLOCKED',note:'Lịch sử cũ (thử)',actorId:f.scope.userId}});
   };
   const lastNote=async(f:Awaited<ReturnType<typeof setup>>,i:number)=>(await db.vmOpsEvent.findFirstOrThrow({where:{vmId:f.vms[i].id},orderBy:[{createdAt:'desc'},{id:'desc'}]})).note;
-  it('this round says OK before Blocked → OK after the change at the cell; no usable history → Chưa ghi with the reason, never OK',async()=>{
+  it('an old Blocked (OK before it, or no usable history) → Chờ áp dụng proxy after the change at the cell, never OK directly; the note keeps what was before',async()=>{
     const f=await setup();try{
       const a=await f.proxy(),b=await f.proxy(),s1=await f.proxy(),s2=await f.proxy();
       await f.change(0,a.id);await f.status(0,'OK');await legacy(f,0,a.id,'OK');
       await f.change(1,b.id);await f.status(1,'OK');await legacy(f,1,b.id,'none');
-      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:s1.id},db)).toMatchObject({outcome:'READY',restore:'OK'});
-      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[1].id,endpointId:s2.id},db)).toMatchObject({outcome:'READY',restore:'Chưa ghi'});
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[0].id,endpointId:s1.id},db)).toMatchObject({outcome:'READY',restore:'Chờ áp dụng proxy'});
+      expect(await checkVmProxyChange(f.scope,{vmId:f.vms[1].id,endpointId:s2.id},db)).toMatchObject({outcome:'READY',restore:'Chờ áp dụng proxy'});
       expect(await f.change(0,s1.id)).toMatchObject({changed:true});await f.change(1,s2.id);
       expect([(await f.current(0)).desired?.ip,(await f.current(1)).desired?.ip]).toEqual([s1.host,s2.host]);
-      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['OK',null]);
-      expect(await lastNote(f,0)).toMatch(/trở về OK .*theo lịch sử lượt này/);expect(await lastNote(f,1)).toMatch(/không xác định/);
+      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['PROXY_PENDING','PROXY_PENDING']);
+      expect(await lastNote(f,0)).toMatch(/trước Blocked: OK, theo lịch sử lượt này/);expect(await lastNote(f,1)).toMatch(/trước Blocked: Chưa ghi/);
       // Switching to a spare keeps the old proxies BLOCKED; the new ones are LIVE.
       expect([await f.state(a.id),await f.state(s1.id)]).toEqual(['BLOCKED','LIVE']);
       // The change and the restored status are one journal entry: undo puts the proxy and Blocked back together.
@@ -162,20 +163,20 @@ describe('Blocked cũ (chưa có mốc) khi thay proxy',()=>{
     const f=await setup();try{
       const a=await f.proxy(),b=await f.proxy(),s1=await f.proxy(),s2=await f.proxy();
       await f.change(0,a.id);await f.status(0,'OK');await legacy(f,0,a.id,'OK');await db.vmOperation.update({where:{vmId:f.vms[0].id},data:{cycle:2}});
-      await f.change(0,s1.id);expect((await f.ops(0))?.status).toBeNull();
+      await f.change(0,s1.id);expect((await f.ops(0))?.status).toBe('PROXY_PENDING');
       // Old Blocked, then the operator chose OFF VM while waiting for the provider: the change keeps OFF.
       await f.change(1,b.id);await f.status(1,'OK');await legacy(f,1,b.id,'OK');await f.status(1,'OFF');
       expect(await checkVmProxyChange(f.scope,{vmId:f.vms[1].id,endpointId:s2.id},db)).toMatchObject({outcome:'READY',restore:null});
       await f.change(1,s2.id);expect((await f.ops(1))?.status).toBe('OFF');
     }finally{await f.cleanup();}
   });
-  it('a provider replacement received in Kho proxy restores an old Blocked from this round history in the same save',async()=>{
+  it('a provider replacement received in Kho proxy turns an old Blocked into Chờ áp dụng proxy in the same save',async()=>{
     const f=await setup();try{
       const a=await f.proxy(),b=await f.proxy();await f.change(0,a.id);await f.change(1,b.id);await f.status(0,'LINKED');
       await legacy(f,0,a.id,'LINKED');await legacy(f,1,b.id,'none');
       const n1=f.net+'211',n2=f.net+'212',{result}=await f.batch({kind:'REPLACE',removedText:a.host+'\n'+b.host,addedText:n1+'\n'+n2});expect(result?.applied).toBe(2);
       expect([(await f.current(0)).desired?.ip,(await f.current(1)).desired?.ip]).toEqual([n1,n2]);
-      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['LINKED',null]);expect(await lastNote(f,1)).toMatch(/không xác định/);
+      expect([(await f.ops(0))?.status,(await f.ops(1))?.status]).toEqual(['PROXY_PENDING','PROXY_PENDING']);expect(await lastNote(f,0)).toMatch(/trước Blocked: LINKED/);expect(await lastNote(f,1)).toMatch(/trước Blocked: Chưa ghi/);
       expect(await f.state(a.id)).toBe('REPLACED');
     }finally{await f.cleanup();}
   });

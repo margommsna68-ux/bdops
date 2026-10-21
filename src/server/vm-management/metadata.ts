@@ -6,13 +6,20 @@ import {recordOperation} from '../operation-history/journal';
 import {authorizeVM} from './repository';
 import {snapshotCollector} from './allocation';
 import {expandVmRange,VmCodeError} from './vm-codes';
+// A VM added on the web is a machine still to be created and prepared (owner brief 21/10/2026): only the rows created here start as
+// New VM (round 1, with a history line). Adding a server or a range never claims the real machines exist; older VMs are never touched.
+// Undoing the creation archives the VM; its status row stays with it.
+async function startAsNewVm(tx:Prisma.TransactionClient,projectId:string,vmId:string,actorId:string,now:Date){
+  await tx.vmOperation.create({data:{projectId,vmId,cycle:1,status:'NEW_VM',statusAt:now,statusById:actorId}});
+  await tx.vmOpsEvent.create({data:{projectId,vmId,cycle:1,kind:'STATUS',fromStatus:null,toStatus:'NEW_VM',note:'VM mới thêm trên web: cần tạo và chuẩn bị máy thật',actorId}});
+}
 function validateCodes(codes:string[]){if(!codes.length||codes.length>500||new Set(codes).size!==codes.length||codes.some(code=>!/^[a-zA-Z0-9_-]{1,64}$/.test(code)))throw new ProxyDomainError('INVALID_INPUT','Mỗi VM có một mã riêng (chữ/số/-/_), tối đa 500 VM mỗi đợt');}
 export async function createManagedServer(scope:ActorScope,input:{code:string;vmCodes:string[];ipAddress?:string},db:PrismaClient=prisma){
   validateCodes(input.vmCodes);if(!input.code.trim()||input.code.length>80)throw new ProxyDomainError('INVALID_INPUT');
   return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'MANAGE',tx);if(await tx.server.findFirst({where:{projectId:scope.projectId,code:input.code.trim()},select:{id:true}}))throw new ProxyDomainError('DUPLICATE_INPUT','Server '+input.code.trim()+' đã có trong dự án (kể cả đã xoá)');
     const images=await snapshotCollector(tx,current),server=await tx.server.create({data:{projectId:scope.projectId,code:input.code.trim(),ipAddress:input.ipAddress||null,managed:true}});await images.remember('SERVER',server.id,true);
-    for(const code of input.vmCodes){const vm=await tx.virtualMachine.create({data:{serverId:server.id,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});await images.remember('VM',vm.id,true);}
+    const now=new Date();for(const code of input.vmCodes){const vm=await tx.virtualMachine.create({data:{serverId:server.id,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});await images.remember('VM',vm.id,true);await startAsNewVm(tx,scope.projectId,vm.id,current.userId,now);}
     await recordOperation(tx,{scope:current,kind:'SERVER_CREATE',summary:{server:server.code,count:input.vmCodes.length},snapshot:await images.finish()});return {id:server.id};
   },db);
 }
@@ -27,7 +34,7 @@ export async function addManagedVMs(scope:ActorScope,serverId:string,codes:strin
     const existing=known.filter(v=>!v.archivedAt).map(v=>v.code).sort(),archived=known.filter(v=>v.archivedAt).map(v=>v.code).sort(),fresh=codes.filter(c=>!known.some(k=>k.code===c));
     if(!fresh.length) return {created:0,existing,archived,operationId:null as string|null};
     const images=await snapshotCollector(tx,current);await images.remember('SERVER',server.id);
-    for(const code of fresh){const vm=await tx.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});await images.remember('VM',vm.id,true);}
+    const now=new Date();for(const code of fresh){const vm=await tx.virtualMachine.create({data:{serverId,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});await images.remember('VM',vm.id,true);await startAsNewVm(tx,scope.projectId,vm.id,current.userId,now);}
     await tx.server.update({where:{id:server.id},data:{revision:{increment:1}}});const op=await recordOperation(tx,{scope:current,kind:'VM_CREATE',summary:{server:server.code,count:fresh.length},snapshot:await images.finish()});
     return {created:fresh.length,existing,archived,operationId:op.id as string|null};
   },db);

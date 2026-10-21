@@ -35,8 +35,8 @@ async function judge(db:VMReader,projectId:string,vmId:string,pick:{endpointId?:
     const pool=await getManualInventory(projectId,db as PrismaClient);
     if(!pool.some(p=>p.endpointId===endpoint!.id))return {...base,outcome:'ERROR',message:endpoint.inventoryState==='LIVE'?'Proxy đang LIVE (ghi là đang dùng); chọn proxy NEW trong kho':'Proxy chưa đủ điều kiện cấp VM (cần NEW, có gói, chưa từng cài ở máy khác, không phải Genjy riêng)'};
   }
-  const back=await blockedSource(db,vm.id,vm.operation,cur.candidates.filter(id=>id!==endpoint!.id)),restore=back?(back.known&&back.from?VM_OPS[back.from].label:'Chưa ghi'):null;
-  return {...base,restore,outcome:'READY',message:(cur.review?'Chọn proxy này làm proxy đang dùng; các proxy cần đối chiếu rời VM':cur.endpointId?'Thay proxy':'Gán proxy')+(restore?'; tình trạng VM trở về '+restore:'')};
+  const back=await blockedSource(db,vm.id,vm.operation,cur.candidates.filter(id=>id!==endpoint!.id)),restore=back?VM_OPS.PROXY_PENDING.label:null; // 21/10/2026: a replaced Blocked waits for the machine, never back to OK directly
+  return {...base,restore,outcome:'READY',message:(cur.review?'Chọn proxy này làm proxy đang dùng; các proxy cần đối chiếu rời VM':cur.endpointId?'Thay proxy':'Gán proxy')+(restore?'; tình trạng VM thành '+restore+' (máy thật cần áp dụng và kiểm tra)':'; máy thật cần áp dụng proxy mới')};
 }
 export async function checkVmProxyChange(scope:ActorScope,input:{vmId:string;endpointId?:string;text?:string},db:PrismaClient=prisma){
   await authorizeVM(scope,'ASSIGN',db);return judge(db,scope.projectId,input.vmId,input);
