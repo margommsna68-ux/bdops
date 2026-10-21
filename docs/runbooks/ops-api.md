@@ -103,6 +103,12 @@ Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` / `M
 - `post <path> <body.json>`: key và nội dung được ghi vào nhật ký lệnh cục bộ (`~/.mth/ops-journal`, không có token / PIN) và key được in ra **trước khi gửi**.
 - Mất phản hồi / ngắt kết nối → `RESULT_UNKNOWN` "Chưa xác định kết quả" (lệnh có thể đã ghi): chạy `retry <key>` — gửi lại đúng đường dẫn, nội dung và
   key; không tạo lệnh mới. `pending` liệt kê lệnh chưa rõ kết quả. Một key không bao giờ dùng cho nội dung khác (script từ chối).
+- Chỉ phản hồi đúng hợp đồng mới chốt kết quả: 2xx + `{ok:true, data, error:null}` (DONE) hoặc 4xx + `{ok:false, data:null, error:{code, message}}`
+  (ANSWERED, chưa ghi). Mọi 5xx (502 / 503 / 504 từ gateway có thể đến **sau khi** ứng dụng đã ghi; 500 INTERNAL), HTML, JSON sai cấu trúc, 2xx mà
+  `ok:false`, phản hồi đứt giữa chừng → giữ UNKNOWN trong `pending`, in "Chưa xác định kết quả. Gửi lại bằng retry <key>." (thoát mã 3).
+- Mỗi lệnh lưu trong file `k-<sha256 của key nguyên bản>.json`, nên key chỉ khác nhau ở `:` / `_` hay chữ hoa / thường (Windows) không chung file; bản ghi
+  chỉ dùng khi key bên trong khớp tuyệt đối. File cũ (tên `key` thay `:` → `_`) vẫn đọc được khi đúng key, không bị sửa / xoá; file cũ giữ key khác, bản ghi
+  hỏng hoặc sai cấu trúc → dừng, báo rõ, không gửi gì (lệnh mới thì dùng key khác; kiểm tra yêu cầu trên MoneyToHome trước khi gửi lại lệnh cũ).
 - Token / PIN chỉ gửi tới đúng origin của `MTH_BASE` dưới `/api/ops/v1/`: đường dẫn có `..`, dạng mã hoá (`%2e`, `%2f`), tuyệt đối hoặc URL khác bị từ
   chối trước khi gửi; không đi theo redirect; `MTH_BASE` phải là https (http chỉ cho localhost khi thử).
 

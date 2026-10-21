@@ -1,0 +1,10 @@
+{"gatewayAcceptedRequest":true,"clientExit":1,"pendingCount":0}
+{"requestedKey":"review:collision:1","actuallySentKey":"review_collision_1"}
+     × a gateway failure after accepting POST stays unresolved and appears in pending 84ms
+     × two distinct valid keys must keep distinct command records and retry exact requested key 160ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected [] to include 'review-gateway-1'
+     28|    console.log(JSON.stringify({gatewayAcceptedRequest:hits.includes('r…
+AssertionError: expected 'review_collision_1' to be 'review:collision:1' // Object.is equality
+     37|    console.log(JSON.stringify({requestedKey:'review:collision:1',actua…
+      Tests  2 failed (2)

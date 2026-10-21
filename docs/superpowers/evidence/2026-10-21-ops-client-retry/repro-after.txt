@@ -1,0 +1,4 @@
+{"gatewayAcceptedRequest":true,"clientExit":3,"pendingCount":1}
+{"requestedKey":"review:collision:1","actuallySentKey":"review:collision:1"}
+ ✓ .runtime/review-ops-client-retry-20261021.test.ts (2 tests) 250ms
+      Tests  2 passed (2)
