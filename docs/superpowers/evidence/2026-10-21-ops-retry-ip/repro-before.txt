@@ -1,0 +1,8 @@
+{"mode":"revoked","recordedEffects":1,"retryExit":1,"retryCode":"TOKEN_REVOKED","pendingAfterRefusal":0}
+{"mode":"rights","recordedEffects":1,"retryExit":1,"retryCode":"FORBIDDEN","pendingAfterRefusal":0}
+{"mode":"rate","recordedEffects":1,"retryExit":1,"retryCode":"RATE_LIMITED","pendingAfterRefusal":0}
+     × 502 after commit then 401 TOKEN_REVOKED must remain pending until the original outcome is recovered 252ms
+     × 502 after commit then 403 FORBIDDEN must remain pending until the original outcome is recovered 238ms
+     × 502 after commit then 429 RATE_LIMITED must remain pending until the original outcome is recovered 242ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed (3)

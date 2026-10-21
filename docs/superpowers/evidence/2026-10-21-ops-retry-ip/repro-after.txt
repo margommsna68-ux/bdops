@@ -1,0 +1,5 @@
+{"mode":"revoked","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+{"mode":"rights","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+{"mode":"rate","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+ ✓ .runtime/review-ops-client-retry-refused-20261021.test.ts (3 tests) 737ms
+      Tests  3 passed (3)

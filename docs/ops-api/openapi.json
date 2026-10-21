@@ -1329,14 +1329,57 @@
      },
      "verifiedIp": {
       "type": "string",
-      "description": "your address as the server trusts it",
+      "description": "your address as the server trusts it (Railway: X-Real-IP set by the edge); null = not verifiable, an IP-limited token is refused",
       "nullable": true
+     },
+     "ipSource": {
+      "type": "string",
+      "enum": [
+       "railway",
+       "xff",
+       "none"
+      ]
+     },
+     "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "xRealIp": {
+        "type": "string",
+        "description": "valid IP or INVALID",
+        "nullable": true
+       },
+       "forwardedFor": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "description": "valid IP or INVALID"
+        },
+        "nullable": true
+       },
+       "railwayRequestId": {
+        "type": "string",
+        "nullable": true
+       },
+       "railwayEdge": {
+        "type": "string",
+        "nullable": true
+       }
+      },
+      "required": [
+       "xRealIp",
+       "forwardedFor",
+       "railwayRequestId",
+       "railwayEdge"
+      ],
+      "description": "only with ?diag=net: network fields of your own request"
      }
     },
     "required": [
      "service",
      "version",
-     "verifiedIp"
+     "verifiedIp",
+     "ipSource"
     ]
    },
    "ProjectList": {
@@ -2446,7 +2489,20 @@
   "/health": {
    "get": {
     "security": [],
-    "summary": "Service up; verifiedIp = your address as the server trusts it",
+    "summary": "Service up; verifiedIp = your address as the server trusts it; ?diag=net adds the network fields of your own request",
+    "parameters": [
+     {
+      "name": "diag",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "net"
+       ]
+      }
+     }
+    ],
     "responses": {
      "200": {
       "description": "ok",

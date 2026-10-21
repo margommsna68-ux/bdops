@@ -11,7 +11,7 @@ import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updat
 import {hashToken,memberOps,userActive,type OpsScope} from './tokens';
 import {runWithOpsAuth} from './context';
 import {hit,peek} from './limits';
-import {clientIp,ipAllowed,maskEmail,redactSecrets} from './safety';
+import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
@@ -50,9 +50,20 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt},
 ];
 const KEY=/^[A-Za-z0-9._:-]{8,100}$/;
+const ipOrInvalid=(v:string)=>normalIp(v)??'INVALID',idOrNull=(v:string|null)=>v&&/^[A-Za-z0-9_.:-]{1,80}$/.test(v)?v:null;
+function networkDiag(h:Headers){
+  const real=h.get('x-real-ip'),xff=h.get('x-forwarded-for');
+  return {xRealIp:real===null?null:ipOrInvalid(real),forwardedFor:xff===null?null:xff.split(',').slice(0,10).map(x=>ipOrInvalid(x)),
+    railwayRequestId:idOrNull(h.get('x-railway-request-id')),railwayEdge:idOrNull(h.get('x-railway-edge'))};
+}
 export async function handleOpsRequest(req:Request,path:string,db:PrismaClient=prisma):Promise<Response>{
-  const requestId=randomUUID(),ip=clientIp(req.headers.get('x-forwarded-for')),method=req.method.toUpperCase();
-  if(method==='GET'&&path==='health')return json(200,{ok:true,data:{service:'moneytohome-ops',version:'v1',verifiedIp:ip},error:null},{'x-request-id':requestId});
+  const requestId=randomUUID(),{ip,source:ipSource}=requestIp(req.headers),method=req.method.toUpperCase();
+  if(method==='GET'&&path==='health'){
+    // ?diag=net: only the network fields needed to check where the address comes from, each reduced to a valid IP or "INVALID";
+    // never other headers (no Authorization, PIN, Cookie). They describe the caller's own request only.
+    const net=new URL(req.url).searchParams.get('diag')==='net'?networkDiag(req.headers):undefined;
+    return json(200,{ok:true,data:{service:'moneytohome-ops',version:'v1',verifiedIp:ip,ipSource,...(net?{network:net}:{})},error:null},{'x-request-id':requestId});
+  }
   const route=routes.find(r=>r.method===method&&r.path.test(path)),params=route?(path.match(route.path)!.slice(1)):[];
   let token:Ctx['token']|null=null,userId:string|null=null;const audit:Ctx['audit']={},action=route?.action??'UNKNOWN';
   const write=method==='POST';

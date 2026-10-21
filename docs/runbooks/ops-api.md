@@ -106,9 +106,19 @@ Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` / `M
 - `post <path> <body.json>`: key và nội dung được ghi vào nhật ký lệnh cục bộ (`~/.mth/ops-journal`, không có token / PIN) và key được in ra **trước khi gửi**.
 - Mất phản hồi / ngắt kết nối → `RESULT_UNKNOWN` "Chưa xác định kết quả" (lệnh có thể đã ghi): chạy `retry <key>` — gửi lại đúng đường dẫn, nội dung và
   key; không tạo lệnh mới. `pending` liệt kê lệnh chưa rõ kết quả. Một key không bao giờ dùng cho nội dung khác (script từ chối).
-- Chỉ phản hồi đúng hợp đồng mới chốt kết quả: 2xx + `{ok:true, data, error:null}` (DONE) hoặc 4xx + `{ok:false, data:null, error:{code, message}}`
-  (ANSWERED, chưa ghi). Mọi 5xx (502 / 503 / 504 từ gateway có thể đến **sau khi** ứng dụng đã ghi; 500 INTERNAL), HTML, JSON sai cấu trúc, 2xx mà
-  `ok:false`, phản hồi đứt giữa chừng → giữ UNKNOWN trong `pending`, in "Chưa xác định kết quả. Gửi lại bằng retry <key>." (thoát mã 3).
+- **Trạng thái lệnh ≠ kết quả lần gửi gần nhất** (sửa 21/10/2026). Nhật ký giữ `state` (của lệnh) và `lastAttempt` (lần gửi cuối). Mã thoát theo
+  trạng thái lệnh: 0 DONE, 1 ANSWERED, 3 UNKNOWN; đầu ra có `commandState`.
+  - Phản hồi không rõ (mọi 5xx — 502 / 503 / 504 từ gateway có thể đến **sau khi** ứng dụng đã ghi; 500 INTERNAL —, HTML, JSON sai cấu trúc, 2xx mà
+    `ok:false`, phản hồi đứt, mất kết nối) không chốt gì: lệnh chưa DONE thành UNKNOWN, nằm trong `pending`, in "Chưa xác định kết quả. Gửi lại bằng
+    retry <key>."
+  - 2xx + `{ok:true, data, error:null}` → DONE.
+  - 4xx đúng hợp đồng (`{ok:false, data:null, error:{code, message}}`) **không** có nghĩa chung là "chưa ghi"; ý nghĩa tuỳ lịch sử của lệnh:
+    - lần gửi đầu tiên, hoặc mọi lần trước cũng bị từ chối rõ ràng → ANSWERED (chưa ghi; sửa nội dung thì dùng key mới cho lệnh mới);
+    - lệnh từng SENDING / UNKNOWN (lần trước có thể đã ghi) → vẫn UNKNOWN trong `pending`, thoát 3: "Lần thử lại bị từ chối: <mã> — <lời>; kết quả lệnh
+      ban đầu vẫn chưa xác định…". 401 TOKEN_REVOKED, 403 FORBIDDEN / PIN, 429 RATE_LIMITED… bị từ chối **trước khi** máy chủ tra kết quả cũ, nên không
+      chứng minh lần đầu chưa ghi. Không tạo key mới: khôi phục token / quyền / chờ hết giới hạn rồi `retry <key>` để nhận kết quả ban đầu (`replay`);
+    - lệnh đã DONE → vẫn DONE (thoát 0), lần thử lại bị từ chối / không rõ chỉ ghi vào `lastAttempt`.
+  - Kiểm tra quyền / PIN của API không nới cho lần gửi lại: muốn nhận kết quả cũ vẫn cần token, quyền và PIN hợp lệ.
 - Mỗi lệnh lưu trong file `k-<sha256 của key nguyên bản>.json`, nên key chỉ khác nhau ở `:` / `_` hay chữ hoa / thường (Windows) không chung file; bản ghi
   chỉ dùng khi key bên trong khớp tuyệt đối. File cũ (tên `key` thay `:` → `_`) vẫn đọc được khi đúng key, không bị sửa / xoá; file cũ giữ key khác, bản ghi
   hỏng hoặc sai cấu trúc → dừng, báo rõ, không gửi gì (lệnh mới thì dùng key khác; kiểm tra yêu cầu trên MoneyToHome trước khi gửi lại lệnh cũ).
