@@ -1,0 +1,12 @@
+[
+  {
+    "origin": "http://127.0.0.1:3000",
+    "status": 200,
+    "build": "v3cNHJaJOYY2MHO35IK0W"
+  },
+  {
+    "origin": "https://wow.lalamail.sbs",
+    "status": 200,
+    "build": "v3cNHJaJOYY2MHO35IK0W"
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "results": [
+    "BLOCKED first and URL",
+    "Only BLOCKED",
+    "Package counts + filter all pages",
+    "Reload keeps filters",
+    "No JS errors, desktop/mobile rendered"
+  ]
+}
