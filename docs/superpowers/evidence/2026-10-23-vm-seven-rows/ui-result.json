@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "results": [
+    {
+      "size": {
+        "width": 1280,
+        "height": 800
+      },
+      "rows": 7,
+      "seventhBottom": 991.953125,
+      "gridBottom": 1010.03125,
+      "scrollHeight": 390,
+      "header": "ServerVMTình trạngTIỀN TRONG VMProxySDKTài khoản EarnAppPayPal nhậnGhi chú",
+      "visible": true
+    },
+    {
+      "size": {
+        "width": 1280,
+        "height": 720
+      },
+      "rows": 7,
+      "seventhBottom": 991.953125,
+      "gridBottom": 1010.03125,
+      "scrollHeight": 390,
+      "header": "ServerVMTình trạngTIỀN TRONG VMProxySDKTài khoản EarnAppPayPal nhậnGhi chú",
+      "visible": true
+    },
+    {
+      "size": {
+        "width": 390,
+        "height": 844
+      },
+      "rows": 7,
+      "seventhBottom": 1506.0625,
+      "gridBottom": 1524.140625,
+      "scrollHeight": 390,
+      "header": "ServerVMTình trạngTIỀN TRONG VMProxySDKTài khoản EarnAppPayPal nhậnGhi chú",
+      "visible": true
+    }
+  ],
+  "errors": []
+}
