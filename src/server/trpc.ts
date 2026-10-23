@@ -40,7 +40,7 @@ export const createTRPCContext = async (): Promise<Context> => {
   return { session, prisma, web: { sessionId: check.sessionId, pinUnlocked: check.pinUnlocked } };
 };
 // Calls allowed before the PIN of this session is proved (they are how it gets proved / set).
-const PIN_FREE = new Set(["user.hasPin", "user.verifyPin", "user.setPin", "user.securityStatus", "user.totpBegin", "user.totpConfirm"]);
+const PIN_FREE = new Set(["user.hasPin", "user.verifyPin", "user.setPin", "user.securityStatus", "user.totpBegin", "user.totpConfirm", "user.setOwnPassword"]);
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,

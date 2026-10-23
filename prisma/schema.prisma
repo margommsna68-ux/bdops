@@ -43,6 +43,8 @@ model User {
   totpFailedCount        Int                      @default(0)
   totpLockedAt           DateTime?
   totpVersion            Int                      @default(0)
+  // Owner request 23/10/2026: after an ADMIN reset, the person chooses their own password at the next visit (the gate forces it).
+  passwordResetRequiredAt DateTime?
   backupCodes            UserBackupCode[]
   webSessions            UserSession[]
   memberships            ProjectMember[]

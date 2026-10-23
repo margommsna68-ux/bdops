@@ -15,7 +15,7 @@ import {
 export function ProjectSwitcher() {
   const { data: session } = useSession();
   const { data: projects } = trpc.project.list.useQuery();
-  const { currentProjectId, setCurrentProject } = useProjectStore();
+  const { currentProjectId, currentProjectName, setCurrentProject } = useProjectStore();
 
   const memberships = (session?.user as any)?.memberships || [];
 
@@ -36,6 +36,14 @@ export function ProjectSwitcher() {
       );
     }
   };
+
+  // A renamed project (owner request 23/10/2026: "GROUP MOON") shows its current name everywhere without re-picking it: the
+  // stored name follows the server's list.
+  useEffect(() => {
+    const p = projects?.find((x) => x.id === currentProjectId);
+    if (p && p.name !== currentProjectName) selectProject(p.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, currentProjectId, currentProjectName]);
 
   // Auto-select first project if none selected
   useEffect(() => {

@@ -3,7 +3,7 @@ import {afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi} from 'vit
 import {JSDOM} from 'jsdom';
 // 2FA gate (owner decision 23/10/2026). Component lifecycle only: no browser, database or network; the security status is a mocked
 // answer of user.securityStatus, exactly what the server would decide.
-const mock=vi.hoisted(()=>({status:{data:undefined as unknown,isLoading:false,refetch:vi.fn()},verify:vi.fn(),setPin:vi.fn(),begin:vi.fn(),confirm:vi.fn(),heartbeat:vi.fn(),invalidate:vi.fn()}));
+const mock=vi.hoisted(()=>({status:{data:undefined as unknown,isLoading:false,refetch:vi.fn()},verify:vi.fn(),setPin:vi.fn(),begin:vi.fn(),confirm:vi.fn(),heartbeat:vi.fn(),invalidate:vi.fn(),setOwnPassword:vi.fn()}));
 vi.mock('@/lib/trpc',()=>({trpc:{
   useUtils:()=>({invalidate:mock.invalidate}),
   user:{
@@ -13,6 +13,7 @@ vi.mock('@/lib/trpc',()=>({trpc:{
     totpBegin:{useMutation:()=>({mutateAsync:mock.begin,isLoading:false})},
     totpConfirm:{useMutation:()=>({mutateAsync:mock.confirm,isLoading:false})},
     heartbeat:{useMutation:()=>({mutate:mock.heartbeat})},
+    setOwnPassword:{useMutation:()=>({mutateAsync:mock.setOwnPassword,isLoading:false})},
   },
 }}));
 import {PinGate} from '@/components/PinGate';
@@ -29,12 +30,23 @@ beforeAll(async()=>{
 beforeEach(()=>{vi.clearAllMocks();mock.status.data=undefined;container=document.createElement('div');document.body.append(container);root=createRoot(container);});
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 afterAll(()=>{dom.window.close();for(const [k,d] of saved){if(d)Object.defineProperty(globalThis,k,d);else Reflect.deleteProperty(globalThis,k);}});
-const base={totpEnabled:false,totpRequired:false,setupStarted:false,hasPin:true,unlocked:false,backupCodesLeft:0};
+const base={totpEnabled:false,totpRequired:false,setupStarted:false,hasPin:true,unlocked:false,backupCodesLeft:0,passwordResetRequired:false};
 const gate=async(status:Partial<typeof base>)=>{mock.status.data={...base,...status};await act(async()=>root.render(<PinGate><div data-testid="app">APP</div></PinGate>));};
 const button=(name:string)=>{const b=Array.from(container.querySelectorAll('button')).find(e=>e.textContent===name);if(!b)throw new Error('Missing button '+name);return b as HTMLButtonElement;};
 const click=async(name:string)=>act(async()=>button(name).click());
 async function fill(el:HTMLInputElement,value:string){await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});}
 describe('PinGate with 2FA',()=>{
+  it('after an ADMIN reset the person must choose their own password first (before any PIN / 2FA prompt)',async()=>{
+    await gate({passwordResetRequired:true,totpEnabled:true});
+    expect(container.querySelector('[data-testid="pin-gate-password"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="password-reset-form"]')).not.toBeNull();
+    const inputs=Array.from(container.querySelectorAll('input')) as HTMLInputElement[];
+    await fill(inputs[0],'MatKhauMoi-2026');await fill(inputs[1],'MatKhauMoi-2026');
+    mock.setOwnPassword.mockResolvedValue({success:true});
+    await click('Lưu mật khẩu và tiếp tục');
+    expect(mock.setOwnPassword).toHaveBeenCalledWith({newPassword:'MatKhauMoi-2026'});
+    expect(mock.status.refetch).toHaveBeenCalled();
+  });
   it('forces the 2FA setup when an ADMIN required it and the person has not set it up (no PIN prompt, no way to skip)',async()=>{
     await gate({totpRequired:true,totpEnabled:false,hasPin:true});
     expect(container.querySelector('[data-testid="pin-gate-setup2fa"]')).not.toBeNull();

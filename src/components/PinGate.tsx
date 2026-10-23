@@ -26,6 +26,9 @@ export function PinGate({ children }: { children: React.ReactNode }) {
   const { data: status, isLoading, refetch } = trpc.user.securityStatus.useQuery(undefined, { retry: false });
   const verifyPin = trpc.user.verifyPin.useMutation();
   const setupPin = trpc.user.setPin.useMutation();
+  const setOwnPassword = trpc.user.setOwnPassword.useMutation();
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   useEffect(() => {
     if (typeof window !== "undefined") sessionStorage.removeItem("bdops-pin-ok"); // the old client flag proves nothing
@@ -100,12 +103,32 @@ export function PinGate({ children }: { children: React.ReactNode }) {
 
   const forcedSetup = status.totpRequired && !status.totpEnabled;
   const codeMode = status.totpEnabled && !status.unlocked;
-  const mode: "setup2fa" | "code" | "verify" | "setup" = forcedSetup || (optIn && !status.totpEnabled) ? "setup2fa" : codeMode ? "code" : status.hasPin ? "verify" : "setup";
+  const mode: "password" | "setup2fa" | "code" | "verify" | "setup" = status.passwordResetRequired ? "password" : forcedSetup || (optIn && !status.totpEnabled) ? "setup2fa" : codeMode ? "code" : status.hasPin ? "verify" : "setup";
+  const handlePassword = async () => {
+    setError("");
+    if (newPassword.length < 8) { setError("Mật khẩu mới ít nhất 8 ký tự"); return; }
+    if (newPassword !== confirmPassword) { setError("Hai lần nhập chưa khớp"); return; }
+    try { await setOwnPassword.mutateAsync({ newPassword }); setNewPassword(""); setConfirmPassword(""); await refetch(); }
+    catch (e: any) { setError(e?.message || "Không đặt được mật khẩu"); }
+  };
 
   return (
     <div className="mth-pin-backdrop fixed inset-0 z-[100] bg-gray-900 flex items-center justify-center overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-sm mx-4 my-6" data-testid={"pin-gate-" + mode}>
-        {mode === "setup2fa" ? (
+        {mode === "password" ? (
+          <div data-testid="password-reset-form">
+            <div className="text-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">Đặt mật khẩu của bạn</h2>
+              <p className="text-sm text-gray-500 mt-1">ADMIN đã đặt lại mật khẩu tạm. Hãy chọn mật khẩu riêng (ít nhất 8 ký tự) để tiếp tục.</p>
+            </div>
+            <div className="space-y-3 mb-4">
+              <Input type="password" placeholder="Mật khẩu mới" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" autoFocus />
+              <Input type="password" placeholder="Nhập lại mật khẩu mới" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handlePassword()} autoComplete="new-password" />
+            </div>
+            {error && <p className="text-sm text-red-600 text-center mb-3">{error}</p>}
+            <Button className="w-full" onClick={handlePassword} disabled={newPassword.length < 8 || setOwnPassword.isLoading}>{setOwnPassword.isLoading ? "Đang lưu..." : "Lưu mật khẩu và tiếp tục"}</Button>
+          </div>
+        ) : mode === "setup2fa" ? (
           <TotpSetup forced={forcedSetup} onDone={() => { setOptIn(false); void finishUnlock(); }} onCancel={forcedSetup ? undefined : () => setOptIn(false)} />
         ) : mode === "code" ? (
           <>

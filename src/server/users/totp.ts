@@ -108,13 +108,13 @@ export async function unlockWebSessionTotp(db:PrismaClient,sid:string,userId:str
 }
 // ─── Status / admin ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 export async function securityStatus(db:PrismaClient,userId:string,sid:string|null){
-  const u=await db.user.findUniqueOrThrow({where:{id:userId},select:{pin:true,pinVersion:true,totpEnabledAt:true,totpRequiredAt:true,totpVersion:true,totpSecretCipher:true}});
+  const u=await db.user.findUniqueOrThrow({where:{id:userId},select:{pin:true,pinVersion:true,totpEnabledAt:true,totpRequiredAt:true,totpVersion:true,totpSecretCipher:true,passwordResetRequiredAt:true}});
   const s=sid?await db.userSession.findUnique({where:{id:sid},select:{userId:true,revokedAt:true,pinUnlockedAt:true,pinVersion:true,totpUnlockedAt:true,totpVersion:true}}):null;
   const open=s&&s.userId===userId&&!s.revokedAt;
   const totpEnabled=!!u.totpEnabledAt;
   const unlocked=!open?false:totpEnabled?!!s.totpUnlockedAt&&s.totpVersion===u.totpVersion:!!u.pin&&!!s.pinUnlockedAt&&s.pinVersion===u.pinVersion;
   const backupLeft=totpEnabled?await db.userBackupCode.count({where:{userId,usedAt:null}}):0;
-  return {totpEnabled,totpRequired:!!u.totpRequiredAt,setupStarted:!totpEnabled&&!!u.totpSecretCipher,hasPin:!!u.pin,unlocked,backupCodesLeft:backupLeft};
+  return {totpEnabled,totpRequired:!!u.totpRequiredAt,setupStarted:!totpEnabled&&!!u.totpSecretCipher,hasPin:!!u.pin,unlocked,backupCodesLeft:backupLeft,passwordResetRequired:!!u.passwordResetRequiredAt};
 }
 /** An ADMIN of the project resets a user's 2FA (lost phone): secret and backup codes gone, version +1 (every unlock ends); setup required at the next visit. */
 export async function adminResetTotp(db:PrismaClient,actorId:string,userId:string,projectId:string){

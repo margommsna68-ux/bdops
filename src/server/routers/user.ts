@@ -112,6 +112,18 @@ export const userRouter = router({
       return { success: true };
     }),
 
+  // After an ADMIN reset (passwordResetRequiredAt) the person sets their own password without the temporary one; otherwise changePassword.
+  setOwnPassword: protectedProcedure
+    .input(z.object({ newPassword: z.string().min(8).max(128) }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = (ctx.user as any).id;
+      const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordResetRequiredAt: true, disabledAt: true } });
+      if (u.disabledAt) throw new Error("Tài khoản đã bị vô hiệu hoá");
+      if (!u.passwordResetRequiredAt) throw new Error("Không có yêu cầu đặt lại mật khẩu; dùng Đổi mật khẩu (cần mật khẩu hiện tại)");
+      await ctx.prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(input.newPassword, 12), passwordResetRequiredAt: null, loginFailedCount: 0, loginLockedAt: null } });
+      return { success: true };
+    }),
+
   // Heartbeat - update lastActiveAt
   heartbeat: protectedProcedure.mutation(async ({ ctx }) => {
     const userId = (ctx.user as any).id;
@@ -176,7 +188,7 @@ export const userRouter = router({
       const hashedPassword = await bcrypt.hash(input.newPassword, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { password: hashedPassword, loginFailedCount: 0, loginLockedAt: null },
+        data: { password: hashedPassword, loginFailedCount: 0, loginLockedAt: null, passwordResetRequiredAt: new Date() },
       });
       await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: callerId, projectId: input.projectId, changes: { targetUserId: input.userId } });
       return { success: true };
@@ -410,11 +422,12 @@ export const userRouter = router({
   resetPassword: moderatorProcedure
     .input(z.object({ projectId: z.string(), userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      // Temporary password (owner request 23/10/2026): the person must choose their own at the next visit (passwordResetRequiredAt, gate).
       const newPassword = Math.random().toString(36).slice(2, 10);
       const hashed = await bcrypt.hash(newPassword, 12);
       await ctx.prisma.user.update({
         where: { id: input.userId },
-        data: { password: hashed, loginFailedCount: 0, loginLockedAt: null },
+        data: { password: hashed, loginFailedCount: 0, loginLockedAt: null, passwordResetRequiredAt: new Date() },
       });
       await createAuditLog({ action: "RESET_PASSWORD", entity: "User", entityId: input.userId, userId: (ctx.user as any).id, projectId: input.projectId });
       return { newPassword };

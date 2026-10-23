@@ -205,7 +205,7 @@ export default function UserDetailPage() {
         {isAdmin && (
           <div className="flex gap-2 pt-3 border-t">
             <Button variant="outline" size="sm" className="text-xs h-7 border-red-300 text-red-600 hover:bg-red-50"
-              onClick={() => { if (confirm("Đặt lại mật khẩu? Mật khẩu mới sẽ được hiện lên.")) resetPassword.mutate({ projectId: projectId!, userId: user.id }); }}>
+              onClick={() => { if (confirm("Đặt lại mật khẩu? Một mật khẩu tạm sẽ hiện lên; người này phải tự đặt mật khẩu riêng ngay lần đăng nhập sau.")) resetPassword.mutate({ projectId: projectId!, userId: user.id }); }}>
               Đặt lại mật khẩu
             </Button>
           </div>
