@@ -10,7 +10,8 @@ Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. Mo
 - Mỗi lần tạo / cài VM phải kiểm và ghi SDK thực sinh ra, đúng VM / UUID / lượt; có tiền thì ghi số đã quan sát và giờ đọc. Phân biệt mã hiện hành, mã dự phòng chưa dùng, mã đã dùng. Có SDK chưa dùng trong kho không tự chứng minh đó là SDK máy đang chạy.
 - Việc nhập hàng vào kho chưa phải một lệnh chạy máy. AI thực hiện trong phạm vi công việc chủ đã giao; không tự mở rộng sang server / VM khác. Tự lấy hàng trong phạm vi đó, ghi từng bước để có thể tiếp tục sau gián đoạn.
 - Đọc lại web sau thao tác: tình trạng, proxy, tài khoản, SDK, tiền và giờ kiểm tra phải phản ánh đúng kết quả máy thật. Thiếu hàng / bị chặn / chưa rõ kết quả thì báo rõ VM và bước đang dừng; không ghi OK để kết thúc lô.
-- Luồng đã chốt vẫn là New VM → cài proxy + EarnApp + Firefox, kiểm / ghi SDK → Chưa nối. **Đang hỏi chủ về lệnh mới “làm hoàn chỉnh”: có làm tiếp đăng ký / nối EarnApp hay không. Chưa coi câu hỏi đó là quyết định hoặc tự chạy thêm.**
+- **Chủ chốt 23/10/2026: “làm hoàn chỉnh VM” = tạo / cài máy trong phạm vi được giao → áp và kiểm proxy → cài EarnApp + Firefox → kiểm và lưu SDK thực sinh ra, đúng UUID / lượt → Chưa nối. Dừng tại đây; lệnh này không bao gồm lấy tài khoản để đăng ký / đăng nhập / nối EarnApp.** Luồng tài khoản cần một công việc riêng.
+- Đang hỏi chủ về cách bắt đầu: chờ lệnh giao cho Claude hay tự nhận New VM trên web. Chưa có quyết định tự chạy; tiếp tục chờ lệnh như hiện tại.
 
 ## 1. Kết nối và quyền
 
