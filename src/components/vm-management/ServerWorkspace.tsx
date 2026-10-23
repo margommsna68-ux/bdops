@@ -1,5 +1,5 @@
 "use client";
-import {MONEY_FILTERS,MONEY_FILTER_LABEL,moneyFlags,moneySortKey,moneySummary,type MoneyFlag,type MoneyRow} from '@/lib/vm-ops';
+import {MONEY_FILTER_LABEL,moneyFlags,moneySortKey,moneySummary,type MoneyRow} from '@/lib/vm-ops';
 import {formatLedger as fmtLedger,formatUsd} from '@/lib/money-input';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import Link from 'next/link';
@@ -16,7 +16,7 @@ import {links} from '@/lib/links';
 import {InlineText} from './InlineText';
 import {AddVmDialog,CreateServerDialog} from './VmForms';
 import {useVMRefresh,errorMessage,type ManagedVM} from './shared';
-import {vmView,summarizeVMs} from './workflow';
+import {vmView} from './workflow';
 import {VmGrid,type CopyWhich,type GridRights} from './vm-grid/VmGrid';
 import {proxyCellInfo} from './vm-grid/ProxyCell';
 import {VmSidePanel} from './vm-grid/VmSidePanel';
@@ -28,6 +28,7 @@ import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
 import {vmMoneySortKey,vmMoneyState,vmMoneySummary} from '@/lib/vm-money';
 import {SDK_STORE_DEFAULT,type SdkStoreUrl,DEFAULT_PREFS,OPS_FILTERS,normalizePrefs,pageOf,prefsKey,readGridUrl,writeGridUrl,type EditField,type GridPrefs,type GridSort,type GridUrl,type GridView,type MoneyFilter,type OpsFilter,type PanelTab} from './vm-grid/grid-model';
 import type {OpsRow} from './vm-grid/OpsCells';
+import {applyFilters,countWith,serverDistribution,vmIdLines,VIEW_LABEL,type GridFilters,type ServerDistribution,type VmFacts} from './vm-grid/filter-model';
 import {selectionKey,useSessionSelection} from '@/lib/session-selection';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
@@ -60,20 +61,16 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const [selected,setSelected,restoreSelection]=useSessionSelection(session.status==='authenticated'?selectionKey('vm',userId,projectId):null,scopeKey);
   useEffect(()=>{if(firstScope.current===scopeKey) return;firstScope.current=scopeKey;setSelected(new Set());setBlocked([]);setBulk(b=>b==='paste'?b:null);},[scopeKey,setSelected]);
   const allServers=useMemo(()=>[...(workspace.data?.servers||[])].sort((a,b)=>compareCodes(a.code,b.code)),[workspace.data]),servers=allServers.filter(s=>!s.archivedAt),current=allServers.find(s=>s.id===serverId),single=!!current;
-  const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),inScope=useMemo(()=>allVMs.filter(v=>!serverId||v.serverId===serverId),[allVMs,serverId]);
-  const active=useMemo(()=>inScope.filter(v=>!v.archivedAt&&servers.some(s=>s.id===v.serverId)),[inScope,servers]),deleted=useMemo(()=>inScope.filter(v=>v.archivedAt),[inScope]),deletedView=url.view==='DELETED';
-  const counts=summarizeVMs(active),noSdk=active.filter(v=>!v.sdks.length&&!v.sdk).length;
+  const allVMs=useMemo(()=>workspace.data?.vms||[],[workspace.data]),deletedView=url.view==='DELETED';
   // EarnApp account (login + PayPal) of each VM; the search also finds VMs by login email or PayPal code.
   const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.earnApp?.paypal?.email,a.legacyGmail].filter(Boolean).join(' '):'';};
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
   const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
-  const noAccount=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp).length:null,noPaypal=accountsReady?active.filter(v=>!accountOfVm.get(v.id)?.earnApp?.paypal).length:null;
   const TODO:(VmOpsStatus|null)[]=['NEW_VM','PROXY_PENDING','PROXY_BLOCKED','EARN_ERROR'];
-  const todo=(v:ManagedVM)=>v.applyPending||vmView(v)==='BLOCKED'||TODO.includes((opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null);
-  const inView=(v:ManagedVM)=>!url.view||(url.view==='APPLY'?v.applyPending:url.view==='TODO'?todo(v):url.view==='SDK_MISSING'?!v.sdks.length&&!v.sdk:url.view==='ACCOUNT_MISSING'?!accountOfVm.get(v.id)?.earnApp:url.view==='PAYPAL_MISSING'?!accountOfVm.get(v.id)?.earnApp?.paypal:vmView(v)===url.view);
   // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
   const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
   const opsStatus=(v:ManagedVM)=>(opsOfVm.get(v.id)?.status??v.ops??null) as VmOpsStatus|null,milestone=(v:ManagedVM)=>(opsOfVm.get(v.id)?.milestone||'') as Milestone;
+  const todo=(v:ManagedVM)=>v.applyPending||vmView(v)==='BLOCKED'||TODO.includes(opsStatus(v));
   const proxyBlocked=(v:ManagedVM)=>vmView(v)==='BLOCKED';
   const opsKey=(v:ManagedVM):OpsFilter=>opsStatus(v)??'NONE';
   // Money at the VM (20/10/2026): balance read on EarnApp + payout request; filters and sorts run over the whole result before paging.
@@ -81,17 +78,29 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Tiền VM (22/10/2026): the current SDK code's money of each row; Chưa kiểm tra / Số cũ / Kiểm tra lỗi, the money sorts and the
   // total are about it (the EarnApp balance and the payout stay in the frame and the other chips).
   const vmMoneyOf=(v:ManagedVM)=>{const c=v.sdks.find(s=>s.current);return vmMoneyState(c?{code:c.code,amount:c.amount,observedAt:c.amountObservedAt,failedAt:c.amountFailedAt,moneyHidden:c.moneyHidden,stored:c.stored}:null);};
-  const flagMoney=(m:MoneyFilter):m is MoneyFlag=>(MONEY_FILTERS as readonly string[]).includes(m)&&m!=='WAITING'&&m!=='UNCHECKED';
-  const vmMoneyMatch=(v:ManagedVM,m:MoneyFilter)=>{const s=vmMoneyOf(v);return m==='UNCHECKED'?s.kind==='UNCHECKED':m==='STALE'?s.kind==='STALE'||s.kind==='FAILED'&&s.stale:s.kind==='FAILED';};
-  const moneyMatch=(v:ManagedVM)=>!url.money||(url.money==='UNCHECKED'||url.money==='STALE'||url.money==='VM_FAILED'?vmMoneyMatch(v,url.money):flagMoney(url.money)?moneyFlags(moneyRow(v))[url.money]:url.money==='NONE'?!milestone(v):milestone(v)===url.money);
-  const opsView=(v:ManagedVM)=>(!url.st.length||url.st.includes(opsKey(v)))&&moneyMatch(v)&&(!url.warn||proxyBlocked(v));
   const priority=(v:ManagedVM)=>opsPriority({status:opsStatus(v),proxyBlocked:proxyBlocked(v),milestone:milestone(v)});
-  const needle=url.q.trim().toLowerCase(),unusedSdk=(v:ManagedVM)=>v.sdks.filter(s=>s.state!=='LINKED').length;
-  // Filter and sort the whole result first, then page it.
-  const filtered=useMemo(()=>(accountView&&!accountsReady?[]:deletedView?deleted:active).filter(v=>(deletedView||inView(v)&&opsView(v))&&(!needle||`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdks.map(x=>x.code).join(' ')} ${accountText(v.id)}`.toLowerCase().includes(needle)))
+  const unusedSdk=(v:ManagedVM)=>v.sdks.filter(s=>s.state!=='LINKED').length;
+  // One set of facts per VM (owner brief 23/10/2026): the table, every count chip, "Phân bố theo server" and "Copy danh sách VM"
+  // read the same rule (vm-grid/filter-model.ts). Facts that need the accounts / board answer null until those are loaded.
+  const facts=useMemo<VmFacts[]>(()=>allVMs.map(v=>{const m=vmMoneyOf(v),srv=allServers.find(s=>s.id===v.serverId);
+    return {id:v.id,serverId:v.serverId,server:v.server,code:v.code,archived:!!v.archivedAt,serverArchived:!srv||!!srv.archivedAt,view:vmView(v),applyPending:!!v.applyPending,todo:todo(v),noSdk:!v.sdks.length&&!v.sdk,
+      hasAccount:accountsReady?!!accountOfVm.get(v.id)?.earnApp:null,hasPaypal:accountsReady?!!accountOfVm.get(v.id)?.earnApp?.paypal:null,opsKey:opsKey(v),milestone:board.data?milestone(v):null,moneyFlags:board.data?moneyFlags(moneyRow(v)):null,
+      vmMoney:m.kind==='FAILED'?(m.stale?'FAILED_STALE':'FAILED'):m.kind,text:`${v.server} ${v.code} ${displayNote(v.notes)||''} ${v.desired?.ip||''} ${v.installed?.ip||''} ${v.sdks.map(x=>x.code).join(' ')} ${accountText(v.id)}`.toLowerCase()};}),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allVMs,allServers,accountOfVm,accountsReady,opsOfVm,board.data]);
+  const filters:GridFilters={serverId:serverId||null,view:url.view,st:url.st,money:url.money,warn:url.warn,q:url.q};
+  const vmOf=useMemo(()=>new Map(allVMs.map(v=>[v.id,v])),[allVMs]),factOf=useMemo(()=>new Map(facts.map(f=>[f.id,f])),[facts]);
+  const active=useMemo(()=>allVMs.filter(v=>{const f=factOf.get(v.id);return !!f&&!f.archived&&!f.serverArchived&&(!serverId||f.serverId===serverId);}),[allVMs,factOf,serverId]),deleted=useMemo(()=>allVMs.filter(v=>{const f=factOf.get(v.id);return !!f&&f.archived&&(!serverId||f.serverId===serverId);}),[allVMs,factOf,serverId]);
+  // Count next to a choice: the other groups as they are, the choice's own group replaced (null = a needed dataset not loaded yet).
+  const n=(patch:Partial<GridFilters>)=>countWith(facts,filters,patch);
+  // "Phân bố theo server": every condition except the server; "Kết quả đang xem" (filtered): with the server, before paging.
+  const distribution:ServerDistribution|null=useMemo(()=>serverDistribution(facts,filters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facts,serverId,url.view,url.st,url.money,url.warn,url.q]);
+  const filtered=useMemo(()=>applyFilters(facts,filters).map(f=>vmOf.get(f.id)!)
     .sort((a,b)=>((url.sort==='BALANCE'||url.sort==='CHECKED_OLD')?vmMoneySortKey(url.sort,vmMoneyOf(a))-vmMoneySortKey(url.sort,vmMoneyOf(b)):url.sort==='WAITING_OLD'?moneySortKey(url.sort,moneyRow(a))-moneySortKey(url.sort,moneyRow(b)):url.sort==='PRIORITY'?priority(a)-priority(b):url.sort==='SDK'?unusedSdk(a)-unusedSdk(b):url.sort==='PROXY'?Number(vmView(a)!=='MISSING')-Number(vmView(b)!=='MISSING'):url.sort==='STATUS'?STATUS_ORDER[vmView(a)]-STATUS_ORDER[vmView(b)]:0)||compareCodes(a.server,b.server)||compareCodes(a.code,b.code)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletedView,deleted,active,url.view,url.sort,url.st,url.money,url.warn,needle,accountOfVm,accountView,accountsReady,opsOfVm]);
+    [facts,vmOf,serverId,url.view,url.sort,url.st,url.money,url.warn,url.q,opsOfVm]);
   // Back on the page: tick the saved rows again once the whole result is known (VMs, accounts and statuses loaded), so a row still in
   // the list is never dropped for being late; deleted or filtered-out rows are not restored.
   const restoreReady=!!workspace.data&&(!!accounts.data||accounts.isError)&&(!!board.data||board.isError);
@@ -137,6 +146,13 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     let note='',count=0;
     const out=await copyWhenReady(async()=>{const r=await copyBlocked.mutateAsync({projectId,endpointIds:ids});if(r.skipped.length)note=' · bỏ qua '+r.skipped.map(x=>x.count+' ('+(x.reason==='NO_CREDENTIALS'?'thiếu user/pass':'không còn proxy')+')').join(', ');if(!r.proxies.length)throw new Error('Không có proxy Blocked đủ IP:port:user:pass'+note);count=r.proxies.length;return r.proxies.join('\n');});
     if(out.ok)toast.success('Đã copy '+count+' proxy Blocked'+note,{duration:5000});
+    else if(out.text){setManualCopy(out.text);setBulk('copy');toast('Trình duyệt chặn copy; chọn và copy trong khung bên phải.');}
+    else toast.error(out.error||'Chưa copy được');
+  }
+  // "Copy danh sách VM" (23/10/2026): identities only (Server | VM), the selected rows or the whole filtered result on every page.
+  async function copyIds(vms:ManagedVM[]){
+    if(!vms.length)return;const text=vmIdLines(vms),out=await copyWhenReady(async()=>text);
+    if(out.ok)toast.success('Đã copy '+vms.length+' VM (Server | VM)',{duration:4000});
     else if(out.text){setManualCopy(out.text);setBulk('copy');toast('Trình duyệt chặn copy; chọn và copy trong khung bên phải.');}
     else toast.error(out.error||'Chưa copy được');
   }
@@ -200,11 +216,13 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   if(serverId&&workspace.data&&!current)return <p role="alert" className="pm-error">Server không thuộc dự án này.</p>;
   if(current?.archivedAt)return <div className="proxy-workspace space-y-4"><div className="pm-heading"><div><h1>{current.code}</h1><p className="pm-muted">Server đã xoá. Dữ liệu và lịch sử vẫn được giữ.</p></div>{rights.manage&&<button className="pm-button pm-button-primary" disabled={busy} onClick={()=>void bringBackServer(current.id)}><RotateCcw size={16}/>Khôi phục server</button>}</div><Link className="pm-button pm-button-quiet w-fit" href="/infrastructure/servers">Về danh sách server</Link></div>;
   const pickerServers=servers.map(s=>({id:s.id,code:s.code,ipAddress:s.ipAddress,vms:allVMs.filter(v=>v.serverId===s.id&&!v.archivedAt).length}));
+  // Changing server (picker or distribution) keeps search, views, statuses, money filter, sort and page size; back to page 1; closes the open VM.
+  const goServer=(id:string)=>router.push((id?`/infrastructure/servers/${id}`:'/infrastructure/servers')+writeGridUrl({...url,page:1,vm:null,cause:null}));
   const pager=(where:'top'|'bottom')=><Pager where={where} first={paged.first} last={paged.last} total={filtered.length} page={paged.current} pages={paged.pages} size={url.size} onPage={p=>go({page:p})} onSize={s=>go({size:s,page:1})}/>;
   const panelOpen=!!panelVm||!!bulk;
   return <div className="proxy-workspace vm-workspace">
     <div className="vm-head">
-      <ServerPicker servers={pickerServers} value={serverId||''} onChange={id=>router.push((id?`/infrastructure/servers/${id}`:'/infrastructure/servers')+writeGridUrl({...url,q:'',page:1,vm:null,cause:null}))}/>
+      <ServerPicker servers={pickerServers} value={serverId||''} onChange={goServer}/>
       <div className="vm-title min-w-0">{single?<h1><InlineText value={current!.code} label="tên server" canEdit={rights.manage} onSave={saveServer('code')}/></h1>:<h1>Server / VM</h1>}
         {single&&<div className="pm-muted text-xs flex gap-3 flex-wrap"><span>IP: <InlineText value={current!.ipAddress} label="IP server" placeholder="chưa có" canEdit={rights.manage} onSave={saveServer('ipAddress')}/></span><span className="min-w-0">Ghi chú: <InlineText value={displayNote(current!.notes)} label="ghi chú server" placeholder="thêm ghi chú" canEdit={rights.manage} onSave={saveServer('notes')}/></span></div>}</div>
       <div className="vm-head-actions">{rights.manage&&servers.length>0&&<button className="pm-button" onClick={()=>setForm('ADD')}><Plus size={16}/>Thêm VM</button>}{(rights.assign||rights.manage)&&<button className={'pm-button'+(bulk==='paste'?' pm-button-primary':'')} onClick={()=>openBulk('paste',true)}><ClipboardPaste size={16}/>Dán bảng</button>}<button className={'pm-button'+(storeOpen?' pm-button-primary':'')} aria-pressed={storeOpen} onClick={()=>goStore({open:!storeOpen})}><Boxes size={16}/>Kho SDK</button><button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" onClick={()=>void refresh()}><RefreshCw size={16}/></button>
@@ -215,15 +233,15 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         </DropdownMenuContent></DropdownMenu></div>
     </div>
     {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
-    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',counts.total)}{chip('MISSING','Thiếu proxy',counts.missing)}{chip('ASSIGNED','Có proxy',counts.assigned)}{chip('BLOCKED','Proxy Blocked',counts.blocked)}{chip('APPLY','Chờ áp dụng trên máy',active.filter(v=>v.applyPending).length)}{chip('TODO','Cần xử lý',active.filter(todo).length)}{chip('REVIEW','Cần kiểm tra',counts.review)}{chip('SDK_MISSING','Chưa SDK',noSdk)}{chip('ACCOUNT_MISSING','Chưa tài khoản',noAccount)}{chip('PAYPAL_MISSING','Chưa PayPal',noPaypal)}{chip('DELETED','Đã xoá',deleted.length)}</div>
+    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',n({view:''}))}{chip('MISSING','Thiếu proxy',n({view:'MISSING'}))}{chip('ASSIGNED','Có proxy',n({view:'ASSIGNED'}))}{chip('BLOCKED','Proxy Blocked',n({view:'BLOCKED'}))}{chip('APPLY','Chờ áp dụng trên máy',n({view:'APPLY'}))}{chip('TODO','Cần xử lý',n({view:'TODO'}))}{chip('REVIEW','Cần kiểm tra',n({view:'REVIEW'}))}{chip('SDK_MISSING','Chưa SDK',n({view:'SDK_MISSING'}))}{chip('ACCOUNT_MISSING','Chưa tài khoản',n({view:'ACCOUNT_MISSING'}))}{chip('PAYPAL_MISSING','Chưa PayPal',n({view:'PAYPAL_MISSING'}))}{chip('DELETED','Đã xoá',n({view:'DELETED'}))}</div>
     <div className="vm-chips vm-chips-ops" role="group" aria-label="Lọc theo tình trạng vận hành"><span className="pm-muted text-xs">Tình trạng:</span>
-      {OPS_FILTERS.map(k=>{const n=active.filter(v=>opsKey(v)===k).length,on=url.st.includes(k);if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{n}</strong></button>;})}
+      {OPS_FILTERS.map(k=>{const on=url.st.includes(k),c=n({st:[k]});if(c===0&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{c??'…'}</strong></button>;})}
       <span className="pm-muted text-xs ml-2">Proxy / tiền:</span>
       {rights.copy&&!deletedView&&(()=>{const scope=selected.size?selectedRows:filtered,n=blockedIn(scope);return <button type="button" className="pm-button" disabled={!n} title={selected.size?'Proxy Blocked của các dòng đã chọn':'Proxy Blocked trong bộ lọc hiện tại (mọi trang)'} onClick={()=>void copyBlockedOf(scope)}><Copy size={15}/>Copy proxy Blocked ({n})</button>;})()}
-      {(['UNCHECKED','STALE','VM_FAILED'] as const).map(k=>{const n=active.filter(v=>vmMoneyMatch(v,k)).length,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='VM_FAILED'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{k==='UNCHECKED'?'Chưa kiểm tra':k==='STALE'?'Số cũ':'Kiểm tra lỗi'} <strong>{n}</strong></button>;})}
-      {(['WITHDRAWABLE'] as const).map(k=>{const n=board.data?active.filter(v=>moneyFlags(moneyRow(v))[k]).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
-      {(['WAITING','RECREATE','MONEY_REVIEW','FAILED'] as const).map(k=>{const n=board.data?active.filter(v=>milestone(v)===k).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='RECREATE'||k==='MONEY_REVIEW'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MILESTONE_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
-      {(['RECEIVED','CHECK'] as const).map(k=>{const n=board.data?active.filter(v=>moneyFlags(moneyRow(v))[k]).length:null,on=url.money===k;if(!n&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='CHECK'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{n??'…'}</strong></button>;})}
+      {(['UNCHECKED','STALE','VM_FAILED'] as const).map(k=>{if(!rights.sdkMoneyRead)return null;const c=n({money:k}),on=url.money===k;if(!c&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='VM_FAILED'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{k==='UNCHECKED'?'Chưa kiểm tra':k==='STALE'?'Số cũ':'Kiểm tra lỗi'} <strong>{c??'…'}</strong></button>;})}
+      {(['WITHDRAWABLE'] as const).map(k=>{const c=n({money:k}),on=url.money===k;if(!c&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{c??'…'}</strong></button>;})}
+      {(['WAITING','RECREATE','MONEY_REVIEW','FAILED'] as const).map(k=>{const c=n({money:k}),on=url.money===k;if(!c&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='RECREATE'||k==='MONEY_REVIEW'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MILESTONE_LABEL[k]} <strong>{c??'…'}</strong></button>;})}
+      {(['RECEIVED','CHECK'] as const).map(k=>{const c=n({money:k}),on=url.money===k;if(!c&&!on)return null;return <button key={k} type="button" className={'vm-chip'+(on?' active':'')+(k==='CHECK'?' attention':'')} aria-pressed={on} onClick={()=>go({money:(on?'':k) as MoneyFilter,page:1})}>{MONEY_FILTER_LABEL[k]} <strong>{c??'…'}</strong></button>;})}
       {(url.st.length>0||url.money||url.warn)&&<button type="button" className="pm-link text-xs" onClick={()=>go({st:[],money:'',warn:false,page:1})}>Bỏ lọc tình trạng</button>}
     </div>
     {summary&&vmSummary&&!deletedView&&filtered.length>0&&<MoneySummaryLine summary={summary} vm={vmSummary} total={filtered.length} balanceRead={!!board.data?.rights.balanceRead} money={!!board.data?.rights.money} sdkMoney={!!access.data?.sdkMoneyRead}/>}
@@ -233,8 +251,9 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
         {!storeOpen&&<div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
-          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">Theo mã VM</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option><option value="BALANCE">Tiền VM cao → thấp</option><option value="CHECKED_OLD">Tiền VM kiểm tra lâu nhất</option><option value="WAITING_OLD">Chờ tiền lâu nhất trước</option></select>
+          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">{single?'Theo mã VM':'Theo server → mã VM'}</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option><option value="BALANCE">Tiền VM cao → thấp</option><option value="CHECKED_OLD">Tiền VM kiểm tra lâu nhất</option><option value="WAITING_OLD">Chờ tiền lâu nhất trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>}
+        {!storeOpen&&<ScopeStrip distribution={workspace.data?distribution:null} loading={!workspace.data} viewing={filtered.length} single={current?{id:current.id,code:current.code}:null} filters={filters} onServer={goServer} onPatch={patch=>go({...patch,page:1})} onClear={()=>go({view:'',st:[],money:'',warn:false,q:'',page:1})} copy={{label:selected.size?`Copy danh sách VM (${selectedRows.length} đã chọn)`:`Copy danh sách VM (${filtered.length} · mọi trang)`,disabled:selected.size?!selectedRows.length:!filtered.length,run:()=>void copyIds(selected.size?selectedRows:filtered)}}/>}
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}
         {hasSelection&&!storeOpen&&<div className="vm-bulkbar" role="status"><strong>Đã chọn {selectedRows.length} VM</strong>{offPage>0&&<span className="pm-muted text-xs">({offPage} không ở trang này)</span>}
           {paged.rows.length>0&&paged.rows.every(v=>selected.has(v.id))&&selectedInFilter<filtered.length&&<button className="pm-link text-sm" onClick={()=>setSelected(new Set(filtered.map(v=>v.id)))}>Chọn tất cả {filtered.length} kết quả đang lọc</button>}
@@ -283,4 +302,35 @@ function MoneySummaryLine({summary:s,vm,total,balanceRead,money,sdkMoney}:{summa
     {count(s.unassigned,'Chưa gán tài khoản')}
     <span className="pm-muted">Theo bộ lọc, mọi trang; tiền VM, số dư EarnApp và tiền chờ về PP không cộng với nhau.</span>
   </p>;
+}
+
+// "Phân bố theo server" + the conditions in force (owner brief 23/10/2026). Two scopes, named apart: the distribution applies every
+// condition except the server (so the other servers stay visible), "Đang xem" is the table's own count (with the server). Counts are
+// over every page. null = a needed dataset is still loading: "Đang tải…", never 0.
+const MONEY_LABEL:Record<Exclude<MoneyFilter,''>,string>={WAITING:MILESTONE_LABEL.WAITING,RECREATE:MILESTONE_LABEL.RECREATE,MONEY_REVIEW:MILESTONE_LABEL.MONEY_REVIEW,FAILED:MILESTONE_LABEL.FAILED,NONE:'Chưa có mốc tiền',UNCHECKED:'Chưa kiểm tra',STALE:'Số cũ',VM_FAILED:'Kiểm tra lỗi',WITHDRAWABLE:MONEY_FILTER_LABEL.WITHDRAWABLE,RECEIVED:MONEY_FILTER_LABEL.RECEIVED,CHECK:MONEY_FILTER_LABEL.CHECK};
+const SHOW_SERVERS=8;
+function ScopeStrip({distribution:d,loading,viewing,single,filters,onServer,onPatch,onClear,copy}:{distribution:ServerDistribution|null;loading:boolean;viewing:number;single:{id:string;code:string}|null;filters:GridFilters;onServer:(id:string)=>void;onPatch:(p:Partial<GridUrl>)=>void;onClear:()=>void;copy:{label:string;disabled:boolean;run:()=>void}}){
+  const [more,setMore]=useState(false);
+  const tags:{key:string;label:string;patch:Partial<GridUrl>}[]=[];
+  if(filters.view)tags.push({key:'view',label:VIEW_LABEL[filters.view],patch:{view:''}});
+  for(const k of filters.st)tags.push({key:'st-'+k,label:k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label,patch:{st:filters.st.filter(x=>x!==k)}});
+  if(filters.money)tags.push({key:'money',label:MONEY_LABEL[filters.money],patch:{money:''}});
+  if(filters.warn)tags.push({key:'warn',label:'Chỉ proxy Blocked',patch:{warn:false}});
+  if(filters.q.trim())tags.push({key:'q',label:'Tìm "'+filters.q.trim()+'"',patch:{q:''}});
+  const items=d?(more?d.items:d.items.slice(0,SHOW_SERVERS)):[],hidden=d?d.items.length-items.length:0;
+  const noneHere=!!single&&!!d&&viewing===0&&d.total>0;
+  return <div className="vm-scope" role="region" aria-label="Phân bố theo server" data-testid="vm-scope">
+    <div className="vm-scope-line">
+      {!d?<span className="pm-muted">{loading?'Đang tải…':'Đang tải dữ liệu lọc…'}</span>:<>
+        <span className="vm-scope-total"><strong>{d.total}</strong> VM phù hợp · <strong>{d.items.length}</strong> server{single&&<span className="pm-muted"> · Đang xem {single.code} · <strong>{viewing}</strong> VM</span>}</span>
+        <span className="vm-scope-servers">
+          <button type="button" className={'vm-chip vm-chip-sm'+(single?'':' active')} aria-pressed={!single} onClick={()=>onServer('')}>Tất cả</button>
+          {items.map(it=><button key={it.serverId} type="button" className={'vm-chip vm-chip-sm'+(single?.id===it.serverId?' active':'')} aria-pressed={single?.id===it.serverId} title={'Xem '+it.code+' với bộ lọc hiện tại'} onClick={()=>onServer(it.serverId)}>{it.code} <strong>{it.count}</strong></button>)}
+          {hidden>0&&<button type="button" className="pm-link text-xs" onClick={()=>setMore(true)}>+{hidden} server</button>}{more&&d.items.length>SHOW_SERVERS&&<button type="button" className="pm-link text-xs" onClick={()=>setMore(false)}>Thu gọn</button>}
+        </span></>}
+      <button type="button" className="pm-button vm-scope-copy" disabled={copy.disabled} title="Chỉ tên server và mã VM, mỗi VM một dòng" onClick={copy.run}><Copy size={14}/>{copy.label}</button>
+    </div>
+    {tags.length>0&&<div className="vm-scope-line vm-scope-tags"><span className="pm-muted">Đang lọc:</span>{tags.map(t=><span key={t.key} className="vm-filter-tag">{t.label}<button type="button" className="vm-cell-icon" aria-label={'Bỏ điều kiện '+t.label} onClick={()=>onPatch(t.patch)}><X size={12}/></button></span>)}<button type="button" className="pm-link text-xs" onClick={onClear}>Xoá bộ lọc</button></div>}
+    {noneHere&&<div className="vm-scope-line" role="status"><span>Không còn VM phù hợp ở <strong>{single!.code}</strong>; các server khác còn <strong>{d!.total}</strong> VM.</span><button type="button" className="pm-button pm-button-quiet" onClick={()=>onServer('')}>Về Tất cả server</button></div>}
+  </div>;
 }
