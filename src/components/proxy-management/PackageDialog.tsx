@@ -1,4 +1,5 @@
 "use client";
+import {formatMoney} from '@/lib/money-input';
 import {useMemo,useState} from 'react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {trpc} from '@/lib/trpc';
@@ -17,7 +18,7 @@ export function filterPackages(list:PackageRow[],view:PackageView){
   return list;
 }
 export const dayLabel=(ymd:string|null)=>ymd?ymd.split('-').reverse().join('/'):'';
-export function priceLabel(p:Pick<PackageRow,'price'|'priceCurrency'|'cycleMonths'>&{priceHidden?:boolean}){return p.priceHidden?`Ẩn theo quyền / ${p.cycleMonths} tháng`:p.price?`${p.price} ${p.priceCurrency||''}`.trim()+` / ${p.cycleMonths} tháng`:'';}
+export function priceLabel(p:Pick<PackageRow,'price'|'priceCurrency'|'cycleMonths'>&{priceHidden?:boolean}){return p.priceHidden?`Ẩn theo quyền / ${p.cycleMonths} tháng`:p.price!==null&&p.price!==''?(p.priceCurrency==='USD'?`${p.price} USD`:formatMoney(p.price,p.priceCurrency||'',{exact:true}))+` / ${p.cycleMonths} tháng`:'';}
 export function dueLabel(p:Pick<PackageRow,'nextDueDate'|'due'>){
   if(!p.nextDueDate||p.due.daysLeft===null) return '';
   return p.due.daysLeft<0?`quá hạn ${-p.due.daysLeft} ngày`:p.due.daysLeft===0?'đến hạn hôm nay':`còn ${p.due.daysLeft} ngày`;
@@ -34,13 +35,13 @@ export function PackageTable({packages,loading=false,canManage,canPay,onEdit,onP
   </tbody></table></div>;
 }
 export function PackageForm({projectId,row,onClose,onSaved}:{projectId:string;row:PackageRow|null;onClose:()=>void;onSaved:()=>void}){
-  const [code,setCode]=useState(row?.code||''),[site,setSite]=useState(row?.site||''),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[price,setPrice]=useState(row?.price||''),[currency,setCurrency]=useState(row?.priceCurrency||'USD'),[cycle,setCycle]=useState(String(row?.cycleMonths||1)),[due,setDue]=useState(row?.nextDueDate||''),[note,setNote]=useState(row?.note||''),[remind,setRemind]=useState(String(row?.reminderDays||7));
+  const [code,setCode]=useState(row?.code||''),[site,setSite]=useState(row?.site||''),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[price,setPrice]=useState(row?.price||''),[currency,setCurrency]=useState(row?.priceCurrency||'USDT'),[cycle,setCycle]=useState(String(row?.cycleMonths||1)),[due,setDue]=useState(row?.nextDueDate||''),[note,setNote]=useState(row?.note||''),[remind,setRemind]=useState(String(row?.reminderDays||7));
   const save=trpc.proxyManagement.saveCatalog.useMutation({onSuccess:()=>{toast.success('Đã lưu gói proxy');onSaved();onClose();},onError:e=>toast.error(e.message)});
   const needCredentials=!row;
   return <form className="space-y-4" onSubmit={e=>{e.preventDefault();save.mutate({projectId,code:code.trim(),label:code.trim(),username:username||null,password:password||null,site:site||null,note:note||null,...(row?.priceHidden?{}:{price:price||null,priceCurrency:currency||null}),cycleMonths:Number(cycle)||1,nextDueDate:due||null,reminderDays:Number(remind)||7});}}>
     <div className="grid sm:grid-cols-2 gap-4"><label className="pm-label">Tên gói<input required className="pm-input" value={code} disabled={!!row} maxLength={80} placeholder="Ví dụ: 240292 hoặc Account VietPhe" onChange={e=>setCode(e.target.value)}/></label><label className="pm-label">Site / nhà cung cấp<input className="pm-input" value={site} maxLength={120} placeholder="proxiware.com, vietphe…" onChange={e=>setSite(e.target.value)}/></label></div>
     <div className="grid sm:grid-cols-2 gap-4"><label className="pm-label">Username{row&&<span className="pm-muted font-normal"> (để trống = giữ nguyên)</span>}<input className="pm-input" autoComplete="off" required={needCredentials} value={username} onChange={e=>setUsername(e.target.value)}/></label><label className="pm-label">Password<input type="password" className="pm-input" autoComplete="new-password" required={needCredentials||!!username} value={password} onChange={e=>setPassword(e.target.value)}/></label></div>
-    <div className="grid sm:grid-cols-4 gap-4"><label className="pm-label">Giá mỗi chu kỳ<input inputMode="decimal" className="pm-input" value={price} onChange={e=>setPrice(e.target.value)}/></label><label className="pm-label">Đồng tiền<input list="pm-package-currencies" maxLength={8} className="pm-input" value={currency} onChange={e=>setCurrency(e.target.value.toUpperCase())}/><datalist id="pm-package-currencies"><option>USD</option><option>USDT</option><option>VND</option></datalist></label><label className="pm-label">Chu kỳ (tháng)<input type="number" min={1} max={60} className="pm-input" value={cycle} onChange={e=>setCycle(e.target.value)}/></label><label className="pm-label">Đến hạn tiếp<input type="date" className="pm-input" value={due} onChange={e=>setDue(e.target.value)}/></label></div>
+    <div className="grid sm:grid-cols-4 gap-4"><label className="pm-label">Giá mỗi chu kỳ<input inputMode="decimal" className="pm-input" value={price} onChange={e=>setPrice(e.target.value)}/></label><label className="pm-label">Đồng tiền<select className="pm-input" value={currency} onChange={e=>setCurrency(e.target.value)}><option value="VND">VND</option><option value="PPUSD">USD PayPal</option><option value="USDT">USDT</option>{row?.priceCurrency==='USD'&&<option value="USD">USD (cũ)</option>}</select></label><label className="pm-label">Chu kỳ (tháng)<input type="number" min={1} max={60} className="pm-input" value={cycle} onChange={e=>setCycle(e.target.value)}/></label><label className="pm-label">Đến hạn tiếp<input type="date" className="pm-input" value={due} onChange={e=>setDue(e.target.value)}/></label></div>
     <label className="pm-label sm:w-48">Nhắc trước (ngày)<input type="number" min={1} max={90} className="pm-input" value={remind} onChange={e=>setRemind(e.target.value)}/></label>
     <label className="pm-label">Ghi chú<input className="pm-input" maxLength={500} value={note} onChange={e=>setNote(e.target.value)}/></label>
     {save.error&&<p role="alert" className="pm-error text-sm">{save.error.message}</p>}

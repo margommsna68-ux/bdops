@@ -39,7 +39,7 @@ export async function saveProviderAccount(scope:ActorScope,input:{code:string;la
     // Disabling a package only stops new imports/allocations; proxies, costs and reminders stay. Editing never silently re-enables it.
     const account=await tx.proxyProviderAccount.upsert({where:{projectId_code:{projectId:scope.projectId,code:input.code}},create:{projectId:scope.projectId,code:input.code,label:input.label,credentialCipher:encrypt(JSON.stringify(credentials)),...terms,disabled:input.disabled??false},update:{label:input.label,...(credentials?{credentialCipher:encrypt(JSON.stringify(credentials))}:{}),...terms}});
     const resources:ResourceImage[]=[{resource:'ACCOUNT',id:account.id,before:oldAccount?captureAccount(oldAccount):null,after:captureAccount(account)}];
-    const catalog=await loadCatalog(scope.projectId,tx,true),rows=await tx.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null},credentialCipher:{not:null}},include:endpointInclude});
+    const catalog=await loadCatalog(scope.projectId,tx,true),rows=credentials||!oldAccount?await tx.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null},credentialCipher:{not:null}},include:endpointInclude}):[];
     let resolved=0;
     for(const row of rows){
       const proxy=decodeEndpoint(row);if(!proxy) continue;

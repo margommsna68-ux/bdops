@@ -88,3 +88,14 @@ it('paying a package records a USDT cost and advances the due date in one comman
     expect((await db.costRecord.findUniqueOrThrow({where:{id:explicit.id}})).voidedAt).not.toBeNull();
   }finally{await f.cleanup();}
 });
+
+it('a price-only edit never rematches explicitly imported proxy packages',async()=>{
+ const f=await fixture();try{
+  await saveProviderAccount(f.scope,{code:'PRICE-ONLY',label:'PRICE-ONLY',username:'price-user',password:'price-password'},db);
+  const {commit}=await f.run({kind:'NEW',text:randomIp()+':80:price-user:price-password',owner:'SELF'});await commit();
+  const row=await db.proxyIP.findFirstOrThrow({where:{projectId:f.projectId}});
+  await db.proxyIP.update({where:{id:row.id},data:{packageCode:'EXPLICIT-IMPORT'}});
+  await saveProviderAccount(f.scope,{code:'PRICE-ONLY',label:'PRICE-ONLY',price:'140',priceCurrency:'PPUSD'},db);
+  expect(await db.proxyIP.findUnique({where:{id:row.id}})).toMatchObject({packageCode:'EXPLICIT-IMPORT',revision:row.revision});
+ }finally{await f.cleanup();}
+});

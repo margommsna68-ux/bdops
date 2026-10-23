@@ -50,11 +50,12 @@ export function roundDecimal(value:string,places:number):string{
   return (neg&&rounded>BigInt(0)?'-':'')+out;
 }
 const fixed2=(value:string)=>{const r=roundDecimal(value,2),[i,d]=r.replace(/^-/,'').split('.');return (r.startsWith('-')?'-':'')+group(i)+','+d;};
-/** US dollars: "$0,00", "$18,50", "-$5,00". Only USD uses the dollar sign. */
+/** US dollars: "$0,00", "$18,50", "-$5,00". USD uses the dollar sign; PayPal cost dollars add their own label in formatMoney. */
 export function formatUsd(value:string):string{const t=fixed2(value);return t.startsWith('-')?'-$'+t.slice(1):'$'+t;}
 /** One amount with its own currency. USDT is shown with 2 decimals unless `exact` (the stored precision); VND as ₫. */
 export function formatMoney(value:string,currency:string,opts:{exact?:boolean}={}):string{
   const c=currency.toUpperCase();
+  if(c==='PPUSD')return formatMoney(value,'USD',opts)+' PayPal';
   if(c==='USD')return opts.exact?(value.startsWith('-')?'-$':'$')+viNumber(value.replace(/^-/,'')):formatUsd(value);
   if(c==='VND')return viNumber(value)+' ₫';
   return (opts.exact?viNumber(value):fixed2(value))+' '+c;

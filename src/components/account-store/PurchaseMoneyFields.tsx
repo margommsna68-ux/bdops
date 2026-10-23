@@ -4,7 +4,7 @@ import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {formatMoney} from '@/lib/money-input';
 import {applyQuote,changeCurrency,editAmount,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
-const CURRENCIES=['USDT','VND','USD'];
+const CURRENCIES=['VND','PPUSD','USDT'];
 // Money of a purchase (Nhập kho, Ghi chi phí of a batch): total paid by default, or price per account × quantity bought. Vietnamese
 // number input ("70.000", "16,27"), every field checked in place; the canonical numbers are built by readPurchase. With VND the
 // Binance P2P BUY reference is fetched through the existing quote endpoint; it may be edited into the rate actually paid (then
@@ -12,7 +12,7 @@ const CURRENCIES=['USDT','VND','USD'];
 // kept as a manual rate, so the converted amount never changes at the click.
 export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{projectId:string;unitWord:string;value:PurchaseState;onChange:(v:PurchaseState)=>void;locked:boolean}){
   const latest=useRef(value);latest.current=value;
-  const p2p=trpc.businessManagement.p2pQuote.useQuery({projectId,currency:value.currency==='USDT'?'VND':value.currency,side:'BUY'},{enabled:false,retry:false});
+  const p2p=trpc.businessManagement.p2pQuote.useQuery({projectId,currency:value.currency==='USDT'||value.currency==='PPUSD'?'VND':value.currency,side:'BUY'},{enabled:false,retry:false});
   const [fetchError,setFetchError]=useState(''),[fetching,setFetching]=useState(false),tried=useRef('');
   const r=readPurchase(value,unitWord);
   async function fetchQuote(){
@@ -24,7 +24,7 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
     finally{setFetching(false);}
   }
   // VND: fetch the reference once per currency choice while the rate is empty (never over a typed rate).
-  useEffect(()=>{if(value.currency==='VND'&&!value.rate.trim()&&!value.quote&&tried.current!==value.currency&&!locked){tried.current=value.currency;void fetchQuote();}if(value.currency!=='VND')tried.current='';},[value.currency,value.rate,value.quote,locked]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{if((value.currency==='VND'||value.currency==='PPUSD')&&!(value.currency==='PPUSD'?value.vndUsdtRate??'':value.rate).trim()&&!value.quote&&tried.current!==value.currency&&!locked){tried.current=value.currency;void fetchQuote();}if(value.currency!=='VND'&&value.currency!=='PPUSD')tried.current='';},[value.currency,value.rate,value.vndUsdtRate,value.quote,locked]);// eslint-disable-line react-hooks/exhaustive-deps
   const err=(f:keyof typeof r.errors,shown:boolean)=>shown&&r.errors[f]?<span className="pm-field-error" role="alert">{r.errors[f]}</span>:null;
   const unit=value.mode==='UNIT';
   return <div className="acc-money">
@@ -35,11 +35,12 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
       {unit?<label className="pm-label">Giá mỗi {unitWord}<input className="pm-input" inputMode="decimal" value={value.unit} disabled={locked} placeholder="Ví dụ 70.000" aria-invalid={!!r.errors.unit} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('unit',true)}</label>
         :<label className="pm-label">Tổng tiền thực trả<input className="pm-input" inputMode="decimal" value={value.total} disabled={locked} placeholder="Để trống nếu chưa có giá" aria-invalid={!!r.errors.total} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('total',true)}</label>}
       <label className="pm-label">{unit?`Số ${unitWord} thực mua`:`Số ${unitWord} thực mua (không bắt buộc)`}<input className="pm-input" inputMode="numeric" value={value.quantity} disabled={locked} placeholder={unitWord==='PP'?'Đếm mã PP, không đếm email':'Số tài khoản đã trả tiền'} aria-invalid={!!r.errors.quantity} onChange={e=>onChange({...value,quantity:e.target.value})}/>{err('quantity',r.priced||!!value.quantity)}</label>
-      <label className="pm-label">Đồng tiền<select className="pm-input" value={value.currency} disabled={locked||fetching} onChange={e=>{setFetchError('');onChange(changeCurrency(value,e.target.value));}}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select></label>
-      {value.currency!=='USDT'&&<label className="pm-label">Tỷ giá thực trả: 1 USDT = ? {value.currency}<input className="pm-input" inputMode="decimal" value={value.rate} disabled={locked||fetching} placeholder={fetching?'Đang lấy giá…':value.currency==='VND'?'Ví dụ 25.820':''} aria-invalid={!!r.errors.rate&&r.priced} onChange={e=>onChange(editRate(value,e.target.value))}/>{err('rate',r.priced&&!fetching)}</label>}
+      <label className="pm-label">Đồng tiền<select className="pm-input" value={value.currency} disabled={locked||fetching} onChange={e=>{setFetchError('');onChange(changeCurrency(value,e.target.value));}}>{!CURRENCIES.includes(value.currency)&&<option value={value.currency} disabled>Chọn đồng tiền</option>}{CURRENCIES.map(c=><option key={c} value={c}>{c==='PPUSD'?'USD PayPal':c}</option>)}</select>{err('currency',r.priced)}</label>
+      {value.currency==='PPUSD'&&<label className="pm-label">1 USD PayPal = ? VND<input className="pm-input" inputMode="decimal" value={value.paypalVndRate??''} disabled={locked} placeholder="Ví dụ 24.000" aria-invalid={!!r.errors.paypalVndRate&&r.priced} onChange={e=>onChange({...value,paypalVndRate:e.target.value})}/>{err('paypalVndRate',r.priced)}</label>}
+      {value.currency!=='USDT'&&<label className="pm-label">{value.currency==='PPUSD'?'1 USDT = ? VND':`Tỷ giá thực trả: 1 USDT = ? ${value.currency}`}<input className="pm-input" inputMode="decimal" value={value.currency==='PPUSD'?value.vndUsdtRate??'':value.rate} disabled={locked||fetching} placeholder={fetching?'Đang lấy giá…':value.currency==='VND'?'Ví dụ 25.820':''} aria-invalid={!!r.errors[value.currency==='PPUSD'?'vndUsdtRate':'rate']&&r.priced} onChange={e=>onChange(editRate(value,e.target.value))}/>{err(value.currency==='PPUSD'?'vndUsdtRate':'rate',r.priced&&!fetching)}</label>}
     </div>
     {value.currency!=='USDT'&&<div className="text-xs flex gap-2 items-center flex-wrap" aria-live="polite">
-      {fetching?<span className="pm-muted">Đang lấy giá tham khảo Binance P2P (Mua USDT bằng {value.currency})…</span>
+      {fetching?<span className="pm-muted">Đang lấy giá tham khảo Binance P2P (Mua USDT bằng {value.currency==='PPUSD'?'VND':value.currency})…</span>
         :fetchError?<><span className="pm-error">{fetchError} Nội dung được giữ; nhập tỷ giá thực trả hoặc thử lại.</span><button type="button" className="pm-button pm-button-quiet" disabled={locked} onClick={()=>void fetchQuote()}>Thử lại</button></>
         :r.rateText?<><span><strong>{r.rateText}</strong> · {r.rateSource}</span>{!r.quoteExpired&&<button type="button" className="pm-button pm-button-quiet" disabled={locked} onClick={()=>void fetchQuote()}>Lấy giá Binance mới</button>}</>
         :<button type="button" className="pm-button pm-button-quiet" disabled={locked} onClick={()=>void fetchQuote()}>Lấy giá Binance P2P</button>}

@@ -9,7 +9,7 @@ import {assertBusinessArea} from '../business-management/scope';
 import {authorizeTeamCash} from '../business-management/team-cash-scope';
 import {assertPeriodOpen} from '../business-management/period-lock';
 import {dayDate} from '../business-management/money';
-import {CashDecimal,cashCurrency,normalizeCostMoney,parseOriginalMoney} from '../business-management/usdt-money';
+import {CashDecimal,cashCurrency,normalizeCostMoney,parseOriginalMoney,paypalCostFxNote} from '../business-management/usdt-money';
 import {verifyP2PQuote} from '../business-management/binance-p2p';
 import {LOGIN_FORMATS,MAX_LINES,isEmail,parseLoginLines,parsePaypalLines,repeats,type LoginFormat,type PaypalLine} from './parse';
 // Kho tài khoản: receive Gmail / Apple ID logins and PayPals in bulk (one preview, one import of the valid lines), each line with
@@ -19,7 +19,7 @@ export type StockKind='LOGIN'|'PAYPAL';
 export type PriceMode='NONE'|'UNIT'|'TOTAL';
 // A new purchase (batch) or an explicit "Nhập bổ sung" into one existing batch (append). Never both: an append carries no money,
 // source or date, and a new purchase never falls into an old batch because its code matches.
-export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;currency?:string|null;rate?:string|null;notes?:string|null;p2pQuoteToken?:string|null}
+export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;currency?:string|null;rate?:string|null;paypalVndRate?:string;vndUsdtRate?:string;notes?:string|null;p2pQuoteToken?:string|null}
 export interface ImportInput {kind:StockKind;loginType?:AccountLoginType|null;/** Apple ID lists default to APPLE5 (Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại); STANDARD is the older pattern. Gmail is always STANDARD. */loginFormat?:LoginFormat|null;text:string;batch?:BatchInput|null;append?:{batchId:string}|null}
 export const loginFormatOf=(input:Pick<ImportInput,'loginType'|'loginFormat'>):LoginFormat=>input.loginFormat??(input.loginType==='APPLE_ID'?'APPLE5':'STANDARD');
 // PayPal rows also carry the emails of the line and, for a code already in stock, the emails it would add (outcome ADD: shown with
@@ -42,7 +42,7 @@ function parse(input:ImportInput){
 export const MAX_QUANTITY=100000;
 // Paid total of a purchase: the total as entered, or unit price × the quantity actually bought (typed by the person, never the
 // number of pasted or valid lines: accounts that could not be imported may still have been paid for). Fixed afterwards.
-export function batchTotal(b:Pick<BatchInput,'priceMode'|'amount'|'currency'|'rate'|'quantity'>){
+export function batchTotal(b:Pick<BatchInput,'priceMode'|'amount'|'currency'|'rate'|'quantity'|'paypalVndRate'|'vndUsdtRate'>){
   const quantity=b.quantity==null?null:b.quantity;
   if(quantity!==null&&(!Number.isInteger(quantity)||quantity<1||quantity>MAX_QUANTITY))throw new ProxyDomainError('INVALID_INPUT','Số lượng thực mua là số nguyên từ 1 đến '+MAX_QUANTITY);
   if(b.priceMode==='NONE'){if(b.amount?.trim())throw new ProxyDomainError('INVALID_INPUT','Đã nhập số tiền nhưng chưa chọn cách tính tiền mua');return null;}
@@ -50,14 +50,15 @@ export function batchTotal(b:Pick<BatchInput,'priceMode'|'amount'|'currency'|'ra
   if(b.priceMode==='UNIT'&&quantity===null)throw new ProxyDomainError('INVALID_INPUT','Giá mỗi tài khoản cần Số lượng thực mua (không lấy số dòng dán)');
   canonical(b.amount,'Số tiền');if(b.rate)canonical(b.rate,'Tỷ giá');
   const amount=parseOriginalMoney(b.amount),total=b.priceMode==='UNIT'?new CashDecimal(amount).mul(quantity!).toFixed(8):amount;
-  const money=normalizeCostMoney({amount:total,currency:b.currency,rate:b.rate||undefined});return {unit:b.priceMode==='UNIT'?amount:null,quantity,...money};
+  const money=normalizeCostMoney({amount:total,currency:b.currency,rate:b.rate||undefined,paypalVndRate:b.paypalVndRate,vndUsdtRate:b.vndUsdtRate});return {unit:b.priceMode==='UNIT'?amount:null,quantity,...money};
 }
 // Numbers reach these endpoints in canonical form only ("420000", "25820", "16.27"): the web form parses the Vietnamese text once
 // (src/lib/money-input.ts). Text such as "25.820" or "70.000" is refused instead of being read as 25,82 / 70 (bug 19/10/2026).
 function canonical(text:string,label:string){if(!/^(0|[1-9]\d*)(\.\d*[1-9])?$/.test(text.trim()))throw new ProxyDomainError('INVALID_INPUT',label+' phải gửi ở dạng số chuẩn (ví dụ 420000, 25820 hoặc 16.27); "'+text.slice(0,20)+'" có thể bị hiểu sai nên không nhận');}
 // Rate source of a purchase cost: a sealed Binance P2P quote (same check as Chi phí: same user, project, currency and rate, at most 10
 // minutes old; an expired quote is refused, never re-priced) or the rate typed by the person.
-function fxOf(scope:{projectId:string;userId:string},token:string|null|undefined,money:{currency:string;rate:string}){
+function fxOf(scope:{projectId:string;userId:string},token:string|null|undefined,money:{currency:string;rate:string},chain:{paypalVndRate?:string;vndUsdtRate?:string}={}){
+  if(money.currency==='PPUSD'){const q=token?verifyP2PQuote(token,scope,'VND',chain.vndUsdtRate||''):null;return {fxSource:q?'PAYPAL_VND_BINANCE_P2P_'+q.side:'PAYPAL_VND_MANUAL',fxAppliedAt:q?new Date(q.fetchedAt):new Date(),fxNote:paypalCostFxNote(chain)};}
   if(!token||money.currency==='USDT')return {fxSource:'MANUAL',fxAppliedAt:new Date()};
   const q=verifyP2PQuote(token,scope,money.currency,money.rate);return {fxSource:'BINANCE_P2P_'+q.side,fxAppliedAt:new Date(q.fetchedAt)};
 }
@@ -147,7 +148,7 @@ export async function previewStockImport(scope:ActorScope,input:ImportInput,db:P
     return {...counts,batch:{existing:true,id:batch.id,code:batch.code,cost:batch.costRecordId&&!batch.costRecord?.voidedAt?'RECORDED' as const:'NONE' as const,total:null}};
   }
   // The code shown is the next free one now; the import takes the next free one at that moment (same unless someone imported meanwhile).
-  const code=await newCode(db,current,input.kind,purchase),money=batchTotal(purchase);if(money)fxOf(current,purchase.p2pQuoteToken,money);
+  const code=await newCode(db,current,input.kind,purchase),money=batchTotal(purchase);if(money)fxOf(current,purchase.p2pQuoteToken,money,purchase);
   return {...counts,batch:{existing:false,id:null,code,cost:money?'WILL_RECORD' as const:'NONE' as const,total:money&&canSeeMoney(current)?{amount:money.amount,currency:money.currency,usdt:money.usdt,quantity:money.quantity,unit:money.unit}:null}};
 }
 // Idempotency hash input: secrets are replaced by their digest, so the journal never holds them.
@@ -167,7 +168,7 @@ export async function commitStockImport(scope:ActorScope,input:ImportInput&{key:
       if(money){
         try{await authorizeTeamCash(current,'COSTS',true,tx);}catch{throw new ProxyDomainError('FORBIDDEN','Cần quyền ghi Chi phí (thu chi USDT) để ghi tiền mua; hoặc nhập không giá rồi ghi chi phí sau');}
         await assertPeriodOpen(tx,scope.projectId,date,money.currency);
-        const row=await tx.costRecord.create({data:{projectId:scope.projectId,code:'CP-'+input.key,date,amount:money.amount,total:money.amount,currency:money.currency,category:input.kind==='PAYPAL'?'PAYPAL':'GMAIL',note:costNote(code,purchase.source,money.quantity,input.kind,input.loginType),usdtRate:money.rate,usdtAmount:money.usdt,...fxOf(current,purchase.p2pQuoteToken,money),profitTreatment:'CASH_COST',businessManaged:true}});
+        const row=await tx.costRecord.create({data:{projectId:scope.projectId,code:'CP-'+input.key,date,amount:money.amount,total:money.amount,currency:money.currency,category:input.kind==='PAYPAL'?'PAYPAL':'GMAIL',note:costNote(code,purchase.source,money.quantity,input.kind,input.loginType),usdtRate:money.rate,usdtAmount:money.usdt,...fxOf(current,purchase.p2pQuoteToken,money,purchase),profitTreatment:'CASH_COST',businessManaged:true}});
         await images.remember('COST',row.id,true);costId=row.id;
       }
       batch=await tx.accountPurchaseBatch.create({data:{projectId:scope.projectId,kind:input.kind,loginType:input.kind==='LOGIN'?input.loginType:null,code,source:purchase.source?.trim()||null,purchasedAt:date,priceMode:money?purchase.priceMode:'NONE',unitPrice:money?.unit??null,totalPaid:money?.amount??null,currency:money?.currency??(purchase.currency?cashCurrency(purchase.currency):null),lineCount:rows.length,paidQuantity:money?.quantity??purchase.quantity??null,costRecordId:costId,notes:purchase.notes?.trim()||null,createdById:current.userId}});
@@ -227,14 +228,14 @@ export async function addPaypalEmails(scope:ActorScope,input:{paypalId:string;em
   },db);
 }
 // A batch received without a price gets its actual payment later, once (total paid, or unit price × quantity bought). A batch whose cost was voided in Chi phí may be recorded again.
-export async function recordBatchCost(scope:ActorScope,input:{batchId:string;expectedRevision:number;priceMode:'UNIT'|'TOTAL';amount:string;quantity?:number|null;currency:string;rate?:string|null;date?:string|null;p2pQuoteToken?:string|null;key:string},db:PrismaClient=prisma){
+export async function recordBatchCost(scope:ActorScope,input:{batchId:string;expectedRevision:number;priceMode:'UNIT'|'TOTAL';amount:string;quantity?:number|null;currency:string;rate?:string|null;paypalVndRate?:string;vndUsdtRate?:string;date?:string|null;p2pQuoteToken?:string|null;key:string},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'ACCOUNT_BATCH_COST',module:'COSTS',cash:true},async(tx,images)=>{
     const batch=await tx.accountPurchaseBatch.findFirst({where:{id:input.batchId,projectId:scope.projectId,archivedAt:null},include:{costRecord:true}});if(!batch)throw new ProxyDomainError('NOT_FOUND');
     if(batch.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','Lô vừa được sửa; tải lại');
     if(batch.costRecord&&!batch.costRecord.voidedAt)throw new ProxyDomainError('INVALID_INPUT','Lô đã ghi chi phí; sửa khoản chi ở trang Chi phí, không ghi thêm');
     const money=batchTotal(input)!,date=input.date?dayDate(input.date):batch.purchasedAt;
     await assertPeriodOpen(tx,scope.projectId,date,money.currency);
-    const cost=await tx.costRecord.create({data:{projectId:scope.projectId,code:'CP-'+input.key,date,amount:money.amount,total:money.amount,currency:money.currency,category:batch.kind==='PAYPAL'?'PAYPAL':'GMAIL',note:costNote(batch.code,batch.source,money.quantity??batch.paidQuantity,batch.kind as StockKind,batch.loginType),usdtRate:money.rate,usdtAmount:money.usdt,...fxOf(scope,input.p2pQuoteToken,money),profitTreatment:'CASH_COST',businessManaged:true}});
+    const cost=await tx.costRecord.create({data:{projectId:scope.projectId,code:'CP-'+input.key,date,amount:money.amount,total:money.amount,currency:money.currency,category:batch.kind==='PAYPAL'?'PAYPAL':'GMAIL',note:costNote(batch.code,batch.source,money.quantity??batch.paidQuantity,batch.kind as StockKind,batch.loginType),usdtRate:money.rate,usdtAmount:money.usdt,...fxOf(scope,input.p2pQuoteToken,money,input),profitTreatment:'CASH_COST',businessManaged:true}});
     await images.remember('COST',cost.id,true);await images.remember('ACCOUNT_BATCH',batch.id);
     await tx.accountPurchaseBatch.update({where:{id:batch.id},data:{costRecordId:cost.id,priceMode:input.priceMode,unitPrice:money.unit,totalPaid:money.amount,paidQuantity:money.quantity??batch.paidQuantity,currency:money.currency,revision:{increment:1}}});
     return {id:batch.id,costId:cost.id};

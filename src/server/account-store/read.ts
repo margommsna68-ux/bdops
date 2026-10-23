@@ -1,6 +1,6 @@
 import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
-import {CashDecimal} from '../business-management/usdt-money';
+import {CashDecimal,readPaypalCostRates} from '../business-management/usdt-money';
 import {dayText} from '../business-management/money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
@@ -24,7 +24,7 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
   const [gm,pp,batches,legacyVms]=await Promise.all([
     logins?db.gmailAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,email:true,loginType:true,status:true,notes:true,recoveryEmail:true,phone:true,twoFaLink:true,smsLink:true,revision:true,createdAt:true,archivedAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}},paypalEmail:{select:{id:true,email:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
     paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,archivedAt:true,_count:{select:{gmails:true}},emails:{select:{id:true,email:true,isPrimary:true,archivedAt:true,usedEarnAppId:true,reviewHold:true,reviewNote:true,createdAt:true,revision:true,earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{isPrimary:'desc'},{createdAt:'asc'},{email:'asc'}]},earnApps:{where:{paypalEmailId:null},select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
-    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),// newest purchase date first; same day: the purchase created last first
+    db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true,fxNote:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),// newest purchase date first; same day: the purchase created last first
    
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
   ]);
@@ -65,8 +65,8 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
     cost:b.costRecord&&!b.costRecord.voidedAt?'RECORDED' as const:b.costRecord?'VOIDED' as const:'NONE' as const,costId:money?b.costRecord?.id??null:null,
     costLink:money&&b.costRecord&&!b.costRecord.voidedAt?{id:b.costRecord.id,month:dayText(b.costRecord.date).slice(0,7)}:null,
     money:money?(()=>{const p=paidOf(b),original=b.totalPaid?{total:b.totalPaid.toString(),currency:b.currency,unit:b.unitPrice?.toString()??null,quantity:b.paidQuantity}:null;
-      if(p.c)return {priceMode:b.priceMode,total:p.c.amount.toString(),currency:p.c.currency,rate:p.c.usdtRate?.toString()??null,usdt:p.c.usdtAmount?.toString()??null,unit:p.unit,adjusted:!p.same,original:p.same?null:original};
-      return original?{priceMode:b.priceMode,total:null,currency:null,rate:null,usdt:null,unit:null,adjusted:false,original}:null;})():null}));
+      if(p.c)return {...readPaypalCostRates(p.c.fxNote),priceMode:b.priceMode,total:p.c.amount.toString(),currency:p.c.currency,rate:p.c.usdtRate?.toString()??null,usdt:p.c.usdtAmount?.toString()??null,unit:p.unit,adjusted:!p.same,original:p.same?null:original};
+      return original?{paypalVndRate:null,vndUsdtRate:null,priceMode:b.priceMode,total:null,currency:null,rate:null,usdt:null,unit:null,adjusted:false,original}:null;})():null}));
   // Old data that conflicts with the new rules: listed for a person to check; never merged, moved or deleted automatically. Each item
   // belongs to one account kind (shown with that kind), has a short reason and opens the place to handle it: the VM, the account
   // (searched in its own table) or the purchase in Lịch sử nhập kho. Account states (locked, PayPal limit, stopped) are not listed here.

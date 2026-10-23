@@ -380,3 +380,12 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   `.runtime/review-stock-detail-state-20261020.test.tsx` đỏ 3/3 → xanh 3/3; `.runtime/review-stock-delete-apple-20261020.test.ts` vẫn xanh 2/2.
   Phát hành: commit 6bc27f9, backup host fa1d5724, deploy c896cc53, không migration; host chỉ đọc trước / sau giống hệt.
   Evidence docs/superpowers/evidence/2026-10-20-stock-detail-state/.
+
+## 23/10/2026 — VND, USD PayPal, USDT khi nhập chi phí
+
+- Lần mua mới / Ghi chi phí của lô / Chi phí / giá gói mới chỉ chọn VND, USD PayPal, USDT. Mã nội bộ USD PayPal là PPUSD; không thay đổi USD của sổ tiền PayPal hay các khoản lịch sử. Nguồn collector cũ có USD giữ nguyên USD, không tự chuyển đơn vị.
+- USD PayPal hỏi hai tỷ giá riêng: 1 USD PayPal = ? VND (người dùng nhập khi trả, không mặc định 24.000); 1 USDT = ? VND (Binance P2P BUY VND có nguồn/giờ, hoặc người dùng nhập tay).
+- USDT = tiền USD PayPal × VND/USD PayPal ÷ VND/USDT. Tính Decimal theo chuỗi gốc, làm tròn 6 số lẻ cuối; không làm tròn tỷ giá hiệu dụng rồi nhân ngược. Ví dụ 250 × 24.000 ÷ 25.940 = 231,303007 USDT.
+- Hai tỷ giá được lưu trong CostRecord.fxNote dạng JSON {version:1,kind:PAYPAL_VND,paypalVndRate,vndUsdtRate,reason}, cùng ảnh COST/lịch sử/hoàn tác hiện có; usdtRate là tỷ giá hiệu dụng để tương thích báo cáo cũ. Không cần migration. Nhập lại/đổi chế độ đơn giá-tổng/nháp không mất tỷ giá.
+- Quote của PPUSD là quote VND, token kiểm cùng user/project/rate và hạn10 phút. Sửa tỷ giá PayPal giữ quote VND; sửa tỷ giá VND/USDT bỏ quote; đổi đồng tiền bỏ cả hai. Không tự lấy tỷ giá mới lúc lưu, không đánh đồng USD PayPal=USDT.
+- Chi phí đã trừ trước khi team nhận vẫn giữ cả hai tỷ giá nếu nhập; không trừ hai lần. Lỗi/thiếu tỷ giá chặn lưu rõ tại form/backend.

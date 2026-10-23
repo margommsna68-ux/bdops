@@ -9,14 +9,31 @@ function positive(text:string,integers:number,fraction:number){
 export function cashCurrency(text:string){const c=text.trim().toUpperCase();if(!/^[A-Z]{3,8}$/.test(c))invalid();return c;}
 export function parseOriginalMoney(text:string){return positive(text,16,8).toFixed(8);}
 export function parseUsdt(text:string){return positive(text,18,6).toFixed(6);}
-export function normalizeCostMoney(input:{amount:string;currency:string;rate?:string}){
+export type PaypalCostRates={paypalVndRate?:string;vndUsdtRate?:string};
+export function normalizeCostMoney(input:{amount:string;currency:string;rate?:string}&PaypalCostRates){
  const currency=cashCurrency(input.currency),amount=parseOriginalMoney(input.amount);
+ if(currency==='PPUSD'){
+  if(!input.paypalVndRate||!input.vndUsdtRate)throw new ProxyDomainError('INVALID_INPUT','Nhập hai tỷ giá: VND / USD PayPal và VND / USDT');
+  const pp=positive(input.paypalVndRate,12,12),vnd=positive(input.vndUsdtRate,12,12),rate=vnd.div(pp).toFixed(12);positive(rate,12,12);
+  if(input.rate&&!new CashDecimal(input.rate).eq(rate))throw new ProxyDomainError('INVALID_INPUT','Tỷ giá trực tiếp không khớp hai tỷ giá đã nhập');
+  const usdt=new CashDecimal(amount).mul(pp).div(vnd).toFixed(6);parseUsdt(usdt);
+  return {amount,currency,rate,usdt};
+ }
  if(currency!=='USDT'&&!input.rate)invalid();
  const rate=positive(input.rate??'1',12,12);
  if(currency==='USDT'&&!rate.eq(1))invalid();
  const usdt=new CashDecimal(amount).div(rate).toFixed(6);
  parseUsdt(usdt);
  return {amount,currency,rate:rate.toFixed(12),usdt};
+}
+// Versioned metadata in the existing fxNote column is included in COST journal images/undo.
+export function paypalCostFxNote(input:PaypalCostRates,reason?:string){
+ const paypalVndRate=positive(input.paypalVndRate||'',12,12).toFixed(12),vndUsdtRate=positive(input.vndUsdtRate||'',12,12).toFixed(12);
+ return JSON.stringify({version:1,kind:'PAYPAL_VND',paypalVndRate,vndUsdtRate,reason:reason||null});
+}
+export function readPaypalCostRates(note:string|null|undefined):{paypalVndRate:string|null;vndUsdtRate:string|null}{
+ try{const p=JSON.parse(note||'');if(p.version===1&&p.kind==='PAYPAL_VND')return {paypalVndRate:positive(p.paypalVndRate,12,12).toFixed(12),vndUsdtRate:positive(p.vndUsdtRate,12,12).toFixed(12)};}catch{}
+ return {paypalVndRate:null,vndUsdtRate:null};
 }
 export function allocateUsdt(net:string,partners:{name:string;percentage:string}[]){
  if(!/^-?(0|[1-9]\d{0,19})(\.\d{1,6})?$/.test(net)||!partners.length||partners.length>100||new Set(partners.map(p=>p.name.trim())).size!==partners.length)invalid();

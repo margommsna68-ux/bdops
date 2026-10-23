@@ -14,13 +14,13 @@ import {formatMoney,parseViNumber,roundDecimal,viInput,viNumber} from '@/lib/mon
 //   time, expires visibly (the form blocks Nhập instead of changing the converted amount at the click) and is dropped when the rate
 //   is edited or the currency changes.
 export type Quote={rate:string;token:string;fetchedAt:string;side:'BUY'|'SELL'};
-export interface PurchaseState {mode:'TOTAL'|'UNIT';total:string;unit:string;quantity:string;currency:string;rate:string;quote:Quote|null;held?:boolean}
-export const emptyPurchase=():PurchaseState=>({mode:'TOTAL',total:'',unit:'',quantity:'',currency:'USDT',rate:'',quote:null});
+export interface PurchaseState {mode:'TOTAL'|'UNIT';total:string;unit:string;quantity:string;currency:string;rate:string;paypalVndRate?:string;vndUsdtRate?:string;quote:Quote|null;held?:boolean}
+export const emptyPurchase=():PurchaseState=>({mode:'TOTAL',total:'',unit:'',quantity:'',currency:'USDT',rate:'',paypalVndRate:'',vndUsdtRate:'',quote:null});
 /** The server accepts a quote for 10 minutes; the form treats it as expired a little earlier so a click never races the limit. */
 export const QUOTE_TTL_MS=9.5*60000;
 export const MAX_QUANTITY=100000;
-export interface PurchasePayload {priceMode:'TOTAL'|'UNIT';amount:string;quantity:number|null;currency:string;rate:string|null;p2pQuoteToken:string|null}
-type Field='total'|'unit'|'quantity'|'rate';
+export interface PurchasePayload {priceMode:'TOTAL'|'UNIT';amount:string;quantity:number|null;currency:string;rate:string|null;paypalVndRate?:string;vndUsdtRate?:string;p2pQuoteToken:string|null}
+type Field='total'|'unit'|'quantity'|'rate'|'currency'|'paypalVndRate'|'vndUsdtRate';
 const sameNumber=(a:string,b:string)=>{try{return new CashDecimal(a).eq(b);}catch{return false;}};
 const strip=(v:string)=>v.includes('.')?v.replace(/\.?0+$/,''):v;
 function quantityOf(s:PurchaseState):{value:number|null;error:string|null}{
@@ -47,6 +47,7 @@ export function readPurchase(s:PurchaseState,unitWord:string,now=Date.now()){
   const priced=money.value!==null||!!money.error||kept;
   const empty={errors,priced,payload:null as PurchasePayload|null,total:null as string|null,usdt:null as string|null,formula:null as string|null,usdtText:null as string|null,rateText:null as string|null,rateSource:'',allocation:null as string|null,quoteExpired:false,unitHint:null as string|null};
   if(!priced)return empty;
+  if(!['VND','PPUSD','USDT'].includes(cur))errors.currency='Chọn VND, USD PayPal hoặc USDT cho lần mua mới';
   if(s.mode==='TOTAL'&&s.held){const t=money.value;
     empty.unitHint=!t?`Sửa Tổng tiền thực trả trước khi tính giá mỗi ${unitWord}.`
       :qty.value===null?`Cần số ${unitWord} thực mua để tính giá mỗi ${unitWord}; giữ Tổng tiền thực trả ${formatMoney(t,cur,{exact:true})}.`
@@ -54,17 +55,20 @@ export function readPurchase(s:PurchaseState,unitWord:string,now=Date.now()){
   if(s.mode==='UNIT'&&s.held)empty.unitHint=!money.value?`Sửa giá mỗi ${unitWord} trước khi chuyển sang Tổng tiền thực trả.`
     :qty.value===null?`Cần số ${unitWord} thực mua hợp lệ để tính tổng; giữ giá mỗi ${unitWord} ${formatMoney(money.value,cur,{exact:true})}.`:null;
   if(s.mode==='UNIT'&&qty.value===null&&!qty.error)errors.quantity='Giá mỗi '+unitWord+' cần số lượng thực mua (không lấy số email hay số dòng dán)';
-  let rate:string|null=null;
-  if(cur!=='USDT'){const r=positive(s.rate,12,vnd(s));if(r.error)errors.rate=r.error;else if(r.value===null)errors.rate='Nhập tỷ giá thực trả: 1 USDT = ? '+cur;else rate=r.value;}
-  const quote=s.quote&&rate&&sameNumber(s.quote.rate,rate)?s.quote:null,quoteExpired=!!quote&&now-Date.parse(quote.fetchedAt)>QUOTE_TTL_MS;
+  let rate:string|null=null,paypalVndRate:string|null=null,vndUsdtRate:string|null=null;
+  if(cur==='PPUSD'){
+    for(const field of ['paypalVndRate','vndUsdtRate'] as const){const r=positive(s[field]??'',12,true);if(r.error)errors[field]=r.error;else if(r.value===null)errors[field]='Nhập tỷ giá thực trả';else if(field==='paypalVndRate')paypalVndRate=r.value;else vndUsdtRate=r.value;}
+  }
+  else if(cur!=='USDT'){const r=positive(s.rate,12,vnd(s));if(r.error)errors.rate=r.error;else if(r.value===null)errors.rate='Nhập tỷ giá thực trả: 1 USDT = ? '+cur;else rate=r.value;}
+  const quote=s.quote&&(cur==='PPUSD'?vndUsdtRate:rate)&&sameNumber(s.quote.rate,(cur==='PPUSD'?vndUsdtRate:rate)!)?s.quote:null,quoteExpired=!!quote&&now-Date.parse(quote.fetchedAt)>QUOTE_TTL_MS;
   const total=money.value===null?null:s.mode==='UNIT'?(qty.value!==null?product(money.value,qty.value):null):money.value;
-  let usdt:string|null=null;if(total&&(cur==='USDT'||rate)){try{usdt=normalizeCostMoney({amount:total,currency:cur,rate:rate??undefined}).usdt;}catch{errors.rate=errors.rate||'Số tiền quy đổi quá nhỏ hoặc tỷ giá không hợp lệ';}}
+  let usdt:string|null=null;if(total&&(cur==='USDT'||rate||(paypalVndRate&&vndUsdtRate))){try{usdt=normalizeCostMoney({amount:total,currency:cur,rate:rate??undefined,...(cur==='PPUSD'?{paypalVndRate:paypalVndRate!,vndUsdtRate:vndUsdtRate!}:{})}).usdt;}catch{const field=cur==='PPUSD'?'vndUsdtRate':'rate';errors[field]=errors[field]||'Số tiền quy đổi quá nhỏ hoặc tỷ giá không hợp lệ';}}
   const formula=s.mode==='UNIT'&&total&&qty.value!==null?`${qty.value.toLocaleString('vi-VN')} ${unitWord} × ${formatMoney(money.value!,cur,{exact:true})} = ${formatMoney(total,cur,{exact:true})}`:null;
   const allocation=s.mode==='TOTAL'&&total&&qty.value!==null?`≈ ${formatMoney(strip(roundDecimal(new CashDecimal(total).div(qty.value).toFixed(8),2)),cur,{exact:true})} / ${unitWord} (tham khảo)`:null;
   const ok=!Object.keys(errors).length&&!!total&&!quoteExpired;
   return {...empty,total,usdt,formula,allocation,quoteExpired,
-    usdtText:cur!=='USDT'&&usdt?'≈ '+formatMoney(usdt,'USDT'):null,rateText:rate?`1 USDT = ${viNumber(rate)} ${cur}`:null,rateSource:quote?quoteLabel(quote):rate?'Nhập tay':'',
-    payload:ok?{priceMode:s.mode,amount:money.value!,quantity:qty.value,currency:cur,rate:cur==='USDT'?null:rate,p2pQuoteToken:quote?.token??null}:null};
+    usdtText:cur!=='USDT'&&usdt?'≈ '+formatMoney(usdt,'USDT'):null,rateText:cur==='PPUSD'&&paypalVndRate&&vndUsdtRate?`1 USD PayPal = ${viNumber(paypalVndRate)} VND · 1 USDT = ${viNumber(vndUsdtRate)} VND`:rate?`1 USDT = ${viNumber(rate)} ${cur}`:null,rateSource:quote?quoteLabel(quote):(rate||vndUsdtRate)?'Nhập tay':'',
+    payload:ok?{priceMode:s.mode,amount:money.value!,quantity:qty.value,currency:cur,rate:cur==='USDT'?null:rate,...(cur==='PPUSD'?{paypalVndRate:paypalVndRate!,vndUsdtRate:vndUsdtRate!}:{}),p2pQuoteToken:quote?.token??null}:null};
 }
 // Switching keeps the money and the intent of what is shown. Unit → total carries the exact unit × quantity; total → unit fills the
 // exact quotient (every decimal, written so it reads back unchanged). When the amount shown cannot be converted exactly (unit price or
@@ -89,8 +93,8 @@ export function editAmount(s:PurchaseState,text:string):PurchaseState{
   if(!text.trim())return {...s,total:'',unit:'',held:false};
   return s.mode==='TOTAL'?{...s,total:text}:{...s,unit:text};
 }
-export const changeCurrency=(s:PurchaseState,currency:string):PurchaseState=>({...s,currency,rate:'',quote:null});
-export const applyQuote=(s:PurchaseState,q:Quote):PurchaseState=>({...s,rate:viInput(strip(q.rate),{vnd:vnd(s)}),quote:q});
+export const changeCurrency=(s:PurchaseState,currency:string):PurchaseState=>({...s,currency,rate:'',paypalVndRate:'',vndUsdtRate:'',quote:null});
+export const applyQuote=(s:PurchaseState,q:Quote):PurchaseState=>({...s,[s.currency==='PPUSD'?'vndUsdtRate':'rate']:viInput(strip(q.rate),{vnd:vnd(s)||s.currency==='PPUSD'}),quote:q});
 export function editRate(s:PurchaseState,text:string):PurchaseState{
-  const v=parseViNumber(text,{fraction:12,vnd:vnd(s)}).value;return {...s,rate:text,quote:s.quote&&v&&sameNumber(s.quote.rate,v)?s.quote:null};
+  const v=parseViNumber(text,{fraction:12,vnd:vnd(s)||s.currency==='PPUSD'}).value;return {...s,[s.currency==='PPUSD'?'vndUsdtRate':'rate']:text,quote:s.quote&&v&&sameNumber(s.quote.rate,v)?s.quote:null};
 }
