@@ -1686,6 +1686,18 @@ model OpsRateBucket {
   count       Int
 }
 
+// Bind a batch key to the exact request even if none of its items need approval.
+// No payload, result or credential is stored here; individual commands own replay.
+model OpsBatchKey {
+  key         String   @id
+  tokenId     String
+  projectId   String
+  payloadHash String
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+}
+
 // Audit of every API call that reached a decision (allowed fields only: never headers, body, PIN or token).
 model OpsAudit {
   id         String   @id @default(cuid())
@@ -1761,6 +1773,8 @@ model OpsApproval {
   decisionNote      String?
   consumedAt        DateTime?
   consumedRequestId String?
+  // CLI confirmation with the ADMIN's TOTP (23/10/2026 evening): wrong codes per approval; 5 → LOCKED (ask again with a new key).
+  confirmFailed     Int       @default(0)
 
   @@index([projectId, status, requestedAt])
   @@index([requestKey, status])

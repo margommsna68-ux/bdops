@@ -12,14 +12,16 @@ import {activeJobs,addVmOpsNote,claimVmJob,finishPrepareJob,finishProxyJob,jobVi
 import {setVmStatus} from '../vm-ops/ops';
 import {runWithOpsAuth} from './context';
 import {hasAmounts,observeVmSdks,OBSERVE_MAX} from '../vm-management/sdk-observe';
-import {hit,peek} from './limits';
+import {hit,peek,LIMITS} from './limits';
 import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 import {canonicalAmount} from '@/lib/sdk-money';
 import {normalizeSdk} from '../vm-management/sdk-parse';
 import {vmMoneyState} from '@/lib/vm-money';
 import {maskSdk} from '@/lib/sdk-mask';
-import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf} from './approvals';
+import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
+import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount} from './ai-accounts';
+import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
@@ -44,12 +46,25 @@ interface Route {method:'GET'|'POST';path:RegExp;scope:OpsScope|null;action:stri
 const ID='([A-Za-z0-9_-]{1,64})';
 const routes:Route[]=[
   {method:'GET',path:/^me$/,scope:null,action:'ME',run:me},
+  // 23/10/2026 evening: the AI's own approvals — read, and confirm with the ADMIN's TOTP typed at the CLI; a batch of commands.
+  {method:'GET',path:new RegExp('^approvals/'+ID+'$'),scope:'READ',action:'APPROVAL',run:approvalDetail},
+  {method:'POST',path:new RegExp('^approvals/'+ID+'/confirm$'),scope:null,action:'APPROVAL_CONFIRM',run:approvalConfirm},
+  {method:'POST',path:/^batch$/,scope:null,action:'BATCH',run:async()=>{throw fail('INTERNAL','batch runs through runBatch');}},
   {method:'GET',path:/^projects$/,scope:'READ',action:'PROJECTS',run:projects},
   {method:'GET',path:/^servers$/,scope:'READ',action:'SERVERS',run:servers},
   {method:'GET',path:/^vms$/,scope:'READ',action:'VMS',run:vms},
   {method:'GET',path:/^vms\/resolve$/,scope:'READ',action:'VM_RESOLVE',run:resolveVm},
   {method:'GET',path:new RegExp('^vms/'+ID+'$'),scope:'READ',action:'VM',run:vmDetail},
   {method:'GET',path:/^sdks$/,scope:'READ',action:'SDK_LOOKUP',run:sdkLookup},
+  {method:'GET',path:/^earnapp-accounts$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_LIST',run:accountList},
+  {method:'POST',path:/^earnapp-accounts\/hold$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_HOLD',run:accountHold},
+  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/credentials$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_CREDENTIALS',run:accountCredentials,approval:true},
+  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/used$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_USED',run:accountUsed},
+  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/release$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_RELEASE',run:accountRelease},
+  {method:'GET',path:/^proxies$/,scope:'READ',action:'PROXY_STOCK',run:proxyStock},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-assign$'),scope:'VM_OPS',action:'PROXY_ASSIGN',run:proxyAssign},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-assign$'),scope:'VM_OPS',action:'SDK_ASSIGN',run:sdkAssign},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-linked$'),scope:'VM_OPS',action:'SDK_LINKED',run:sdkLinked},
   {method:'GET',path:new RegExp('^earnapp-accounts/'+ID+'$'),scope:'READ',action:'EARNAPP',run:earnAppDetail},
   {method:'GET',path:/^paypal\/suggest$/,scope:'PAYOUT',action:'PAYPAL_SUGGEST',run:paypalSuggest},
   {method:'GET',path:/^withdrawals$/,scope:'READ',action:'WITHDRAWALS',run:withdrawals},
@@ -112,8 +127,10 @@ export async function handleOpsRequest(req:Request,path:string,db:PrismaClient=p
     if(row.expiresAt<new Date())throw await denied('TOKEN_EXPIRED','Token đã hết hạn');
     if(!ipAllowed(ip,row.allowedIps))throw fail('FORBIDDEN','Địa chỉ gọi không nằm trong danh sách IP của token');
     if(!await userActive(db,row.userId))throw fail('FORBIDDEN','Tài khoản của token đang bị khoá hoặc không còn đăng nhập được');
-    // 2. How often.
+    // 2. How often. A batch is one write hit plus its own bucket (10 / minute); its items are not counted one by one.
+    const isBatch=route?.action==='BATCH';
     const rate=await hit(db,write?'write':'read',row.id);if(rate.over)throw fail('RATE_LIMITED','Gọi quá nhanh; thử lại sau',undefined,rate.retryAfter);
+    if(isBatch){const b=await hit(db,'batch',row.id);if(b.over)throw fail('RATE_LIMITED','Quá nhiều lô trong một phút; thử lại sau',undefined,b.retryAfter);}
     if(!row.lastUsedAt||Date.now()-row.lastUsedAt.getTime()>60000||row.lastUsedIp!==ip)await db.opsToken.update({where:{id:row.id},data:{lastUsedAt:new Date(),lastUsedIp:ip}}).catch(()=>undefined);
     // 3. What the token allows (the services then check the user's own rights).
     if(!route)throw fail('NOT_FOUND','Không có endpoint này trong API vận hành');
@@ -121,31 +138,105 @@ export async function handleOpsRequest(req:Request,path:string,db:PrismaClient=p
     let body:unknown=null,key:string|null=null;
     if(write){
       key=req.headers.get('idempotency-key');if(!key||!KEY.test(key))throw fail('VALIDATION','Lệnh ghi cần Idempotency-Key (8–100 ký tự A-Z a-z 0-9 . _ : -)');
-      const text=await req.text();if(text.length>20000)throw fail('VALIDATION','Nội dung quá lớn');
+      const text=await req.text();if(text.length>(isBatch?400000:20000))throw fail('VALIDATION','Nội dung quá lớn');
       try{body=JSON.parse(text||'{}');}catch{throw fail('VALIDATION','Nội dung phải là JSON');}
       const projectId=(body as {projectId?:unknown})?.projectId;audit.projectId=typeof projectId==='string'?projectId.slice(0,64):null;
       // 4. (23/10/2026) No PIN for the AI: the token is the credential; critical commands wait for an ADMIN's 2FA approval instead.
     }
-    const c:Ctx={db,requestId,ip,token,url:new URL(req.url),body,key,audit};
-    let approval:{id:string}|null=null;
-    if(write&&route.approval){
-      const pid=(body as {projectId?:unknown})?.projectId;
-      if(typeof pid!=='string'||!row.projectIds.includes(pid))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
-      const hash=payloadHashOf(method,path,body),summary=await approvalSummary(db,pid,route.action,params,body as Record<string,unknown>);
-      const g=await gateApproval(db,{projectId:pid,tokenId:row.id,userId:row.userId,action:route.action,method,path,objectId:params[0]??null,requestKey:serviceKey(c,pid),payloadHash:hash,summary});
-      if(!g.replay)approval=g.approval;
-    }
-    const data=write?await runWithOpsAuth({tokenId:row.id,userId:row.userId,operation:route.scope!},()=>route.run(c,params)):await route.run(c,params);
-    if(approval)await consumeApproval(db,approval.id,requestId);
-    return done(200,audit.replay?'REPLAY':'OK',{ok:true,data,error:null});
+    const caller:CallerRow={row,token,ip,requestId,url:new URL(req.url)};
+    if(isBatch){const out=await runBatch(db,caller,body,key!);Object.assign(audit,out.audit);return done(out.status,out.result,out.body);}
+    const out=await executeRoute(db,caller,route,params,method,path,body,key,{approvalHandled:false,approved:false});
+    Object.assign(audit,out.audit);
+    return done(out.status,out.result,out.body,out.headers);
   }catch(e){
-    if(e instanceof ApprovalHold)return error(fail(e.code,e.message,e.details));
-    if(e instanceof OpsError)return error(e);
-    if(e instanceof ProxyDomainError)return error(fromDomain(e));
-    if(e instanceof z.ZodError)return error(fail('VALIDATION','Dữ liệu chưa hợp lệ',{fields:e.issues.slice(0,10).map(i=>({path:i.path.join('.'),message:i.message}))}));
-    console.error('ops-api',requestId,action,e instanceof Error?e.name:'error');
-    return error(fail('INTERNAL','Lỗi máy chủ; dùng lại cùng Idempotency-Key để thử lại an toàn'));
+    const err=toOpsError(e,requestId,action);
+    return error(err);
   }
+}
+// Every failure of a command becomes one OpsError (the envelope's error.code); unknown failures are INTERNAL.
+function toOpsError(e:unknown,requestId:string,action:string):OpsError{
+  if(e instanceof ApprovalHold)return fail(e.code,e.message,e.details);
+  if(e instanceof OpsError)return e;
+  if(e instanceof ProxyDomainError)return fromDomain(e);
+  if(e instanceof z.ZodError)return fail('VALIDATION','Dữ liệu chưa hợp lệ',{fields:e.issues.slice(0,10).map(i=>({path:i.path.join('.'),message:i.message}))});
+  console.error('ops-api',requestId,action,e instanceof Error?e.name:'error');
+  return fail('INTERNAL','Lỗi máy chủ; dùng lại cùng Idempotency-Key để thử lại an toàn');
+}
+interface CallerRow {row:{id:string;userId:string;projectIds:string[];scopes:string[]};token:Ctx['token'];ip:string|null;requestId:string;url:URL}
+interface RouteOutcome {status:number;result:string;body:unknown;headers:Record<string,string>;audit:Ctx['audit']}
+// Only these critical routes persist a business result before replying. A prior result may be replayed after an approval expires;
+// non-journaled secret reads must never use another command's journal entry to bypass approval.
+async function committedCritical(c:Ctx,route:Route){
+ if(!['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT'].includes(route.action))return false;
+ const projectId=(c.body as {projectId?:string})?.projectId;if(!projectId||!c.token.projectIds.includes(projectId))return false;
+ return !!await c.db.operationJournal.findFirst({where:{projectId,commandKey:serviceKey(c,projectId),actorId:c.token.userId,resultCipher:{not:null}},select:{id:true}});
+}
+// One command (a plain request, or one item of a batch): the approval gate, the handler, the consume. Never writes the audit row
+// (the caller does, once per command). gate.approvalHandled = a batch already held/approved this item as part of its approval.
+async function executeRoute(db:PrismaClient,caller:CallerRow,route:Route,params:string[],method:string,path:string,body:unknown,key:string|null,gate:{approvalHandled:boolean;approved:boolean}):Promise<RouteOutcome>{
+  const audit:Ctx['audit']={};const pid=(body as {projectId?:unknown})?.projectId;audit.projectId=typeof pid==='string'?pid.slice(0,64):null;
+  const c:Ctx={db,requestId:caller.requestId,ip:caller.ip,token:caller.token,url:caller.url,body,key,audit};
+  const write=method==='POST';
+  try{
+    if(route.scope&&!caller.row.scopes.includes(route.scope))throw fail('FORBIDDEN','Token không được cấp '+route.scope);
+    let approval:{id:string}|null=null;
+    if(write&&route.approval&&!gate.approvalHandled){
+      if(typeof pid!=='string'||!caller.row.projectIds.includes(pid))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
+      const hash=payloadHashOf(method,path,body),summary=await approvalSummary(db,pid,route.action,params,body as Record<string,unknown>);
+      try{const g=await gateApproval(db,{projectId:pid,tokenId:caller.row.id,userId:caller.row.userId,action:route.action,method,path,objectId:params[0]??null,requestKey:serviceKey(c,pid),payloadHash:hash,summary});if(!g.replay)approval=g.approval;}
+      catch(e){if(!(e instanceof ApprovalHold)||!await committedCritical(c,route))throw e;}
+    }
+    if(write&&route.approval&&gate.approvalHandled&&!gate.approved&&!await committedCritical(c,route))throw new ApprovalHold('APPROVAL_REQUIRED','Mục này nằm trong lô đang chờ ADMIN duyệt',{});
+    const data=write?await runWithOpsAuth({tokenId:caller.row.id,userId:caller.row.userId,operation:route.scope},()=>route.run(c,params)):await route.run(c,params);
+    if(approval)await consumeApproval(db,approval.id,caller.requestId);
+    return {status:200,result:audit.replay?'REPLAY':'OK',body:{ok:true,data,error:null},headers:{},audit};
+  }catch(e){
+    const err=toOpsError(e,caller.requestId,route.action);
+    return {status:STATUS[err.code],result:err.code,body:{ok:false,data:null,error:{code:err.code,message:err.message,...(err.details?{details:err.details}:{})}},headers:err.retryAfter?{'retry-after':String(err.retryAfter)}:{},audit};
+  }
+}
+// ─── Batch (owner decision 23/10/2026 evening) ─────────────────────────────────────────────────────────────────────────────
+// 1–100 write items in one request, run one after another with their own Idempotency-Key, scope, service key, audit and replay.
+// A failing item never stops the batch. Items that need an ADMIN's approval share ONE approval (hash of the whole batch): until it is
+// approved they answer 202 while the others run; after approval the retry of the same batch key runs them (done items replay).
+const BatchBody=z.object({projectId:z.string().min(1).max(64),items:z.array(z.object({method:z.literal('POST').default('POST'),path:z.string().min(1).max(200),body:z.object({}).passthrough().default({}),idempotencyKey:z.string().regex(KEY,'idempotencyKey 8–100 ký tự A-Z a-z 0-9 . _ : -')}).strict()).min(1).max(100)}).strict();
+async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKey:string):Promise<{status:number;result:string;body:unknown;audit:Ctx['audit']}>{
+  const b=BatchBody.parse(rawBody),audit:Ctx['audit']={projectId:b.projectId};
+  const c:Ctx={db,requestId:caller.requestId,ip:caller.ip,token:caller.token,url:caller.url,body:b,key:batchKey,audit};
+  await projectOf(c,b.projectId);
+  if(new Set(b.items.map(i=>i.idempotencyKey)).size!==b.items.length)throw fail('VALIDATION','Mỗi mục trong lô cần idempotencyKey riêng');
+  const key=serviceKey(c,b.projectId),hash=payloadHashOf('POST','batch',b);
+  await db.opsBatchKey.createMany({data:[{key,tokenId:caller.row.id,projectId:b.projectId,payloadHash:hash}],skipDuplicates:true});
+  const binding=await db.opsBatchKey.findUniqueOrThrow({where:{key}});
+  // serviceKey already binds the current user + project. A replacement token with the same CURRENT rights can recover results.
+  if(binding.payloadHash!==hash)throw fail('IDEMPOTENCY_CONFLICT','Idempotency-Key lô đã dùng cho nội dung khác');
+  const resolved=b.items.map((it,index)=>{
+    const path=it.path.replace(/^\//,''),route=routes.find(r=>r.method==='POST'&&r.path.test(path));
+    const problem=!route||route.action==='BATCH'||route.action==='APPROVAL_CONFIRM'?fail('VALIDATION','Không có lệnh ghi '+it.path+' trong lô'):route.scope&&!caller.row.scopes.includes(route.scope)?fail('FORBIDDEN','Token không được cấp '+route.scope):null;
+    if(it.body.projectId!==undefined&&it.body.projectId!==b.projectId)return {index,it,path,route,params:[],body:it.body,problem:fail('VALIDATION','Dự án của mục khác dự án của lô')};
+    return {index,it,path,route,params:route?path.match(route.path)!.slice(1):[],body:{...it.body,projectId:b.projectId},problem};
+  });
+  const needing=resolved.filter(r=>!r.problem&&r.route!.approval);
+  let approved=false,approvalInfo:Record<string,unknown>|null=null,approvalRow:{id:string}|null=null,hold:ApprovalHold|null=null;
+  if(needing.length){
+    const items=await Promise.all(needing.map(async r=>({index:r.index,path:r.path,...await approvalSummary(db,b.projectId,r.route!.action,r.params,r.body)})));
+    try{
+      const g=await gateApproval(db,{projectId:b.projectId,tokenId:caller.row.id,userId:caller.row.userId,action:'BATCH',method:'POST',path:'batch',objectId:null,requestKey:key,payloadHash:hash,summary:{action:'BATCH',label:'Lô '+b.items.length+' mục, '+needing.length+' mục cần duyệt',items}});
+      approved=true;if(!g.replay)approvalRow=g.approval;approvalInfo={approvalId:g.approval.id,status:g.replay?'CONSUMED':'APPROVED'};
+    }catch(e){if(e instanceof ApprovalHold){hold=e;approvalInfo={approvalId:e.details.approvalId,status:e.details.status??e.code,expiresAt:e.details.expiresAt??null,code:e.code,message:e.message};}else throw e;}
+  }
+  const results:{index:number;path:string;idempotencyKey:string;status:number;body:unknown}[]=[];
+  for(const r of resolved){
+    let out:RouteOutcome;
+    if(r.problem)out={status:STATUS[r.problem.code],result:r.problem.code,body:{ok:false,data:null,error:{code:r.problem.code,message:r.problem.message}},headers:{},audit:{}};
+    else if(hold&&r.route!.approval&&!await committedCritical({...c,body:r.body,key:r.it.idempotencyKey},r.route!))out={status:STATUS[hold.code],result:hold.code,body:{ok:false,data:null,error:{code:hold.code,message:hold.message,details:hold.details}},headers:{},audit:{}};
+    else out=await executeRoute(db,caller,r.route!,r.params,'POST',r.path,r.body,r.it.idempotencyKey,{approvalHandled:!!r.route!.approval,approved});
+    results.push({index:r.index,path:r.path,idempotencyKey:r.it.idempotencyKey,status:out.status,body:out.body});
+    await db.opsAudit.create({data:{requestId:caller.requestId,tokenId:caller.row.id,userId:caller.row.userId,projectId:b.projectId,action:r.route?.action??'UNKNOWN',objectId:out.audit.objectId??r.params[0]??null,ip:caller.ip,httpStatus:out.status,result:out.result,replay:!!out.audit.replay}}).catch(()=>undefined);
+  }
+  if(approvalRow&&needing.every(r=>results[r.index].status===200))await consumeApproval(db,approvalRow.id,caller.requestId);
+  const summary={ok:results.filter(r=>r.status===200).length,refused:results.filter(r=>r.status>=400).length,waiting:results.filter(r=>r.status===202).length};
+  return {status:summary.waiting?202:200,result:summary.waiting?'WAITING_APPROVAL':summary.refused?'PARTIAL':'OK',body:{ok:true,data:{batchKey,approval:approvalInfo,items:results,summary},error:null},audit};
 }
 // ─── Scope helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 // A project outside the token, or one the user is no longer a member of, is "not found" (nothing about other projects leaks).
@@ -176,7 +267,8 @@ async function me(c:Ctx){
   const list=await Promise.all(projects.map(async p=>{const can=await memberOps(c.db,u.id,p.id),m=await c.db.projectMember.findUniqueOrThrow({where:{userId_projectId:{userId:u.id,projectId:p.id}}});
     return {projectId:p.id,code:p.code,name:p.name,role:m.role,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'].includes(x)),
       effective:Object.fromEntries((OPS_SCOPES).map(s=>[s,can[s]&&c.token.scopes.includes(s)]))};}));
-  return {user:{id:u.id,username:u.username,name:u.name},token:{id:c.token.id,prefix:c.token.prefix,name:c.token.name,expiresAt:c.token.expiresAt.toISOString(),scopes:c.token.scopes},projects:list};
+  return {user:{id:u.id,username:u.username,name:u.name},token:{id:c.token.id,prefix:c.token.prefix,name:c.token.name,expiresAt:c.token.expiresAt.toISOString(),scopes:c.token.scopes},projects:list,
+    limits:{readPerMinute:LIMITS.read.max,writePerMinute:LIMITS.write.max,batchPerMinute:LIMITS.batch.max,batchMaxItems:100},approvalRequired:routes.filter(r=>r.approval).map(r=>r.action),pinRequired:false};
 }
 async function projects(c:Ctx){
   const rows=await c.db.project.findMany({where:{id:{in:c.token.projectIds},members:{some:{userId:c.token.userId}}},select:{id:true,code:true,name:true},orderBy:{name:'asc'}});
@@ -360,6 +452,17 @@ async function receipt(c:Ctx,[id]:string[]){
 const caller=(c:Ctx):OpsCaller=>({tokenId:c.token.id,tokenLabel:c.token.name+' ('+c.token.prefix+')'});
 // SDK codes leave the API masked (23/10/2026); only an approved `sdks/{id}/reveal` shows one in full.
 const maskJob=<T extends {sdkCode?:string|null}>(j:T)=>({...j,sdkCode:maskSdk(j.sdkCode)});
+const ApprovalConfirmBody=z.object({projectId:id64,admin:z.string().min(1).max(254),totp:z.string().min(6).max(12)}).strict();
+async function approvalConfirm(c:Ctx,[id]:string[]){
+  const b=ApprovalConfirmBody.parse(c.body);c.audit.objectId=id;
+  if(!c.token.projectIds.includes(b.projectId))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
+  // The code is used here once and never kept: not in the audit, not in the answer.
+  return confirmApprovalByToken(c.db,{approvalId:id,tokenId:c.token.id,projectId:b.projectId,admin:b.admin,totp:b.totp});
+}
+async function approvalDetail(c:Ctx,[id]:string[]){
+  const {projectId}=await projectOf(c,q(c,'projectId'));c.audit.objectId=id;
+  return readApprovalForToken(c.db,{approvalId:id,tokenId:c.token.id,projectId});
+}
 const SdkRevealBody=z.object({projectId:id64}).strict();
 async function sdkReveal(c:Ctx,[sdkId]:string[]){
   const b=SdkRevealBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=sdkId;
@@ -369,6 +472,27 @@ async function sdkReveal(c:Ctx,[sdkId]:string[]){
   return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ chỉ trả một lần sau khi ADMIN duyệt; không ghi vào nhật ký máy hay chat'};
 }
 const cycleN=z.number().int().min(1),rev=z.number().int().min(0),opsNote=z.string().max(500).nullish();
+const AccountHoldBody=z.object({projectId:id64,vmId:id64,expectedCycle:cycleN,expectedVmRevision:rev,jobId:id64,loginType:z.enum(['GMAIL','APPLE','APPLE_ID'])}).strict();
+const AccountCredentialBody=z.object({projectId:id64,vmId:id64,jobId:id64}).strict();
+const AccountUsedBody=z.object({projectId:id64,vmId:id64,expectedCycle:cycleN,jobId:id64,expectedRevision:rev,sdkId:id64.nullish(),expectedSdkRevision:rev.nullish(),evidence:z.string().min(1).max(300)}).strict();
+const AccountReleaseBody=z.object({projectId:id64,vmId:id64,expectedCycle:cycleN,jobId:id64,expectedRevision:rev,reason:z.string().min(1).max(300)}).strict();
+const ProxyAssignBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,jobId:id64,proxyId:id64.nullish(),pick:z.object({group:z.enum(['TUT','SHARED']),packageCode:z.string().min(1).max(100).optional()}).strict().nullish()}).strict();
+const SdkAssignBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,jobId:id64,sdkId:id64,expectedSdkRevision:rev}).strict();
+const SdkLinkedBody=z.object({projectId:id64,expectedCycle:cycleN,jobId:id64,sdkId:id64,expectedSdkRevision:rev,accountId:id64,evidence:z.string().min(1).max(300)}).strict();
+async function accountList(c:Ctx){
+ const {projectId,ops}=await projectOf(c,q(c,'projectId'));if(!ops.ACCOUNT_OPS)throw fail('FORBIDDEN','Chưa có quyền gán tài khoản');
+ const state=z.enum(['UNUSED','HELD','USED']).optional().parse(q(c,'state')??undefined),type=z.enum(['GMAIL','APPLE','APPLE_ID']).optional().parse(q(c,'type')??undefined);
+ return listAiAccounts(c.db,projectId,{...page(c),state,type});
+}
+async function accountHold(c:Ctx){const b=AccountHoldBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>holdAiAccount(scopeOf(c,projectId),{...b,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function accountCredentials(c:Ctx,[accountId]:string[]){const b=AccountCredentialBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=accountId;return {replay:false,accountId,vmId:b.vmId,credentials:await aiAccountCredentials(scopeOf(c,projectId),{...b,accountId},c.db,caller(c))};}
+async function accountUsed(c:Ctx,[accountId]:string[]){const b=AccountUsedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>markAiAccountUsed(scopeOf(c,projectId),{...b,accountId,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function accountRelease(c:Ctx,[accountId]:string[]){const b=AccountReleaseBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>releaseAiAccount(scopeOf(c,projectId),{...b,accountId,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function proxyStock(c:Ctx){const {projectId}=await projectOf(c,q(c,'projectId'));const state=z.enum(['FREE','ASSIGNED','BLOCKED']).optional().parse(q(c,'state')??undefined),group=z.enum(['TUT','SHARED']).optional().parse(q(c,'group')??undefined);return listAiProxies(c.db,projectId,{...page(c),state,group,packageCode:q(c,'package')});}
+async function proxyAssign(c:Ctx,[vmId]:string[]){const b=ProxyAssignBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,vmId,()=>assignAiProxy(scopeOf(c,projectId),{...b,vmId,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function sdkAssign(c:Ctx,[vmId]:string[]){const b=SdkAssignBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,vmId,()=>assignAiSdk(scopeOf(c,projectId),{...b,vmId,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function sdkLinked(c:Ctx,[vmId]:string[]){const b=SdkLinkedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,vmId,()=>linkAiSdk(scopeOf(c,projectId),{...b,evidence:redactSecrets(b.evidence)!,vmId,key:serviceKey(c,projectId)},c.db,caller(c)));}
+async function stockAck<T extends Record<string,unknown>&{replay?:boolean;undone?:boolean}>(c:Ctx,projectId:string,vmId:string,fn:()=>Promise<T>){const r=await asOps(c,projectId,vmId,fn);c.audit.objectId=vmId;c.audit.replay=!!r.replay;const {replay,undone:_undone,...recorded}=r;return {replay:!!replay,recorded,current:await vmNow(c,projectId,vmId)};}
 async function vmNow(c:Ctx,projectId:string,vmId:string){
   const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)return null;
   return {...vmView(vm),activeJob:(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null};
@@ -487,14 +611,16 @@ async function vmSdkObserve(c:Ctx,[vmId]:string[]){
 // so the client sends the revision it read (null only when the code is not stored). A code of another project reads as not found.
 async function sdkLookup(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),raw=c.url.searchParams.getAll('code');
-  if(!raw.length||raw.length>OBSERVE_MAX)throw fail('VALIDATION','Gửi 1 đến '+OBSERVE_MAX+' tham số code');
+  if(raw.length>OBSERVE_MAX)throw fail('VALIDATION','Gửi 1 đến '+OBSERVE_MAX+' tham số code');
   const codes=raw.map(x=>{const n=normalizeSdk(x);if(!n)throw fail('VALIDATION','Mã SDK không hợp lệ: '+x.slice(0,20));return n;});
   const show=(await rightsOf(c,projectId)).balanceRead;
-  const rows=await c.db.sdkRecord.findMany({where:{projectId,code:{in:codes}},select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountVmId:true,amountCycle:true}});
+  const state=z.enum(['UNLINKED','LINKED','UNCONFIRMED']).optional().parse(q(c,'state')??undefined),place=z.enum(['STOCK','VM']).optional().parse(q(c,'place')??undefined),paging=page(c);
+  const allRows=await c.db.sdkRecord.findMany({where:{projectId,...(codes.length?{code:{in:codes}}:{}),...(state?{linkState:state}:{}),...(place==='STOCK'?{holderVmId:null,vmId:null}:place==='VM'?{OR:[{holderVmId:{not:null}},{vmId:{not:null}}]}:{})},...(!codes.length?{orderBy:[{createdAt:'asc' as const},{id:'asc' as const}],take:paging.limit+1,...(paging.cursor?{cursor:{id:paging.cursor},skip:1}:{})}:{}),select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountVmId:true,amountCycle:true}});
+  const rows=codes.length?allRows:allRows.slice(0,paging.limit);
   const vmIds=[...new Set(rows.flatMap(r=>[r.vmId,r.holderVmId]).filter((x):x is string=>!!x))];
   const vms=await c.db.virtualMachine.findMany({where:{id:{in:vmIds}},select:{id:true,code:true,archivedAt:true,server:{select:{code:true}}}});
   const at=(id:string|null)=>{const v=id?vms.find(x=>x.id===id):null;return v?{vmId:v.id,serverCode:v.server.code,vmCode:v.code,deleted:!!v.archivedAt}:null;};
-  return {amountsVisible:show,items:[...new Set(codes)].map(code=>{const r=rows.find(x=>x.code===code);
+  return {amountsVisible:show,...(!codes.length?{nextCursor:allRows.length>paging.limit?rows[rows.length-1]?.id??null:null}:{}),items:[...new Set(codes.length?codes:rows.map(r=>r.code))].map(code=>{const r=rows.find(x=>x.code===code);
     if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null,failedAt:null,observedCycle:null,observedVmId:null};
     return {code:maskSdk(code),found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
       amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null,failedAt:show?r.amountFailedAt?.toISOString()??null:null,observedCycle:show?r.amountCycle:null,observedVmId:show?r.amountVmId:null};})};

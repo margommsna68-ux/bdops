@@ -5,35 +5,37 @@ API cho Claude vận hành (hoặc script khác) đọc MoneyToHome và ghi nh�
 
 **API này chỉ đọc / ghi MoneyToHome. Nó chưa tạo kết nối tới VM, không đăng nhập EarnApp và không tự rút tiền trên EarnApp.**
 
-Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.2.0). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
+Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.3.0). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
 và [2026-10-23-totp-ai-approval-design.md](../superpowers/specs/2026-10-23-totp-ai-approval-design.md).
+
+**Bổ sung 1.3.0 (23/10 tối):** [Kho / batch / CLI TOTP](ai-stock-batch.md) là hướng dẫn hiện hành cho ACCOUNT_OPS, proxy / SDK từ kho, duyệt CLI hoặc web và lô có kết quả từng phần. Chủ tạo token **90 ngày** trong UI: READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; **không PAYOUT / RECEIPT**. Các ví dụ payout bên dưới chỉ mô tả API cho người đã được cấp quyền tương ứng, không phải quyền của token vận hành này.
 
 ## 0. Thay đổi 23/10/2026 (quyết định chủ dự án): AI không còn PIN, lệnh quan trọng chờ ADMIN duyệt
 
 - **Không còn `X-Ops-Pin`.** Token là chứng thực duy nhất của AI; `PIN_REQUIRED / PIN_INVALID / PIN_LOCKED` không còn phát sinh. Mọi chỗ bên dưới
   còn nhắc PIN cho AI là lịch sử. (Người dùng web dùng 2FA Google Authenticator thay PIN — xem user-access.md.)
 - **Lệnh quan trọng cần ADMIN duyệt** (`POST withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts`, `vms/{id}/proxy-credentials`,
-  mới `sdks/{id}/reveal`): sau khi kiểm token / thao tác / nội dung, API **chưa ghi gì** và trả **HTTP 202**
+  `sdks/{id}/reveal` và `earnapp-accounts/{id}/credentials`): sau khi kiểm token / thao tác / nội dung, lệnh lẻ **chưa chạy** và trả **HTTP 202**
   `{ok:false, data:null, error:{code:"APPROVAL_REQUIRED", message, details:{approvalId, status:"PENDING", expiresAt}}}`. Yêu cầu hiện ở trang
   **Phê duyệt** (`/approvals`, menu ADMIN; chip số chờ duyệt ở sidebar) với tóm tắt cho phép (hành động, VM, số tiền, email PP che, mã SDK che; không
-  có bí mật). Chỉ ADMIN của đúng dự án **đã bật 2FA** duyệt / từ chối được, bằng mã Google Authenticator của chính mình.
+  có bí mật). Chỉ ADMIN của đúng dự án **đã bật 2FA** duyệt / từ chối được. CLI `approve <approvalId> --admin <username>` nhận mã ẩn để duyệt; web Phê duyệt vẫn duyệt / từ chối được. Không lưu mã trong journal hay body file. Chi tiết lô và confirm ở [hướng dẫn 1.3.0](ai-stock-batch.md).
   - Được duyệt → AI gửi lại **cùng `Idempotency-Key` + cùng nội dung** trong 15 phút → lệnh chạy một lần (200, `replay:false`), yêu cầu thành
     CONSUMED; gửi lại nữa → replay bình thường theo key (không cần duyệt lại).
   - Chờ duyệt mà gửi lại → 202 lần nữa (cùng `approvalId`). Cùng key + nội dung khác → 409 `IDEMPOTENCY_CONFLICT` (duyệt gắn với hash nội dung).
   - Từ chối → 403 `APPROVAL_REJECTED` (details: approvalId, status REJECTED): key này kết thúc, không ghi.
-  - Quá 15 phút → 410 `APPROVAL_EXPIRED` (details: approvalId, expiredAt): không ghi; muốn xin duyệt lại thì gửi lệnh với **key mới**.
-  - Các lệnh ghi khác (số dư, trạng thái VM, ghi chú, SDK quan sát, việc, Blocked…) chỉ cần token + Idempotency-Key như trước.
+  - Quá 15 phút → 410 `APPROVAL_EXPIRED` (details: approvalId, status EXPIRED, expiresAt): không ghi; muốn xin duyệt lại thì gửi lệnh với **key mới**.
+  - Các lệnh ghi khác (giữ / trả / ghi đã dùng tài khoản, gán proxy / SDK từ kho, SDK đã nối, số dư, trạng thái VM, ghi chú, SDK quan sát, việc, Blocked…) chỉ cần token + Idempotency-Key như trước.
 - **Mã SDK bị che ở mọi câu trả lời đọc**: `currentSdk.code`, `sdk.items[].code`, `GET sdks` `items[].code`, `job.sdkCode`, `recorded.sdk.code`,
   `recorded.sdks[].code`, `recorded.sdkCode` đều là 4 ký tự đầu + `…` + 4 ký tự cuối (ví dụ `sdk-…3456`); tên trường không đổi, luôn kèm `sdkId`.
-  Lệnh ghi vẫn nhận mã đầy đủ từ AI (AI đọc trên máy); `GET sdks?code=` vẫn nhận mã đầy đủ để đối chiếu revision.
+  Lệnh ghi vẫn nhận mã đầy đủ từ AI (AI đọc trên máy); `GET sdks?projectId=…&code=` giữ lookup cũ (không nextCursor). Tìm SDK chưa dùng: `GET sdks?projectId=…&state=UNLINKED&place=STOCK&limit=50` **không code**: found:true, sdkId/revision, code che, vị trí và tiền theo quyền; nextCursor chỉ có ở chế độ danh sách. Lọc state=UNLINKED/LINKED/UNCONFIRMED, place=STOCK/VM; phân trang limit/cursor như thường.
 - **`POST /sdks/{id}/reveal`** (thao tác token `VM_OPS`, body `{projectId}`, cần duyệt): trả mã đầy đủ một lần `{replay, sdkId, code, revision,
   linkState, currentOf, note}`; audit `SDK_REVEAL`. Không dán mã vào chat / file commit; script in ra stdout một lần và không ghi vào nhật ký lệnh.
 - **ops-client** (`scripts/ops-client.mjs`): bỏ `MTH_PIN` / `x-ops-pin`; `init` chỉ hỏi token (file bí mật cũ còn `pin` vẫn đọc được, pin bị bỏ qua).
   202 → trạng thái lệnh **`WAITING_APPROVAL`** (giữ key, nội dung, hash, `approvalId`, `approvalExpiresAt`), in JSON `commandState:"WAITING_APPROVAL"`
-  + approvalId + hạn + "ADMIN duyệt trên web (Phê duyệt), rồi chạy lại: retry <key>", **mã thoát 4**. `retry <key>` gửi lại đúng nội dung: 200 → DONE
+  + approvalId + hạn + "ADMIN duyệt CLI (approve) hoặc web (Phê duyệt), rồi chạy lại: retry <key>", **mã thoát 4**. `retry <key>` gửi lại đúng nội dung: 200 → DONE
   (0); 403 APPROVAL_REJECTED → `REJECTED` (1, kết thúc); 410 APPROVAL_EXPIRED → `EXPIRED` (1, dùng key mới). Lệnh `approvals` liệt kê các key đang
   chờ (approvalId, hạn, đã quá hạn hay chưa). `sdk-reveal <projectId> <sdkId> [--key K]` = POST reveal (chờ duyệt rồi `retry`). Một lần gửi lại bị từ
-  chối vì token / quyền / giới hạn khi đang chờ duyệt vẫn giữ `WAITING_APPROVAL` (chưa ghi gì); phản hồi không rõ khi gửi lại vẫn là UNKNOWN (có thể
+  chối vì token / quyền / giới hạn khi đang chờ duyệt vẫn giữ `WAITING_APPROVAL` (lệnh lẻ chưa chạy; với batch có thể đã ghi mục khác); phản hồi không rõ khi gửi lại vẫn là UNKNOWN (có thể
   đã được duyệt và chạy) → `retry <key>`. `pending` không liệt kê lệnh chờ duyệt (không phải "chưa rõ kết quả").
 - Trên web, Thiết lập → Token API vận hành / trang user vẫn cần ADMIN (giờ với mã 2FA thay PIN) để tạo token.
 
@@ -53,6 +55,10 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 | GET /jobs/{id}, POST /vms/{id}/claim, /jobs/{id}/step, /jobs/{id}/release, /vms/{id}/sdk, /vms/{id}/status, /vms/{id}/proxy-blocked, /vms/{id}/notes, /jobs/{id}/finish-prepare, /jobs/{id}/finish-proxy (21/10/2026) | READ (GET) / **VM_OPS** | USER (không phải VIEWER) có Server / VM (quyền ASSIGN / BLOCK hiện có). Xem docs/runbooks/ai-vm-ops.md |
 | POST /vms/{id}/proxy-credentials (21/10/2026) | **PROXY_CREDENTIALS** | ADMIN, hoặc USER có **VM_PROXY_FOR_OPS** ("Lấy proxy của VM đang xử lý (AI)"), **và** việc đang giữ (claim) của chính token đó trên VM đó; **cần ADMIN duyệt** (mục 0) |
 | POST /sdks/{id}/reveal (23/10/2026) | **VM_OPS** | Quyền đọc Server / VM của dự án; **cần ADMIN duyệt**; trả mã SDK đầy đủ một lần (mọi câu trả lời đọc đều che mã) |
+| GET /earnapp-accounts; POST /earnapp-accounts/hold, /earnapp-accounts/{id}/credentials, /used, /release | **ACCOUNT_OPS** | ASSIGN + Hạ tầng; POST cần job ACTIVE của chính token đúng VM / lượt; credentials cần duyệt |
+| GET /proxies; POST /vms/{id}/proxy-assign, /sdk-assign, /sdk-linked | READ (GET) / **VM_OPS** (POST) | ASSIGN + job ACTIVE của token; kỳ / VM revision / SDK revision theo từng request |
+| GET /approvals/{id}; POST /approvals/{id}/confirm | READ (GET) / token hợp lệ (POST) | Chỉ approval của token; confirm bằng TOTP ADMIN đúng dự án; Idempotency-Key bắt buộc nhưng không lưu mã |
+| POST /batch | Theo từng mục | 1–100 POST, key riêng; một approval cho mục đặc quyền; 202 mixed / 200 final, kiểm từng item |
 
 Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` cũng **cần ADMIN duyệt** (202 `APPROVAL_REQUIRED`, mục 0).
 
@@ -67,8 +73,7 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
   của cùng người không thấy số dư / tiền yêu cầu / email PP đầy đủ nếu quyền đọc đó chỉ đến từ quyền hẹp.
 - Proxy đầy đủ (21/10/2026, ngoại lệ hẹp): danh sách / chi tiết vẫn che; chỉ `POST /vms/{id}/proxy-credentials` trả IP:port:user:pass của cấu hình hiện
   hành của VM đang xử lý (token, ADMIN duyệt — 23/10/2026 —, đúng dự án / VM / lượt / việc); audit `VM_PROXY_FOR_OPS` (người, token, VM, proxy id, cấu hình), không user / pass.
-- Không làm qua API: xoá / tạo lại VM, gán / thay proxy, nhóm, liên kết tài khoản, chuyển / xoá / đánh dấu đã dùng SDK, VM deleted, rút / chuyển PayPal, USDT,
-  chi phí, cấp lại email đã dùng. (Từ 21/10/2026 API ghi được: nhận việc, bước, SDK của lần cài cho VM đang xử lý, tình trạng quan sát, Blocked, ghi chú.)
+- Không làm qua API: xoá / tạo lại VM, thay nhóm sở hữu, chuyển SDK của VM khác, xoá SDK, VM deleted, rút / chuyển PayPal, USDT, chi phí, cấp lại email đã dùng. 1.3.0 mở gán proxy đủ điều kiện từ kho, giữ / trả / ghi đã dùng tài khoản và gán / ghi SDK đã nối trong đúng job, không thay quy tắc dùng vĩnh viễn. (Từ 21/10/2026 API ghi được: nhận việc, bước, SDK của lần cài cho VM đang xử lý, tình trạng quan sát, Blocked, ghi chú.)
 
 - SDK khảo sát (22/10/2026): `POST vms/{id}/sdk-observations` ghi mã cần `VM_OPS`; kèm tiền tích luỹ SDK cần thêm `BALANCE_WRITE` (user `EARN_BALANCE`), như ghi số dư EarnApp; đọc tiền SDK (`sdk.items[].amount`, `GET sdks`) cần quyền đọc số dư. Không mở rút tiền, PayPal hay chi phí. Chi tiết: vm-sdk.md (mục cuối).
 
@@ -77,8 +82,7 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
 1. **Cấp quyền** — Kho proxy → Quyền nhân viên (ADMIN): chọn tài khoản (ví dụ `ai-ops`), giữ Hạ tầng, tick các quyền cần
    (Ghi kiểm tra tiền EarnApp / Chuẩn bị rút EarnApp / Ghi khoản nhận PP của yêu cầu rút). Hai quyền mới mặc định tắt.
 2. ~~Đặt PIN cho tài khoản đó~~ — từ 23/10/2026 AI **không cần PIN**; thay vào đó ADMIN duyệt lệnh quan trọng trên trang Phê duyệt (ADMIN phải bật 2FA).
-3. **Tạo token** — trang user (Nhân viên → Quyền · PIN · API) / Thiết lập → Token API vận hành: chọn người, tên, thao tác, hạn (7 / 30 / 90 ngày, hoặc **Không hết hạn** — theo yêu cầu chủ 22/10/2026: lưu mốc 9999-12-31, vẫn kết thúc khi thu hồi hoặc user bị vô hiệu hoá, quyền vẫn đọc lại mỗi lệnh; thu hồi ngay khi máy thôi dùng), IP (tuỳ chọn), xác nhận bằng mã 2FA của ADMIN →
-   token `mth_…` hiện **một lần**. Copy ngay vào kho bí mật; không gửi qua chat, không dán vào lệnh, file commit hay ví dụ.
+3. **Tạo token** — ADMIN mở trang user / Thiết lập → Token API vận hành, chọn dự án và hạn **90 ngày**, scope READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; không PAYOUT / RECEIPT trong đợt này. Xác nhận 2FA → token hiện **một lần**. Copy ngay vào kho bí mật; không gửi qua chat, không dán vào lệnh, file commit hay ví dụ.
 4. **Nạp bí mật ngoài cuộc chat** — mở terminal của chính bạn (không qua ô chat Claude, không dùng cú pháp `!`), trong thư mục source:
    `node scripts/ops-client.mjs init` → gõ token (không hiện ký tự) → lưu ở `~/.mth/ops-secret.json`. Hoặc đặt biến môi trường
    `MTH_TOKEN` trong phiên terminal của bạn (`MTH_PIN` không còn dùng; file bí mật cũ còn `pin` vẫn đọc được). Lưu ý: một công cụ chạy cùng tài khoản máy vẫn đọc được file / biến đó; đây là
@@ -90,17 +94,17 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
 
 - Header: `Authorization: Bearer $MTH_TOKEN`; lệnh ghi thêm `Idempotency-Key` (8–100 ký tự `A-Za-z0-9._:-`). Không còn `X-Ops-Pin` (23/10/2026).
 - Trả về `{ "ok": true, "data": …, "error": null }` hoặc `{ "ok": false, "data": null, "error": { "code", "message", "details"? } }`, kèm
-  `X-Request-Id`. HTTP: 202 chờ ADMIN duyệt (`APPROVAL_REQUIRED`, chưa ghi), 401 xác thực, 403 quyền / `APPROVAL_REJECTED`, 404 không thấy (kể cả dự án ngoài token),
+  `X-Request-Id`. HTTP: lệnh lẻ 202 chờ ADMIN duyệt (`APPROVAL_REQUIRED`, chưa chạy); batch 202 `ok:true` có thể đã ghi một số mục, đọc từng kết quả, 401 xác thực, 403 quyền / `APPROVAL_REJECTED`, 404 không thấy (kể cả dự án ngoài token),
   409 xung đột, 410 `APPROVAL_EXPIRED`, 422 dữ liệu sai, 429 giới hạn.
 - ID ổn định; `projectId` lấy từ `/projects` (MOON là tên hiển thị, không phải code). Tiền là chuỗi thập phân "10.00"; đồng tiền rõ ràng.
 - `expectedCycle` = lượt VM (`VmOperation.cycle`); `expectedVmRevision` = `VirtualMachine.revision`; `expectedRequestRevision` = revision của yêu cầu
   rút. Kiểm trong cùng giao dịch ghi. 409 trả `details.current` (trạng thái hiện tại theo quyền); không tự lấy revision mới để ép ghi.
-- Lệnh ghi trả `{ replay, recorded, current }`: `recorded` là đúng lệnh đó như lần ghi đầu (VM, lượt, EarnApp, số tiền, id bản ghi) — gửi lại vẫn
+- Các lệnh ghi nghiệp vụ có wrapper `{ replay, recorded, current }` (không áp dụng chung cho confirm, batch hoặc reveal): `recorded` là đúng lệnh đó như lần ghi đầu (VM, lượt, EarnApp, số tiền, id bản ghi) — gửi lại vẫn
   y nguyên, không bao giờ lấy tài khoản / số dư đang có trên VM thay vào; `current` là trạng thái lúc này (có thể là tài khoản / lượt khác), tách riêng.
   Ghi số dư còn có `vm` / `balance` = số dư mà bản ghi đó để lại (cùng VM / lượt / EarnApp).
 - Gửi lại: cùng key + cùng nội dung → kết quả cũ (`replay: true`), không ghi lần hai, kể cả khi dữ liệu đã đổi sau đó; cùng key + nội dung khác →
-  `IDEMPOTENCY_CONFLICT`. Key gắn với người dùng + dự án (không gắn token), nên xoay token vẫn chống trùng. Mất phản hồi → gửi lại **cùng key**.
-- Giới hạn (dùng chung mọi instance): 120 đọc / phút và 30 ghi / phút mỗi token; 30 lần xác thực sai / phút mỗi IP. 429 có `Retry-After`.
+  `IDEMPOTENCY_CONFLICT`. Key nghiệp vụ thường gắn người dùng + dự án; riêng approval và outer batch key còn gắn chính token, không xoay token để tiếp tục chúng. Mất phản hồi → gửi lại **cùng key**.
+- Giới hạn (dùng chung mọi instance): 120 đọc / phút và 30 ghi / phút mỗi token; 30 lần xác thực sai / phút mỗi IP. Lô thêm 10/phút/token, 1–100 mục; một lô tính một hit ghi. 429 có `Retry-After`.
   (Khoá vì PIN sai không còn áp dụng cho AI từ 23/10/2026; mã 2FA sai 3 lần khoá chính ADMIN đang duyệt 30 phút, không khoá token.)
 - IP (sửa 21/10/2026, `requestIp` trong src/server/ops-api/safety.ts): **một** địa chỉ dùng chung cho giới hạn IP của token, đếm xác thực sai theo
   địa chỉ, `OpsAudit.ip` và `lastUsedIp`.
@@ -120,12 +124,12 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
   người có quyền rút / ghi khoản nhận. Ghi chú tự do được che link / mật khẩu / mã trước khi lưu và trước khi trả.
 - Nhật ký: `OpsAudit` (requestId, tokenId, userId, projectId, action, objectId, thời gian, IP đã xác minh, HTTP, kết quả, replay) cho mọi lệnh ghi và
   mọi lần bị từ chối; không có header / body / token. Quyết định duyệt / từ chối ghi `auditLog` `OPS_APPROVE` / `OPS_REJECT` (ADMIN, yêu cầu, hành động);
-  `OpsApproval` giữ yêu cầu (tóm tắt cho phép, hash nội dung, hạn, trạng thái PENDING / APPROVED / REJECTED / EXPIRED / CONSUMED). Nhật ký nghiệp vụ vẫn là Lịch sử thao tác của web.
+  `OpsApproval` giữ yêu cầu (tóm tắt cho phép, hash nội dung, hạn, trạng thái PENDING / APPROVED / REJECTED / EXPIRED / CONSUMED / LOCKED). Nhật ký nghiệp vụ vẫn là Lịch sử thao tác của web.
 
 ## 4. Ví dụ (biến môi trường, không ghi token vào lệnh)
 
 ```bash
-B=https://moneytohome.up.railway.app/api/ops/v1
+B=https://wow.lalamail.sbs/api/ops/v1
 H=(-H "Authorization: Bearer $MTH_TOKEN")
 W=(-H "Content-Type: application/json")   # không còn X-Ops-Pin (23/10/2026)
 curl -s "$B/health"
@@ -151,7 +155,7 @@ curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: sent-$WD-1" -X POST "$B/withdra
 # Tiền thực về PP (từng phần được; không vượt phần còn chờ)
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rcv-$WD-1" -X POST "$B/withdrawals/$WD/receipts" \
   -d '{"projectId":"'$P'","expectedRequestRevision":1,"amount":"6.00","currency":"USD","receivedAt":"2026-10-23T08:00:00+07:00","transactionId":"<mã giao dịch PayPal>","evidenceNote":"PayPal activity"}'
-# prepare / status / receipts / proxy-credentials / sdks/{id}/reveal: lần đầu trả 202 APPROVAL_REQUIRED (chưa ghi) → ADMIN duyệt trên web →
+# prepare / status / receipts / proxy-credentials / sdks/{id}/reveal: lần đầu trả 202 APPROVAL_REQUIRED (chưa ghi) → ADMIN duyệt CLI hoặc web →
 # gửi lại ĐÚNG lệnh trên (cùng Idempotency-Key, cùng -d) → 200. Mã SDK đầy đủ một lần:
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rev-$SDK-1" -X POST "$B/sdks/$SDK/reveal" -d '{"projectId":"'$P'"}'
 ```
@@ -176,7 +180,7 @@ Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` ho�
       chứng minh lần đầu chưa ghi. Không tạo key mới: khôi phục token / quyền / chờ hết giới hạn rồi `retry <key>` để nhận kết quả ban đầu (`replay`);
     - lệnh đã DONE → vẫn DONE (thoát 0), lần thử lại bị từ chối / không rõ chỉ ghi vào `lastAttempt`.
   - Kiểm tra quyền của API không nới cho lần gửi lại: muốn nhận kết quả cũ vẫn cần token và quyền hợp lệ.
-  - Lệnh đang `WAITING_APPROVAL` mà lần gửi lại bị từ chối vì token / quyền / giới hạn → vẫn `WAITING_APPROVAL` (chưa ghi gì, duyệt vẫn chờ tới hạn);
+  - Lệnh đang `WAITING_APPROVAL` mà lần gửi lại bị từ chối vì token / quyền / giới hạn → vẫn `WAITING_APPROVAL` (duyệt vẫn chờ tới hạn; batch có thể đã ghi mục khác);
     phản hồi không rõ khi gửi lại → UNKNOWN (có thể đã được duyệt và chạy) → `retry <key>`.
 - Mỗi lệnh lưu trong file `k-<sha256 của key nguyên bản>.json`, nên key chỉ khác nhau ở `:` / `_` hay chữ hoa / thường (Windows) không chung file; bản ghi
   chỉ dùng khi key bên trong khớp tuyệt đối. File cũ (tên `key` thay `:` → `_`) vẫn đọc được khi đúng key, không bị sửa / xoá; file cũ giữ key khác, bản ghi
@@ -184,12 +188,12 @@ Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` ho�
 - Token chỉ gửi tới đúng origin của `MTH_BASE` dưới `/api/ops/v1/`: đường dẫn có `..`, dạng mã hoá (`%2e`, `%2f`), tuyệt đối hoặc URL khác bị từ
   chối trước khi gửi; không đi theo redirect; `MTH_BASE` phải là https (http chỉ cho localhost khi thử).
 
-## 5. Luồng chuẩn cho AI
+## 5. Luồng payout tham khảo cho token có PAYOUT / RECEIPT
 
 1. `/me` (xem `effective`) → `/projects` → `/vms/resolve` → `/vms/{id}` (lấy `expectedCycle`, `revision`, `earnAppAccount.id`).
 2. Đọc số dư trên EarnApp (ngoài web) → `balance-check` với `checkedAt` là lúc đọc thật; `withdrawable: true` chỉ khi thấy điều kiện rút.
 3. `paypal/suggest` với số tiền → `withdrawals/prepare` với `paypalEmailId` (gợi ý chưa giữ gì; prepare mới giữ email). **Cần duyệt**: 202 → báo
-   ADMIN duyệt trên web → `retry <key>` (chưa bấm gì trên EarnApp khi lệnh chưa DONE).
+   ADMIN duyệt CLI hoặc web → `retry <key>` (chưa bấm gì trên EarnApp khi lệnh chưa DONE).
 4. Bấm rút trên EarnApp (ngoài web) → thấy trong lịch sử EarnApp → `status SUBMITTED_ON_EARNAPP`; không chắc → `UNKNOWN_RESULT`, đối chiếu lịch sử
    EarnApp trước, không bấm lần hai. (`status` cũng cần duyệt; chờ duyệt không đổi việc đã làm trên EarnApp — vẫn `retry <key>`, không gửi key mới khi chưa hết hạn.)
 5. Tiền về PayPal → `receipts` đúng số thực nhận, có mã giao dịch (cần duyệt). Yêu cầu 10, về 6 → còn chờ 4; không tự chốt thiếu (việc của quản lý trên web).

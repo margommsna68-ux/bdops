@@ -182,6 +182,14 @@ export async function placeVmSdk(tx:Tx,images:BusinessCollector,current:ActorSco
 export async function linkVmSdk(scope:ActorScope,input:{key:string;vmId:string;sdkId:string;expectedSdkRevision:number;earnAppId:string;expectedCycle:number},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_LINK',module:'INFRASTRUCTURE',reversible:false,skipJournalWhenUnchanged:true},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
+    return linkVmSdkIn(tx,images,current,input);
+  },db);
+}
+/** The body of linkVmSdk for a caller that already runs inside its own command / transaction (AI "used" command, 23/10/2026): same
+ *  checks and writes, no second command. `current` is the authorised scope of that command (rights are the caller's business). */
+export async function linkVmSdkIn(tx:Tx,images:BusinessCollector,current:ActorScope,input:{vmId:string;sdkId:string;expectedSdkRevision:number;earnAppId:string;expectedCycle:number}){
+  const scope=current;
+  {
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);
     if(vm.archivedAt||vm.server.archivedAt)throw new ProxyDomainError('INVALID_INPUT',where(vm)+' đã xoá');
     if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
@@ -196,7 +204,7 @@ export async function linkVmSdk(scope:ActorScope,input:{key:string;vmId:string;s
     await tx.sdkRecord.update({where:{id:sdk.id},data:{linkState:'LINKED',linkedEarnAppId:earnApp.id,linkedVmId:vm.id,linkedCycle:cycle,linkedAt:now,linkedById:current.userId,revision:{increment:1}}});
     await event(tx,{projectId:scope.projectId,actorId:current.userId,images,now,via:'Đã nối EarnApp'},sdk.id,'LINK',{toVmId:vm.id,toLabel:where(vm),detail:{earnAppId:earnApp.id,login:earnApp.login.email,cycle,wasUnconfirmed:sdk.linkState==='UNCONFIRMED'}});
     return {changed:true,message:'Đã ghi SDK '+sdk.code+' nối với '+earnApp.login.email};
-  },db);
+  }
 }
 /** Old data ("Chưa xác nhận"): a person states whether the code was ever linked. Linked is final (undo never takes it back). */
 export async function confirmLegacySdk(scope:ActorScope,input:{key:string;sdkId:string;expectedRevision:number;decision:'UNLINKED'|'LINKED'},db:PrismaClient=prisma){

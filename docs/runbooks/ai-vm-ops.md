@@ -7,14 +7,15 @@ Thiết kế: docs/superpowers/specs/2026-10-21-ai-vm-ops-design.md. Service: `s
 ## 1. Tài khoản, quyền, bí mật
 
 - User **ai-ops** (USER, dự án MOON, module Server / VM). Quyền: đọc Server / VM; ghi tình trạng, SDK, Blocked, ghi chú (quyền ASSIGN / BLOCK của USER có
-  Server / VM); `EARN_BALANCE` (số dư); `VM_PROXY_FOR_OPS` (proxy đầy đủ của **VM đang xử lý**). Không: copy thông tin đăng nhập, nhập / replace proxy,
+  Server / VM); `EARN_BALANCE` (số dư); `VM_PROXY_FOR_OPS` (proxy đầy đủ của **VM đang xử lý**). 1.3.0 mở lấy thông tin đăng nhập tài khoản đang giữ sau duyệt và gán proxy đủ điều kiện từ kho. Không: nhập / replace kho proxy,
   xoá kho, chi phí, người dùng, `EARN_PAYOUT`, `PAYPAL_RECEIPT_RECORD`.
-- Token theo máy: tên `<máy> · AI vận hành` (ví dụ `SERVER-01-8939C · AI vận hành`), thao tác READ, BALANCE_WRITE, VM_OPS, PROXY_CREDENTIALS, có hạn.
+- Token theo máy: tên `<máy> · AI vận hành` (ví dụ `SERVER-01-8939C · AI vận hành`), thao tác READ, BALANCE_WRITE, VM_OPS, PROXY_CREDENTIALS, ACCOUNT_OPS, hạn **90 ngày**, chủ tạo qua UI; không PAYOUT / RECEIPT.
   Máy / AI khác → token riêng (cùng user ai-ops), để tra lịch sử theo token.
-- Bí mật trên máy chạy AI: `%USERPROFILE%\.mth\ops-secret.json` (token + PIN của ai-ops; quyền đọc chỉ user Windows đó). Script tự đọc file; không in token /
-  PIN. Không gõ bí mật qua chat. File nằm ngoài Git. Không cam kết AI trên cùng máy không đọc được file này: chỉ để token có quyền hẹp và có hạn.
+- Bí mật trên máy chạy AI: `%USERPROFILE%\.mth\ops-secret.json` (chỉ token của ai-ops, không PIN; quyền đọc chỉ user Windows đó). Script tự đọc file; không in token. Không gõ bí mật qua chat. File nằm ngoài Git. Không cam kết AI trên cùng máy không đọc được file này: chỉ để token có quyền hẹp và có hạn.
 - Proxy đầy đủ: `node scripts/ops-client.mjs proxy <projectId> <vmId> <jobId> <lượt>` → file riêng `%USERPROFILE%\.mth\proxy\<vmId>.json`
   (IP, port, user, pass, configurationId). Đưa file này cho AE Mini Tool; **xoá file sau khi cấu hình xong**. Không bao giờ in ra chat / stdout / nhật ký.
+
+**Kho / lô / duyệt CLI 1.3.0:** xem [ai-stock-batch.md](ai-stock-batch.md). Account credentials, proxy credentials và SDK reveal phải được ADMIN duyệt bằng CLI TOTP hoặc web trước khi lấy bí mật. Lô pending trả HTTP 202 `ok:true` và có thể đã ghi một số mục; không coi cả lô chưa chạy. Hold tài khoản, gán proxy / SDK từ kho, used / sdk-linked chỉ ghi web; mọi thao tác thật vẫn cần kiểm máy. Base `https://wow.lalamail.sbs`.
 
 ## 2. Trên web
 
@@ -27,7 +28,7 @@ Thiết kế: docs/superpowers/specs/2026-10-21-ai-vm-ops-design.md. Service: `s
 
 ## 3. Quy trình cho AI
 
-Mọi lệnh ghi: script tự gắn PIN + Idempotency-Key, in key trước khi gửi. Mất phản hồi → `retry <key>` (không key mới). **Khoá chống lặp của web không bảo
+Mọi lệnh ghi: script dùng Bearer token + Idempotency-Key (không PIN), in key trước khi gửi. Mất phản hồi → `retry <key>` (không key mới). **Khoá chống lặp của web không bảo
 đảm thao tác trên máy thật chỉ chạy một lần:** trước khi làm lại một thao tác máy (tạo máy, áp dụng proxy, cài) phải kiểm tra máy thật.
 
 Chung:

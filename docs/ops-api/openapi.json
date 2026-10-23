@@ -2,12 +2,12 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.2.0",
-  "description": "Reads MoneyToHome and records EarnApp balances, payout preparation, sent / unknown results and money received on PayPal. It does NOT connect to any VM, does not log in to EarnApp and does not send money. Every answer is the envelope {ok, data, error} with X-Request-Id. Writes need Idempotency-Key only (no X-Ops-Pin since 23/10/2026; the token is the credential). Critical writes (withdrawals/prepare, withdrawals/{id}/status, withdrawals/{id}/receipts, vms/{id}/proxy-credentials, sdks/{id}/reveal) answer HTTP 202 APPROVAL_REQUIRED until an ADMIN approves the request on the web (Phê duyệt, 15 minutes); the same Idempotency-Key + same body then runs (200), APPROVAL_REJECTED = 403, APPROVAL_EXPIRED = 410 (send again with a new key), same key + other body = 409 IDEMPOTENCY_CONFLICT. SDK codes in every read answer are masked (4 đầu + … + 4 cuối); only sdks/{id}/reveal returns one in full, once per approval; a write answer is {replay, recorded, current}: `recorded` = this command as first written (identical on a replay), `current` = the state now. Effective rights = the user's current rights ∩ the token's projects ∩ the token's operations."
+  "version": "1.3.0",
+  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Full account credentials, proxy credentials and SDK reveals require ADMIN approval via CLI TOTP or web; the TOTP is never persisted. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
   {
-   "url": "https://moneytohome.up.railway.app/api/ops/v1"
+   "url": "https://wow.lalamail.sbs/api/ops/v1"
   }
  ],
  "security": [
@@ -1529,7 +1529,8 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS"
+          "PROXY_CREDENTIALS",
+          "ACCOUNT_OPS"
          ]
         }
        }
@@ -1587,6 +1588,9 @@
           },
           "PROXY_CREDENTIALS": {
            "type": "boolean"
+          },
+          "ACCOUNT_OPS": {
+           "type": "boolean"
           }
          },
          "required": [
@@ -1595,7 +1599,8 @@
           "PAYOUT",
           "RECEIPT",
           "VM_OPS",
-          "PROXY_CREDENTIALS"
+          "PROXY_CREDENTIALS",
+          "ACCOUNT_OPS"
          ]
         }
        },
@@ -1608,12 +1613,55 @@
         "effective"
        ]
       }
+     },
+     "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "readPerMinute": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "writePerMinute": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "batchPerMinute": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "batchMaxItems": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "readPerMinute",
+       "writePerMinute",
+       "batchPerMinute",
+       "batchMaxItems"
+      ]
+     },
+     "approvalRequired": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "pinRequired": {
+      "type": "boolean",
+      "enum": [
+       false
+      ]
      }
     },
     "required": [
      "user",
      "token",
-     "projects"
+     "projects",
+     "limits",
+     "approvalRequired",
+     "pinRequired"
     ]
    },
    "Health": {
@@ -4293,12 +4341,18 @@
         "observedVmId"
        ]
       }
+     },
+     "nextCursor": {
+      "type": "string",
+      "nullable": true,
+      "description": "Only present without code parameters (list mode). Pass as cursor on the next page; null means no more rows. Omitted from legacy supplied-code lookup."
      }
     },
     "required": [
      "amountsVisible",
      "items"
-    ]
+    ],
+    "description": "Shared item schema for supplied-code lookup and stored-SDK listing. nextCursor exists only in list mode; money access rules remain unchanged."
    },
    "OkSdkLookup": {
     "type": "object",
@@ -4329,7 +4383,7 @@
    "ApprovalRequired": {
     "type": "object",
     "additionalProperties": false,
-    "description": "HTTP 202: lệnh quan trọng CHƯA ghi, đang chờ ADMIN của dự án (có 2FA) duyệt trên web (Phê duyệt). Gửi lại CÙNG Idempotency-Key và cùng nội dung sau khi duyệt → chạy một lần (200); cùng key + nội dung khác → 409 IDEMPOTENCY_CONFLICT.",
+    "description": "HTTP 202 for a standalone privileged command: not executed until ADMIN approval via CLI or web. Retry identical key/body after approval. This is also the body of each waiting batch item; the outer batch uses OkBatchResult.",
     "properties": {
      "ok": {
       "type": "boolean",
@@ -4432,14 +4486,21 @@
          "approvalId": {
           "type": "string"
          },
-         "expiredAt": {
+         "status": {
+          "type": "string",
+          "enum": [
+           "EXPIRED"
+          ]
+         },
+         "expiresAt": {
           "type": "string",
           "format": "date-time"
          }
         },
         "required": [
          "approvalId",
-         "expiredAt"
+         "status",
+         "expiresAt"
         ]
        }
       },
@@ -4542,6 +4603,1615 @@
      "data",
      "error"
     ]
+   },
+   "AccountStockItem": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Login stock id (loginId), NOT the EarnApp accountId used in write paths."
+     },
+     "accountId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "nullable": true
+     },
+     "email": {
+      "type": "string",
+      "description": "Masked email only"
+     },
+     "loginType": {
+      "type": "string",
+      "enum": [
+       "GMAIL",
+       "APPLE_ID"
+      ],
+      "nullable": true
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "UNUSED",
+       "HELD",
+       "USED"
+      ],
+      "description": "UNUSED is an active login with no EarnApp row or an unregistered, unclosed EarnApp row with no VM. HELD is on a live VM without registration; registered/closed or left on a deleted VM is USED. A prior credential reveal is not registration evidence and does not itself prevent release/reuse; an unknown actual registration outcome must remain held."
+     },
+     "heldBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "serverCode": {
+        "type": "string"
+       },
+       "vmCode": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer",
+        "minimum": 1
+       }
+      },
+      "required": [
+       "vmId",
+       "serverCode",
+       "vmCode",
+       "cycle"
+      ],
+      "nullable": true
+     },
+     "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "EarnApp account revision; send as expectedRevision for used/release (0 if no EarnApp row)."
+     },
+     "importedAt": {
+      "type": "string",
+      "format": "date-time"
+     }
+    },
+    "required": [
+     "id",
+     "accountId",
+     "email",
+     "loginType",
+     "state",
+     "heldBy",
+     "revision",
+     "importedAt"
+    ]
+   },
+   "AccountStockPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/AccountStockItem"
+      }
+     },
+     "nextCursor": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "items",
+     "nextCursor"
+    ]
+   },
+   "OkAccountStockPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/AccountStockPage"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "AccountHoldBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedVmRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "loginType": {
+      "type": "string",
+      "enum": [
+       "GMAIL",
+       "APPLE",
+       "APPLE_ID"
+      ]
+     }
+    },
+    "required": [
+     "projectId",
+     "vmId",
+     "expectedCycle",
+     "jobId",
+     "expectedVmRevision",
+     "loginType"
+    ]
+   },
+   "AccountCredentialsBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     }
+    },
+    "required": [
+     "projectId",
+     "vmId",
+     "jobId"
+    ]
+   },
+   "AccountUsedBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "sdkId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "nullable": true
+     },
+     "expectedSdkRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "nullable": true
+     },
+     "evidence": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+     }
+    },
+    "required": [
+     "projectId",
+     "vmId",
+     "expectedCycle",
+     "jobId",
+     "expectedRevision",
+     "evidence"
+    ],
+    "description": "sdkId is optional; when supplied expectedSdkRevision is mandatory and non-null. Marks registeredAt from real successful registration/login; optionally links the current SDK atomically. Does not perform login.",
+    "allOf": [
+     {
+      "oneOf": [
+       {
+        "properties": {
+         "sdkId": {
+          "nullable": true,
+          "enum": [
+           null
+          ]
+         }
+        }
+       },
+       {
+        "required": [
+         "sdkId",
+         "expectedSdkRevision"
+        ],
+        "properties": {
+         "sdkId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+         },
+         "expectedSdkRevision": {
+          "type": "integer",
+          "minimum": 0
+         }
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "AccountReleaseBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+     }
+    },
+    "required": [
+     "projectId",
+     "vmId",
+     "expectedCycle",
+     "jobId",
+     "expectedRevision",
+     "reason"
+    ]
+   },
+   "AccountCredentials": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "email": {
+      "type": "string"
+     },
+     "password": {
+      "type": "string",
+      "nullable": true
+     },
+     "twoFa": {
+      "type": "string",
+      "nullable": true
+     },
+     "token": {
+      "type": "string",
+      "nullable": true
+     },
+     "twoFaLink": {
+      "type": "string",
+      "nullable": true
+     },
+     "smsLink": {
+      "type": "string",
+      "nullable": true
+     },
+     "phone": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "email",
+     "password",
+     "twoFa",
+     "token",
+     "twoFaLink",
+     "smsLink",
+     "phone"
+    ]
+   },
+   "AccountHoldRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "accountId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "loginId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "email": {
+      "type": "string"
+     },
+     "loginType": {
+      "type": "string",
+      "enum": [
+       "GMAIL",
+       "APPLE_ID"
+      ],
+      "nullable": true
+     },
+     "revision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "already": {
+      "type": "boolean"
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "cycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     }
+    },
+    "required": [
+     "accountId",
+     "loginId",
+     "email",
+     "loginType",
+     "revision",
+     "already",
+     "vmId",
+     "cycle",
+     "jobId"
+    ]
+   },
+   "AccountUsedRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "accountId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "loginId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "email": {
+      "type": "string"
+     },
+     "loginType": {
+      "type": "string",
+      "enum": [
+       "GMAIL",
+       "APPLE_ID"
+      ],
+      "nullable": true
+     },
+     "revision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "registered": {
+      "type": "boolean"
+     },
+     "changed": {
+      "type": "boolean"
+     },
+     "noteId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "nullable": true
+     },
+     "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "linkState": {
+        "type": "string",
+        "enum": [
+         "UNLINKED",
+         "LINKED",
+         "UNCONFIRMED"
+        ]
+       },
+       "revision": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "changed": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "id",
+       "linkState",
+       "revision",
+       "changed"
+      ],
+      "nullable": true
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "cycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     }
+    },
+    "required": [
+     "accountId",
+     "loginId",
+     "email",
+     "loginType",
+     "revision",
+     "registered",
+     "changed",
+     "noteId",
+     "sdk",
+     "vmId",
+     "cycle",
+     "jobId"
+    ]
+   },
+   "AccountReleaseRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "released": {
+      "type": "boolean"
+     },
+     "accountId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "loginId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "email": {
+      "type": "string"
+     },
+     "loginType": {
+      "type": "string",
+      "enum": [
+       "GMAIL",
+       "APPLE_ID"
+      ],
+      "nullable": true
+     },
+     "noteId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "vmId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "cycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     }
+    },
+    "required": [
+     "released",
+     "accountId",
+     "loginId",
+     "email",
+     "loginType",
+     "noteId",
+     "vmId",
+     "cycle",
+     "jobId"
+    ]
+   },
+   "AccountHoldAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/AccountHoldRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkAccountHoldAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/AccountHoldAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "AccountUsedAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/AccountUsedRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkAccountUsedAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/AccountUsedAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "AccountReleaseAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/AccountReleaseRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkAccountReleaseAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/AccountReleaseAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ProxyStockItem": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "host": {
+      "type": "string"
+     },
+     "port": {
+      "type": "integer"
+     },
+     "packageCode": {
+      "type": "string",
+      "nullable": true
+     },
+     "group": {
+      "type": "string",
+      "enum": [
+       "TUT",
+       "SHARED",
+       "GENJY",
+       "OTHER"
+      ]
+     },
+     "inventoryState": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "FREE",
+       "ASSIGNED",
+       "BLOCKED",
+       "OTHER"
+      ]
+     },
+     "vm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "serverCode": {
+        "type": "string"
+       },
+       "vmCode": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "vmId",
+       "serverCode",
+       "vmCode"
+      ],
+      "nullable": true
+     },
+     "revision": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "id",
+     "host",
+     "port",
+     "packageCode",
+     "group",
+     "inventoryState",
+     "state",
+     "vm",
+     "revision"
+    ]
+   },
+   "ProxyStockPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ProxyStockItem"
+      }
+     },
+     "nextCursor": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "items",
+     "nextCursor"
+    ]
+   },
+   "OkProxyStockPage": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ProxyStockPage"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ProxyAssignBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "expectedVmRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "proxyId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "nullable": true
+     },
+     "pick": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "group": {
+        "type": "string",
+        "enum": [
+         "TUT",
+         "SHARED"
+        ]
+       },
+       "packageCode": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+       }
+      },
+      "required": [
+       "group"
+      ],
+      "nullable": true
+     }
+    },
+    "required": [
+     "projectId",
+     "expectedCycle",
+     "expectedVmRevision",
+     "jobId"
+    ],
+    "oneOf": [
+     {
+      "required": [
+       "proxyId"
+      ],
+      "properties": {
+       "proxyId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "pick": {
+        "nullable": true,
+        "enum": [
+         null
+        ]
+       }
+      }
+     },
+     {
+      "required": [
+       "pick"
+      ],
+      "properties": {
+       "proxyId": {
+        "nullable": true,
+        "enum": [
+         null
+        ]
+       },
+       "pick": {
+        "type": "object",
+        "nullable": false
+       }
+      }
+     }
+    ],
+    "description": "Exactly one of proxyId or pick. pick.packageCode is the service field (not pick.package). Assigning in MoneyToHome does not install on a real VM."
+   },
+   "ProxyAssignRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "changed": {
+      "type": "boolean"
+     },
+     "configurationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "nullable": true
+     },
+     "endpointId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "host": {
+      "type": "string"
+     },
+     "port": {
+      "type": "integer"
+     },
+     "packageCode": {
+      "type": "string",
+      "nullable": true
+     },
+     "group": {
+      "type": "string",
+      "enum": [
+       "TUT",
+       "SHARED",
+       "GENJY",
+       "OTHER"
+      ]
+     },
+     "from": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64
+      }
+     }
+    },
+    "required": [
+     "changed",
+     "configurationId",
+     "endpointId",
+     "host",
+     "port",
+     "packageCode",
+     "group",
+     "from"
+    ]
+   },
+   "ProxyAssignAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/ProxyAssignRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkProxyAssignAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ProxyAssignAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "SdkAssignBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "expectedVmRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "sdkId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedSdkRevision": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "projectId",
+     "expectedCycle",
+     "expectedVmRevision",
+     "jobId",
+     "sdkId",
+     "expectedSdkRevision"
+    ]
+   },
+   "SdkLinkedBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedCycle": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "sdkId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "expectedSdkRevision": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "accountId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "evidence": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+     }
+    },
+    "required": [
+     "projectId",
+     "expectedCycle",
+     "jobId",
+     "sdkId",
+     "expectedSdkRevision",
+     "accountId",
+     "evidence"
+    ]
+   },
+   "SdkStockRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "changed": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "revision": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "linkState": {
+        "type": "string",
+        "enum": [
+         "UNLINKED",
+         "LINKED",
+         "UNCONFIRMED"
+        ]
+       }
+      },
+      "required": [
+       "id",
+       "revision",
+       "linkState"
+      ]
+     },
+     "maskedCode": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "changed",
+     "message",
+     "sdk",
+     "maskedCode"
+    ]
+   },
+   "SdkStockAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/SdkStockRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkSdkStockAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SdkStockAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ApprovalDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "approvalId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "action": {
+      "type": "string"
+     },
+     "label": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "PENDING",
+       "APPROVED",
+       "REJECTED",
+       "EXPIRED",
+       "CONSUMED",
+       "LOCKED"
+      ]
+     },
+     "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Allowed summary only; batch summaries include per-item summaries, never secret results."
+     },
+     "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "decidedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "consumedAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "attemptsLeft": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5
+     },
+     "decisionNote": {
+      "type": "string",
+      "nullable": true
+     }
+    },
+    "required": [
+     "approvalId",
+     "action",
+     "label",
+     "status",
+     "summary",
+     "requestedAt",
+     "expiresAt",
+     "decidedAt",
+     "consumedAt",
+     "attemptsLeft",
+     "decisionNote"
+    ]
+   },
+   "OkApprovalDetail": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ApprovalDetail"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ApprovalConfirmBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "admin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 254
+     },
+     "totp": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 12,
+      "writeOnly": true,
+      "description": "ADMIN TOTP from hidden terminal prompt or --totp-stdin; never persist in business/client journals, files, logs or chat. No code in command arguments."
+     }
+    },
+    "required": [
+     "projectId",
+     "admin",
+     "totp"
+    ]
+   },
+   "BatchBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "method": {
+         "type": "string",
+         "enum": [
+          "POST"
+         ],
+         "default": "POST"
+        },
+        "path": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        },
+        "body": {
+         "type": "object",
+         "additionalProperties": true,
+         "default": {}
+        },
+        "idempotencyKey": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9._:-]{8,100}$"
+        }
+       },
+       "required": [
+        "path",
+        "idempotencyKey"
+       ]
+      }
+     }
+    },
+    "required": [
+     "projectId",
+     "items"
+    ]
+   },
+   "BatchItem": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "index": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "path": {
+      "type": "string"
+     },
+     "idempotencyKey": {
+      "type": "string"
+     },
+     "status": {
+      "type": "integer"
+     },
+     "body": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The exact standalone endpoint envelope: 200 success, 202 ApprovalRequired or error for this item."
+     }
+    },
+    "required": [
+     "index",
+     "path",
+     "idempotencyKey",
+     "status",
+     "body"
+    ]
+   },
+   "BatchResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "batchKey": {
+      "type": "string"
+     },
+     "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "approvalId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+       },
+       "status": {
+        "type": "string"
+       },
+       "expiresAt": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       },
+       "code": {
+        "type": "string"
+       },
+       "message": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "approvalId",
+       "status"
+      ],
+      "nullable": true
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/BatchItem"
+      }
+     },
+     "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "refused": {
+        "type": "integer",
+        "minimum": 0
+       },
+       "waiting": {
+        "type": "integer",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "ok",
+       "refused",
+       "waiting"
+      ]
+     }
+    },
+    "required": [
+     "batchKey",
+     "approval",
+     "items",
+     "summary"
+    ]
+   },
+   "OkBatchResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/BatchResult"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "AccountCredentialResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "accountId": {
+      "type": "string"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "credentials": {
+      "$ref": "#/components/schemas/AccountCredentials"
+     }
+    },
+    "required": [
+     "replay",
+     "accountId",
+     "vmId",
+     "credentials"
+    ]
+   },
+   "OkAccountCredentialResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/AccountCredentialResult"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -4602,7 +6272,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4649,7 +6319,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4706,7 +6376,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4790,7 +6460,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4878,7 +6548,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4968,7 +6638,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5019,8 +6689,8 @@
      {
       "name": "code",
       "in": "query",
-      "required": true,
-      "description": "1–20 SDK codes, repeat the parameter (code=A&code=B)",
+      "required": false,
+      "description": "Optional lookup mode: supply 1–20 full codes by repeating code=A&code=B. Legacy lookup omits nextCursor. Omit all code parameters for paginated list mode.",
       "schema": {
        "type": "array",
        "items": {
@@ -5029,6 +6699,39 @@
       },
       "style": "form",
       "explode": true
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "description": "Optional state filter; UNLINKED with place=STOCK discovers unused warehouse SDK IDs.",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "UNLINKED",
+        "LINKED",
+        "UNCONFIRMED"
+       ]
+      }
+     },
+     {
+      "name": "place",
+      "in": "query",
+      "required": false,
+      "description": "STOCK: both holderVmId and vmId are null. VM: either holderVmId or vmId is set.",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "STOCK",
+        "VM"
+       ]
+      }
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
      }
     ],
     "responses": {
@@ -5053,7 +6756,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5093,7 +6796,8 @@
       }
      }
     },
-    "summary": "Look up SDK codes before a survey write: id, revision, state, VM list / current VM; money with the balance read right (scope READ)"
+    "summary": "List stored SDKs or look up supplied codes: masked code, SDK ID, revision, placement and money subject to rights (READ)",
+    "description": "Without code parameters, list stored SDKs ordered by createdAt then id, using state/place filters and cursor pagination (limit 1–200, default 50). List items have found:true and masked code; nextCursor is present (null at the last page). Example: sdks?projectId=…&state=UNLINKED&place=STOCK&limit=50. Use sdkId and revision for sdk-assign, not the masked code. With code parameters, retain legacy lookup behavior: one item per distinct normalized supplied code, possibly found:false, with no nextCursor."
    }
   },
   "/sdks/{id}/reveal": {
@@ -5158,7 +6862,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5252,7 +6956,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5349,7 +7053,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5440,7 +7144,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5514,7 +7218,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5655,7 +7359,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5801,7 +7505,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5964,7 +7668,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6117,7 +7821,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6211,7 +7915,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6324,7 +8028,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6449,7 +8153,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6558,7 +8262,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6680,7 +8384,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6812,7 +8516,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6987,7 +8691,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN (also money without BALANCE_WRITE on the token or EARN_BALANCE on the user)",
+      "description": "FORBIDDEN (also money without BALANCE_WRITE on the token or EARN_BALANCE on the user); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7118,7 +8822,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7245,7 +8949,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7362,7 +9066,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7504,7 +9208,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7628,7 +9332,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN",
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7674,6 +9378,1434 @@
         "schema": {
          "$ref": "#/components/schemas/Error"
         }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts": {
+   "get": {
+    "summary": "Masked EarnApp login stock",
+    "description": "UNUSED / HELD / USED. No passwords, 2FA, phone or full email. UNUSED must not be interpreted as permission to reuse an account with uncertain registration.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "UNUSED",
+        "HELD",
+        "USED"
+       ]
+      }
+     },
+     {
+      "name": "type",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "GMAIL",
+        "APPLE",
+        "APPLE_ID"
+       ]
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkAccountStockPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts/hold": {
+   "post": {
+    "summary": "Hold next unused login for the VM",
+    "description": "Requires user ASSIGN in INFRASTRUCTURE and own token ACTIVE job, matching VM/round/revision. Oldest import first. Existing current account returns already:true; hold is not registration.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkAccountHoldAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountHoldBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts/{id}/credentials": {
+   "post": {
+    "summary": "Reveal the current held account credentials",
+    "description": "id is EarnApp accountId, not login stock id. Own token ACTIVE job, VM and current job round are checked. Store secrets only in private ACL-restricted runtime output; never journal, stdout, chat or Git.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkAccountCredentialResult"
+        }
+       }
+      }
+     },
+     "202": {
+      "description": "ADMIN approval required; command has not run",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "Expired key remains expired; use a new command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountCredentialsBody"
+       }
+      }
+     }
+    },
+    "x-approval-required": true
+   }
+  },
+  "/earnapp-accounts/{id}/used": {
+   "post": {
+    "summary": "Record real successful EarnApp registration/login",
+    "description": "id is accountId; expectedRevision is the account revision, not the VM revision. Own token ACTIVE job required. registeredAt and SDK LINKED are permanent. SDK linking requires expectedSdkRevision.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkAccountUsedAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountUsedBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts/{id}/release": {
+   "post": {
+    "summary": "Release an account only when registration is known not to have occurred",
+    "description": "id is accountId; requires expectedRevision and own token ACTIVE job, same VM/round. Registered accounts are refused. Current service allows an unregistered, open account released from its VM to re-enter UNUSED; it does not currently exclude prior credential reveals. Never release when real registration result is uncertain.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkAccountReleaseAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AccountReleaseBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/proxies": {
+   "get": {
+    "summary": "Proxy stock without username/password",
+    "description": "FREE means eligible NEW stock, package + complete credentials, no current VM hold and no previous incompatible installation. Genjy private and BLOCKED are never selected. OTHER may appear without state filter.",
+    "x-required-scope": "READ",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     },
+     {
+      "$ref": "#/components/parameters/limit"
+     },
+     {
+      "$ref": "#/components/parameters/cursor"
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "FREE",
+        "ASSIGNED",
+        "BLOCKED"
+       ]
+      }
+     },
+     {
+      "name": "group",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "TUT",
+        "SHARED"
+       ]
+      }
+     },
+     {
+      "name": "package",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkProxyStockPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/proxy-assign": {
+   "post": {
+    "summary": "Assign eligible FREE proxy from stock",
+    "description": "Own token ACTIVE job and matching cycle/VM revision. Selection is locked and checked in the transaction; no proxy is silently taken from another VM. Existing same proxy may be a no-op. Creates web configuration/apply state, not actual installation. Full credentials still require approval.",
+    "x-required-scope": "VM_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkProxyAssignAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ProxyAssignBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/sdk-assign": {
+   "post": {
+    "summary": "Make an unused stock SDK current on the VM",
+    "description": "Own token ACTIVE job; expectedCycle, expectedVmRevision and expectedSdkRevision checked. Only UNLINKED stock or own VM list. LINKED / UNCONFIRMED / another VM holder refused. Prior code stays in VM list; no actual EarnApp configuration occurs.",
+    "x-required-scope": "VM_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkStockAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SdkAssignBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/sdk-linked": {
+   "post": {
+    "summary": "Record current SDK actually linked to current EarnApp account",
+    "description": "Own token ACTIVE job, same round; accountId must be this VM current open EarnApp account. expectedSdkRevision is required; no expectedVmRevision in this request. LINKED is permanent and cannot be undone or reused. Evidence describes real successful action.",
+    "x-required-scope": "VM_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkStockAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SdkLinkedBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/approvals/{id}": {
+   "get": {
+    "summary": "Read an approval owned by this token",
+    "description": "",
+    "x-required-scope": "READ",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/projectId"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkApprovalDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/approvals/{id}/confirm": {
+   "post": {
+    "summary": "Confirm own token approval using a project ADMIN TOTP",
+    "description": "Bearer token, project membership of ADMIN, enabled 2FA, PENDING unexpired approval owned by the same token. Idempotency-Key required by HTTP layer only; no business journal or saved TOTP. Submit code once; on lost response read approval status before further action. Five failed confirmations lock the approval; three invalid ADMIN codes lock that ADMIN for 30 minutes; TOTP step replay refused. Success APPROVED does not itself execute the held command; retry its original key. No CLI rejection endpoint; web can approve/reject.",
+    "x-required-scope": null,
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkApprovalDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApprovalConfirmBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/batch": {
+   "post": {
+    "summary": "Run 1–100 independent ordered write items",
+    "description": "Outer Idempotency-Key durably binds the whole payload even without privileged items; a changed payload under that key is 409. Distinct item keys keep their own audit/replay. Paths are relative API POST routes, excluding batch and approvals/{id}/confirm; no external URLs. Missing item body.projectId is filled from the batch; a different item projectId is a per-item VALIDATION refusal. Outer-key binding is token-specific; rotating the token does not resume this batch key. Items run sequentially, not atomically: route/scope/service refusal is per item and others continue. Privileged items share one approval hashing the entire batch. Nonprivileged items run while approval is pending. Retry identical outer key/body: completed items replay; approved items may execute. A final 200 can still contain refused items: inspect every item. One write hit plus batch bucket 10/minute/token, no per-item write hits. No secret results stored by the outer-key binding.",
+    "x-required-scope": null,
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "No waiting items; inspect summary.refused and each item even when outer ok:true.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkBatchResult"
+        },
+        "example": {
+         "ok": true,
+         "data": {
+          "batchKey": "batch-demo-0001",
+          "approval": null,
+          "items": [
+           {
+            "index": 0,
+            "path": "vms/vm-example/notes",
+            "idempotencyKey": "item-demo-0001",
+            "status": 200,
+            "body": {
+             "ok": true,
+             "data": {},
+             "error": null
+            }
+           },
+           {
+            "index": 1,
+            "path": "missing-route",
+            "idempotencyKey": "item-demo-0002",
+            "status": 422,
+            "body": {
+             "ok": false,
+             "data": null,
+             "error": {
+              "code": "VALIDATION",
+              "message": "Unknown batch route"
+             }
+            }
+           }
+          ],
+          "summary": {
+           "ok": 1,
+           "refused": 1,
+           "waiting": 0
+          }
+         },
+         "error": null
+        }
+       }
+      }
+     },
+     "202": {
+      "description": "Mixed batch pending: ok:true, data.items (waiting items status 202), data.summary, data.approval. Other items may already be committed.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkBatchResult"
+        },
+        "example": {
+         "ok": true,
+         "data": {
+          "batchKey": "batch-demo-0001",
+          "approval": {
+           "approvalId": "approval-example",
+           "status": "PENDING",
+           "expiresAt": "2026-10-23T15:15:00Z"
+          },
+          "items": [
+           {
+            "index": 0,
+            "path": "vms/vm-example/notes",
+            "idempotencyKey": "item-demo-0001",
+            "status": 200,
+            "body": {
+             "ok": true,
+             "data": {},
+             "error": null
+            }
+           },
+           {
+            "index": 1,
+            "path": "sdks/sdk-example/reveal",
+            "idempotencyKey": "item-demo-0002",
+            "status": 202,
+            "body": {
+             "ok": false,
+             "data": null,
+             "error": {
+              "code": "APPROVAL_REQUIRED",
+              "message": "Waiting for ADMIN approval",
+              "details": {
+               "approvalId": "approval-example",
+               "status": "PENDING",
+               "expiresAt": "2026-10-23T15:15:00Z"
+              }
+             }
+            }
+           }
+          ],
+          "summary": {
+           "ok": 1,
+           "refused": 0,
+           "waiting": 1
+          }
+         },
+         "error": null
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BatchBody"
        }
       }
      }

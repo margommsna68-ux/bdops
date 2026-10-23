@@ -17,20 +17,20 @@ import {validIpRule} from './safety';
 // full proxy of the VM in hand (right VM_PROXY_FOR_OPS).
 // SDK survey (22/10/2026): codes need VM_OPS; the accumulated SDK money read on a machine needs BALANCE_WRITE as well (user right
 // EARN_BALANCE), like the EarnApp balance check; it opens no payout, PayPal or cost data.
-export const OPS_SCOPES=['READ','BALANCE_WRITE','PAYOUT','RECEIPT','VM_OPS','PROXY_CREDENTIALS'] as const;
+export const OPS_SCOPES=['READ','BALANCE_WRITE','PAYOUT','RECEIPT','VM_OPS','PROXY_CREDENTIALS','ACCOUNT_OPS'] as const;
 export type OpsScope=typeof OPS_SCOPES[number];
-export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp / tiền tích luỹ SDK',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút',VM_OPS:'Vận hành VM: nhận việc, ghi bước, SDK, tình trạng, Blocked, ghi chú',PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM đang xử lý'};
+export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp / tiền tích luỹ SDK',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút',VM_OPS:'Vận hành VM: nhận việc, ghi bước, SDK, tình trạng, Blocked, ghi chú',ACCOUNT_OPS:'Kho tài khoản EarnApp: xem danh sách che, giữ / trả / đánh dấu đã dùng cho VM đang nhận việc (thông tin đăng nhập cần ADMIN duyệt)',PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM đang xử lý'};
 export const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
 type Db=PrismaClient|Prisma.TransactionClient;
 /** Which operations this member can do now in this project (the same rules the services check). */
 export async function memberOps(db:Db,userId:string,projectId:string):Promise<Record<OpsScope,boolean>>{
-  const none={READ:false,BALANCE_WRITE:false,PAYOUT:false,RECEIPT:false,VM_OPS:false,PROXY_CREDENTIALS:false};
+  const none={READ:false,BALANCE_WRITE:false,PAYOUT:false,RECEIPT:false,VM_OPS:false,PROXY_CREDENTIALS:false,ACCOUNT_OPS:false};
   let current;try{current=await loadInfrastructureScope(db,userId,projectId);}catch{return none;}
   if(current.businessMode!=='PROXY_VM')return none;
   let read=true;try{assertInfrastructureAction(current,'READ');}catch{read=false;}if(!read)return none;
   const [b,p]=await Promise.all([balanceRights(current,db),payoutRights(current,db)]);
   let assign=true;try{assertInfrastructureAction(current,'ASSIGN');}catch{assign=false;}
-  return {READ:true,BALANCE_WRITE:b.write,PAYOUT:p.payout,RECEIPT:p.receipt,VM_OPS:assign,PROXY_CREDENTIALS:assign&&(current.role==='ADMIN'||current.capabilities.includes('VM_PROXY_FOR_OPS'))};
+  return {READ:true,BALANCE_WRITE:b.write,PAYOUT:p.payout,RECEIPT:p.receipt,VM_OPS:assign,PROXY_CREDENTIALS:assign&&(current.role==='ADMIN'||current.capabilities.includes('VM_PROXY_FOR_OPS')),ACCOUNT_OPS:assign};
 }
 /** A user can still act through a token: has a password and is not locked out of signing in. */
 export async function userActive(db:Db,userId:string){

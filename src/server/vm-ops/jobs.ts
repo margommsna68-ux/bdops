@@ -51,7 +51,7 @@ async function lockOps(tx:Tx,projectId:string,vmId:string){
 }
 async function expire(tx:Tx,vmId:string,now:Date){await tx.vmJob.updateMany({where:{vmId,state:'ACTIVE',expiresAt:{lte:now}},data:{state:'RELEASED',result:'EXPIRED',finishedAt:now}});}
 /** The caller's own active job, locked; anything else (expired, released, another operator or token, another VM) is refused. */
-async function ownJob(tx:Tx,projectId:string,userId:string,caller:OpsCaller,jobId:string,vmId?:string){
+export async function ownJob(tx:Tx,projectId:string,userId:string,caller:OpsCaller,jobId:string,vmId?:string){
   const [row]=await tx.$queryRaw<{id:string}[]>`SELECT "id" FROM "VmJob" WHERE "id"=${jobId} AND "projectId"=${projectId} FOR UPDATE`;
   if(!row)throw new ProxyDomainError('NOT_FOUND','Không có việc này trong dự án','NOT_FOUND');
   const job=await tx.vmJob.findUniqueOrThrow({where:{id:jobId}});
@@ -71,7 +71,7 @@ export function jobView(job:VmJob,extra:{sdkCode?:string|null}={}){
   return {id:job.id,vmId:job.vmId,cycle:job.cycle,kind:job.kind,state:job.state,claimedAt:job.claimedAt.toISOString(),expiresAt:job.expiresAt.toISOString(),step:job.step,stepNote:job.stepNote,stepAt:iso(job.stepAt),
     machineRef:job.machineRef,configurationId:job.configurationId,sdkId:job.sdkId,sdkCode:extra.sdkCode??null,resumeOf:job.resumeOf,result:job.result,finishedAt:iso(job.finishedAt),statusRevision:job.statusRevision};
 }
-async function jobEvent(tx:Tx,projectId:string,actorId:string,job:{vmId:string;cycle:number;id:string;kind:string},note:string,caller:OpsCaller,detail:Record<string,unknown>={}){
+export async function jobEvent(tx:Tx,projectId:string,actorId:string,job:{vmId:string;cycle:number;id:string;kind:string},note:string,caller:OpsCaller,detail:Record<string,unknown>={}){
   await tx.vmOpsEvent.create({data:{projectId,vmId:job.vmId,cycle:job.cycle,kind:'JOB',note:note.slice(0,500),detail:{jobId:job.id,jobKind:job.kind,...(caller.tokenLabel?{token:caller.tokenLabel}:{}),...detail} as Prisma.InputJsonValue,actorId}});
 }
 // ─── Take / step / release ─────────────────────────────────────────────────────────────────────────────────────────────────────

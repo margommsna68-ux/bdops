@@ -9,6 +9,25 @@
 //   node scripts/ops-client.mjs vm <projectId> <vmId>
 //   node scripts/ops-client.mjs get '<path?query>'       # any GET under /api/ops/v1/, e.g. 'withdrawals?projectId=…&status=PREPARING'
 //   node scripts/ops-client.mjs post <path> <body.json> [--key <Idempotency-Key>]
+//   node scripts/ops-client.mjs batch <file.json> [--key K]
+//       # {projectId,items:[{method:'POST',path,body,idempotencyKey}]} (1–100 distinct item keys).
+//       # <file.json>.run.json remembers the outer key; reruns/retry resend ALL original items with unchanged keys.
+//       # DONE items business-replay. Exit 4 waiting; exit 1 PARTIAL (inspect item states), exit 3 unknown.
+//   node scripts/ops-client.mjs approve <approvalId> --admin <username> [--totp-stdin]
+//       # hidden TTY by default; --totp-stdin reads ONE code from stdin. Never pass a code as an argument.
+//       # Sends confirm ONCE, outside the journal, then retries its local command on APPROVED only.
+// Stock uses generic get/post (bodies are captured facts; never refresh revisions automatically):
+//   get 'earnapp-accounts?projectId=P&state=UNUSED&type=GMAIL&limit=50'
+//   get 'proxies?projectId=P&state=FREE&group=TUT' | get 'sdks?projectId=P'
+//   post earnapp-accounts/hold body.json  # projectId,vmId,expectedCycle,expectedVmRevision,jobId,loginType
+//   post earnapp-accounts/A/credentials body.json # projectId,vmId,jobId; approval; file only
+//   post earnapp-accounts/A/used body.json # projectId,vmId,expectedCycle,jobId,expectedRevision,evidence[,sdkId,expectedSdkRevision]
+//   post earnapp-accounts/A/release body.json # projectId,vmId,expectedCycle,jobId,expectedRevision,reason
+//   post vms/V/proxy-assign body.json # projectId,expectedCycle,expectedVmRevision,jobId,proxyId OR pick:{group,packageCode?}
+//   post vms/V/sdk-assign body.json # projectId,expectedCycle,expectedVmRevision,jobId,sdkId,expectedSdkRevision
+//   post vms/V/sdk-linked body.json # projectId,expectedCycle,jobId,sdkId,expectedSdkRevision,accountId,evidence
+// Credentials (also generic post/retry and nested batch results) go to ACL-private files only.
+// MTH_RUNTIME_DIR overrides ~/.mth/runtime; remove credential files after use. Batch SDK reveals are file-only too.
 //   node scripts/ops-client.mjs retry <Idempotency-Key>  # send the SAME command again (same path, body and key) after a lost answer
 //   node scripts/ops-client.mjs pending                  # commands whose result is not known yet
 //   node scripts/ops-client.mjs approvals                # critical commands waiting for an ADMIN's approval on the web (23/10/2026)
@@ -48,7 +67,7 @@
 // on the web (Phê duyệt): the command is NOT recorded, its state is WAITING_APPROVAL (exit 4) and `retry <key>` sends the SAME body
 // again (200 → DONE; 403 APPROVAL_REJECTED → REJECTED, final; 410 APPROVAL_EXPIRED → EXPIRED, send again with a NEW key). `approvals`
 // lists the waiting commands. SDK codes in read answers are masked; only sdk-reveal shows one in full, on stdout, never in the log.
-import {readFileSync,writeFileSync,mkdirSync,existsSync,chmodSync,readdirSync,renameSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,existsSync,chmodSync,readdirSync,renameSync,unlinkSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -81,10 +100,31 @@ function secrets(){
   if(existsSync(FILE)){const j=JSON.parse(readFileSync(FILE,'utf8'));if(!j?.token)die('File bí mật '+FILE+' không có token; chạy lại "init".');return {token:j.token};} // an old `pin` field is ignored
   die('Chưa có token: đặt MTH_TOKEN hoặc chạy "init" trong terminal của bạn.');
 }
-async function hidden(prompt){
-  if(!process.stdin.isTTY)die('init cần một terminal thật (không chạy qua chat hay pipe).');
-  process.stdout.write(prompt);process.stdin.setRawMode(true);process.stdin.resume();process.stdin.setEncoding('utf8');
-  return new Promise(resolve=>{let v='';const on=ch=>{if(ch==='\r'||ch==='\n'){process.stdin.setRawMode(false);process.stdin.pause();process.stdin.off('data',on);process.stdout.write('\n');resolve(v);}else if(ch==='\u0003')process.exit(130);else if(ch==='\u007f')v=v.slice(0,-1);else v+=ch;};process.stdin.on('data',on);});
+/** Raw input arrives in chunks, including whole pasted lines. Never echo the value. */
+export function hiddenInputChunk(value,chunk){
+  for(const ch of String(chunk)){
+    if(ch==='\r'||ch==='\n')return {value,action:'submit'};
+    if(ch==='\x03')return {value:'',action:'cancel'};
+    if(ch==='\b'||ch==='\x7f')value=Array.from(value).slice(0,-1).join('');
+    else value+=ch;
+  }
+  return {value,action:'continue'};
+}
+export async function hidden(prompt,input=process.stdin,output=process.stdout){
+  if(!input.isTTY)die('Cần terminal thật để nhập ẩn (approve qua pipe phải dùng --totp-stdin).');
+  const wasRaw=!!input.isRaw;
+  output.write(prompt);input.setRawMode(true);input.setEncoding('utf8');
+  return new Promise((resolve,reject)=>{
+    let value='';
+    const on=chunk=>{
+      const result=hiddenInputChunk(value,chunk);value=result.value;
+      if(result.action==='continue')return;
+      input.off('data',on);input.pause();input.setRawMode(wasRaw);output.write('\n');
+      if(result.action==='cancel'){value='';reject(Object.assign(new Error('Đã huỷ nhập mã.'),{exitCode:130}));}
+      else{resolve(value);value='';}
+    };
+    input.on('data',on);input.resume();
+  });
 }
 // ─── Command log (no secrets) ────────────────────────────────────────────────────────────────────────────────────────────────
 const KEY=/^[A-Za-z0-9._:-]{8,100}$/;
@@ -156,20 +196,107 @@ export const exitFor=state=>state==='DONE'?0:state==='WAITING_APPROVAL'?4:state=
 // log and the chat never see the user / password.
 const PROXY_PATH=/^vms\/[A-Za-z0-9_-]{1,64}\/proxy-credentials$/;
 const PROXY_DIR=process.env.MTH_PROXY_DIR||join(homedir(),'.mth','proxy');
+const RUNTIME_DIR=process.env.MTH_RUNTIME_DIR||join(homedir(),'.mth','runtime');
+const ACCOUNT_PATH=/^earnapp-accounts\/[A-Za-z0-9_-]{1,64}\/credentials$/;
+const REVEAL_PATH=/^sdks\/[A-Za-z0-9_-]{1,64}\/reveal$/;
+const CONFIRM_PATH=/^approvals\/[^/]+\/confirm$/;
+const routePath=path=>opsUrl(path).pathname.slice(PREFIX.length);
+/** Set a private ACL BEFORE any secret bytes are written. Fail closed on Windows ACL errors. */
+function privateJson(target,value){
+  mkdirSync(dirname(target),{recursive:true});
+  const tmp=target+'.tmp-'+randomUUID();
+  try{
+    writeFileSync(tmp,'',{mode:0o600,flag:'wx'});
+    if(process.platform==='win32'){
+      const who=spawnSync('whoami',['/user','/fo','csv','/nh'],{encoding:'utf8',windowsHide:true});
+      const sid=who.status===0?who.stdout.match(/S-1-\d+(?:-\d+)+/)?.[0]:null;
+      if(!sid)throw new Error('Không xác định được SID để đặt ACL riêng');
+      const acl=spawnSync('icacls',[tmp,'/inheritance:r','/grant:r','*'+sid+':F'],{encoding:'utf8',windowsHide:true});
+      if(acl.status!==0)throw new Error('Không đặt được ACL riêng cho file bí mật');
+    }else chmodSync(tmp,0o600);
+    writeFileSync(tmp,JSON.stringify(value,null,1));renameSync(tmp,target);
+  }finally{if(existsSync(tmp))unlinkSync(tmp);}
+}
 function writeProxyFile(out,vmId,file){
-  const target=file||join(PROXY_DIR,vmId+'.json');mkdirSync(dirname(target),{recursive:true});
-  const tmp=target+'.tmp-'+process.pid;writeFileSync(tmp,JSON.stringify({vmId,configurationId:out.data.recorded.configurationId,...out.data.proxy},null,1),{mode:0o600});renameSync(tmp,target);try{chmodSync(target,0o600);}catch{/* Windows keeps the user's ACL */}
-  return {...out,data:{...out.data,proxy:'[đã ghi vào file '+target+'; không in user / pass]'},proxyFile:target};
+  const target=file||join(PROXY_DIR,vmId+'.json');
+  privateJson(target,{vmId,configurationId:out.data.recorded?.configurationId,...out.data.proxy});
+  // Only whitelisted metadata leaves a secret endpoint; extra nested server fields may hold secrets too.
+  return {ok:true,error:null,data:{proxy:'[đã ghi vào file '+target+'; không in user / pass]'},proxyFile:target};
+}
+function hideSecretResult(path,out,{batch=false,key='read',index=0}={}){
+  const p=routePath(path);
+  if(!out?.ok)return out;
+  if(PROXY_PATH.test(p)&&!batch){
+    const safe=writeProxyFile(out,p.split('/')[1],proxyOut);
+    // Preserve all fields in a separate private response file, including unexpected nested credentials.
+    const full=join(RUNTIME_DIR,'proxy-response-'+sha(key)+'.json');privateJson(full,out.data);
+    return {...safe,secretFile:full};
+  }
+  if(ACCOUNT_PATH.test(p)||batch&&(PROXY_PATH.test(p)||REVEAL_PATH.test(p))){
+    const target=join(RUNTIME_DIR,'secret-'+sha(key+'-'+index)+'-'+p.split('/')[1]+'.json');
+    privateJson(target,out.data);
+    return {ok:true,error:null,data:{saved:true},secretFile:target};
+  }
+  return out;
+}
+function validateBatch(body){
+  if(!body||typeof body.projectId!=='string'||!Array.isArray(body.items)||body.items.length<1||body.items.length>100)throw new Error('batch cần projectId và 1–100 items');
+  const keys=new Set();
+  for(const it of body.items){
+    if(it?.method!=='POST'||typeof it.path!=='string'||!it.body||typeof it.body!=='object'||Array.isArray(it.body)||typeof it.idempotencyKey!=='string'||!KEY.test(it.idempotencyKey)||keys.has(it.idempotencyKey))throw new Error('Mỗi mục cần POST, path, body và idempotencyKey riêng (8–100 ký tự)');
+    const p=routePath(it.path);if(p==='batch'||CONFIRM_PATH.test(p))throw new Error('Không cho batch lồng hoặc confirm trong lô; dùng approve');
+    keys.add(it.idempotencyKey);
+  }
+}
+function batchCommand(file,key){
+  const body=JSON.parse(readFileSync(file,'utf8'));validateBatch(body);
+  const stateFile=file+'.run.json',hash=digest('batch',body);
+  if(existsSync(stateFile)){
+    const state=JSON.parse(readFileSync(stateFile,'utf8'));
+    if(state.hash!==hash||!KEY.test(state.key)||key&&state.key!==key)throw new Error('File batch đã đổi hoặc key khác; retry key đã lưu, lệnh mới dùng file mới');
+    key=state.key;
+  }else{key=key||randomUUID();if(!KEY.test(key))throw new Error('Idempotency-Key không hợp lệ');privateJson(stateFile,{key,hash});}
+  return call('POST','batch',body,key);
+}
+/** Confirm is deliberately outside call()/the journal. Neither request nor server echoes can escape. */
+async function approve(id,admin,stdin){
+  if(!/^[A-Za-z0-9_-]{1,64}$/.test(id))throw new Error('approvalId không hợp lệ');
+  const entries=allEntries().filter(e=>e.approvalId===id&&e.state==='WAITING_APPROVAL');
+  if(entries.length!==1)throw new Error('Cần đúng một lệnh local đang chờ approvalId này; kiểm tra approvals');
+  const e=entries[0],projectId=e.body.projectId;
+  let code=stdin?readFileSync(0,'utf8').trim():await hidden('Mã 2FA của ADMIN (ẩn): ');
+  if(!/^\d{6}$/.test(code))throw new Error('Mã 2FA phải có 6 chữ số');
+  const s=secrets();let res,out;
+  try{
+    res=await fetch(opsUrl('approvals/'+id+'/confirm'),{method:'POST',redirect:'manual',headers:{authorization:'Bearer '+s.token,'content-type':'application/json',accept:'application/json','idempotency-key':randomUUID()},body:JSON.stringify({projectId,admin,totp:code})});
+    code='';out=await res.json();
+  }catch{code='';die('Chưa xác định kết quả duyệt; kiểm tra trạng thái approval trước khi gửi mã khác.',3);}
+  if(res.status!==200||out?.ok!==true||out.error!==null||out.data?.status!=='APPROVED'){
+    const terminal=out?.ok===false&&out.data===null&&((res.status===403&&out.error?.code==='APPROVAL_REJECTED')||(res.status===410&&out.error?.code==='APPROVAL_EXPIRED'));
+    if(terminal){
+      const state=res.status===410?'EXPIRED':'REJECTED',now=new Date().toISOString();
+      writeEntry({...e,state,answeredAt:now,errorCode:out.error.code,lastAttempt:{at:now,result:state,httpStatus:res.status}});
+      console.log(JSON.stringify({ok:false,status:res.status,commandState:state,idempotencyKey:e.key,error:{code:out.error.code,message:'Approval kết thúc; sau khi khôi phục quyền truy cập, dùng key MỚI. Kiểm tra các mục đã DONE trước khi tạo lô mới.'}}));
+      process.exitCode=1;return;
+    }
+    console.log(JSON.stringify({ok:false,status:res.status,error:{code:res.status>=300&&res.status<400?'REDIRECT_REFUSED':'APPROVAL_NOT_CONFIRMED',message:'Không xác nhận APPROVED; không tự gửi lại mã hoặc chạy lệnh.'}}));
+    process.exitCode=res.status>=500?3:1;return;
+  }
+  await call('POST',e.path,e.body,e.key);
 }
 let proxyOut=null;
 async function call(method,path,body,key){
   const url=opsUrl(path),s=secrets(),headers={authorization:'Bearer '+s.token,accept:'application/json'};
-  let entry=null,before=null;
+  const p=routePath(path);
+  if(CONFIRM_PATH.test(p))throw new Error('Dùng approve để gửi mã trực tiếp, không qua nhật ký');
+  if(method==='POST'&&p==='batch')validateBatch(body);
+  let entry=null,before=null,batchBefore=[];
   const settle=(attempt,{status=null,why=null,out=null}={})=>{
     const now=new Date().toISOString(),state=nextState(before,attempt),err=out&&!out.ok?{code:out.error.code,message:String(out.error.message).slice(0,300)}:null;
     const lastAttempt={at:now,result:attempt,httpStatus:status,...(why?{reason:why}:{}),...(err?{errorCode:err.code}:{})};
     const d=out?.error?.details,approval=attempt==='WAITING'?{approvalId:d.approvalId,approvalExpiresAt:typeof d.expiresAt==='string'?d.expiresAt:null,waitingSince:entry.waitingSince||now}:{};
-    writeEntry({...entry,state,lastAttempt,...approval,...(state==='DONE'&&before!=='DONE'?{doneAt:now}:{}),...(state==='ANSWERED'||state==='REJECTED'||state==='EXPIRED'?{httpStatus:status,errorCode:err?.code??null,answeredAt:now}:{})});
+    const batchItems=p==='batch'?{items:entry.body.items.map((it,i)=>({index:i,path:it.path,idempotencyKey:it.idempotencyKey,state:attempt==='UNCLEAR'?nextState(batchBefore[i]?.state,'UNCLEAR'):(batchBefore[i]?.state||'ANSWERED')}))}:{};
+    writeEntry({...entry,state,lastAttempt,...batchItems,...approval,...(state==='DONE'&&before!=='DONE'?{doneAt:now}:{}),...(state==='ANSWERED'||state==='REJECTED'||state==='EXPIRED'?{httpStatus:status,errorCode:err?.code??null,answeredAt:now}:{})});
     return {state,err,lastAttempt};
   };
   /** An attempt that did not settle the command: print what the command is now (never "not recorded" when it may be). */
@@ -186,9 +313,11 @@ async function call(method,path,body,key){
     const prev=readEntry(key),hash=digest(path,body);
     if(prev&&prev.hash!==hash)die('Key '+key+' đã dùng cho một lệnh khác (đường dẫn / nội dung khác). Dùng key mới cho lệnh mới; key cũ chỉ để gửi lại đúng lệnh cũ.');
     before=prev?.state??null;
+    if(p==='batch')batchBefore=prev?.items||((before==='SENDING'||before==='UNKNOWN')?body.items.map(()=>({state:'UNKNOWN'})):[]);
     const now=new Date().toISOString();
     // While this attempt is in flight the command may get recorded: SENDING, except a DONE command, which stays DONE.
     entry={...(prev||{}),key,method,path,body,hash,createdAt:prev?.createdAt||now,attempts:(prev?.attempts||0)+1,state:before==='DONE'?'DONE':'SENDING',lastTryAt:now,lastAttempt:{at:now,result:'SENDING'}};
+    if(p==='batch')entry.items=body.items.map((it,i)=>({index:i,path:it.path,idempotencyKey:it.idempotencyKey,state:batchBefore[i]?.state==='DONE'?'DONE':'SENDING'}));
     writeEntry(entry);
     console.error('Idempotency-Key: '+key+' (đã lưu lệnh vào '+entryFile(key)+' trước khi gửi)');
     headers['content-type']='application/json';headers['idempotency-key']=key;
@@ -209,6 +338,27 @@ async function call(method,path,body,key){
     // Only a well-formed answer with a meaning in the contract counts: a gateway 5xx, HTML or a broken envelope may come after the
     // app already recorded the command.
     if(!definiteAnswer(res.status,out))unsettled('UNCLEAR',{status:res.status,why:out===null?'not-json':res.status>=500?'server':'envelope'});
+    if(p==='batch'&&out.ok){
+      const items=out.data.items;
+      if(!Array.isArray(items)||items.length!==body.items.length||items.some((r,i)=>!r||r.index!==i||r.path!==body.items[i].path||(r.idempotencyKey!==undefined&&r.idempotencyKey!==body.items[i].idempotencyKey)||!Number.isInteger(r.status)))unsettled('UNCLEAR',{status:res.status,why:'batch-envelope'});
+      const rows=items.map((r,i)=>{
+        const definite=definiteAnswer(r.status,r.body),attempt=!definite?'UNCLEAR':isApprovalHold(r.status,r.body)?'WAITING':r.body.ok?'OK':r.body.error.code==='APPROVAL_REJECTED'?'REJECTED':r.body.error.code==='APPROVAL_EXPIRED'?'EXPIRED':'REFUSED';
+        return {index:i,path:body.items[i].path,idempotencyKey:body.items[i].idempotencyKey,state:nextState(batchBefore[i]?.state,attempt),httpStatus:r.status,...(definite&&!r.body.ok?{errorCode:r.body.error.code}:{})};
+      });
+      const state=rows.some(r=>r.state==='UNKNOWN')?'UNKNOWN':rows.some(r=>r.state==='WAITING_APPROVAL')?'WAITING_APPROVAL':rows.every(r=>r.state==='DONE')?'DONE':'PARTIAL';
+      const info=out.data.approval||items.find(r=>isApprovalHold(r.status,r.body))?.body.error.details;
+      if(state==='WAITING_APPROVAL'&&typeof info?.approvalId!=='string')unsettled('UNCLEAR',{status:res.status,why:'missing-batch-approval'});
+      let safeItems;
+      try{safeItems=items.map((r,i)=>{
+        const safe=definiteAnswer(r.status,r.body)?hideSecretResult(body.items[i].path,r.body,{batch:true,key,index:i}):{ok:false,data:null,error:{code:'RESULT_UNKNOWN',message:'Kết quả mục chưa xác định; retry cùng key lô.'}};
+        return {index:i,path:body.items[i].path,idempotencyKey:body.items[i].idempotencyKey,status:r.status,body:safe,...(safe?.secretFile?{secretFile:safe.secretFile}:{}),commandState:rows[i].state};
+      });}catch{unsettled('UNCLEAR',{status:res.status,why:'secret-file'});}
+      const now=new Date().toISOString();
+      writeEntry({...entry,state,items:rows,lastAttempt:{at:now,result:state,httpStatus:res.status},...(state==='DONE'?{doneAt:entry.doneAt||now}:{}),...(state==='WAITING_APPROVAL'?{approvalId:info.approvalId,approvalExpiresAt:info.expiresAt??null,waitingSince:entry.waitingSince||now}:{})});
+      // Do not copy arbitrary outer data: credentials belong only to their private item response files.
+      console.log(JSON.stringify({ok:true,status:res.status,idempotencyKey:key,commandState:state,...(state==='WAITING_APPROVAL'?{approvalId:info.approvalId}:{}),data:{items:safeItems,summary:{ok:rows.filter(r=>r.state==='DONE').length,waiting:rows.filter(r=>r.state==='WAITING_APPROVAL').length,refused:rows.filter(r=>['ANSWERED','REJECTED','EXPIRED'].includes(r.state)).length}},...(rows.some(r=>r.state==='EXPIRED'||r.state==='REJECTED')?{message:'Approval kết thúc; kiểm tra kết quả từng mục và dùng key MỚI cho lệnh mới (không tạo lại mục đã DONE).'}:{})},null,2));
+      process.exitCode=exitFor(state);return;
+    }
     // Approval answers (23/10/2026): held (not recorded), rejected or expired — each settles the command on its own, whatever came before.
     if(isApprovalHold(res.status,out)){
       const {state}=settle('WAITING',{status:res.status,out}),d=out.error.details;
@@ -222,13 +372,14 @@ async function call(method,path,body,key){
       console.log(JSON.stringify({ok:false,status:res.status,requestId:res.headers.get('x-request-id'),idempotencyKey:key,commandState:state,approvalId:out.error.details?.approvalId??null,error:{code:out.error.code,message:out.error.message},message},null,2));
       process.exitCode=exitFor(state);return;}
     if(!out.ok&&nextState(before,'REFUSED')!=='ANSWERED')unsettled('REFUSED',{status:res.status,out});
+    try{out=hideSecretResult(path,out,{key});}catch{unsettled('UNCLEAR',{status:res.status,why:'secret-file'});}
     const {state}=settle(out.ok?'OK':'REFUSED',{status:res.status,out});
-    if(PROXY_PATH.test(path)&&out.ok&&out.data?.proxy)out=writeProxyFile(out,path.split('/')[1],proxyOut);
     // sdks/{id}/reveal: the full code is in `out.data.code` and goes to stdout once; the command log holds key / path / body / state only.
     console.log(JSON.stringify({status:res.status,requestId:res.headers.get('x-request-id'),idempotencyKey:key,commandState:state,...out},null,2));
     process.exitCode=exitFor(state);return;
   }
   if(out===null)out={ok:false,error:{code:'HTTP_'+res.status,message:text.slice(0,200)}};
+  out=hideSecretResult(path,out);
   console.log(JSON.stringify({status:res.status,requestId:res.headers.get('x-request-id'),...out},null,2));
   if(!out.ok)process.exitCode=1;
 }
@@ -368,6 +519,8 @@ if(isMain){
     else if(cmd==='vm'&&args.length===2)await call('GET','vms/'+encodeURIComponent(args[1])+'?'+new URLSearchParams({projectId:args[0]}));
     else if(cmd==='get'&&args.length===1)await call('GET',args[0]);
     else if(cmd==='post'){const key=flag('--key')||randomUUID();if(args.length!==2)die('post <path> <body.json> [--key K]');await call('POST',args[0],JSON.parse(readFileSync(args[1],'utf8')),key);}
+    else if(cmd==='batch'){const key=flag('--key');if(args.length!==1)die('batch <file.json> [--key K]');await batchCommand(args[0],key);}
+    else if(cmd==='approve'){const admin=flag('--admin'),at=args.indexOf('--totp-stdin'),stdin=at>=0;if(stdin)args.splice(at,1);if(args.length!==1||!admin)die('approve <approvalId> --admin <username> [--totp-stdin]');await approve(args[0],admin,stdin);}
     else if(cmd==='proxy'){const out=flag('--out'),pkey=flag('--key')||randomUUID();if(args.length!==4||!/^\d+$/.test(args[3]))die('proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]');proxyOut=out;
       await call('POST','vms/'+encodeURIComponent(args[1])+'/proxy-credentials',{projectId:args[0],jobId:args[2],expectedCycle:Number(args[3])},pkey);}
     else if(cmd==='sdk-check'&&args.length===1){const r=checkSdkSurvey(JSON.parse(readFileSync(args[0],'utf8')));console.log(JSON.stringify({ok:!r.problems.length,vms:r.vms.length,codes:r.codes,problems:r.problems},null,2));if(r.problems.length)process.exitCode=1;}
@@ -385,7 +538,7 @@ if(isMain){
       console.log(JSON.stringify(list.map(e=>({key:e.key,path:e.path,state:e.state,approvalId:e.approvalId??null,expiresAt:e.approvalExpiresAt??null,expired:!!e.approvalExpiresAt&&Date.parse(e.approvalExpiresAt)<Date.now(),waitingSince:e.waitingSince??null,attempts:e.attempts,next:WAITING_MSG(e.key)})),null,2));}
     else if(cmd==='pending'){const list=allEntries().filter(e=>e.state==='SENDING'||e.state==='UNKNOWN'||e.state==='UNREADABLE');
       console.log(JSON.stringify(list.map(e=>e.state==='UNREADABLE'?{key:null,file:e.file,state:e.state,error:e.error}:{key:e.key,path:e.path,state:e.state,attempts:e.attempts,lastTryAt:e.lastTryAt,...(e.httpStatus?{httpStatus:e.httpStatus}:{})}),null,2));}
-    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | retry <key> | pending | approvals | sdk-reveal <projectId> <sdkId> [--key K] | proxy <projectId> <vmId> <jobId> <cycle> [--out F] | sdk-prepare <projectId> <vm>... [--code C] [--out F] | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K] | sdk-survey <survey.json> [--state F] [--redo vmId]\n'
+    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | batch <file.json> [--key K] | approve <approvalId> --admin <username> [--totp-stdin] | retry <key> | pending | approvals | sdk-reveal <projectId> <sdkId> [--key K] | proxy <projectId> <vmId> <jobId> <cycle> [--out F] | sdk-prepare <projectId> <vm>... [--code C] [--out F] | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K] | sdk-survey <survey.json> [--state F] [--redo vmId]\n'
       +'Mã thoát: 0 DONE · 1 ANSWERED / REJECTED / EXPIRED · 2 lỗi dùng lệnh · 3 UNKNOWN (retry <key>) · 4 WAITING_APPROVAL (ADMIN duyệt trên web rồi retry <key>). Không còn PIN (23/10/2026); lệnh quan trọng chờ ADMIN duyệt.');
-  }catch(e){die(String(e.message||e));}
+  }catch(e){die(String(e.message||e),e.exitCode===130?130:2);}
 }

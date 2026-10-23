@@ -1,7 +1,7 @@
 import type {PrismaClient} from '@prisma/client';
 // Fixed-window counters in PostgreSQL (OpsRateBucket), so every instance and every restart sees the same count. One atomic upsert per
 // hit: a new window starts the count again at 1. Times are written as UTC explicitly (the column has no time zone).
-export const LIMITS={read:{max:120,windowSec:60},write:{max:30,windowSec:60},authFail:{max:30,windowSec:60},pinFail:{max:5,windowSec:1800}} as const;
+export const LIMITS={read:{max:120,windowSec:60},write:{max:30,windowSec:60},batch:{max:10,windowSec:60},authFail:{max:30,windowSec:60},pinFail:{max:5,windowSec:1800}} as const;
 export type LimitName=keyof typeof LIMITS;
 const windowOf=(name:LimitName,now=Date.now())=>{const w=LIMITS[name].windowSec*1000;return {start:new Date(Math.floor(now/w)*w),end:Math.floor(now/w)*w+w};};
 /** Count one hit; over the limit → retryAfter (seconds). */
