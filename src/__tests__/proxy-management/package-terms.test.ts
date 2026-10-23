@@ -46,6 +46,10 @@ describe('sortRegistryRows',()=>{
   it('STATUS: newest recorded status first, unknown dates last',()=>{
     expect(ips('STATUS')).toEqual(['10.0.0.1','10.0.0.2','10.0.0.4','10.0.0.9','10.0.0.3']);
   });
+  it('BLOCKED_FIRST: blocked proxies first, then package and VM, before pagination',()=>{
+    const input=[row({ip:'10.9.0.1',packageCode:'1',state:'LIVE'}),row({ip:'10.9.0.2',packageCode:'10',state:'BLOCKED'}),row({ip:'10.9.0.3',packageCode:'2',state:'BLOCKED'}),row({ip:'10.9.0.4',packageCode:'2',state:'NEW'})];
+    expect(sortRegistryRows(input,'BLOCKED_FIRST').map(r=>r.ip)).toEqual(['10.9.0.3','10.9.0.2','10.9.0.1','10.9.0.4']);
+  });
   it('IP: numeric address order',()=>{
     expect(ips('IP')).toEqual(['10.0.0.1','10.0.0.2','10.0.0.3','10.0.0.4','10.0.0.9']);
   });

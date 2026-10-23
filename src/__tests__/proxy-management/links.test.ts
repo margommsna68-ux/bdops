@@ -22,6 +22,7 @@ describe('shared link builder',()=>{
     expect(u).toEqual({q:'1.2.3.4',servers:['moon1',UNASSIGNED_SERVER],group:'TUT',state:'OTHER',pkg:'due',sort:'PACKAGE',view:'HISTORY',page:1,batch:''});
     expect('/infrastructure/proxies'+writeRegistryUrl(u)).toBe(href);
     expect(writeRegistryUrl({...u,sort:'IP'})).toContain('sort=IP');
+    expect(readRegistryUrl(params(writeRegistryUrl({...u,state:'BLOCKED',pkg:'231243',sort:'BLOCKED_FIRST'}).slice(1)))).toMatchObject({state:'BLOCKED',pkg:'231243',sort:'BLOCKED_FIRST'});
     expect(readRegistryUrl(params('state=bogus&tab=nope&sort=x'))).toMatchObject({state:'',view:'CURRENT',sort:'PACKAGE'});
     expect(writeRegistryUrl(readRegistryUrl(params('group=SHARED')),'240292')).toBe('?group=SHARED&pay=240292');
     expect(filterKey(readRegistryUrl(params('group=TUT')))).not.toBe(filterKey(readRegistryUrl(params('group=TUT&tab=all'))));

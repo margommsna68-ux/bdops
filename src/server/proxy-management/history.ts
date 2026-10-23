@@ -35,11 +35,15 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
   const groupKey=registryGroupKey;
   const groupMatch=(r:RegistryRow)=>!filter.group||groupKey(r)===filter.group;
   const dueCodes=filter.due?new Set((await db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null}},select:{code:true,nextDueDate:true}})).filter(a=>['DUE_SOON','OVERDUE'].includes(dueState(a.nextDueDate).state)).map(a=>a.code)):null;
-  const scoped=rows.filter(r=>(!inBatch||(!!r.endpointId&&inBatch.has(r.endpointId)))&&(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
+  const packageScope=rows.filter(r=>(!inBatch||(!!r.endpointId&&inBatch.has(r.endpointId)))&&(!dueCodes||(!!r.packageCode&&dueCodes.has(r.packageCode)))&&
     (filter.view==='ALL'||(filter.view==='HISTORY'?HISTORICAL_STATES.includes(r.state):!HISTORICAL_STATES.includes(r.state)))&&
-    (!filter.owner||r.owner===filter.owner)&&(!filter.packageCode||r.packageCode===filter.packageCode)&&
+    (!filter.owner||r.owner===filter.owner)&&
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
     (!search||[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search))));
+  // Package counts apply every other filter, over all rows before paging.
+  const packageCounts:Record<string,number>=Object.create(null);
+  for(const r of packageScope)if(groupMatch(r)&&(!filter.state||stateMatches(r.state,filter.state))){const code=r.packageCode||'';packageCounts[code]=(packageCounts[code]||0)+1;}
+  const scoped=packageScope.filter(r=>!filter.packageCode||r.packageCode===filter.packageCode);
   // stateCounts: rows per state under every filter except the state itself; groupCounts: per group under every filter except the group.
   const stateCounts:Record<string,number>={ALL:0,OTHER:0};for(const r of scoped) if(groupMatch(r)){stateCounts.ALL++;stateCounts[r.state]=(stateCounts[r.state]||0)+1;if(!MAIN_STATES.includes(r.state)) stateCounts.OTHER++;}
   const stateScoped=filter.state?scoped.filter(r=>stateMatches(r.state,filter.state!)):scoped;
@@ -47,7 +51,7 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
   for(const r of stateScoped){const k=groupKey(r);groupCounts[k]=(groupCounts[k]||0)+1;}
   const filtered=stateScoped.filter(groupMatch);
   sortRegistryRows(filtered,filter.sort);
-  return {rows:filtered,counts,servers,groups,groupCounts,stateCounts};
+  return {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts};
 }
 async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
@@ -55,13 +59,13 @@ async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
 export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:PrismaClient=prisma):Promise<RegistryPage>{
   await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
-  const {rows:filtered,counts,servers,groups,groupCounts,stateCounts}=await loadRegistryRows(scope,filter,db);
+  const {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts}=await loadRegistryRows(scope,filter,db);
   // ?page= of the registry: a page past the end (rows changed since the link was made) is served as the last page and reported back.
   let start=0;
   if(filter.page&&!filter.cursor){if(!Number.isInteger(filter.page)||filter.page<1) throw new ProxyDomainError('INVALID_INPUT');start=(Math.min(filter.page,Math.max(1,Math.ceil(filtered.length/filter.limit)))-1)*filter.limit;}
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
-  return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
+  return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,packageCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
 }
 export async function getProxyTimeline(scope:ActorScope,identityId:string,db:PrismaClient=prisma):Promise<ProxyTimeline>{
   await authorize(scope,false,db);

@@ -8,7 +8,7 @@ import {links} from '@/lib/links';
 export type RegistryView='CURRENT'|'HISTORY'|'ALL';
 export interface RegistryUrl {q:string;servers:string[];group:string;state:string;pkg:string;sort:RegistrySort;view:RegistryView;page:number;/** ?batch= one import batch ("Xem vừa nhập") */batch:string}
 export const REGISTRY_STATES=['NEW','LIVE','BLOCKED','REPLACED','DIE','QUARANTINED','VOID','RETIRED','OTHER'];
-const SORTS:RegistrySort[]=['PACKAGE','SERVER','STATUS','IP'];
+const SORTS:RegistrySort[]=['PACKAGE','SERVER','STATUS','IP','BLOCKED_FIRST'];
 const TABS:Record<string,RegistryView>={history:'HISTORY',all:'ALL'};
 // A page number the server can serve: a whole number from 1 (anything else is page 1). Past the last page is clamped by the server.
 export const pageOf=(v:string|null)=>/^[1-9]\d{0,5}$/.test(v||'')?Number(v):1;

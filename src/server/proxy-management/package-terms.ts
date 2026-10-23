@@ -1,6 +1,6 @@
 import type {RegistryLocation,RegistryRow} from './types';
 export type DueState='NONE'|'OVERDUE'|'DUE_SOON'|'OK';
-export type RegistrySort='PACKAGE'|'SERVER'|'STATUS'|'IP';
+export type RegistrySort='PACKAGE'|'SERVER'|'STATUS'|'IP'|'BLOCKED_FIRST';
 export const DUE_SOON_DAYS=7;
 const utcDay=(d:Date)=>Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
 // Calendar day as the team sees it (Asia/Bangkok), expressed as a UTC day number so it compares with DATE columns.
@@ -34,6 +34,7 @@ const comparators:Record<RegistrySort,(a:RegistryRow,b:RegistryRow)=>number>={
   PACKAGE:(a,b)=>comparePackage(a,b)||compareVM(a,b)||compareIP(a,b),
   SERVER:(a,b)=>compareVM(a,b)||comparePackage(a,b)||compareIP(a,b),
   STATUS:(a,b)=>compareStatus(a,b)||comparePackage(a,b)||compareIP(a,b),
+  BLOCKED_FIRST:(a,b)=>Number(b.state==='BLOCKED')-Number(a.state==='BLOCKED')||comparePackage(a,b)||compareVM(a,b)||compareIP(a,b),
   IP:compareIP,
 };
 export function sortRegistryRows(rows:RegistryRow[],mode:RegistrySort='PACKAGE'){return rows.sort(comparators[mode]||comparators.PACKAGE);}

@@ -65,6 +65,16 @@ it('registry sorts by package, server, status or IP, filters one package and pac
     expect(await codes({sort:'PACKAGE'})).toEqual(['231243','231243','240292']);
     expect(await codes({sort:'STATUS'})).toHaveLength(3);
     expect(await codes({packageCode:'240292'})).toEqual(['240292']);
+    const onePage=await queryRegistry(f.scope,{view:'CURRENT',limit:1,packageCode:'240292'},db);
+    expect(onePage.packageCounts).toEqual({'231243':2,'240292':1});
+    const empty=await queryRegistry(f.scope,{view:'CURRENT',limit:1,state:'BLOCKED'},db);
+    expect(empty.packageCounts).toEqual({});
+    await (await f.run({kind:'BLOCKED',text:ips[1]})).commit();
+    const blocked=await queryRegistry(f.scope,{view:'CURRENT',limit:1,state:'BLOCKED'},db);
+    expect(blocked.packageCounts).toEqual({'231243':1});
+    expect(blocked.total).toBe(1);
+    const ranked=await queryRegistry(f.scope,{view:'CURRENT',limit:1,sort:'BLOCKED_FIRST'},db);
+    expect(ranked.rows[0].ip).toBe(ips[1]);
     expect(await codes({due:true})).toEqual(['240292']);
     const numeric=(ip:string)=>ip.split('.').reduce((n,x)=>n*256+Number(x),0);
     const byIp=(await queryRegistry(f.scope,{view:'CURRENT',limit:50,sort:'IP'},db)).rows.map(r=>r.ip);expect([...byIp].sort((a,b)=>numeric(a)-numeric(b))).toEqual(byIp);
