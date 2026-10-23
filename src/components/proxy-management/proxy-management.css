@@ -46,3 +46,43 @@
 .acc-batch-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 /* Narrow screens: the bar wraps so Xoá / Bỏ chọn stay visible (height then follows its content); a search box in a column of actions is one line high. */
 @media(max-width:640px){.pm-bulkbar{height:auto;flex-wrap:wrap;overflow-x:visible}.pm-bulkbar-actions{flex-wrap:wrap!important}.pm-bulkbar-end{margin-left:0}.pm-actions .vm-search{flex:0 0 auto;width:100%}}
+
+/* Proxy inventory only: actions, search, then one aligned set of filters. */
+.pm-registry .pm-registry-actions{align-items:center;flex-direction:row;flex-wrap:wrap;padding:16px 20px;gap:10px}
+.pm-registry-actions-main{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.pm-registry-actions-main .pm-button-primary{margin-right:4px}
+.pm-registry-filters{padding:0 20px 12px}
+.pm-registry-search-row{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.pm-registry-search-row .pm-search{min-width:180px;background:var(--ds-input)}
+.pm-registry-search-row .pm-search input{min-width:0}
+.pm-registry-filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.pm-registry-filter-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pm-registry-filter-field>span{font-size:12px;font-weight:500;color:var(--ds-text-secondary)}
+.pm-registry-filter-field .pm-input,.pm-registry-filter-field .pm-filter-trigger{width:100%;min-width:0;height:38px;min-height:38px;padding:7px 10px;text-overflow:ellipsis}
+.pm-registry-filter-field .pm-filter-trigger{overflow:hidden}
+.pm-registry-filter-field .pm-filter-trigger svg{flex-shrink:0}
+.pm-registry-blocked{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:5px 10px;border:1px solid var(--ds-border-strong);border-radius:7px;color:var(--ds-text-secondary);background:transparent;font-size:12px;font-weight:550;white-space:nowrap}
+.pm-registry-blocked:hover{background:var(--ds-hover)}
+.pm-registry-status-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#ef4444}
+.pm-registry-filter-count{font-variant-numeric:tabular-nums;min-width:18px;text-align:center;padding:0 4px;border-radius:4px;background:var(--ds-hover)}
+.pm-registry-blocked[aria-pressed="true"]{color:#b91c1c;border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08)}
+.pm-registry-blocked[aria-pressed="true"] .pm-registry-filter-count{background:rgba(239,68,68,.12)}
+[data-theme="dark"] .pm-registry-blocked[aria-pressed="true"],[data-theme="golden"] .pm-registry-blocked[aria-pressed="true"]{color:#fca5a5}
+.pm-registry-blocked:focus-visible{outline:2px solid #3b82f6;outline-offset:3px}
+.pm-registry-reset{min-height:34px;padding:5px 7px;font-size:12px;color:var(--ds-text-secondary)}
+.pm-registry-filters .pm-filter-chip{margin-top:10px}
+.pm-registry-copy-menu{min-width:260px;max-width:calc(100vw - 24px)}
+.pm-registry-copy-menu [role="menuitem"]{padding:9px 10px;gap:10px}
+.pm-registry-copy-menu small{display:block;margin-top:2px;font-size:11px;opacity:.65}
+.pm-registry-menu-count{margin-left:auto;align-self:center;font-variant-numeric:tabular-nums;font-size:12px}
+@media(max-width:1100px){.pm-registry-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){
+  .pm-registry .pm-registry-actions{padding:14px 15px 12px;gap:8px}
+  .pm-registry-actions-main{display:contents}
+  .pm-registry .pm-registry-actions>.pm-button,.pm-registry-actions-main .pm-button{flex:1 1 calc(50% - 8px);margin:0;min-width:0;padding:8px;font-size:12px}
+  .pm-registry-filters{padding:0 15px 12px}
+  .pm-registry-search-row .pm-search{flex:1 0 100%;min-width:0}
+  .pm-registry-search-row .pm-registry-reset{margin-left:auto}
+  .pm-registry-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pm-registry-filter-field:last-child{grid-column:1 / -1}
+}
