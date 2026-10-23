@@ -2,6 +2,16 @@
 
 Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. MoneyToHome cấp kho và ghi kết quả, thay Sheet Server Total. API không tạo máy, áp proxy, cài phần mềm, đăng nhập EarnApp hay tự rút tiền. Phân biệt “đã thao tác máy thật”, “đã ghi API”, “đã đọc lại trên web”. Thành công API không chứng minh máy đã làm xong.
 
+## 0. Mục tiêu vận hành từ kho — chủ bổ sung 23/10/2026
+
+- Chủ nhập hàng vào Kho tài khoản (Gmail / Apple ID), Kho proxy và Kho SDK trên web. Khi chủ giao đúng server / VM / khoảng VM và công việc, AI đọc kho qua API, chọn hàng đủ điều kiện, giữ / gán đúng VM, lấy thông tin được duyệt rồi **thao tác cài đặt thực tế bằng AE Mini Tool**. Chủ không phải chép từng tài khoản hoặc proxy lại cho AI.
+- Dùng tài khoản chưa dùng; Gmail hoặc Apple ID đều được nếu chủ không chỉ định loại. Đăng nhập đúng phương thức của loại đó, không đoán từ đuôi email. Tài khoản đã đăng ký và SDK đã dùng không cấp lại. Kết quả đăng ký chưa rõ thì giữ chỗ để đối chiếu.
+- VM đã có proxy hợp lệ đúng trên web thì dùng cấu hình đó. Chỉ lấy proxy FREE từ kho khi công việc cần cấp proxy; không thay proxy tốt đang dùng chỉ vì có hàng mới. Proxy BLOCKED theo luồng chủ thay trên web → AI áp cấu hình mới và kiểm thật.
+- Mỗi lần tạo / cài VM phải kiểm và ghi SDK thực sinh ra, đúng VM / UUID / lượt; có tiền thì ghi số đã quan sát và giờ đọc. Phân biệt mã hiện hành, mã dự phòng chưa dùng, mã đã dùng. Có SDK chưa dùng trong kho không tự chứng minh đó là SDK máy đang chạy.
+- Việc nhập hàng vào kho chưa phải một lệnh chạy máy. AI thực hiện trong phạm vi công việc chủ đã giao; không tự mở rộng sang server / VM khác. Tự lấy hàng trong phạm vi đó, ghi từng bước để có thể tiếp tục sau gián đoạn.
+- Đọc lại web sau thao tác: tình trạng, proxy, tài khoản, SDK, tiền và giờ kiểm tra phải phản ánh đúng kết quả máy thật. Thiếu hàng / bị chặn / chưa rõ kết quả thì báo rõ VM và bước đang dừng; không ghi OK để kết thúc lô.
+- Luồng đã chốt vẫn là New VM → cài proxy + EarnApp + Firefox, kiểm / ghi SDK → Chưa nối. **Đang hỏi chủ về lệnh mới “làm hoàn chỉnh”: có làm tiếp đăng ký / nối EarnApp hay không. Chưa coi câu hỏi đó là quyết định hoặc tự chạy thêm.**
+
 ## 1. Kết nối và quyền
 
 - Base **https://wow.lalamail.sbs**, API `/api/ops/v1`; dự án **GROUP MOON**, code MOON. Lấy projectId từ `projects`; resolve đúng server + VM. Không dùng số lượng nhập cũ làm trạng thái hiện tại.
@@ -55,7 +65,7 @@ Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu s
 
 - Pending: **HTTP 202 `ok:true`**, `data.items`, `summary`, `approval`; mục chờ `status:202`, body APPROVAL_REQUIRED. Mục thường có thể đã ghi. Client WAITING_APPROVAL / exit 4.
 - Final: **HTTP 200 `ok:true` vẫn có thể có refused**. Đọc `summary.ok/refused/waiting` và từng item, không tuyên bố cả lô xong chỉ theo HTTP.
-- Duyệt → retry **nguyên outer key/body**, mục đã ghi replay. Outer key gắn chính token, ràng buộc bền payload kể cả không duyệt; đổi payload cùng key → 409. Không sửa item đã xong để chạy lại lô; không lưu secret results vào journal.
+- Duyệt → retry **nguyên outer key/body**, mục đã ghi replay. Outer key gắn người dùng + dự án, ràng buộc bền payload kể cả không duyệt; token thay thế cùng người dùng vẫn phải có quyền hiện tại để phát lại kết quả đã ghi, không dùng duyệt của token cũ để lấy bí mật mới; đổi payload cùng key → 409. Không sửa item đã xong để chạy lại lô; không lưu secret results vào journal.
 - Mất phản hồi → UNKNOWN / exit 3, retry key cũ. 120 đọc/phút, 30 ghi/phút/token; batch thêm 10 lô/phút, tối đa 100 mục, một hit ghi mỗi lô. 429 theo Retry-After.
 
 ## 7. Máy thật và báo cáo
