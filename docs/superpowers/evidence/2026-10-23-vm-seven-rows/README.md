@@ -9,3 +9,5 @@ Checks: tsc clean; lint on all three changed files clean; 21/21 related grid/fil
 Backup: moneytohome-20261023-231213.dump, encrypted offsite copy on moon-01 verified. Deployment result is recorded separately after Windows administrator confirmation.
 
 Deploy succeeded 23:16:43 Bangkok, build PQRxLyWlfHd0ShwXbZIRt. Public and localhost build manifests both HTTP 200. Windows approval was reopened visibly after the first launch was cancelled. No host business data was written. Host UI not rechecked through an authenticated browser; local UI was measured as documented above.
+
+Owner requested no repeated UAC. Granted only TUNTUN query/enumerate/start/stop rights on MoneyToHome-Web, preserving existing permissions. Verified OpenService access 0x3c succeeds from a non-elevated process. UAC policy unchanged; no restart needed for verification. Future deployment scripts run directly without RunAs.
