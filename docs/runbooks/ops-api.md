@@ -14,7 +14,7 @@ và [2026-10-23-totp-ai-approval-design.md](../superpowers/specs/2026-10-23-totp
 
 - **Không còn `X-Ops-Pin`.** Token là chứng thực duy nhất của AI; `PIN_REQUIRED / PIN_INVALID / PIN_LOCKED` không còn phát sinh. Mọi chỗ bên dưới
   còn nhắc PIN cho AI là lịch sử. (Người dùng web dùng 2FA Google Authenticator thay PIN — xem user-access.md.)
-- **Lệnh quan trọng cần ADMIN duyệt** (`POST withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts`, `vms/{id}/proxy-credentials`,
+- **Lệnh quan trọng cần ADMIN duyệt** (`POST withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts`,
   `sdks/{id}/reveal` và `earnapp-accounts/{id}/credentials`): sau khi kiểm token / thao tác / nội dung, lệnh lẻ **chưa chạy** và trả **HTTP 202**
   `{ok:false, data:null, error:{code:"APPROVAL_REQUIRED", message, details:{approvalId, status:"PENDING", expiresAt}}}`. Yêu cầu hiện ở trang
   **Phê duyệt** (`/approvals`, menu ADMIN; chip số chờ duyệt ở sidebar) với tóm tắt cho phép (hành động, VM, số tiền, email PP che, mã SDK che; không
@@ -53,7 +53,7 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 | GET /paypal/suggest, POST /withdrawals/prepare, POST /withdrawals/{id}/status | PAYOUT | Người ghi Tiền vào PayPal (quản lý), hoặc USER (không phải VIEWER) có Hạ tầng + **EARN_PAYOUT** ("Chuẩn bị rút EarnApp") |
 | POST /withdrawals/{id}/receipts | RECEIPT | Người ghi Tiền vào PayPal (quản lý), hoặc USER có Hạ tầng + **PAYPAL_RECEIPT_RECORD** ("Ghi khoản nhận PP của yêu cầu rút") |
 | GET /jobs/{id}, POST /vms/{id}/claim, /jobs/{id}/step, /jobs/{id}/release, /vms/{id}/sdk, /vms/{id}/status, /vms/{id}/proxy-blocked, /vms/{id}/notes, /jobs/{id}/finish-prepare, /jobs/{id}/finish-proxy (21/10/2026) | READ (GET) / **VM_OPS** | USER (không phải VIEWER) có Server / VM (quyền ASSIGN / BLOCK hiện có). Xem docs/runbooks/ai-vm-ops.md |
-| POST /vms/{id}/proxy-credentials (21/10/2026) | **PROXY_CREDENTIALS** | ADMIN, hoặc USER có **VM_PROXY_FOR_OPS** ("Lấy proxy của VM đang xử lý (AI)"), **và** việc đang giữ (claim) của chính token đó trên VM đó; **cần ADMIN duyệt** (mục 0) |
+| POST /vms/{id}/proxy-credentials (21/10/2026) | **PROXY_CREDENTIALS** | ADMIN, hoặc USER có **VM_PROXY_FOR_OPS** ("Lấy proxy của VM đang xử lý (AI)"), **và** việc đang giữ (claim) của chính token đó trên VM đó; **không cần ADMIN duyệt** (quyết định 24/10/2026) |
 | POST /sdks/{id}/reveal (23/10/2026) | **VM_OPS** | Quyền đọc Server / VM của dự án; **cần ADMIN duyệt**; trả mã SDK đầy đủ một lần (mọi câu trả lời đọc đều che mã) |
 | GET /earnapp-accounts; POST /earnapp-accounts/hold, /earnapp-accounts/{id}/credentials, /used, /release | **ACCOUNT_OPS** | ASSIGN + Hạ tầng; POST cần job ACTIVE của chính token đúng VM / lượt; credentials cần duyệt |
 | GET /proxies; POST /vms/{id}/proxy-assign, /sdk-assign, /sdk-linked | READ (GET) / **VM_OPS** (POST) | ASSIGN + job ACTIVE của token; kỳ / VM revision / SDK revision theo từng request |
@@ -155,7 +155,7 @@ curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: sent-$WD-1" -X POST "$B/withdra
 # Tiền thực về PP (từng phần được; không vượt phần còn chờ)
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rcv-$WD-1" -X POST "$B/withdrawals/$WD/receipts" \
   -d '{"projectId":"'$P'","expectedRequestRevision":1,"amount":"6.00","currency":"USD","receivedAt":"2026-10-23T08:00:00+07:00","transactionId":"<mã giao dịch PayPal>","evidenceNote":"PayPal activity"}'
-# prepare / status / receipts / proxy-credentials / sdks/{id}/reveal: lần đầu trả 202 APPROVAL_REQUIRED (chưa ghi) → ADMIN duyệt CLI hoặc web →
+# prepare / status / receipts / sdks/{id}/reveal: lần đầu trả 202 APPROVAL_REQUIRED (chưa ghi) → ADMIN duyệt CLI hoặc web →
 # gửi lại ĐÚNG lệnh trên (cùng Idempotency-Key, cùng -d) → 200. Mã SDK đầy đủ một lần:
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rev-$SDK-1" -X POST "$B/sdks/$SDK/reveal" -d '{"projectId":"'$P'"}'
 ```
@@ -199,3 +199,8 @@ Script mẫu `scripts/ops-client.mjs` làm cùng việc (đọc `MTH_TOKEN` ho�
 5. Tiền về PayPal → `receipts` đúng số thực nhận, có mã giao dịch (cần duyệt). Yêu cầu 10, về 6 → còn chờ 4; không tự chốt thiếu (việc của quản lý trên web).
 6. 409 `CYCLE_CHANGED` / `ACCOUNT_CHANGED`: VM đã sang lượt mới hoặc đổi tài khoản — dừng, đọc lại; tài khoản cũ đối chiếu trên web (Lịch sử VM).
    Tiền về muộn của tài khoản cũ vẫn ghi `receipts` vào đúng yêu cầu cũ (không cần khớp tài khoản hiện tại).
+
+
+## Quyền vận hành proxy — 24/10/2026
+
+Khi chủ giao việc, AI dùng VM_OPS để đọc kho, chọn proxy FREE đủ điều kiện và gán qua proxy-assign cho VM của việc đang giữ. Không cần duyệt gán hoặc lấy proxy. Sau khi gán, đọc lại VM, lấy proxy-credentials với PROXY_CREDENTIALS + VM_PROXY_FOR_OPS, đúng job/token/VM/lượt hiện hành; lưu tệp riêng, áp dụng lên máy thật và kiểm tra rồi finish-proxy. Proxy BLOCKED, đang được VM khác giữ, Genjy riêng hoặc không đủ điều kiện vẫn bị chặn. Không tự tạo tác vụ ngoài phạm vi chủ giao. Yêu cầu proxy đã chờ duyệt trước bản này: retry đúng key và nội dung cũ, không cần ADMIN duyệt; nếu job đã hết hạn thì nhận lại việc theo quy trình.

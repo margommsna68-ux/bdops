@@ -80,7 +80,8 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^vms/'+ID+'/claim$'),scope:'VM_OPS',action:'VM_CLAIM',run:claim},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/step$'),scope:'VM_OPS',action:'JOB_STEP',run:jobStep},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/release$'),scope:'VM_OPS',action:'JOB_RELEASE',run:jobRelease},
-  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials,approval:true},
+  // Owner decision 24/10/2026: the assigned proxy is available directly to its active VM job; rights and job/cycle checks remain.
+  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials},
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk$'),scope:'VM_OPS',action:'VM_SDK',run:vmSdk},
   // 22/10/2026: SDK codes seen running on the machine (no install), with their money when the token also has BALANCE_WRITE.
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-observations$'),scope:'VM_OPS',action:'VM_SDK_OBSERVE',run:vmSdkObserve},

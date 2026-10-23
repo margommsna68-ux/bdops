@@ -44,7 +44,7 @@ Mọi POST cần `Idempotency-Key`. Lưu key/path/body trước khi gửi. Mất
 
 - `GET proxies?projectId=…&state=FREE&group=TUT|SHARED&package=…`: READ, không user-pass. Chỉ FREE đủ điều kiện; không Genjy riêng, BLOCKED hoặc proxy VM khác.
 - `POST vms/{vmId}/proxy-assign {projectId,expectedCycle,expectedVmRevision,jobId,proxyId}` hoặc thay proxyId bằng `pick:{group:"TUT"|"SHARED",packageCode?:…}`, đúng một cách chọn. Gán web chưa phải áp máy. `package` là lọc URL; **packageCode** trong pick.
-- `POST vms/{vmId}/proxy-credentials {projectId,expectedCycle,jobId}`: PROXY_CREDENTIALS + **duyệt**. Tệp riêng, áp/kiểm trên máy thật, xoá tệp, rồi ghi hoàn tất.
+- `POST vms/{vmId}/proxy-credentials {projectId,expectedCycle,jobId}`: PROXY_CREDENTIALS + quyền VM_PROXY_FOR_OPS + việc đang giữ đúng VM/lượt; **không cần duyệt**. Tệp riêng, áp/kiểm trên máy thật, xoá tệp, rồi ghi hoàn tất.
 - Tìm SDK chưa dùng: `GET sdks?projectId=…&state=UNLINKED&place=STOCK&limit=50` (READ), không cần biết code. Lấy **sdkId + revision**, code chỉ che; nextCursor → cursor, null là hết. Lọc state=UNLINKED/LINKED/UNCONFIRMED, place=STOCK/VM. Có code thì lookup cũ, không nextCursor. Không dùng mã che làm mã thật; tiền theo quyền đọc.
 - `POST vms/{vmId}/sdk-assign {projectId,expectedCycle,expectedVmRevision,jobId,sdkId,expectedSdkRevision}`: UNLINKED trong kho/danh sách chính VM làm mã hiện hành; mã cũ ở lại danh sách. UNCONFIRMED/LINKED/mã VM khác bị từ chối. Không dùng route SDK lần cài lấy mã VM khác.
 - `POST vms/{vmId}/sdk-linked {projectId,expectedCycle,jobId,sdkId,expectedSdkRevision,accountId,evidence}`: sau nối thật, đúng SDK/tài khoản hiện hành; không có expectedVmRevision ở request này. LINKED vĩnh viễn.
@@ -52,7 +52,7 @@ Mọi POST cần `Idempotency-Key`. Lưu key/path/body trước khi gửi. Mất
 
 ## 5. Duyệt CLI 2FA hoặc web
 
-Account credentials, proxy credentials, SDK reveal cần duyệt. Payout prepare/status/receipts cũng cần duyệt nhưng token này không được gọi. Cấp kho, SDK quan sát, tình trạng, ghi chú không cần duyệt.
+Account credentials và SDK reveal cần duyệt. Proxy của đúng VM đang nhận việc lấy trực tiếp, không cần duyệt. Payout prepare/status/receipts cũng cần duyệt nhưng token này không được gọi. Cấp kho, SDK quan sát, tình trạng, ghi chú không cần duyệt.
 
 Lệnh lẻ trả 202 APPROVAL_REQUIRED (`ok:false`, chưa chạy) + approvalId/hạn 15 phút. `GET approvals/{id}?projectId=…` đọc status/summary/attemptsLeft của **chính token**.
 
@@ -76,8 +76,8 @@ Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu s
 ## 7. Máy thật và báo cáo
 
 - SDK/tiền: sdk-prepare trước → đọc đúng UUID/VM/lượt, SDK/tiền/giờ thật → sdk-observe/sdk-survey. OCR mờ đọc lại; tiền không đọc được dùng amountRead:false, không đoán/ghi 0. Tiền SDK là quan sát mã, không phải tiền PayPal/thu nhập.
-- Chưa cài: claim PREPARE → bước/machineRef → tạo máy thật → proxy sau duyệt, áp/kiểm máy → cài EarnApp/Firefox → ghi SDK lần cài → finish-prepare đủ checks. Có tài khoản/SDK web không chứng minh đã cài.
-- Áp proxy: claim PROXY_APPLY → proxy sau duyệt → áp/kiểm máy → finish-proxy kết quả thật. Không tự bật OFF, tạo lại SUS, mở lượt, đặt Chờ áp dụng proxy/xoá VM.
+- Chưa cài: claim PREPARE → bước/machineRef → tạo máy thật → proxy trực tiếp của việc đang giữ, áp/kiểm máy → cài EarnApp/Firefox → ghi SDK lần cài → finish-prepare đủ checks. Có tài khoản/SDK web không chứng minh đã cài.
+- Áp proxy: claim PROXY_APPLY → proxy trực tiếp của việc đang giữ → áp/kiểm máy → finish-proxy kết quả thật. Không tự bật OFF, tạo lại SUS, mở lượt, đặt Chờ áp dụng proxy/xoá VM.
 - Tình trạng/Blocked/ghi chú đúng lượt/cấu hình/bằng chứng; OK sau kiểm proxy và EarnApp. Đọc lại sau ghi; recorded là lệnh, current là lúc đọc lại. Batch/confirm/reveal có cấu trúc riêng.
 - Mã thoát: 0 DONE, 1 bị từ chối rõ/kết thúc, 3 UNKNOWN, 4 WAITING_APPROVAL. Với lô vẫn kiểm từng mục.
 - Báo server/VM, việc máy thật, việc ghi/đọc lại, SDK che/tiền/giờ, approvalId, refused, UNKNOWN và việc cần chủ. Không token/proxy đầy đủ/credential/2FA/SDK đầy đủ. Không video.

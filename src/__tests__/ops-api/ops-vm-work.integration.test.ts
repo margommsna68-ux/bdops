@@ -37,6 +37,21 @@ async function work(){
   return {...f,proxy,vmRow,change,ownerStatus,tok,get,post,vmApi,cleanup};
 }
 type W=Awaited<ReturnType<typeof work>>;
+it('reads the assigned proxy without ADMIN approval, including batch and repeated reads',async()=>{
+  const w=await work();try{
+    const t=await w.tok(['READ','VM_OPS','PROXY_CREDENTIALS']),v=await newVm(w,'DIRECT_101');
+    const job=(await w.post(t,'vms/'+v.id+'/claim',{expectedCycle:1,kind:'PROXY_APPLY'})).json.data.recorded.job;
+    const path='vms/'+v.id+'/proxy-credentials',body={projectId:w.projectId,jobId:job.id,expectedCycle:1},key=randomUUID();
+    const direct=await api('POST',path,{token:t,body,key,autoApprove:false});
+    expect(direct.status).toBe(200);expect(direct.json.data.proxy.password).toMatch(/^secret-pass-/);
+    expect((await api('POST',path,{token:t,body,key,autoApprove:false})).status).toBe(200);
+    expect(await db.opsApproval.count({where:{projectId:w.projectId,action:'VM_PROXY_CREDENTIALS'}})).toBe(0);
+    const batch=await api('POST','batch',{token:t,body:{projectId:w.projectId,items:[{path,body,idempotencyKey:randomUUID()}]},autoApprove:false});
+    expect(batch.status).toBe(200);
+    expect(await db.opsApproval.count({where:{projectId:w.projectId}})).toBe(0);
+    const me=await api('GET','me',{token:t});expect(JSON.stringify(me.json.data.approvalRequired)).not.toContain('VM_PROXY_CREDENTIALS');
+  }finally{await w.cleanup();}
+});
 /** A VM added on the web (New VM) with a proxy assigned by the owner. */
 async function newVm(w:W,code:string){
   await addManagedVMs(w.scope,w.server.id,[code],db);const v=await db.virtualMachine.findFirstOrThrow({where:{serverId:w.server.id,code}});

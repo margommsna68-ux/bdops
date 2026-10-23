@@ -63,7 +63,7 @@
 // Third review fix 21/10/2026: the command's state is kept apart from the latest attempt (see nextState); a refused retry of a
 // command that may already be recorded keeps it UNKNOWN, and a DONE command stays DONE. Exit code = command state (0 / 1 / 3).
 // 23/10/2026 (2FA + approvals, owner decision): no X-Ops-Pin any more. A critical command (withdrawals/prepare, withdrawals/{id}/status,
-// withdrawals/{id}/receipts, vms/{id}/proxy-credentials, sdks/{id}/reveal) answers HTTP 202 APPROVAL_REQUIRED until an ADMIN approves it
+// withdrawals/{id}/receipts, sdks/{id}/reveal) answers HTTP 202 APPROVAL_REQUIRED until an ADMIN approves it
 // on the web (Phê duyệt): the command is NOT recorded, its state is WAITING_APPROVAL (exit 4) and `retry <key>` sends the SAME body
 // again (200 → DONE; 403 APPROVAL_REJECTED → REJECTED, final; 410 APPROVAL_EXPIRED → EXPIRED, send again with a NEW key). `approvals`
 // lists the waiting commands. SDK codes in read answers are masked; only sdk-reveal shows one in full, on stdout, never in the log.
