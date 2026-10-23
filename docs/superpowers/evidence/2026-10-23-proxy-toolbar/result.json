@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "results": [
+    "BLOCKED first and URL",
+    "Only BLOCKED",
+    "Package counts + filter all pages",
+    "Reload keeps filters",
+    "Desktop filters aligned and within viewport",
+    "Blocked filter preserves selected sort",
+    "Copy menu explains filtered pages and blocked scope",
+    "Copy BLOCKED uses selected-row scope",
+    "Clear filters keeps chosen sort",
+    "Back restores package and BLOCKED",
+    "Actual theme light",
+    "Actual theme dark",
+    "Actual theme golden",
+    "Actual theme bronze",
+    "Mobile filter controls stay inside viewport",
+    "Mobile Copy menu fits viewport",
+    "No JS errors, desktop/mobile rendered"
+  ]
+}

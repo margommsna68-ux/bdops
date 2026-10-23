@@ -46,3 +46,10 @@ Một proxy có nhiều vị trí hợp lệ (ví dụ đang giữ cho một VM 
 - `proxyManagement.list` accepts `page` (cursor still works). A page past the end (rows changed since the link) is served as the
   last page and reported back (`page` in the result). The URL is corrected without a history entry, with the note
   *Trang N không còn (danh sách đã thay đổi)*.
+
+## Thanh công cụ Kho proxy — 23/10/2026
+
+- Nhập mới / Báo BLOCKED / Nhận replace nằm cùng hàng. Menu Copy có hai mục: kết quả đang lọc (mọi trang), và proxy BLOCKED (trong lựa chọn nếu đã tick, nếu không thì theo bộ lọc trên mọi trang).
+- Nút BLOCKED nhỏ cạnh ô tìm kiếm chỉ bật/tắt lọc, giữ nguyên cách sắp xếp; màu đỏ nhẹ là đang bật. Báo BLOCKED ở hàng thao tác mới là lệnh ghi.
+- Gói, server, nhóm, trạng thái và sắp xếp nằm trong một bộ lọc có nhãn. Số lượng nhóm chuyển vào danh sách nhóm, không còn hàng nút nhóm trùng lặp.
+- Bỏ lọc xoá điều kiện tìm/nhóm/trạng thái/gói/server/đợt; giữ tab hiện tại và cách sắp xếp. Bộ lọc vẫn giữ trên URL.
