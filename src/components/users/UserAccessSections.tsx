@@ -7,13 +7,15 @@ import {Input} from '@/components/ui/input';
 import {projectLabel} from '@/lib/utils';
 import {MemberRightsForm} from '@/components/proxy-management/MemberRightsDialog';
 import {OpsTokensPanel} from '@/components/settings/OpsTokensPanel';
+import {Dialog,DialogContent,DialogTitle} from '@/components/ui/dialog';
+import {TotpSetup} from '@/components/TotpSetup';
 // One page per person, for people and AI alike (owner brief 22/10/2026): who is managed, in which project, then side by side the rights
 // in this project, PIN and access, and the API connection. Every action is checked again on the server for the project being viewed.
 export function UserAccessSections({projectId,userId,login}:{projectId:string;userId:string;login:string}){
   const utils=trpc.useUtils(),access=trpc.user.access.useQuery({projectId,userId});
   const d=access.data,who=login+' · '+(d?projectLabel(d.project):'…');
   const refresh=()=>{void utils.user.access.invalidate();void utils.user.getDetail.invalidate();void utils.user.onlineUsers.invalidate();};
-  const [pin,setPin]=useState(''),[reason,setReason]=useState(''),[askDisable,setAskDisable]=useState(false);
+  const [pin,setPin]=useState(''),[reason,setReason]=useState(''),[askDisable,setAskDisable]=useState(false),[totpOpen,setTotpOpen]=useState(false);
   useEffect(()=>{setPin('');setReason('');setAskDisable(false);setAskReset(false);},[projectId,userId]);
   const setPinM=trpc.user.adminResetPin.useMutation({onSuccess:()=>{setPin('');toast.success(d?.hasPin?'Đã đổi PIN; phiên đã mở khoá bằng PIN cũ phải nhập lại':'Đã đặt PIN');refresh();},onError:e=>toast.error(e.message)});
   const removePin=trpc.user.resetPin.useMutation({onSuccess:()=>{toast.success('Đã xoá PIN');refresh();},onError:e=>toast.error(e.message)});
@@ -38,7 +40,16 @@ export function UserAccessSections({projectId,userId,login}:{projectId:string;us
       </section>
       <section className="rounded-lg border bg-white p-4 space-y-3" aria-label="PIN và truy cập">
         <h2 className="text-base font-semibold">PIN và truy cập</h2>
-        {d.self&&<p className="text-xs text-gray-500">Đây là tài khoản của bạn: đổi PIN / bật 2FA của mình ở Thiết lập.</p>}
+        {d.self&&<div className="flex flex-wrap items-center gap-2" data-testid="user-totp-self">
+          <p className="text-xs text-gray-500">Đây là tài khoản của bạn.</p>
+          {!d.totpEnabled&&<Button size="sm" onClick={()=>setTotpOpen(true)}>Bật 2FA Google Authenticator cho tôi</Button>}
+          {d.totpEnabled&&<span className="text-xs text-green-700">2FA của bạn đã bật (mã dự phòng và đặt lại: Thiết lập → Bảo mật / ADMIN khác).</span>}
+          <Dialog open={totpOpen} onOpenChange={v=>{if(!v)setTotpOpen(false);}}>
+            <DialogContent className="sm:max-w-md"><DialogTitle className="sr-only">Bật 2FA</DialogTitle>
+              {totpOpen&&<TotpSetup autoStart onDone={()=>{setTotpOpen(false);refresh();void utils.user.securityStatus.invalidate();}} onCancel={()=>setTotpOpen(false)}/>}
+            </DialogContent>
+          </Dialog>
+        </div>}
         {admin&&<div className="space-y-2" data-testid="user-totp">
           <p className="text-sm">2FA (Google Authenticator): <strong>{d.totpEnabled?'Đã bật':d.totpRequired?'Bắt buộc (chưa cài)':'Chưa bật'}</strong>{d.totpEnabled&&d.totpRequired?' · bắt buộc':''}{d.totpLocked?<span className="text-amber-700"> · khoá tạm (sai mã 3 lần)</span>:null}</p>
           {!d.self&&<div className="flex flex-wrap gap-2">
