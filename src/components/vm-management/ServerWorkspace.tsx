@@ -112,9 +112,23 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const paged=pageOf(filtered,url.page,url.size),onPage=new Set(paged.rows.map(v=>v.id)),offPage=selectedRows.filter(v=>!onPage.has(v.id)).length,selectedInFilter=filtered.filter(v=>selected.has(v.id)).length;
   const rights:GridRights={manage:!!access.data?.canManage,assign:!!access.data?.canAssign,sdkMoneyRead:!!access.data?.sdkMoneyRead,sdkMoneyWrite:!!access.data?.sdkMoneyWrite,copy:!!access.data?.canCopy,confirm:!!access.data?.canConfirm,costs:!!business.data?.costs,sourceConnected:!!access.data?.sourceConnected};
   const panelVm=url.vm?allVMs.find(v=>v.id===url.vm):undefined;
-  // The table gets the rest of the window height; the page itself does not scroll, so there is one vertical scroll area.
+  // Keep room for seven actual rows, even when the filters leave less viewport space.
+  // Measure wrapped cells instead of shrinking text or assuming every row is 44 px tall.
   const gridHost=useRef<HTMLDivElement>(null),[maxHeight,setMaxHeight]=useState(480),hasSelection=selected.size>0;
-  useLayoutEffect(()=>{const fit=()=>{const el=gridHost.current;if(!el) return;const top=el.getBoundingClientRect().top+window.scrollY;setMaxHeight(Math.max(260,Math.floor(window.innerHeight-top-84)));};fit();window.addEventListener('resize',fit);return ()=>window.removeEventListener('resize',fit);},[hasSelection,blocked.length,deletedView,workspace.isLoading,single,access.data?.sourceConnected]);
+  useLayoutEffect(()=>{
+    const el=gridHost.current;if(!el)return;
+    const fit=()=>{
+      const rows=Array.from(el.querySelectorAll<HTMLTableRowElement>('tr[data-row]')).slice(0,7);
+      const rowSpace=rows.reduce((sum,row)=>sum+row.getBoundingClientRect().height,0)+(7-rows.length)*44;
+      const header=el.querySelector('thead')?.getBoundingClientRect().height||34;
+      const minimum=Math.ceil(header+rowSpace+18); // Includes the horizontal scrollbar.
+      const top=el.getBoundingClientRect().top+window.scrollY;
+      setMaxHeight(Math.max(minimum,Math.floor(window.innerHeight-top-84)));
+    };
+    fit();const observer=new ResizeObserver(fit);observer.observe(el);
+    window.addEventListener('resize',fit);
+    return ()=>{observer.disconnect();window.removeEventListener('resize',fit);};
+  },[hasSelection,blocked.length,deletedView,workspace.isLoading,single,access.data?.sourceConnected]);
   // Reload with ?vm=…: bring that row into view once.
   const scrolled=useRef(false);useEffect(()=>{if(scrolled.current||!url.vm||!workspace.data) return;scrolled.current=true;requestAnimationFrame(()=>document.querySelector(`[data-row="${url.vm}"]`)?.scrollIntoView({block:'center'}));},[url.vm,workspace.data]);
   const openVm=(vmId:string,tab:PanelTab='overview',cause:string|null=null)=>{setBulk(null);go({vm:vmId,tab,cause});};
@@ -251,7 +265,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
     <div className={'vm-body'+(panelOpen?' with-panel':'')}>
       <div className="pm-surface vm-surface">
         {!storeOpen&&<div className="vm-toolbar"><label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm VM, proxy, SDK, tài khoản, PayPal hoặc ghi chú" placeholder={single?'Tìm VM, IP, SDK, tài khoản, PP, ghi chú…':'Tìm server, VM, IP, SDK, tài khoản, PP…'} value={q} onChange={e=>setQ(e.target.value)}/>{q&&<button className="vm-cell-icon" aria-label="Xoá ô tìm" onClick={()=>setQ('')}><X size={14}/></button>}</label>
-          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">{single?'Theo mã VM':'Theo server → mã VM'}</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option><option value="BALANCE">Tiền VM cao → thấp</option><option value="CHECKED_OLD">Tiền VM kiểm tra lâu nhất</option><option value="WAITING_OLD">Chờ tiền lâu nhất trước</option></select>
+          <select aria-label="Sắp xếp VM" className="pm-input vm-sort" value={url.sort} onChange={e=>go({sort:e.target.value as GridSort})}><option value="VM">{single?'Theo mã VM':'Theo server → mã VM'}</option><option value="PRIORITY">Cần xử lý trước</option><option value="STATUS">Blocked / cần kiểm tra trước</option><option value="PROXY">Thiếu proxy trước</option><option value="SDK">Chưa có SDK trước</option><option value="BALANCE">Tiền trong VM cao → thấp</option><option value="CHECKED_OLD">Tiền trong VM kiểm tra lâu nhất</option><option value="WAITING_OLD">Chờ tiền lâu nhất trước</option></select>
           <ColumnMenu prefs={prefs} onChange={savePrefs}/></div>}
         {!storeOpen&&<ScopeStrip distribution={workspace.data?distribution:null} loading={!workspace.data} viewing={filtered.length} single={current?{id:current.id,code:current.code}:null} filters={filters} onServer={goServer} onPatch={patch=>go({...patch,page:1})} onClear={()=>go({view:'',st:[],money:'',warn:false,q:'',page:1})} copy={{label:selected.size?`Copy danh sách VM (${selectedRows.length} đã chọn)`:`Copy danh sách VM (${filtered.length} · mọi trang)`,disabled:selected.size?!selectedRows.length:!filtered.length,run:()=>void copyIds(selected.size?selectedRows:filtered)}}/>}
         {deletedView&&!serverId&&allServers.some(s=>s.archivedAt)&&<div className="pm-deleted-servers"><span className="pm-muted text-sm">Server đã xoá:</span>{allServers.filter(s=>s.archivedAt).map(s=><span key={s.id} className="flex items-center gap-2"><strong className="text-sm">{s.code}</strong>{rights.manage&&<button className="pm-button pm-button-quiet" disabled={busy} onClick={()=>void bringBackServer(s.id)}><RotateCcw size={14}/>Khôi phục</button>}</span>)}</div>}

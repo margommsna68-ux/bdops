@@ -76,9 +76,9 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
   const face=<><VmMoneyFace s={vmMoney}/>{req&&<LineView line={req}/>}{!req&&sus&&<span className="vm-money vm-money-failed">SUS</span>}</>;
   void m;void MILESTONE_LABEL;void formatLedger;void AccountCell;void onBusy;
   return <div className="vm-payout" data-vm-money={vmMoney.kind}>
-    <button ref={p.anchor} type="button" className="vm-payout-button" aria-haspopup="dialog" aria-expanded={p.open} aria-label={'Tiền VM '+vm.server+' / '+vm.code} onClick={()=>p.open?p.setOpen(false):openWith(null)}>{face}</button>
+    <button ref={p.anchor} type="button" className="vm-payout-button" aria-haspopup="dialog" aria-expanded={p.open} aria-label={'Tiền trong VM '+vm.server+' / '+vm.code} onClick={()=>p.open?p.setOpen(false):openWith(null)}>{face}</button>
     {canRecreate&&!r&&sus&&<button type="button" className="pm-link text-xs" onClick={()=>openWith('recreate')}>Ghi nhận đã tạo lại (SUS)</button>}
-    {p.open&&typeof document!=='undefined'&&createPortal(<div ref={p.pop} role="dialog" aria-label={'Tiền VM '+vm.server+' / '+vm.code} className="vm-status-pop vm-payout-pop" style={{top:p.pos?.top??-9999,left:p.pos?.left??-9999}}>
+    {p.open&&typeof document!=='undefined'&&createPortal(<div ref={p.pop} role="dialog" aria-label={'Tiền trong VM '+vm.server+' / '+vm.code} className="vm-status-pop vm-payout-pop" style={{top:p.pos?.top??-9999,left:p.pos?.left??-9999}}>
       <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · lượt {cycle}{account?.earnApp?' · '+account.earnApp.login.email:''}</p>
       {mode==='request'?<RequestForm projectId={projectId} vm={vm} cycle={cycle} earnAppId={ops?ops.earnAppId:undefined} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={sus&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
@@ -107,7 +107,7 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
 function VmMoneyFace({s}:{s:VmMoneyState}){
   const at=(iso:string|null,label='Kiểm tra')=>iso?<span className="vm-money-line text-xs" title={label+' lúc '+fullTime(iso)+(s.code?' · SDK '+s.code:'')}>{label} {relativeTime(iso)}</span>:null;
   if(s.kind==='UNCHECKED')return <span className="vm-money-amount vm-money-none" title={s.code?'SDK '+s.code+' chưa có số tiền kiểm tra ở lượt này':'VM chưa có SDK hiện hành ở lượt này'}>Chưa kiểm tra</span>;
-  if(s.kind==='HIDDEN')return <span className="vm-money-amount vm-money-none" title="Tiền VM: cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Ẩn</span>;
+  if(s.kind==='HIDDEN')return <span className="vm-money-amount vm-money-none" title="Tiền trong VM: cần quyền xem tiền (quyền tiền hoặc Ghi kiểm tra tiền EarnApp)">Ẩn</span>;
   if(s.kind==='FAILED')return <><span className="vm-money-head"><span className={'vm-money-amount'+(s.amount==null?' vm-money-none':'')}>{s.amount!=null?formatUsd(s.amount):'Chưa có số'}</span><span className="vm-money vm-money-failed">Kiểm tra lỗi</span></span>
     <span className="vm-money-line text-xs" title={'Lần đọc lỗi lúc '+fullTime(s.failedAt)+(s.at?' · số gần nhất lúc '+fullTime(s.at):'')+' · SDK '+s.code}>Lỗi {relativeTime(s.failedAt)}{s.at?' · số gần nhất '+relativeTime(s.at):''}</span></>;
   if(s.kind==='NO_TIME')return <><span className="vm-money-amount">{formatUsd(s.amount)}</span><span className="vm-money-line text-xs" title={'Tiền ghi trước khi có giờ quan sát · SDK '+s.code}>Chưa rõ giờ</span></>;
@@ -116,7 +116,7 @@ function VmMoneyFace({s}:{s:VmMoneyState}){
 function VmMoneySection({projectId,s,source,sdkId,cycle,vmId}:{projectId:string;s:VmMoneyState;source:string|null;sdkId:string|null;cycle:number;vmId:string}){
   const [open,setOpen]=useState(false);
   return <div className="space-y-1 text-xs" data-testid="vm-money-section">
-    <p className="font-semibold">Tiền VM (tiền tích luỹ của SDK đang chạy)</p>
+    <p className="font-semibold">Tiền trong VM (tiền tích luỹ của SDK đang chạy)</p>
     {s.kind==='UNCHECKED'&&!s.code?<p className="pm-muted">VM chưa có SDK hiện hành ở lượt {cycle}; tiền của lượt / mã trước nằm trong Kho SDK và lịch sử, không tính là tiền hiện tại.</p>
     :s.kind==='UNCHECKED'?<p>SDK <code>{shortCode(s.code!)}</code> · <span className="pm-muted">chưa kiểm tra ở lượt {cycle} trên VM này.</span>{s.stored?<><br/><span className="pm-muted">Mã này có số {formatUsd(s.stored.amount!)} đọc {s.stored.observedAt?'lúc '+fullTime(s.stored.observedAt):'(chưa rõ giờ)'}{s.stored.cycle?' ở lượt '+s.stored.cycle:''}{s.stored.vmId&&s.stored.vmId!==vmId?' trên VM khác':''}: giữ làm lịch sử, không tính là tiền lượt này.</span></>:null}</p>
     :s.kind==='HIDDEN'?<p className="pm-muted">Số tiền ẩn theo quyền (cần quyền tiền hoặc “Ghi kiểm tra tiền EarnApp”).</p>

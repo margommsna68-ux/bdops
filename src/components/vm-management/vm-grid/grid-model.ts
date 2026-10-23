@@ -8,7 +8,7 @@ export const COLUMNS:ColumnDef[]=[
   // Tiền VM (22/10/2026; was Tiền / Rút 20/10): the money seen on the machine for the VM's current SDK code, with the payout status
   // under it; the frame keeps the EarnApp balance and the payout flow. Right after Tình trạng so VM, status and money are visible
   // together on a 1280px laptop with the sidebar open. The stored key stays `payout` so saved column layouts keep working.
-  {key:'payout',label:'Tiền VM',width:220,min:150},
+  {key:'payout',label:'TIỀN TRONG VM',width:220,min:150},
   // Proxy: the proxy the VM uses (IP:port + copy) and only the warnings Blocked / Cần kiểm tra; a click opens "Thay proxy" next to the
   // cell (owner decision 19/10/2026: no install step). The old "Cài proxy" / "Tiến độ cài" columns are gone; stored settings drop them.
   {key:'proxy',label:'Proxy',width:250,min:160},
