@@ -19,11 +19,11 @@ Thiết kế: docs/superpowers/specs/2026-10-21-ai-vm-ops-design.md. Service: `s
 
 ## 2. Trên web
 
-- VM thêm trên web (thêm theo khoảng, thêm cùng server mới) = **New VM** (chỉ dòng vừa tạo). Thêm server không có nghĩa máy thật đã tạo.
+- VM thêm trên web (thêm theo khoảng, thêm cùng server mới) = **Chưa cài** (chỉ dòng vừa tạo). Thêm server không có nghĩa máy thật đã tạo.
 - Chủ thay proxy (ô Proxy / Nhận replace ở Kho) cho VM đang **Blocked** → **Chờ áp dụng proxy** (không còn tự về OK). Tình trạng khác giữ nguyên; ô Proxy
   hiện “Chờ áp dụng trên máy”.
 - Ô Tình trạng hiện “AI xử lý · <token> · đến hh:mm” khi có việc đang giữ.
-- Lọc nhanh (giữ trong URL): `Chờ áp dụng trên máy` (`?view=APPLY`), `Cần xử lý` (`?view=TODO`: New VM, Chờ áp dụng proxy, Blocked, Earn/VM lỗi, proxy chờ
+- Lọc nhanh (giữ trong URL): `Chờ áp dụng trên máy` (`?view=APPLY`), `Cần xử lý` (`?view=TODO`: Chưa cài, Chờ áp dụng proxy, Blocked, Earn/VM lỗi, proxy chờ
   áp dụng), tình trạng `st=NEW_VM`, `st=PROXY_PENDING`; sort “Cần xử lý trước” xếp Chờ áp dụng proxy cùng Blocked.
 
 ## 3. Quy trình cho AI
@@ -39,7 +39,7 @@ Chung:
 3. Ghi bước trước và sau mỗi thao tác máy: `post jobs/<jobId>/step {step, note?, machineRef?}` (bước viết HOA: `MACHINE_CREATING`, `MACHINE_CREATED`,
    `PROXY_APPLIED`, `EARNAPP_INSTALLED`, `FIREFOX_INSTALLED`, `SDK_READ`, `SDK_SAVED`, `CHECKED`, `BLOCKED_ON`…). Tên máy đã ghi thì không đổi.
 
-**New VM (kind PREPARE)** — “Chuẩn bị các New VM trên An-01; lưu SDK đầy đủ rồi chuyển Chưa nối.”
+**Chưa cài (kind PREPARE)** — “Chuẩn bị các Chưa cài trên An-01; lưu SDK đầy đủ rồi chuyển Chưa nối.”
 1. Nhận việc; ghi `MACHINE_CREATING`; tạo máy bằng AE Mini Tool; ghi `MACHINE_CREATED` + `machineRef`.
 2. `proxy …` → file; áp dụng proxy bằng AE Mini Tool; xoá file; ghi `PROXY_APPLIED`.
 3. Cài EarnApp + Firefox; ghi bước.
@@ -48,7 +48,7 @@ Chung:
    của VM khác, đã dùng hay chưa xác nhận → bị từ chối.
 5. Kiểm máy, proxy / internet, EarnApp, Firefox.
 6. `post jobs/<jobId>/finish-prepare {projectId, configurationId, checks:{machine,proxy,internet,earnapp,firefox}}` → Chưa nối. Thiếu SDK của lần này, proxy
-   đã đổi, kiểm tra chưa đạt, tình trạng / lượt đã đổi → từ chối, **giữ New VM**: ghi bước đang vướng (`BLOCKED_ON` + note), sửa rồi hoàn tất, hoặc nhả việc.
+   đã đổi, kiểm tra chưa đạt, tình trạng / lượt đã đổi → từ chối, **giữ Chưa cài**: ghi bước đang vướng (`BLOCKED_ON` + note), sửa rồi hoàn tất, hoặc nhả việc.
    Mỗi lần cài / cài lại EarnApp đều phải ghi SDK mới.
 
 **Chờ áp dụng proxy (kind PROXY_APPLY)** — “Áp dụng proxy mới cho các VM Chờ áp dụng proxy trên moon05; kiểm tra và cập nhật tình trạng.”
@@ -76,7 +76,7 @@ cả lệnh; tiền là số đọc gần nhất kèm `observedAt`, không cộn
 ## 4. Chống lệnh cũ / làm trùng
 
 Lệnh mang dự án, VM, lượt (`expectedCycle`), phiên bản tình trạng (`expectedStatusRevision` / việc nhớ phiên bản lúc nhận), cấu hình proxy (`configurationId`),
-thêm EarnApp khi liên quan số dư. VM đổi lượt / chủ đổi tình trạng → từ chối, trả lý do + `details.current`. New VM không cần EarnApp.
+thêm EarnApp khi liên quan số dư. VM đổi lượt / chủ đổi tình trạng → từ chối, trả lý do + `details.current`. Chưa cài không cần EarnApp.
 
 ## 5. Kiểm đã làm (21/10/2026)
 
@@ -84,3 +84,12 @@ thêm EarnApp khi liên quan số dư. VM đổi lượt / chủ đổi tình tr
 - Local qua HTTP thật tới `next start` + DB trial local, **máy giả lập** (không AE Mini Tool, không VM): evidence docs/superpowers/evidence/2026-10-21-ai-vm-ops/.
 - **Chưa** chạy AE Mini Tool thật: trên máy này không tìm thấy chương trình / tài liệu tên “AE Mini Tool” và cách nó nối tới server (xem evidence). Lần chạy máy
   thật đầu tiên chỉ khi chủ giao phạm vi cụ thể.
+
+
+## Chủ chốt luồng server mới — 23/10/2026
+
+Chủ chuẩn bị sẵn máy chủ thật và đường AE Mini Tool / Tailscale, nhập proxy vào kho rồi giao lệnh theo tên server và danh sách cụ thể (ví dụ moon-07 với 90 proxy). Nhập kho không tự chạy máy. Danh sách theo thứ tự: dòng 1 → VM_001, … dòng 90 → VM_090. Dòng lỗi/trống/trùng giữ vị trí, báo để đối chiếu; không dồn dòng hoặc tự lấy proxy khác. Mã VM đã có không phải quyền xoá/tạo lại máy.
+
+Tên hiển thị `NEW_VM` là **Chưa cài**; enum, lượt và dữ liệu không đổi. Tạo/cài máy, proxy, internet, EarnApp, Firefox xong phải lấy SDK thực ngay, ghi đúng VM/UUID/lượt và đọc lại rồi mới `finish-prepare` → **Chưa nối**. Thiếu bước hoặc SDK thì chưa hoàn tất. Lệnh này không gồm đăng ký/đăng nhập/nối tài khoản EarnApp.
+
+API hiện tại xử lý công việc trên VM đã có dòng web; chưa có lệnh tạo server/VM hàng loạt từ danh sách proxy. Phần trên là quy trình chủ đã chốt, không phải xác nhận luồng tạo server tự động đã được triển khai hay chạy máy thật.

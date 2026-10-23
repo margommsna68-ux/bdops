@@ -11,7 +11,9 @@ Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. Mo
 - Việc nhập hàng vào kho chưa phải một lệnh chạy máy. AI thực hiện trong phạm vi công việc chủ đã giao; không tự mở rộng sang server / VM khác. Tự lấy hàng trong phạm vi đó, ghi từng bước để có thể tiếp tục sau gián đoạn.
 - Đọc lại web sau thao tác: tình trạng, proxy, tài khoản, SDK, tiền và giờ kiểm tra phải phản ánh đúng kết quả máy thật. Thiếu hàng / bị chặn / chưa rõ kết quả thì báo rõ VM và bước đang dừng; không ghi OK để kết thúc lô.
 - **Chủ chốt 23/10/2026: “làm hoàn chỉnh VM” = tạo / cài máy trong phạm vi được giao → áp và kiểm proxy → cài EarnApp + Firefox → kiểm và lưu SDK thực sinh ra, đúng UUID / lượt → Chưa nối. Dừng tại đây; lệnh này không bao gồm lấy tài khoản để đăng ký / đăng nhập / nối EarnApp.** Luồng tài khoản cần một công việc riêng.
-- Đang hỏi chủ về cách bắt đầu: chờ lệnh giao cho Claude hay tự nhận New VM trên web. Chưa có quyết định tự chạy; tiếp tục chờ lệnh như hiện tại.
+- **Cách bắt đầu đã chốt:** chủ nhập proxy mới vào kho rồi giao lệnh cụ thể, ví dụ “tạo moon-07 theo danh sách 90 proxy này”. Chỉ nhập kho hoặc thấy trạng thái Chưa cài không tự khởi chạy máy. Chọn đúng danh sách / lô chủ giao, đối chiếu từng Server + VM + proxy trước khi làm; không tự lấy 90 proxy bất kỳ từ toàn kho.
+- Nhãn **Chưa cài** thay New VM; mã API / dữ liệu vẫn là `NEW_VM`. Cài xong phải lấy SDK mới ngay, lưu đúng VM / UUID / lượt và đọc lại thành công trước khi `finish-prepare` chuyển Chưa nối. Thiếu SDK hoặc còn bước cài lỗi thì giữ Chưa cài, ghi bước đang vướng.
+- Tạo dòng server / VM trên web và tạo máy thật là hai việc riêng. API hiện tại chưa tạo server / VM hàng loạt; không tuyên bố đã tạo máy chỉ vì có dòng web. **Máy chủ thật đã được chủ chuẩn bị và có đường AE Mini Tool / Tailscale; AI chỉ tạo và cài VM trên máy chủ đó**, không dựng lại máy chủ vật lý. **Ghép theo thứ tự danh sách chủ chỉ định: dòng 1 → VM_001, dòng 2 → VM_002, … dòng 90 → VM_090.** Kiểm đủ số lượng, trùng proxy và vị trí đang dùng trước khi làm; dòng trống / lỗi giữ nguyên vị trí và báo tại dòng, không dồn các dòng sau, không tự lấy proxy khác bù. Nếu tên VM đã tồn tại thì dừng đối chiếu, không tự xoá / tạo lại máy đang có.
 
 ## 1. Kết nối và quyền
 
@@ -72,7 +74,7 @@ Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu s
 ## 7. Máy thật và báo cáo
 
 - SDK/tiền: sdk-prepare trước → đọc đúng UUID/VM/lượt, SDK/tiền/giờ thật → sdk-observe/sdk-survey. OCR mờ đọc lại; tiền không đọc được dùng amountRead:false, không đoán/ghi 0. Tiền SDK là quan sát mã, không phải tiền PayPal/thu nhập.
-- New VM: claim PREPARE → bước/machineRef → tạo máy thật → proxy sau duyệt, áp/kiểm máy → cài EarnApp/Firefox → ghi SDK lần cài → finish-prepare đủ checks. Có tài khoản/SDK web không chứng minh đã cài.
+- Chưa cài: claim PREPARE → bước/machineRef → tạo máy thật → proxy sau duyệt, áp/kiểm máy → cài EarnApp/Firefox → ghi SDK lần cài → finish-prepare đủ checks. Có tài khoản/SDK web không chứng minh đã cài.
 - Áp proxy: claim PROXY_APPLY → proxy sau duyệt → áp/kiểm máy → finish-proxy kết quả thật. Không tự bật OFF, tạo lại SUS, mở lượt, đặt Chờ áp dụng proxy/xoá VM.
 - Tình trạng/Blocked/ghi chú đúng lượt/cấu hình/bằng chứng; OK sau kiểm proxy và EarnApp. Đọc lại sau ghi; recorded là lệnh, current là lúc đọc lại. Batch/confirm/reveal có cấu trúc riêng.
 - Mã thoát: 0 DONE, 1 bị từ chối rõ/kết thúc, 3 UNKNOWN, 4 WAITING_APPROVAL. Với lô vẫn kiểm từng mục.

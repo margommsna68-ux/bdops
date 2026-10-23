@@ -13,7 +13,7 @@ import {normalizeSdk} from '../vm-management/sdk-parse';
 import {blockCurrentProxy,staleCycle} from './ops';
 // Work on a real machine by an AI operator / person (owner brief 21/10/2026). MoneyToHome never reaches the machine itself: the operator
 // does the work (AE Mini Tool) and records here what it observed, through the same services as the web.
-// - A job = one VM taken in hand: kind PREPARE (New VM: create the machine, apply the proxy, install EarnApp + Firefox, record the SDK
+// - A job = one VM taken in hand: kind PREPARE (Chưa cài: create the machine, apply the proxy, install EarnApp + Firefox, record the SDK
 //   of this install, check, then "Chưa nối"), PROXY_APPLY (apply the proxy now assigned on the web, check, record the result) or CHECK.
 // - At most one ACTIVE job per VM that has not expired; taking it locks the VM's status row, so two operators cannot both take it.
 //   An expired job is released; taking the VM again returns the step, machine and SDK of the unfinished attempt (resume), so the
@@ -83,7 +83,7 @@ export async function claimVmJob(scope:ActorScope,input:{key:string;vmId:string;
     const vm=await loadVm(tx,scope.projectId,input.vmId),ops=await lockOps(tx,scope.projectId,vm.id),now=new Date();
     if(ops.cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(ops.cycle),'CYCLE_CHANGED');
     const state=vmState(vm,ops);
-    if(input.kind==='PREPARE'&&ops.status!=='NEW_VM')throw conflict(where(vm)+' đang '+opsLabel(ops.status)+', không phải New VM; không nhận việc chuẩn bị máy mới');
+    if(input.kind==='PREPARE'&&ops.status!=='NEW_VM')throw conflict(where(vm)+' đang '+opsLabel(ops.status)+', không phải Chưa cài; không nhận việc chuẩn bị máy mới');
     if(input.kind==='PROXY_APPLY'&&!state.pendingConfigurationId&&ops.status!=='PROXY_PENDING')throw conflict(where(vm)+' không có proxy mới chờ áp dụng');
     await expire(tx,vm.id,now);
     const active=await tx.vmJob.findFirst({where:{vmId:vm.id,state:'ACTIVE'}});
@@ -191,23 +191,23 @@ export async function recordJobSdk(scope:ActorScope,input:{key:string;vmId:strin
 export interface PrepareChecks {machine:boolean;proxy:boolean;internet:boolean;earnapp:boolean;firefox:boolean}
 const CHECK_LABEL:Record<keyof PrepareChecks,string>={machine:'máy chạy',proxy:'máy dùng đúng proxy',internet:'internet qua proxy',earnapp:'EarnApp chạy',firefox:'Firefox cài xong'};
 /**
- * New VM → Chưa nối, only when: the job is the caller's PREPARE job of the current round, the VM is still New VM and its status was not
+ * Chưa cài → Chưa nối, only when: the job is the caller's PREPARE job of the current round, the VM is still Chưa cài and its status was not
  * changed by someone else since it was taken, the SDK recorded in this attempt is the VM's current code (in its list, unused), the
- * proxy applied is the VM's current configuration and the one the job fetched, and every check passed. Otherwise New VM stays and the
+ * proxy applied is the VM's current configuration and the one the job fetched, and every check passed. Otherwise Chưa cài stays and the
  * reason comes back; the job stays open to finish later.
  */
 export async function finishPrepareJob(scope:ActorScope,input:{key:string;jobId:string;configurationId:string;checks:PrepareChecks;note?:string|null},db:PrismaClient=prisma,caller:OpsCaller={}){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_PREPARE_DONE',module:'INFRASTRUCTURE',reversible:false},async(tx,_images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
     const job=await ownJob(tx,scope.projectId,current.userId,caller,input.jobId);
-    if(job.kind!=='PREPARE')throw invalid('Việc này không phải chuẩn bị New VM');
+    if(job.kind!=='PREPARE')throw invalid('Việc này không phải chuẩn bị Chưa cài');
     const vm=await loadVm(tx,scope.projectId,job.vmId),ops=await lockOps(tx,scope.projectId,vm.id);
     if(ops.cycle!==job.cycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(ops.cycle),'CYCLE_CHANGED');
     if(ops.status!=='NEW_VM'||ops.revision!==job.statusRevision)throw conflict('Tình trạng đã đổi thành '+opsLabel(ops.status)+' sau khi nhận việc; không ghi đè');
     const missing=(Object.keys(CHECK_LABEL) as (keyof PrepareChecks)[]).filter(k=>input.checks?.[k]!==true);
-    if(missing.length)throw invalid('Chưa đạt: '+missing.map(k=>CHECK_LABEL[k]).join(', ')+'; giữ New VM. Ghi bước đang vướng rồi xử lý tiếp',{failed:missing});
+    if(missing.length)throw invalid('Chưa đạt: '+missing.map(k=>CHECK_LABEL[k]).join(', ')+'; giữ Chưa cài. Ghi bước đang vướng rồi xử lý tiếp',{failed:missing});
     const sdk=job.sdkId?await tx.sdkRecord.findUnique({where:{id:job.sdkId}}):null;
-    if(!sdk||sdk.vmId!==vm.id||sdk.holderVmId!==vm.id||sdk.linkState!=='UNLINKED')throw invalid('Chưa có SDK của lần cài này được lưu làm mã hiện hành của VM; ghi SDK (vms/{id}/sdk) và đọc lại trước khi hoàn tất. Giữ New VM');
+    if(!sdk||sdk.vmId!==vm.id||sdk.holderVmId!==vm.id||sdk.linkState!=='UNLINKED')throw invalid('Chưa có SDK của lần cài này được lưu làm mã hiện hành của VM; ghi SDK (vms/{id}/sdk) và đọc lại trước khi hoàn tất. Giữ Chưa cài');
     const {config}=currentConfiguration(vm);
     if(!config)throw invalid(where(vm)+' chưa có proxy hiện hành trên web');
     if(config.id!==input.configurationId||job.configurationId!==config.id)throw conflict('Proxy trên web đã đổi (hoặc chưa lấy proxy cho việc này); lấy proxy mới, áp dụng lên máy rồi hoàn tất',{currentConfigurationId:config.id});
@@ -224,7 +224,7 @@ const KEEP_ON_APPLY:VmOpsStatus[]=['OFF','SUSPENDED','DELETED','MAIL_LOGGED','NE
 /**
  * The proxy now assigned on the web was applied on the machine and checked: the apply mark goes; the status becomes the observed result
  * when the VM was waiting for it (Chờ áp dụng proxy / Blocked / a working status), never over OFF / SUS / VM deleted / Đã login mail /
- * New VM, never over a status chosen by someone else after the job was taken, and never for a configuration other than the current one
+ * Chưa cài, never over a status chosen by someone else after the job was taken, and never for a configuration other than the current one
  * (the owner replaced the proxy again meanwhile → refused). PROXY_BLOCKED reports the CURRENT proxy blocked (same rule as the web).
  */
 export async function finishProxyJob(scope:ActorScope,input:{key:string;jobId:string;configurationId:string;result:typeof APPLY_RESULTS[number];note?:string|null},db:PrismaClient=prisma,caller:OpsCaller={}){
@@ -233,7 +233,7 @@ export async function finishProxyJob(scope:ActorScope,input:{key:string;jobId:st
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_PROXY_APPLIED',module:'INFRASTRUCTURE',reversible:false},async(tx,images,current)=>{
     const infra=await authorizeVM(current,'ASSIGN',tx);
     const job=await ownJob(tx,scope.projectId,current.userId,caller,input.jobId);
-    if(job.kind!=='PROXY_APPLY'&&job.kind!=='CHECK')throw invalid('Việc chuẩn bị New VM kết thúc bằng finish-prepare');
+    if(job.kind!=='PROXY_APPLY'&&job.kind!=='CHECK')throw invalid('Việc chuẩn bị Chưa cài kết thúc bằng finish-prepare');
     const vm=await loadVm(tx,scope.projectId,job.vmId),ops=await lockOps(tx,scope.projectId,vm.id);
     if(ops.cycle!==job.cycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(ops.cycle),'CYCLE_CHANGED');
     if(ops.revision!==job.statusRevision)throw conflict('Tình trạng đã đổi thành '+opsLabel(ops.status)+' sau khi nhận việc; không ghi đè');

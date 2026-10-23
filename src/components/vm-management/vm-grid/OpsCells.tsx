@@ -242,12 +242,12 @@ function RecreateForm({projectId,vm,cycle,sus,lock,onDone}:{projectId:string;vm:
   async function run(){
     if(lock.current)return;setError('');lock.current=true;
     const input={projectId,vmId:vm.id,expectedCycle:cycle,note:note.trim()||null};
-    try{const r=await save.mutateAsync({...input,key:keyOf(input)});toast.success(r.where+': lượt '+r.cycle+' · New VM · '+r.proxy,{duration:6000});await onDone();}catch(e){setError(message(e));}finally{lock.current=false;}
+    try{const r=await save.mutateAsync({...input,key:keyOf(input)});toast.success(r.where+': lượt '+r.cycle+' · Chưa cài · '+r.proxy,{duration:6000});await onDone();}catch(e){setError(message(e));}finally{lock.current=false;}
   }
   return <div className="space-y-2 text-sm">
     <p className="text-xs">Chỉ bấm khi máy thật <strong>đã được tạo lại</strong>{sus?' (EarnApp bị SUS vĩnh viễn)':''}. Web sẽ:</p>
     <ul className="text-xs list-disc pl-4 space-y-0.5">
-      <li>Giữ id, server và mã <strong>{vm.code}</strong>; mở lượt {cycle+1} (New VM), lưu lượt {cycle}.</li>
+      <li>Giữ id, server và mã <strong>{vm.code}</strong>; mở lượt {cycle+1} (Chưa cài), lưu lượt {cycle}.</li>
       <li>Đóng EarnApp cũ: tài khoản và email không về NEW, không cấp lại.</li>
       <li>{vm.sdks.length?vm.sdks.length+' SDK vẫn nằm trong danh sách của VM ('+vm.sdks.filter(s=>s.state!=='LINKED').length+' chưa dùng, dùng được cho tài khoản mới; mã đã dùng giữ dấu đã dùng, không cấp lại).':'VM chưa có SDK nào; ghi mã thật sau khi cài.'}</li>
       <li>{blocked?'Proxy đang BLOCKED: vẫn ở vị trí và vẫn phải thay (bấm ô Proxy).':installed?'Giữ proxy '+(installed.ip||'')+' cho vị trí ở lượt mới (gán là xong, không có bước cài).':'Không có proxy để giữ.'}</li>

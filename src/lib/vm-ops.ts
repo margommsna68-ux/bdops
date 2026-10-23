@@ -13,7 +13,7 @@ export const VM_OPS:Record<VmOpsStatus,{label:string;tone:string;hint:string}>={
   EARN_ERROR:{label:'Earn/VM lỗi',tone:'orange',hint:'Cần kiểm tra EarnApp hoặc VM'},
   SUSPENDED:{label:'SUS',tone:'severe',hint:'Tài khoản EarnApp bị suspend vĩnh viễn'},
   DELETED:{label:'VM deleted',tone:'muted',hint:'Máy thực tế đã xoá; vị trí và lịch sử vẫn giữ trên web'},
-  NEW_VM:{label:'New VM',tone:'fresh',hint:'Máy mới / tạo lại, đang chuẩn bị cài'},
+  NEW_VM:{label:'Chưa cài',tone:'fresh',hint:'VM chưa hoàn tất cài máy, proxy, EarnApp, Firefox và lưu SDK'},
   MAIL_LOGGED:{label:'Đã login mail',tone:'violet',hint:'Đã đăng nhập Gmail / Apple ID; bước tiếp là tạo EarnApp'},
   // 21/10/2026: the web has the new proxy (replaced after Blocked); the real machine still has to apply it and be checked.
   PROXY_PENDING:{label:'Chờ áp dụng proxy',tone:'pending',hint:'Web đã có proxy mới; máy thật chưa áp dụng / chưa kiểm tra'},

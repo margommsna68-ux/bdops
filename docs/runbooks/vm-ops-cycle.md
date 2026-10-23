@@ -25,7 +25,7 @@ Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, kh
 | `EARN_ERROR` | Earn/VM lỗi | cam |
 | `SUSPENDED` | SUS | đỏ đậm |
 | `DELETED` | VM deleted | xám |
-| `NEW_VM` | New VM | xanh nhạt |
+| `NEW_VM` | Chưa cài | xanh nhạt |
 | `MAIL_LOGGED` | Đã login mail | tím |
 
 - **Chưa ghi trạng thái:** không có dòng `VmOperation` hoặc status trống, hiện "Chưa ghi". Không suy ra từ SDK, tài khoản hay proxy.
@@ -42,7 +42,7 @@ Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, kh
   - nhiều trạng thái một lúc, có số lượng (`?st=OFF,LINKED`; `NONE` = Chưa ghi);
   - cảnh báo proxy (`?warn=proxy`);
   - mốc tiền (`?money=WAITING|RECREATE|MONEY_REVIEW|FAILED`).
-- **Sort "Cần xử lý trước" (`?sort=PRIORITY`):** SUS → proxy BLOCKED → Earn/VM lỗi / tiền cần đối chiếu → cần tạo lại → OFF / VM deleted → chờ tiền → New VM → Đã login mail → Chưa nối → LINKED → Chưa ghi → OK. Cùng mức thì theo mã tự nhiên (VM_009 trước VM_010).
+- **Sort "Cần xử lý trước" (`?sort=PRIORITY`):** SUS → proxy BLOCKED → Earn/VM lỗi / tiền cần đối chiếu → cần tạo lại → OFF / VM deleted → chờ tiền → Chưa cài → Đã login mail → Chưa nối → LINKED → Chưa ghi → OK. Cùng mức thì theo mã tự nhiên (VM_009 trước VM_010).
 
 ## PayPal: sức khoẻ và nhãn gom tiền
 
@@ -93,7 +93,7 @@ Chỉ bấm khi máy thật **đã được tạo lại**.
 - Tình trạng là SUS (EarnApp bị suspend vĩnh viễn).
 
 **Web làm gì:**
-- Giữ id, server và mã VM. Mở lượt N+1 với tình trạng **New VM** (không tự LINKED/OK). Ghi lại lượt N (`VmCycle`): EarnApp, tài khoản, email, SDK, tình trạng cuối, cấu hình.
+- Giữ id, server và mã VM. Mở lượt N+1 với tình trạng **Chưa cài** (không tự LINKED/OK). Ghi lại lượt N (`VmCycle`): EarnApp, tài khoản, email, SDK, tình trạng cuối, cấu hình.
 - Đóng EarnApp cũ: rời VM, đặt `closedAt`. Tài khoản Gmail/Apple ID thành Đã dùng, không về NEW. Email vẫn "đã dùng".
 - SDK hiện hành rời vị trí (Kho SDK, 19/10/2026): mã chưa nối về kho với tiền / ghi chú để dùng lại, mã đã nối EarnApp vào lịch sử. Máy mới có SDK mới; chỉ ghi mã thật người / AI cung cấp sau khi cài. Xem [SDK và Kho SDK](vm-sdk.md).
 - **Proxy:**

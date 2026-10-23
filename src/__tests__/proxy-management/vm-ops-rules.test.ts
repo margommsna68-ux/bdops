@@ -3,6 +3,7 @@ import {gatherOf,requestMoney,milestoneOf,opsPriority,opsLabel} from '@/lib/vm-o
 const req=(o:Partial<Parameters<typeof requestMoney>[0]>={})=>requestMoney({amount:'24',currency:'USD',state:'REQUESTED',settledAt:null,shortfall:null,consumedAt:null,receipts:[],...o});
 const rc=(amount:string,confirmed=true,extra={})=>({amount,currency:'USD',confirmed,failed:false,voided:false,...extra});
 describe('VM ops rules',()=>{
+  it('labels the existing NEW_VM state as Chưa cài',()=>{expect(opsLabel('NEW_VM')).toBe('Chưa cài');});
   it('no recorded status reads "Chưa ghi"',()=>{expect(opsLabel(null)).toBe('Chưa ghi');expect(opsLabel('LINKED')).toBe('LINKED');});
   it('payout: partial receipt leaves only the open part pending; a linked pending receipt is not added on top',()=>{
     expect(req({receipts:[rc('10'),rc('14',false)]})).toMatchObject({phase:'WAITING',received:'10.00',pendingLinked:'14.00',remaining:'14.00'});
