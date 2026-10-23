@@ -18,3 +18,12 @@ Production before snapshot:11 servers /678 VM /486 SDK /1463 proxy /148 login /0
 
 ## Rules retained
 Owner creates new90-day token withREAD,VM_OPS,BALANCE_WRITE,PROXY_CREDENTIALS,ACCOUNT_OPS, noPAYOUT/RECEIPT. No automatic permission increase/token creation. No Sheet operation writes; disableAi remains owner action. UNKNOWN machine result keeps account held; prior credential reveal alone is not proof of registration. Imported SDKs remain UNCONFIRMED until actual check.
+
+## Production and Central verification
+- Source commit0abd6ac, production buildYYuyeK5O_AbCdn_o8iq1h. Deployed23/10/2026 18:21 Bangkok on SERVER-01; additive migrations20261023140000 and20261023150000 applied.
+- Backup immediately before:moneytohome-20261023-181702.dump, encrypted offsite.mthbk SHA2568e57d3deca3f1d69a0555200be74f6842df2af879f9a192a9cb729ed054a47f6 verified/decrypted onmoon-01. Previousapp kept D:\MoneyToHome\app-before-ai-stock-20261023.
+- First deployment attempt applied additive migrations but folder rename hit a Windows sharing lock; old app restarted. Added explicitWaitForStatusStopped + short wait/retry; second attempt succeeded, no restore/reset/data writes.
+- Before/after business snapshot and fingerprint identical:11servers,678VM,486SDK,1463proxy,148login,0PP,0EarnApp,3activecosts. Fingerprint572d8a6c957901b3eff7bfeac02a3361429e8fcc3419a3351b213381d462857b.
+- Public newbuild manifest200, health200, anonymous/me401. Live user-pageJS200 containsACCOUNT_OPS. Host authenticated stock/approval WRITE flows were not exercised: owner has not created a newtoken. Functional writes were checked only in isolatedTEST DB. No new browser UI flow/video in this takeover.
+- Package handoff/moneytohome-ops-central-0abd6ac-20261023(.zip), OpenAPI1.3.0, code/docs only. Copied to pinnedmoon-01 WIN-6CA4QAGDD2F at C:\Users\Administrator\Desktop\MoneyToHome\moneytohome-ops-central-0abd6ac-20261023. All12 files (includingmanifest) transferhash verified; Node syntaxcheckPASS. Oldcode/config/journal retained; rootcommonoperatorprompt backedupand updated. Central actualNodefetch topublicAPI:health200JSON, anonymousme401JSON; no tokensent.
+- Owner next step: create ai-ops token90days READ,VM_OPS,BALANCE_WRITE,PROXY_CREDENTIALS,ACCOUNT_OPS (noPAYOUT/RECEIPT), load via init in private terminal. No automatic token, scope or2FA changes. SheetdisableAi remains owneraction.
