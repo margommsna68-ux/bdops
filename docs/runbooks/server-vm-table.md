@@ -198,3 +198,16 @@ Quy tắc:
   - Khi khung chi tiết mở ở 1366 px, bảng hẹp lại và có cuộn ngang; cột định danh và ⋯ vẫn dính.
   - Dưới 1180 px, khung chi tiết nổi lên che phần phải của bảng.
 - **Bộ gõ tiếng Việt** được kiểm bằng sự kiện composition của Chrome (CDP), chưa thử trực tiếp với Unikey/EVKey trên máy anh.
+
+## Phân bố theo server và một quy tắc lọc (23/10/2026)
+
+- **Một quy tắc lọc** cho cả trang: `src/components/vm-management/vm-grid/filter-model.ts` (thuần, có test). Nhóm điều kiện: server (đường dẫn) · nhóm vấn đề (`view`) · tình trạng vận hành (`st`, chọn nhiều = HOẶC) · tiền (`money`) · chỉ proxy Blocked (`warn`) · tìm kiếm (`q`). Giữa các nhóm là VÀ. Bảng, mọi chip đếm, phân bố theo server và "Copy danh sách VM" đọc cùng một hàm `matchVm`.
+- **Số cạnh mỗi lựa chọn** = các nhóm khác giữ nguyên, nhóm của chính nó thay bằng lựa chọn đó (`countWith`). Ví dụ đang lọc Chưa SDK + OFF trên moon06 thì chip "Tất cả" đếm OFF trên moon06, chip "Chưa nối" đếm Chưa SDK + Chưa nối trên moon06. Lựa chọn đếm 0 và chưa bật thì ẩn.
+- **Phân bố theo server** (vùng ngay trên bảng, sau ô tìm / sắp xếp): "N VM phù hợp · M server" = mọi điều kiện TRỪ server, đếm mọi trang, mỗi VM một lần; các mục sắp theo số VM giảm dần rồi tên tự nhiên; quá 8 server thì thu gọn ("+N server" / "Thu gọn"). Bấm một server mở trang server đó giữ nguyên q / view / st / money / sort / số dòng, về trang 1; "Tất cả" quay lại toàn bộ (giữ điều kiện). Trong trang một server có thêm "Đang xem <server> · K VM" = số dòng thật của bảng.
+- **Đang lọc:** mỗi điều kiện một thẻ có ×; "Xoá bộ lọc" về mặc định của trang (trang một server vẫn ở server đó).
+- **Hết kết quả ở server đang chọn** mà server khác còn: "Không còn VM phù hợp ở <server>; các server khác còn N VM" + "Về Tất cả server" (giữ bộ lọc). Không tự nhảy server.
+- **Dữ liệu phụ thuộc chưa tải** (tài khoản EarnApp cho Chưa tài khoản / Chưa PayPal, bảng vận hành cho các chip tiền EarnApp): `matchVm` trả `null` → chip hiện "…", vùng phân bố hiện "Đang tải…", không bao giờ là 0. Lỗi tải vẫn báo + Thử lại như trước.
+- **Copy danh sách VM**: các dòng đã chọn, hoặc toàn bộ kết quả đang lọc (mọi trang) khi chưa chọn; nhãn nêu phạm vi và số lượng; nội dung `Server | VM` mỗi dòng, sắp server rồi mã VM; chỉ định danh (không mật khẩu / proxy / SDK / tiền). Các nút copy proxy giữ nguyên.
+- **Quyền tiền**: chip Chưa kiểm tra / Số cũ / Kiểm tra lỗi chỉ hiện với quyền đọc tiền SDK; không có quyền thì lọc `money=` trả 0 (không suy ra được số tiền).
+- **Đổi server ở bộ chọn** giữ ô tìm và các điều kiện (trước 23/10 xoá ô tìm). Nhãn sắp xếp mặc định ở trang tất cả server: "Theo server → mã VM" (sắp tự nhiên, VM_002 trước VM_010).
+- Kiểm thử: `vm-filter-model.test.ts`; trình duyệt trên bản thử cục bộ `docs/superpowers/evidence/2026-10-23-vm-filter-distribution/` (44/44).

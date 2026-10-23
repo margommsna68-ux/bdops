@@ -1,0 +1,7 @@
+Deploy self-hosted https://wow.lalamail.sbs — 23/10/2026 22:54 Bangkok
+- Backup trước deploy: D:\MoneyToHome\backups\moneytohome-20261023-224813.dump (39.326.095 bytes) + OFFSITE_OK (mã hoá, verified, moon-01) 22:48:27.
+- Stage: D:\MoneyToHome\app-filter-next-20261023 = git archive 43c3c51 + .env (hash bằng bản đang chạy) + node_modules (robocopy 986 MB); npm run build → BUILD_ID GqFGl1SeYfNv_8zKTXRSw, không lỗi.
+- Đổi thư mục: tools\deploy-vm-filter.ps1 (UAC, lần đầu bị huỷ, lần hai được chấp thuận) → logs\deploy-vm-filter-result.json {"ok":true,"build":"GqFGl1SeYfNv_8zKTXRSw","commit":"43c3c51","previous":"D:\MoneyToHome\app-before-vm-filter-20261023","noMigration":true}.
+- Kiểm host chỉ đọc sau deploy: /login 200, /_next/static/GqFGl1SeYfNv_8zKTXRSw/_buildManifest.js 200, /api/ops/v1/me không token 401, dịch vụ MoneyToHome-Web RUNNING, tunnel không gián đoạn.
+- Số liệu DB trước / sau (chỉ đọc): servers 11/11, VM 678/678, SdkRecord 508/508, ProxyIP 1463/1463, GmailAccount 148/148, CostRecord 3/3; OpsAudit 37 → 38 = một dòng từ chính lệnh kiểm /api/ops/v1/me không token (401 được ghi vết), không phải dữ liệu nghiệp vụ.
+- Full suite trên máy dev: 832 test, 822 pass + 10 "fail" chỉ khi chạy từ Git Bash (whoami của Git che whoami.exe nên ops-client ghi tệp riêng thất bại đóng); chạy lại hai tệp đó từ PowerShell: 12/12 pass. Không liên quan thay đổi này.

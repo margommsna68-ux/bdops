@@ -1,0 +1,60 @@
+PASS T1 Chưa SDK (tất cả server): "1135 VM phù hợp · 120 server" = bảng 1135 = tổng các server 1135
+PASS T1b P45A 2 · P45B 2 trong phân bố — [{"code":"P45A-a37c","n":2,"active":false},{"code":"P45B-a37c","n":2,"active":false}]
+PASS T1c Sắp theo số VM giảm dần
+PASS T2 Bấm P45A giữ view=SDK_MISSING: URL /infrastructure/servers/cmvl4w41i00086l8xnxvw9t97?view=SDK_MISSING
+PASS T2b "Đang xem P45A-a37c · 2 VM", bảng VM_001 + VM_002 — {"v":{"code":"P45A-a37c","n":2},"rs":[{"code":"VM_001","server":"cmvl4w41i00086l8xnxvw9t97"},{"code":"VM_002","server":"cmvl4w41i00086l8xnxvw9t97"}]}
+PASS T2c Phân bố vẫn hiện P45B 2 và tổng toàn dự án
+PASS T3 Chưa SDK + OFF trên P45A → VM_002 — [{"code":"VM_002","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T3b Chip "Tất cả" đếm với OFF trên P45A = 2 (VM_002, VM_003) — 2
+PASS T3c Chip OFF VM đếm với Chưa SDK = 1; chip Chưa nối (0) không hiện — {"off":1,"nl":null}
+PASS T4 OFF hoặc Chưa cài trên P45A → VM_001, VM_002, VM_003 — [{"code":"VM_001","server":"cmvl4w41i00086l8xnxvw9t97"},{"code":"VM_002","server":"cmvl4w41i00086l8xnxvw9t97"},{"code":"VM_003","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T5 Số cũ trên P45A → VM_004 — [{"code":"VM_004","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T5b Kiểm tra lỗi trên P45A → VM_005 — [{"code":"VM_005","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T5c Chưa kiểm tra trên P45A → VM_001, VM_002 (VM_003/004/005 có số) — [{"code":"VM_001","server":"cmvl4w41i00086l8xnxvw9t97"},{"code":"VM_002","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T6 Tìm ghi chú → 1 VM, 1 server (P45A) — {"vms":1,"servers":1}
+PASS T6b Tìm + OK → 0 VM phù hợp · 0 server — {"vms":0,"servers":0}
+PASS T6c P45B + Kiểm tra lỗi: "Không còn VM phù hợp ở P45B", server khác còn 1 — 8 VM phù hợp · 2 server · Đang xem P45B-a37c · 0 VM Tất cả Ops-xdst7 7 P45A-a37c 1 Copy danh sách VM (0 · mọi trang) Đang lọc: Kiểm tra lỗi Xoá bộ lọc Không còn
+PASS T6d "Về Tất cả server" giữ money=VM_FAILED: /infrastructure/servers?money=VM_FAILED
+PASS T6e Bảng tất cả server có VM_005 của P45A
+PASS T7 Đã xoá trên P45A → VM_006; phân bố P45A 1 — [{"code":"VM_006","server":"cmvl4w41i00086l8xnxvw9t97"}]
+PASS T8 Đang lọc: 3 điều kiện (Chưa SDK, OFF VM, Tìm "p45") — ["Chưa SDK","OFF VM","Tìm \"p45\""]
+PASS T8b Bỏ riêng OFF VM: /infrastructure/servers/cmvl4w41i00086l8xnxvw9t97?q=p45&view=SDK_MISSING
+PASS T8c Xoá bộ lọc: vẫn ở P45A, không tham số
+PASS T9 Back → Chưa SDK (1135), Forward → +OFF (38), tải lại giữ (38)
+PASS T10 Nhãn "Copy danh sách VM (2 · mọi trang)" — Copy danh sách VM (2 · mọi trang)
+PASS T10b Nội dung: Server | VM, mỗi VM một dòng, không mật khẩu / proxy / SDK / tiền — "P45A-a37c | VM_001\nP45A-a37c | VM_002"
+PASS T10c Chọn 1 dòng → nhãn "(1 đã chọn)" — Copy danh sách VM (1 đã chọn)
+PASS T10d Copy dòng đã chọn → 1 dòng — "P45A-a37c | VM_002"
+PASS T11 Đổi server ở bộ chọn giữ q và st: /infrastructure/servers/cmvl4w42b00176l8xvzvywvew?q=VM_00&st=OFF
+PASS T12 Tự tải lại sau ghi API: OFF trên P45A 2 → 1 VM, bảng còn VM_002, vẫn chọn 1, URL giữ
+PASS T13 Nhiều server: "+N server" thu gọn, +115 server
+PASS T13b Mở rộng → có "Thu gọn"
+PASS T13c Nhãn sắp xếp tất cả server: "Theo server → mã VM" — Theo server → mã VM
+PASS T13d Tất cả: bảng 1663 = phân bố 1663
+PASS T13e Trang 2 bắt đầu dòng 101: Dòng 101–200 / 1663 VM
+PASS T13f Mã VM sắp tự nhiên: VM_002 trước VM_010 (server cmvbs9p1c041o134kgas9091x) — ["VM_001","VM_002","VM_003","VM_004","VM_005","VM_006","VM_007","VM_008","VM_009","VM_010","VM_011","VM_012"]
+PASS T13g Server không tồn tại: báo rõ, không tự mở server khác
+PASS T14 Theme Sáng (light): data-theme=null, vùng phân bố đọc được
+PASS T14 Theme Tối (dark): data-theme=dark, vùng phân bố đọc được
+PASS T14 Theme Vàng kim (golden): data-theme=golden, vùng phân bố đọc được
+PASS T14 Theme Đồng ấm (bronze): data-theme=bronze, vùng phân bố đọc được
+PASS T14b 390px: vùng phân bố và nút copy vẫn hiện
+PASS T15 Không quyền tiền: không chip Chưa kiểm tra / Số cũ / Kiểm tra lỗi, không "$" trong chip / phân bố — Tất cả 5
+Thiếu proxy 5
+Có proxy 0
+Proxy Blocked 0
+Chờ áp dụng trên máy 0
+Cần xử lý 1
+Cần kiểm tra 0
+Chưa SDK 2
+Chưa tài khoản 5
+Chưa PayPal 5
+Đã xoá 1 Tình trạng:
+OK 2
+Chưa nối 1
+OFF VM 1
+Chưa cài 1
+P
+PASS T15b money=STALE không quyền → 0 VM phù hợp (không suy ra được) — {"vms":0,"servers":0}
+PASS T16 Không lỗi JS trên trang
+TOTAL PASS 44 FAIL 0
