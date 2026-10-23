@@ -15,6 +15,8 @@ Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. Mo
 - Nhãn **Chưa cài** thay New VM; mã API / dữ liệu vẫn là `NEW_VM`. Cài xong phải lấy SDK mới ngay, lưu đúng VM / UUID / lượt và đọc lại thành công trước khi `finish-prepare` chuyển Chưa nối. Thiếu SDK hoặc còn bước cài lỗi thì giữ Chưa cài, ghi bước đang vướng.
 - Tạo dòng server / VM trên web và tạo máy thật là hai việc riêng. API hiện tại chưa tạo server / VM hàng loạt; không tuyên bố đã tạo máy chỉ vì có dòng web. **Máy chủ thật đã được chủ chuẩn bị và có đường AE Mini Tool / Tailscale; AI chỉ tạo và cài VM trên máy chủ đó**, không dựng lại máy chủ vật lý. **Ghép theo thứ tự danh sách chủ chỉ định: dòng 1 → VM_001, dòng 2 → VM_002, … dòng 90 → VM_090.** Kiểm đủ số lượng, trùng proxy và vị trí đang dùng trước khi làm; dòng trống / lỗi giữ nguyên vị trí và báo tại dòng, không dồn các dòng sau, không tự lấy proxy khác bù. Nếu tên VM đã tồn tại thì dừng đối chiếu, không tự xoá / tạo lại máy đang có.
 
+- **Phân biệt tên server:** moon007 / moon-07 trong thảo luận chỉ là ví dụ, không phải lệnh tạo thật. Chủ xác nhận tên vận hành hiện tại là **moon1**; không tự đổi sang server-01 / MOON-01 hoặc coi các tên đó là alias. Luôn đọc tên + ID + dự án hiện hành và xác minh máy thật trước khi thao tác. SERVER-01 trong tài liệu hạ tầng là **máy chạy web**, không phải một server VM đã được chủ tạo. Server-01 có thể được chủ dùng trong nhóm Anh Em sau này; khi đó phải định danh bằng dự án + server ID + UUID máy, không ghép theo tên gần giống.
+
 ## 1. Kết nối và quyền
 
 - Base **https://wow.lalamail.sbs**, API `/api/ops/v1`; dự án **GROUP MOON**, code MOON. Lấy projectId từ `projects`; resolve đúng server + VM. Không dùng số lượng nhập cũ làm trạng thái hiện tại.
