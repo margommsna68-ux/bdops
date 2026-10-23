@@ -42,7 +42,7 @@ Các lệnh dưới cần VM_OPS, ASSIGN và job đang giữ của chính token,
 | POST | Body bắt buộc ngoài projectId | Kiểm tra / kết quả |
 |---|---|---|
 | `vms/{vmId}/proxy-assign` | `expectedCycle, expectedVmRevision, jobId` + đúng một trong `proxyId` hoặc `pick:{group:"TUT"\|"SHARED", packageCode?:…}` | Chọn proxy FREE trong giao dịch có khoá; không lấy của VM khác. Trả endpointId / configurationId / host / port; cấu hình trên web chưa phải đã áp lên máy. |
-| `vms/{vmId}/proxy-credentials` | `expectedCycle, jobId` | PROXY_CREDENTIALS + quyền user; **cần duyệt**, tệp riêng, xoá sau khi áp trên máy thật. |
+| `vms/{vmId}/proxy-credentials` | `expectedCycle, jobId` | PROXY_CREDENTIALS + quyền user; **không cần duyệt** (24/10/2026), việc đúng VM/lượt còn hiệu lực, tệp riêng, xoá sau khi áp trên máy thật. |
 | `vms/{vmId}/sdk-assign` | `expectedCycle, expectedVmRevision, jobId, sdkId, expectedSdkRevision` | Chỉ UNLINKED trong kho hoặc danh sách chính VM; mã cũ vẫn ở danh sách VM; UNCONFIRMED / LINKED / mã VM khác bị từ chối. |
 | `vms/{vmId}/sdk-linked` | `expectedCycle, jobId, sdkId, expectedSdkRevision, accountId, evidence` | SDK hiện hành và tài khoản mở hiện hành của VM; ghi sau khi nối thật, vĩnh viễn. Không có expectedVmRevision ở request này. |
 | `sdks/{sdkId}/reveal` | — | VM_OPS; **cần duyệt**; mã đầy đủ chỉ dùng trong luồng bí mật, không vào log/chat. |
@@ -51,7 +51,7 @@ Các lệnh dưới cần VM_OPS, ASSIGN và job đang giữ của chính token,
 
 ## Duyệt bằng CLI hoặc web
 
-Các lệnh cần duyệt: account credentials, proxy credentials, SDK reveal; payout prepare / status / receipts cũng cần duyệt nhưng token vận hành đợt này **không có scope** để gọi chúng. Gán kho, ghi SDK quan sát, tình trạng, ghi chú không tự phát sinh duyệt.
+Các lệnh cần duyệt: account credentials, SDK reveal; payout prepare / status / receipts cũng cần duyệt nhưng token vận hành đợt này **không có scope** để gọi chúng. Gán kho, ghi SDK quan sát, tình trạng, ghi chú không tự phát sinh duyệt.
 
 Lệnh lẻ trả **202 `{ok:false,data:null,error:{code:"APPROVAL_REQUIRED",details:{approvalId,status:"PENDING",expiresAt}}}`**; chưa thực hiện lệnh đó. Hạn 15 phút; chỉ ADMIN đúng dự án đã bật 2FA quyết định được.
 
