@@ -62,3 +62,11 @@ export function formatMoney(value:string,currency:string,opts:{exact?:boolean}={
 }
 /** Ledger amounts with their unit: USD as "$1.234,50", other currencies with every recorded decimal ("420.000 ₫", "16,26646 USDT"). */
 export function formatLedger(value:string,currency:string):string{return currency.toUpperCase()==='USD'?formatUsd(value):formatMoney(value,currency,{exact:true});}
+/** Display only: explicit units, at most two decimals. Never use this text as an input or persisted value. */
+export function displayMoney(value:string,currency:string):string{
+  const c=currency.toUpperCase(),rounded=roundDecimal(value,c==='VND'?0:2);
+  if(c==='VND')return viNumber(rounded)+' ₫';
+  const negative=rounded.startsWith('-'),[int,frac]=rounded.replace(/^-/,'').split('.');
+  const text=(negative?'-':'')+int.replace(/\B(?=(\d{3})+(?!\d))/g,',')+'.'+frac;
+  return c==='USD'||c==='PPUSD'?(negative?'-$'+text.slice(1):'$'+text)+(c==='PPUSD'?' PayPal':''):text+' '+c;
+}

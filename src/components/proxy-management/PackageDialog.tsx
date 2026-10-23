@@ -1,5 +1,5 @@
 "use client";
-import {formatMoney} from '@/lib/money-input';
+import {displayMoney} from '@/lib/money-input';
 import {useMemo,useState} from 'react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {trpc} from '@/lib/trpc';
@@ -18,7 +18,7 @@ export function filterPackages(list:PackageRow[],view:PackageView){
   return list;
 }
 export const dayLabel=(ymd:string|null)=>ymd?ymd.split('-').reverse().join('/'):'';
-export function priceLabel(p:Pick<PackageRow,'price'|'priceCurrency'|'cycleMonths'>&{priceHidden?:boolean}){return p.priceHidden?`Ẩn theo quyền / ${p.cycleMonths} tháng`:p.price!==null&&p.price!==''?(p.priceCurrency==='USD'?`${p.price} USD`:formatMoney(p.price,p.priceCurrency||'',{exact:true}))+` / ${p.cycleMonths} tháng`:'';}
+export function priceLabel(p:Pick<PackageRow,'price'|'priceCurrency'|'cycleMonths'>&{priceHidden?:boolean}){return p.priceHidden?`Ẩn theo quyền / ${p.cycleMonths} tháng`:p.price!==null&&p.price!==''?displayMoney(p.price,p.priceCurrency||'')+` / ${p.cycleMonths} tháng`:'';}
 export function dueLabel(p:Pick<PackageRow,'nextDueDate'|'due'>){
   if(!p.nextDueDate||p.due.daysLeft===null) return '';
   return p.due.daysLeft<0?`quá hạn ${-p.due.daysLeft} ngày`:p.due.daysLeft===0?'đến hạn hôm nay':`còn ${p.due.daysLeft} ngày`;

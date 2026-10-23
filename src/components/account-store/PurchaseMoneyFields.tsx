@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
-import {formatMoney} from '@/lib/money-input';
+import {displayMoney,formatMoney} from '@/lib/money-input';
 import {applyQuote,changeCurrency,editAmount,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
 const CURRENCIES=['VND','PPUSD','USDT'];
 // Money of a purchase (Nhập kho, Ghi chi phí of a batch): total paid by default, or price per account × quantity bought. Vietnamese
@@ -47,8 +47,8 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
       {value.currency==='VND'&&!fetching&&!fetchError&&<span className="pm-muted">Giá Binance là tham khảo; sửa thành tỷ giá thực trả nếu khác.</span>}</div>}
     {r.unitHint&&<p className="text-xs pm-muted" aria-live="polite">{r.unitHint}</p>}
     {r.quoteExpired&&value.quote&&<div className="pm-review text-sm" role="alert">Giá Binance {quoteLabel(value.quote).replace('Binance P2P · ','')} đã quá 10 phút nên chưa nhập được. <button type="button" className="pm-button" disabled={locked} onClick={()=>void fetchQuote()}>Lấy giá mới</button> <button type="button" className="pm-button pm-button-quiet" disabled={locked} onClick={()=>onChange({...value,quote:null})}>Giữ {r.rateText}, ghi là nhập tay</button></div>}
-    {r.priced&&r.total&&<p className="text-sm acc-money-sum" aria-live="polite">{r.formula?<strong>{r.formula}</strong>:<strong>Tổng {formatMoney(r.total,value.currency,{exact:true})}</strong>}
-      {r.usdtText&&<> · <span title={'Lưu chính xác: '+formatMoney(r.usdt!,'USDT',{exact:true})}>{r.usdtText}</span></>}{r.allocation&&<span className="pm-muted"> · {r.allocation}</span>}<span className="pm-muted"> · ghi một lần vào Chi phí.</span></p>}
+    {r.priced&&r.total&&<p className="text-sm acc-money-sum" aria-live="polite">{r.formula?<strong>{r.formula}</strong>:<strong>Tổng {displayMoney(r.total,value.currency)}</strong>}
+      {r.usdtText&&<> · <span title={'Lưu chính xác: '+formatMoney(r.usdt!,'USDT',{exact:true})}>{r.usdt?`≈ ${displayMoney(r.usdt,'USDT')}`:r.usdtText}</span></>}{r.allocation&&<span className="pm-muted"> · {r.allocation}</span>}<span className="pm-muted"> · ghi một lần vào Chi phí.</span></p>}
   </div>;
 }
 // Re-render the form that holds a quote at the moment it expires, so the whole form (the Nhập / Ghi chi phí button included) shows the

@@ -45,7 +45,7 @@ describe('Purchase money: total paid or price per account',()=>{
     expect(r.errors).toEqual({});
     expect(r.payload).toEqual({priceMode:'UNIT',amount:'70000',quantity:6,currency:'VND',rate:'25820',p2pQuoteToken:null});
     expect(r.total).toBe('420000');expect(r.usdt).toBe('16.266460');
-    expect(r.formula).toBe('6 PP × 70.000 ₫ = 420.000 ₫');expect(r.usdtText).toBe('≈ 16,27 USDT');expect(r.rateText).toBe('1 USDT = 25.820 VND');
+    expect(r.formula).toBe('6 PP × 70.000 ₫ = 420.000 ₫');expect(r.usdtText).toBe('≈ 16.27 USDT');expect(r.rateText).toBe('1 USDT = 25.820 VND');
   });
   it('the total is the source: an optional quantity only gives a reference allocation',()=>{
     const r=readPurchase(pp({total:'420.000',quantity:'6',currency:'VND',rate:'25820'}),'PP',t0);
@@ -68,7 +68,7 @@ describe('Purchase money: total paid or price per account',()=>{
     for(let i=0;i<3;i++){
       s=switchMode(s,'UNIT');expect(s.unit).toBe('0,424');
       expect(readPurchase(s,'PP')).toMatchObject({errors:{},total:'2.12',payload:{priceMode:'UNIT',amount:'0.424',quantity:5,currency:'USDT'}});
-      expect(readPurchase(s,'PP').formula).toBe('5 PP × 0,424 USDT = 2,12 USDT');
+      expect(readPurchase(s,'PP').formula).toBe('5 PP · Tổng 2.12 USDT');
       s=switchMode(s,'TOTAL');expect(s.total).toBe('2,12');
       expect(readPurchase(s,'PP')).toMatchObject({errors:{},payload:{priceMode:'TOTAL',amount:'2.12',quantity:5}});
     }

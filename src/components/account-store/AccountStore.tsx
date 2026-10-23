@@ -1,5 +1,5 @@
 "use client";
-import {formatMoney,roundDecimal} from '@/lib/money-input';
+import {displayMoney,formatMoney,roundDecimal} from '@/lib/money-input';
 import {CashDecimal} from '@/server/business-management/usdt-money';
 import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
 import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
@@ -211,8 +211,8 @@ function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSa
         <td data-label="Nơi mua">{b.source||<span className="pm-muted">Chưa ghi</span>}</td>
         <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?viAmount(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
         <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}{b.kind==='PAYPAL'?' PP':''}</button>{b.kind==='PAYPAL'&&b.emails!=null?<span className="acc-batch-sub">{viAmount(String(b.emails))} email</span>:null}</td>
-        {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{viAmount(m.total)} {m.currency}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
-          {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<span title={'Lưu chính xác: '+formatMoney(m.usdt,'USDT',{exact:true})}>≈ {formatMoney(m.usdt,'USDT')}</span>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
+        {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{displayMoney(m.total,m.currency||'')}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
+          {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<span title={'Lưu chính xác: '+formatMoney(m.usdt,'USDT',{exact:true})}>≈ {displayMoney(m.usdt,'USDT')}</span>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
         <td data-label="Chi phí">{b.cost==='RECORDED'?(b.costLink?<Link className="acc-state NEW" href={links.costs({cost:b.costLink.id,month:b.costLink.month})} title="Mở khoản chi ở Chi phí">Đã ghi</Link>:<span className="acc-state NEW">Đã ghi</span>):b.cost==='VOIDED'?<span className="acc-state BLOCKED" title="Khoản chi đã thu hồi ở Chi phí">Đã thu hồi</span>:<span className="acc-state USED" title="Chưa ghi khoản chi trên web; không có nghĩa là chưa thanh toán">Chưa ghi</span>}</td>
         <td data-label="Thao tác"><div className="acc-batch-actions">{canAppend&&<button className="pm-button pm-button-quiet" onClick={()=>onContinue(b)}>Nhập bổ sung</button>}{b.cost!=='RECORDED'&&store?.rights.writeCosts&&<button className="pm-button pm-button-quiet" onClick={()=>setCostFor(b)}>Ghi chi phí</button>}</div></td></tr>,
         isOpen&&m?<tr key={b.id+':d'} className="acc-batch-detail"><td colSpan={cols}><BatchMoney b={b}/>{b.notes?<div>Ghi chú: {b.notes}</div>:null}<div className="pm-muted">Dán lần đầu {b.lineCount} dòng.</div></td></tr>:null];})}
@@ -223,10 +223,10 @@ function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSa
 // still equals the ledger total; after an adjustment or void the first price stays visible as history.
 function BatchMoney({b}:{b:Batch}){
   const m=b.money;if(!m)return <>—</>;
-  const first=m.original?`${viAmount(m.original.total)} ${m.original.currency||''}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${viAmount(m.original.unit)})`:''}`:'';
-  return <>{m.total?<div>Khoản chi hiện hành: {viAmount(m.total)} {m.currency}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${viAmount(m.unit)})`:''}
-    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {viAmount(m.usdt)} USDT (lưu chính xác)</>:null}</div>:null}
-    {m.total&&b.paidQuantity?<div className="pm-muted">Phân bổ ≈ {viAmount(roundDecimal(new CashDecimal(m.total).div(b.paidQuantity).toFixed(8),2))} {m.currency} / {b.kind==='PAYPAL'?'PP':'tài khoản'} (tham khảo, không ghi thêm chi phí)</div>:null}
+  const first=m.original?`${displayMoney(m.original.total,m.original.currency||'')}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${displayMoney(m.original.unit,m.original.currency||'')})`:''}`:'';
+  return <>{m.total?<div>Khoản chi hiện hành: {displayMoney(m.total,m.currency||'')}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${displayMoney(m.unit,m.currency||'')})`:''}
+    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {displayMoney(m.usdt,'USDT')}</>:null}</div>:null}
+    {m.total&&b.paidQuantity?<div className="pm-muted">Phân bổ ≈ {displayMoney(roundDecimal(new CashDecimal(m.total).div(b.paidQuantity).toFixed(8),2),m.currency||'')} / {b.kind==='PAYPAL'?'PP':'tài khoản'} (tham khảo, không ghi thêm chi phí)</div>:null}
     {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':b.cost==='VOIDED'?'Khoản chi đã thu hồi · giá ban đầu ':'Giá ban đầu '}{first}</div>}</>;
 }
 // Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought), with

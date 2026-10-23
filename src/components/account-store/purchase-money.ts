@@ -1,5 +1,5 @@
 import {CashDecimal,normalizeCostMoney} from '@/server/business-management/usdt-money';
-import {formatMoney,parseViNumber,roundDecimal,viInput,viNumber} from '@/lib/money-input';
+import {displayMoney,formatMoney,parseViNumber,roundDecimal,viInput,viNumber} from '@/lib/money-input';
 // Money of one purchase in Kho tài khoản (new import and "Ghi chi phí" of a batch), owner brief 19/10/2026:
 // - the default is the total actually paid; "Tính theo giá mỗi tài khoản" needs the quantity actually bought (a PayPal purchase
 //   counts PP codes, never emails or pasted lines);
@@ -63,11 +63,11 @@ export function readPurchase(s:PurchaseState,unitWord:string,now=Date.now()){
   const quote=s.quote&&(cur==='PPUSD'?vndUsdtRate:rate)&&sameNumber(s.quote.rate,(cur==='PPUSD'?vndUsdtRate:rate)!)?s.quote:null,quoteExpired=!!quote&&now-Date.parse(quote.fetchedAt)>QUOTE_TTL_MS;
   const total=money.value===null?null:s.mode==='UNIT'?(qty.value!==null?product(money.value,qty.value):null):money.value;
   let usdt:string|null=null;if(total&&(cur==='USDT'||rate||(paypalVndRate&&vndUsdtRate))){try{usdt=normalizeCostMoney({amount:total,currency:cur,rate:rate??undefined,...(cur==='PPUSD'?{paypalVndRate:paypalVndRate!,vndUsdtRate:vndUsdtRate!}:{})}).usdt;}catch{const field=cur==='PPUSD'?'vndUsdtRate':'rate';errors[field]=errors[field]||'Số tiền quy đổi quá nhỏ hoặc tỷ giá không hợp lệ';}}
-  const formula=s.mode==='UNIT'&&total&&qty.value!==null?`${qty.value.toLocaleString('vi-VN')} ${unitWord} × ${formatMoney(money.value!,cur,{exact:true})} = ${formatMoney(total,cur,{exact:true})}`:null;
+  const formula=s.mode==='UNIT'&&total&&qty.value!==null?((money.value!.split('.')[1]?.length||0)>2?`${qty.value.toLocaleString('vi-VN')} ${unitWord} · Tổng ${displayMoney(total,cur)}`:`${qty.value.toLocaleString('vi-VN')} ${unitWord} × ${displayMoney(money.value!,cur)} = ${displayMoney(total,cur)}`):null;
   const allocation=s.mode==='TOTAL'&&total&&qty.value!==null?`≈ ${formatMoney(strip(roundDecimal(new CashDecimal(total).div(qty.value).toFixed(8),2)),cur,{exact:true})} / ${unitWord} (tham khảo)`:null;
   const ok=!Object.keys(errors).length&&!!total&&!quoteExpired;
   return {...empty,total,usdt,formula,allocation,quoteExpired,
-    usdtText:cur!=='USDT'&&usdt?'≈ '+formatMoney(usdt,'USDT'):null,rateText:cur==='PPUSD'&&paypalVndRate&&vndUsdtRate?`1 USD PayPal = ${viNumber(paypalVndRate)} VND · 1 USDT = ${viNumber(vndUsdtRate)} VND`:rate?`1 USDT = ${viNumber(rate)} ${cur}`:null,rateSource:quote?quoteLabel(quote):(rate||vndUsdtRate)?'Nhập tay':'',
+    usdtText:cur!=='USDT'&&usdt?'≈ '+displayMoney(usdt,'USDT'):null,rateText:cur==='PPUSD'&&paypalVndRate&&vndUsdtRate?`1 USD PayPal = ${viNumber(paypalVndRate)} VND · 1 USDT = ${viNumber(vndUsdtRate)} VND`:rate?`1 USDT = ${viNumber(rate)} ${cur}`:null,rateSource:quote?quoteLabel(quote):(rate||vndUsdtRate)?'Nhập tay':'',
     payload:ok?{priceMode:s.mode,amount:money.value!,quantity:qty.value,currency:cur,rate:cur==='USDT'?null:rate,...(cur==='PPUSD'?{paypalVndRate:paypalVndRate!,vndUsdtRate:vndUsdtRate!}:{}),p2pQuoteToken:quote?.token??null}:null};
 }
 // Switching keeps the money and the intent of what is shown. Unit → total carries the exact unit × quantity; total → unit fills the

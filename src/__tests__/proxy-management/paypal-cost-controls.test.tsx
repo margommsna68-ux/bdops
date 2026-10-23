@@ -73,8 +73,8 @@ describe('cost currency controls',()=>{
   }finally{await act(async()=>root.unmount());dom.window.close();for(const [key,value] of saved){if(value)Object.defineProperty(globalThis,key,value);else Reflect.deleteProperty(globalThis,key);}}
  });
  it('formats PayPal and free package prices without hiding zero',()=>{
-  expect(priceLabel({price:'250',priceCurrency:'PPUSD',cycleMonths:1})).toBe('$250 PayPal / 1 tháng');
-  expect(priceLabel({price:'0',priceCurrency:'USDT',cycleMonths:1})).toBe('0 USDT / 1 tháng');
+  expect(priceLabel({price:'250',priceCurrency:'PPUSD',cycleMonths:1})).toBe('$250.00 PayPal / 1 tháng');
+  expect(priceLabel({price:'0',priceCurrency:'USDT',cycleMonths:1})).toBe('0.00 USDT / 1 tháng');
  });
 });
 
