@@ -1,3 +1,4 @@
+import {maskSdk} from '@/lib/sdk-mask';
 import {afterAll,describe,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {db,setup} from '../ops-api/ops-fixture';
@@ -122,7 +123,7 @@ describe('SDK money rights on the web services',()=>{
       expect(back.state).toMatchObject({kind:'UNCHECKED',stored:{amount:'12.34',cycle:1}});expect((await f.rec(c)).amount!.toString()).toBe('12.34');
       // The API says the same (moneyState + stored apart).
       const token=(await createOpsToken(f.scope.userId,{projectId:f.P,userId:f.ai,name:'t',scopes:['READ','VM_OPS','BALANCE_WRITE'],expiresInDays:30,pin:'123456'},db)).token!;
-      const d=(await api('GET','vms/'+f.vm.id+'?projectId='+f.P,{token})).json.data,item=d.sdk.items.find((x:{code:string})=>x.code===c);
+      const d=(await api('GET','vms/'+f.vm.id+'?projectId='+f.P,{token})).json.data,item=d.sdk.items.find((x:{code:string})=>x.code===maskSdk(c)); // the API masks SDK codes (23/10/2026)
       expect(item).toMatchObject({current:true,amount:null,observedAt:null,moneyState:'UNCHECKED',stored:{amount:'12.34',cycle:1,vmId:f.vm.id}});
       // Checked again on this VM in round 2: the new figure is this round's money.
       await f.observe(c,'5',ago(0.5));

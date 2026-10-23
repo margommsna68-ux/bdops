@@ -35,6 +35,24 @@ Brief chủ dự án 22/10/2026. Một trang cho mỗi người (người hay AI
   (Proxy / VM, Chỉ PayPal, Đầy đủ). Chọn / đổi dự án ở mọi nơi dùng `useSelectProject` (membership của chính người đăng nhập, đủ chế độ / tên / quyền); đổi
   tên dự án chỉ đổi tên trong bộ nhớ trình duyệt (`renameCurrentProject`) — trước đây mất chế độ Proxy / VM nên mục token biến mất.
 
+## 2FA Google Authenticator thay PIN (23/10/2026)
+
+Quyết định chủ dự án 23/10/2026 (thiết kế docs/superpowers/specs/2026-10-23-totp-ai-approval-design.md). Mã TOTP (RFC 6238, 30 s, cửa sổ ±1 bước,
+chống dùng lại cùng bước) thay cho PIN ở mọi chỗ web từng hỏi PIN; AI (ops API) không còn PIN và cũng không có mã 2FA.
+
+- **Đăng nhập + mở khoá**: sau mật khẩu, user đã bật 2FA nhập mã 6 số; mở khoá phiên (trước đây PIN) cũng bằng mã 2FA, vẫn gắn phiên + phiên bản
+  2FA (đặt lại 2FA → phải mở khoá lại). Sai 3 lần → khoá 30 phút (một bộ đếm cho đăng nhập, mở khoá, duyệt); ADMIN "Mở khoá tạm" mở sớm.
+- **Bắt buộc cài**: user chưa bật 2FA mà dự án / ADMIN yêu cầu thì sau đăng nhập chỉ thấy popup cài (QR tạo ở server cho phiên đang cài, nhập mã xác
+  nhận; khoá bí mật không bao giờ hiện lại). Chủ cài trước, rồi bật bắt buộc cho người khác.
+- **ADMIN yêu cầu / đặt lại**: trên trang user: "Yêu cầu 2FA" và "Đặt lại 2FA" (xoá khoá cũ, user cài lại ở lần đăng nhập sau; mọi mở khoá đang có của
+  user đó mất hiệu lực). Không ai xem được khoá của người khác.
+- **Mã dự phòng**: cấp một lần khi cài (dùng một lần, có thể dùng để mở khoá); hết mã → ADMIN đặt lại 2FA.
+- **Duyệt lệnh AI (Phê duyệt)**: lệnh quan trọng của ops API (chuẩn bị rút, trạng thái rút, tiền về PP, proxy đầy đủ của VM, xem mã SDK đầy đủ) chờ ở
+  `/approvals` (menu ADMIN; chip số chờ duyệt). Duyệt / Từ chối cần mã 2FA của chính ADMIN (không dùng mở khoá của phiên), chỉ ADMIN của đúng dự án và
+  **đã bật 2FA**; ADMIN chưa bật 2FA không duyệt được. Hạn 15 phút; quyết định ghi audit `OPS_APPROVE` / `OPS_REJECT`. Tạo token API cũng xác nhận bằng mã 2FA
+  của ADMIN thay PIN. Chi tiết phía AI: ops-api.md mục 0.
+- Đồng hồ máy chủ phải đúng (lệch > 30 s mã sẽ sai); kiểm `w32tm /query /status` khi triển khai.
+
 ## Kiểm (22/10/2026)
 
 Test `src/__tests__/users/user-access.integration.test.ts`; trình duyệt local 30/30 (evidence docs/superpowers/evidence/2026-10-22-user-access/).

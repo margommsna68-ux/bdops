@@ -40,7 +40,7 @@ export const createTRPCContext = async (): Promise<Context> => {
   return { session, prisma, web: { sessionId: check.sessionId, pinUnlocked: check.pinUnlocked } };
 };
 // Calls allowed before the PIN of this session is proved (they are how it gets proved / set).
-const PIN_FREE = new Set(["user.hasPin", "user.verifyPin", "user.setPin"]);
+const PIN_FREE = new Set(["user.hasPin", "user.verifyPin", "user.setPin", "user.securityStatus", "user.totpBegin", "user.totpConfirm"]);
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
@@ -131,7 +131,7 @@ const enforceProjectMember = enforceAuth.unstable_pipe(async ({ ctx, next, rawIn
     if(featureLinked) throw new TRPCError({code:'PRECONDITION_FAILED',message:'Dùng luồng quản lý proxy/VM mới để giữ lịch sử và kiểm tra trùng'});
   }
   if(/^(proxy|vm|server)\./.test(path)) await assertLegacyInfrastructureTargets(ctx.prisma,projectId,path,input);
-  if(typeof input.userId==='string'&&(/^user\.(getDetail|adminResetPin|adminResetPassword|resetPin|resetPassword|adminUnlockAccount|kickAutotypeSession|kickAllAutotypeSessions|setDisabled|access)$/.test(path)||/^project\.(updateUserInfo|setPin|removePin)$/.test(path)))await assertUserTarget(ctx.prisma,membership,input.userId,type==='mutation');
+  if(typeof input.userId==='string'&&(/^user\.(getDetail|adminResetPin|adminResetPassword|resetPin|resetPassword|adminUnlockAccount|kickAutotypeSession|kickAllAutotypeSessions|setDisabled|access|requireTotp|resetTotp)$/.test(path)||/^project\.(updateUserInfo|setPin|removePin)$/.test(path)))await assertUserTarget(ctx.prisma,membership,input.userId,type==='mutation');
   return next({
     ctx: {
       ...ctx,

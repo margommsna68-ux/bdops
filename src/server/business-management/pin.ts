@@ -38,7 +38,15 @@ export async function checkPinVersion(db:Db,userId:string,pin:string):Promise<{r
  }
  return {result:'INVALID',pinVersion:null};
 }
+/** The user's second factor for a sensitive action: the TOTP code when 2FA is on (23/10/2026), else the legacy PIN. */
 export async function verifyBusinessPin(db:PrismaClient,userId:string,pin:string){
+ const u=await db.user.findUnique({where:{id:userId},select:{totpEnabledAt:true,totpLockedAt:true}});
+ if(u?.totpEnabledAt){
+  const {checkTotp,totpMessage}=await import('../users/totp');
+  const t=await checkTotp(db,userId,pin);
+  if(t.result!=='OK')throw new ProxyDomainError('FORBIDDEN',totpMessage(t.result,u.totpLockedAt));
+  return;
+ }
  const r=await checkPin(db,userId,pin);
  if(r==='NOT_SET')throw new ProxyDomainError('FORBIDDEN','Cần đặt PIN trước khi copy thông tin đăng nhập');
  if(r==='LOCKED')throw new ProxyDomainError('FORBIDDEN','PIN đang bị khóa. Liên hệ quản lý hoặc chờ hết 30 phút.');

@@ -8,13 +8,24 @@ import {createOpsToken} from '@/server/ops-api/tokens';
 // Shared synthetic setup of the ops API tests (example.invalid, test database only).
 export {db};
 export const AI_PIN='246810',ADMIN_PIN='123456';
-type Call={token?:string|null;pin?:string|null;key?:string|null;body?:unknown;xff?:string};
+type Call={token?:string|null;pin?:string|null;key?:string|null;body?:unknown;xff?:string;autoApprove?:boolean};
 export async function api(method:'GET'|'POST',path:string,o:Call={}){
   const [p]=path.split('?'),headers:Record<string,string>={'x-forwarded-for':o.xff??'203.0.113.7'};
   if(o.token!==null&&o.token!==undefined)headers.authorization='Bearer '+o.token;
   if(method==='POST'){headers['content-type']='application/json';if(o.pin!==null)headers['x-ops-pin']=o.pin??AI_PIN;if(o.key!==null)headers['idempotency-key']=o.key??randomUUID();}
-  const res=await handleOpsRequest(new Request('http://local.invalid/api/ops/v1/'+path,{method,headers,body:method==='POST'?JSON.stringify(o.body??{}):undefined}),p,db);
-  const text=await res.text();return {status:res.status,headers:res.headers,text,json:JSON.parse(text) as {ok:boolean;data:any;error:{code:string;message:string;details?:any}|null}};
+  const send=async()=>{const res=await handleOpsRequest(new Request('http://local.invalid/api/ops/v1/'+path,{method,headers,body:method==='POST'?JSON.stringify(o.body??{}):undefined}),p,db);const text=await res.text();return {status:res.status,headers:res.headers,text,json:JSON.parse(text) as {ok:boolean;data:any;error:{code:string;message:string;details?:any}|null}};};
+  const first=await send();
+  // 23/10/2026: critical commands wait for an ADMIN's 2FA approval. Business-flow tests approve in the database as the project's ADMIN
+  // (the decision path itself is covered by ops-approvals.integration.test.ts); pass autoApprove:false to see the 202.
+  if(first.status===202&&first.json.error?.code==='APPROVAL_REQUIRED'&&o.autoApprove!==false){
+    const id=first.json.error.details.approvalId as string,row=await db.opsApproval.findUniqueOrThrow({where:{id}});
+    const admin=await db.projectMember.findFirstOrThrow({where:{projectId:row.projectId,role:'ADMIN'}});
+    await db.opsApproval.update({where:{id},data:{status:'APPROVED',decidedById:admin.userId,decidedAt:new Date()}});
+    // The held attempt consumed one write of the token's minute budget; give it back so long flows are not rate-limited by the approval step itself.
+    await db.opsRateBucket.updateMany({where:{key:'write:'+row.tokenId,count:{gt:0}},data:{count:{decrement:1}}});
+    return send();
+  }
+  return first;
 }
 export async function setup(){
   const f=await businessFixture(),x=randomUUID().slice(0,6),projectId=f.scope.projectId,today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);

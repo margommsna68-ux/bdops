@@ -35,6 +35,8 @@ export const personalItems=(cashMode:boolean):NavItem[]=>[
   {href:'/profit',labelKey:'Lợi nhuận',icon:'%',module:'PROFIT'},
   {href:'/history',labelKey:'Lịch sử thao tác',icon:'H'},
   {type:'separator',labelKey:'Quản trị'},
+  // Phê duyệt lệnh AI (23/10/2026): the ADMIN of the project approves the AI's critical commands with a 2FA code.
+  {href:'/approvals',labelKey:'Phê duyệt',icon:'A',role:'ADMIN',module:'INFRASTRUCTURE'},
   {href:'/admin/users',labelKey:'Nhân viên',icon:'U',role:'MOD'},
   {href:'/admin/projects',labelKey:'Dự án',icon:'P',role:'ADMIN'},
   {href:'/settings',labelKey:'Thiết lập',icon:'*'},

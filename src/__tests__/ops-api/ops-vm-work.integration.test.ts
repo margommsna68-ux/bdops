@@ -2,6 +2,7 @@ import {afterAll,describe,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {encrypt} from '@/lib/encryption';
 import {db,AI_PIN,api,setup} from './ops-fixture';
+import {maskSdk} from '@/lib/sdk-mask';
 import {checked,expectConforms} from './openapi-conform';
 import {changeVmProxy} from '@/server/vm-management/proxy-command';
 import {addManagedVMs} from '@/server/vm-management/metadata';
@@ -75,16 +76,16 @@ describe('New VM → machine → proxy → EarnApp + Firefox → SDK saved → C
       d=await w.vmApi(t,v.id);const old=await w.post(t,'vms/'+v.id+'/sdk',{jobId:job.id,expectedCycle:1,expectedVmRevision:d.revision,code:'OLDSDK-'+w.x+'-0001'});expect(old.status).toBe(422);
       const code='SDKNEW-'+w.x+'-ABCDEF12';
       const s=await w.post(t,'vms/'+v.id+'/sdk',{jobId:job.id,expectedCycle:1,expectedVmRevision:d.revision,code});
-      expect(s.status).toBe(200);expect(s.json.data.recorded.sdk).toMatchObject({code,current:true,inList:true,linkState:'UNLINKED'});
+      expect(s.status).toBe(200);expect(s.json.data.recorded.sdk).toMatchObject({code:maskSdk(code),current:true,inList:true,linkState:'UNLINKED'});
       // Read back: same code again → acknowledged, no second record.
-      d=await w.vmApi(t,v.id);expect(d.currentSdk.code).toBe(code);
+      d=await w.vmApi(t,v.id);expect(d.currentSdk.code).toBe(maskSdk(code));
       const again=await w.post(t,'vms/'+v.id+'/sdk',{jobId:job.id,expectedCycle:1,expectedVmRevision:d.revision,code});expect(again.json.data.recorded.readBack).toBe(true);
       expect(await db.sdkRecord.count({where:{projectId:w.projectId,code}})).toBe(1);
       // A failed check keeps New VM.
       fin=await w.post(t,'jobs/'+job.id+'/finish-prepare',{configurationId:cfg,checks:{...checks,earnapp:false}});expect(fin.status).toBe(422);expect((await w.vmApi(t,v.id)).status).toBe('NEW_VM');
       fin=await w.post(t,'jobs/'+job.id+'/finish-prepare',{configurationId:cfg,checks});
-      expect(fin.status).toBe(200);expect(fin.json.data.recorded).toMatchObject({status:'NOT_LINKED',sdkCode:code,configurationId:cfg,machineRef:'AE-'+w.x+'-NEW_101'});
-      d=await w.vmApi(t,v.id);expect(d).toMatchObject({status:'NOT_LINKED',applyPending:null,activeJob:null,currentSdk:{code}});
+      expect(fin.status).toBe(200);expect(fin.json.data.recorded).toMatchObject({status:'NOT_LINKED',sdkCode:maskSdk(code),configurationId:cfg,machineRef:'AE-'+w.x+'-NEW_101'});
+      d=await w.vmApi(t,v.id);expect(d).toMatchObject({status:'NOT_LINKED',applyPending:null,activeJob:null,currentSdk:{code:maskSdk(code)}});
       // The old SDK keeps its money, note and unused mark; nothing was marked used.
       expect(await db.sdkRecord.findFirstOrThrow({where:{projectId:w.projectId,code:'OLDSDK-'+w.x+'-0001'}})).toMatchObject({linkState:'UNLINKED',note:'ghi chú cũ',holderVmId:v.id});
       expect((await db.sdkRecord.findFirstOrThrow({where:{projectId:w.projectId,code}})).linkState).toBe('UNLINKED');
@@ -106,7 +107,7 @@ describe('New VM → machine → proxy → EarnApp + Firefox → SDK saved → C
       // The answer was lost and the job expired.
       await db.vmJob.update({where:{id:job.id},data:{expiresAt:new Date(Date.now()-1000)}});
       const again=await w.post(t,'vms/'+v.id+'/claim',{expectedCycle:1,kind:'PREPARE'});
-      expect(again.json.data.recorded).toMatchObject({resumed:true,job:{machineRef:'AE-'+w.x+'-102',step:'MACHINE_CREATED',sdkCode:code,resumeOf:job.id}});
+      expect(again.json.data.recorded).toMatchObject({resumed:true,job:{machineRef:'AE-'+w.x+'-102',step:'MACHINE_CREATED',sdkCode:maskSdk(code),resumeOf:job.id}});
       const j2=again.json.data.recorded.job;
       expect((await w.post(t,'jobs/'+j2.id+'/step',{step:'MACHINE_CREATED',machineRef:'AE-other'})).status).toBe(409);
       expect((await w.post(t,'jobs/'+job.id+'/step',{step:'X_STEP'})).status).toBe(409); // the expired job is closed
@@ -195,7 +196,7 @@ describe('one VM, one operator; rights, PIN, revoked token, old round',()=>{
       expect((await w.post(t,'vms/'+v.id+'/proxy-credentials',{jobId:job.id,expectedCycle:1})).status).toBe(403); // job of another token
       const other=w.vms[4].id;const p=await w.proxy();await w.change(other,p.id);
       expect((await w.post(t,'vms/'+other+'/proxy-credentials',{jobId:job.id,expectedCycle:1})).status).toBe(422); // job of another VM
-      expect((await w.post(noProxy,'jobs/'+job.id+'/step',{step:'MACHINE_CREATED'},{pin:'000000'})).json.error?.code).toBe('PIN_INVALID');
+      expect((await w.post(noProxy,'jobs/'+job.id+'/step',{step:'MACHINE_CREATED'},{pin:'000000'})).status).toBe(200); // 23/10/2026: no PIN for the AI
       await db.user.update({where:{id:w.ai},data:{pinFailedCount:0,pinLockedAt:null}});
       const first=(await db.opsToken.findMany({where:{userId:w.ai},orderBy:{createdAt:'asc'}}))[0];await revokeOpsToken(w.scope.userId,{projectId:w.projectId,tokenId:first.id},db);
       expect((await w.post(noProxy,'jobs/'+job.id+'/step',{step:'MACHINE_CREATED'})).json.error?.code).toBe('TOKEN_REVOKED');

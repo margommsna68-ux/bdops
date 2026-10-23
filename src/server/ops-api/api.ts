@@ -4,7 +4,6 @@ import {z} from 'zod';
 import {prisma} from '@/lib/prisma';
 import {ProxyDomainError,userMessage,type DomainReason} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
-import {checkPin} from '../business-management/pin';
 import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
@@ -19,12 +18,15 @@ import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,typ
 import {canonicalAmount} from '@/lib/sdk-money';
 import {normalizeSdk} from '../vm-management/sdk-parse';
 import {vmMoneyState} from '@/lib/vm-money';
+import {maskSdk} from '@/lib/sdk-mask';
+import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf} from './approvals';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
 // Nothing here logs headers or bodies; the audit (OpsAudit) keeps only the allowed fields.
-export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'VALIDATION'|'INTERNAL';
-const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,VALIDATION:422,INTERNAL:500};
+// 23/10/2026: no PIN for the AI any more (PIN_* kept in the type for old clients' documentation); critical commands answer APPROVAL_*.
+export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'APPROVAL_REQUIRED'|'APPROVAL_REJECTED'|'APPROVAL_EXPIRED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'VALIDATION'|'INTERNAL';
+const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,APPROVAL_REQUIRED:202,APPROVAL_REJECTED:403,APPROVAL_EXPIRED:410,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,VALIDATION:422,INTERNAL:500};
 export class OpsError extends Error{constructor(public readonly code:OpsCode,message:string,public readonly details?:Record<string,unknown>,public readonly retryAfter?:number){super(message);}}
 const fail=(code:OpsCode,message:string,details?:Record<string,unknown>,retryAfter?:number)=>new OpsError(code,message,details,retryAfter);
 const json=(status:number,body:unknown,headers:Record<string,string>={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
@@ -37,7 +39,8 @@ function fromDomain(e:ProxyDomainError):OpsError{
 // ─── Routing ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 interface Ctx {db:PrismaClient;requestId:string;ip:string|null;token:{id:string;userId:string;projectIds:string[];scopes:string[];prefix:string;name:string;expiresAt:Date};url:URL;body:unknown;key:string|null;audit:{projectId?:string|null;objectId?:string|null;replay?:boolean}}
 type Handler=(c:Ctx,params:string[])=>Promise<unknown>;
-interface Route {method:'GET'|'POST';path:RegExp;scope:OpsScope|null;action:string;run:Handler}
+// approval: a critical command (owner decision 23/10/2026) — held until an ADMIN approves it on the web with a 2FA code.
+interface Route {method:'GET'|'POST';path:RegExp;scope:OpsScope|null;action:string;run:Handler;approval?:boolean}
 const ID='([A-Za-z0-9_-]{1,64})';
 const routes:Route[]=[
   {method:'GET',path:/^me$/,scope:null,action:'ME',run:me},
@@ -52,15 +55,17 @@ const routes:Route[]=[
   {method:'GET',path:/^withdrawals$/,scope:'READ',action:'WITHDRAWALS',run:withdrawals},
   {method:'GET',path:new RegExp('^withdrawals/'+ID+'$'),scope:'READ',action:'WITHDRAWAL',run:withdrawalDetail},
   {method:'POST',path:new RegExp('^vms/'+ID+'/balance-check$'),scope:'BALANCE_WRITE',action:'BALANCE_CHECK',run:balanceCheck},
-  {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare},
-  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status},
-  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt},
+  {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare,approval:true},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status,approval:true},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt,approval:true},
+  // 23/10/2026: the full SDK code is a secret; reads show it masked, this command (approved) shows it once.
+  {method:'POST',path:new RegExp('^sdks/'+ID+'/reveal$'),scope:'VM_OPS',action:'SDK_REVEAL',run:sdkReveal,approval:true},
   // Real machines (21/10/2026): take a VM in hand, steps, the full proxy of that VM, the SDK of this install, status, Blocked, notes.
   {method:'GET',path:new RegExp('^jobs/'+ID+'$'),scope:'READ',action:'JOB',run:jobDetail},
   {method:'POST',path:new RegExp('^vms/'+ID+'/claim$'),scope:'VM_OPS',action:'VM_CLAIM',run:claim},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/step$'),scope:'VM_OPS',action:'JOB_STEP',run:jobStep},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/release$'),scope:'VM_OPS',action:'JOB_RELEASE',run:jobRelease},
-  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-credentials$'),scope:'PROXY_CREDENTIALS',action:'VM_PROXY_CREDENTIALS',run:proxyCredentials,approval:true},
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk$'),scope:'VM_OPS',action:'VM_SDK',run:vmSdk},
   // 22/10/2026: SDK codes seen running on the machine (no install), with their money when the token also has BALANCE_WRITE.
   {method:'POST',path:new RegExp('^vms/'+ID+'/sdk-observations$'),scope:'VM_OPS',action:'VM_SDK_OBSERVE',run:vmSdkObserve},
@@ -119,18 +124,22 @@ export async function handleOpsRequest(req:Request,path:string,db:PrismaClient=p
       const text=await req.text();if(text.length>20000)throw fail('VALIDATION','Nội dung quá lớn');
       try{body=JSON.parse(text||'{}');}catch{throw fail('VALIDATION','Nội dung phải là JSON');}
       const projectId=(body as {projectId?:unknown})?.projectId;audit.projectId=typeof projectId==='string'?projectId.slice(0,64):null;
-      // 4. PIN of the user, every write (also a retry). Wrong PINs count for the user (3 → 30 minutes, as on the web) and for the token.
-      const pin=req.headers.get('x-ops-pin');if(!pin)throw fail('PIN_REQUIRED','Lệnh ghi cần X-Ops-Pin');
-      const tokenPin=await peek(db,'pinFail',row.id);if(tokenPin.over)throw fail('PIN_LOCKED','Token này đã nhập sai PIN quá số lần cho phép; chờ hết khoá',undefined,tokenPin.retryAfter);
-      const p=await checkPin(db,row.userId,pin);
-      if(p==='NOT_SET')throw fail('PIN_REQUIRED','Tài khoản chưa đặt PIN');
-      if(p==='LOCKED'||p==='LOCKED_NOW'){if(p==='LOCKED_NOW')await hit(db,'pinFail',row.id);throw fail('PIN_LOCKED','PIN đang bị khoá (sai 3 lần); chờ 30 phút hoặc nhờ quản lý mở khoá');}
-      if(p==='INVALID'){await hit(db,'pinFail',row.id);throw fail('PIN_INVALID','PIN chưa đúng');}
+      // 4. (23/10/2026) No PIN for the AI: the token is the credential; critical commands wait for an ADMIN's 2FA approval instead.
     }
     const c:Ctx={db,requestId,ip,token,url:new URL(req.url),body,key,audit};
+    let approval:{id:string}|null=null;
+    if(write&&route.approval){
+      const pid=(body as {projectId?:unknown})?.projectId;
+      if(typeof pid!=='string'||!row.projectIds.includes(pid))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
+      const hash=payloadHashOf(method,path,body),summary=await approvalSummary(db,pid,route.action,params,body as Record<string,unknown>);
+      const g=await gateApproval(db,{projectId:pid,tokenId:row.id,userId:row.userId,action:route.action,method,path,objectId:params[0]??null,requestKey:serviceKey(c,pid),payloadHash:hash,summary});
+      if(!g.replay)approval=g.approval;
+    }
     const data=write?await runWithOpsAuth({tokenId:row.id,userId:row.userId,operation:route.scope!},()=>route.run(c,params)):await route.run(c,params);
+    if(approval)await consumeApproval(db,approval.id,requestId);
     return done(200,audit.replay?'REPLAY':'OK',{ok:true,data,error:null});
   }catch(e){
+    if(e instanceof ApprovalHold)return error(fail(e.code,e.message,e.details));
     if(e instanceof OpsError)return error(e);
     if(e instanceof ProxyDomainError)return error(fromDomain(e));
     if(e instanceof z.ZodError)return error(fail('VALIDATION','Dữ liệu chưa hợp lệ',{fields:e.issues.slice(0,10).map(i=>({path:i.path.join('.'),message:i.message}))}));
@@ -214,7 +223,7 @@ async function vmDetail(c:Ctx,[id]:string[]){
       items:sdks.map(s=>{const bound=s.amountVmId===vm.id&&s.amountCycle===cycle,boundFailed=s.amountFailedVmId===vm.id&&s.amountFailedCycle===cycle,stored=canonicalAmount(s.amount?.toString()??null);
         const src=sdkMoney?{code:s.code,amount:bound?stored:null,observedAt:bound?s.amountObservedAt?.toISOString()??null:null,failedAt:boundFailed?s.amountFailedAt?.toISOString()??null:null,moneyHidden:false,stored:{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,cycle:s.amountCycle,vmId:s.amountVmId}}:{code:s.code,amount:null,observedAt:null,failedAt:null,moneyHidden:true};
         const st=vmMoneyState(src);
-        return {id:s.id,code:s.code,revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:src.amount,currency:s.currency,observedAt:src.observedAt,failedAt:src.failedAt,moneyState:st.kind,recordedAt:sdkMoney&&bound?s.amountAt?.toISOString()??null:null,source:sdkMoney&&bound?s.amountSource:null,
+        return {id:s.id,code:maskSdk(s.code),revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:src.amount,currency:s.currency,observedAt:src.observedAt,failedAt:src.failedAt,moneyState:st.kind,recordedAt:sdkMoney&&bound?s.amountAt?.toISOString()??null:null,source:sdkMoney&&bound?s.amountSource:null,
           stored:sdkMoney?{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,recordedAt:s.amountAt?.toISOString()??null,source:s.amountSource,cycle:s.amountCycle,vmId:s.amountVmId}:null};}),
       note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
@@ -349,6 +358,16 @@ async function receipt(c:Ctx,[id]:string[]){
 // ─── Real machines (21/10/2026) ──────────────────────────────────────────────────────────────────────────────────────────────────
 // MoneyToHome never reaches the machine: the operator works with AE Mini Tool and records here what it observed (vm-ops/jobs.ts).
 const caller=(c:Ctx):OpsCaller=>({tokenId:c.token.id,tokenLabel:c.token.name+' ('+c.token.prefix+')'});
+// SDK codes leave the API masked (23/10/2026); only an approved `sdks/{id}/reveal` shows one in full.
+const maskJob=<T extends {sdkCode?:string|null}>(j:T)=>({...j,sdkCode:maskSdk(j.sdkCode)});
+const SdkRevealBody=z.object({projectId:id64}).strict();
+async function sdkReveal(c:Ctx,[sdkId]:string[]){
+  const b=SdkRevealBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=sdkId;
+  const s=await c.db.sdkRecord.findFirst({where:{id:sdkId,projectId},select:{id:true,code:true,revision:true,linkState:true,vm:{select:{id:true,code:true,server:{select:{code:true}}}}}});
+  if(!s)throw fail('NOT_FOUND','Không có mã SDK này trong dự án');
+  await c.db.auditLog.create({data:{projectId,userId:c.token.userId,action:'SDK_REVEAL',entity:'SdkRecord',entityId:s.id,changes:{tokenId:c.token.id,requestId:c.requestId}}});
+  return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ chỉ trả một lần sau khi ADMIN duyệt; không ghi vào nhật ký máy hay chat'};
+}
 const cycleN=z.number().int().min(1),rev=z.number().int().min(0),opsNote=z.string().max(500).nullish();
 async function vmNow(c:Ctx,projectId:string,vmId:string){
   const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)return null;
@@ -359,14 +378,14 @@ async function asOps<T>(c:Ctx,projectId:string,vmId:string,fn:()=>Promise<T>):Pr
 async function jobDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
   const sdk=job.sdkId?await c.db.sdkRecord.findUnique({where:{id:job.sdkId},select:{code:true}}):null;
-  return {...jobView(job,{sdkCode:sdk?.code}),current:await vmNow(c,projectId,job.vmId)};
+  return {...maskJob(jobView(job,{sdkCode:sdk?.code})),current:await vmNow(c,projectId,job.vmId)};
 }
 const ClaimBody=z.object({projectId:id64,expectedCycle:cycleN,kind:z.enum(JOB_KINDS),ttlMinutes:z.number().int().min(5).max(240).nullish()}).strict();
 async function claim(c:Ctx,[vmId]:string[]){
   const b=ClaimBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   const r=await asOps(c,projectId,vmId,()=>claimVmJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,kind:b.kind,ttlMinutes:b.ttlMinutes??null},c.db,caller(c)));
   c.audit.replay=!!r.replay;c.audit.objectId=r.job.id;
-  return {replay:!!r.replay,recorded:{job:r.job,vm:r.vm,resumed:r.resumed,already:r.already},current:await vmNow(c,projectId,vmId)};
+  return {replay:!!r.replay,recorded:{job:maskJob(r.job),vm:r.vm,resumed:r.resumed,already:r.already},current:await vmNow(c,projectId,vmId)};
 }
 const StepBody=z.object({projectId:id64,step:z.string().min(2).max(40),note:opsNote,machineRef:z.string().max(120).nullish(),ttlMinutes:z.number().int().min(5).max(240).nullish()}).strict();
 async function jobStep(c:Ctx,[id]:string[]){
@@ -393,7 +412,7 @@ async function vmSdk(c:Ctx,[vmId]:string[]){
   const b=SdkBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   const r=await asOps(c,projectId,vmId,()=>recordJobSdk(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,jobId:b.jobId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,code:b.code},c.db,caller(c)));
   // replay = the same key and request answered from the first command (recorded identical); readBack = a new command with the code already saved.
-  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{vmId,jobId:r.jobId,sdk:r.sdk,changed:r.changed,readBack:r.readBack},current:await vmNow(c,projectId,vmId)};
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{vmId,jobId:r.jobId,sdk:{...r.sdk,code:maskSdk(r.sdk.code)},changed:r.changed,readBack:r.readBack},current:await vmNow(c,projectId,vmId)};
 }
 // Statuses an operator records from what it saw. New VM / Chờ áp dụng proxy end only through finish-prepare / finish-proxy; Blocked has
 // its own endpoint (the proxy it found blocked); VM deleted is the owner's.
@@ -433,7 +452,7 @@ const FinishPrepareBody=z.object({projectId:id64,configurationId:id64,checks:Che
 async function finishPrepare(c:Ctx,[id]:string[]){
   const b=FinishPrepareBody.parse(c.body),{projectId}=await projectOf(c,b.projectId),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
   const r=await asOps(c,projectId,job.vmId,()=>finishPrepareJob(scopeOf(c,projectId),{key:serviceKey(c,projectId),jobId:id,configurationId:b.configurationId,checks:b.checks,note:redactSecrets(b.note?.trim()||null)},c.db,caller(c)));
-  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,job:r.job},current:await vmNow(c,projectId,job.vmId)};
+  c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{...r.recorded,sdkCode:maskSdk(r.recorded.sdkCode),job:maskJob(r.job)},current:await vmNow(c,projectId,job.vmId)};
 }
 const FinishProxyBody=z.object({projectId:id64,configurationId:id64,result:z.enum(APPLY_RESULTS),note:opsNote}).strict();
 async function finishProxy(c:Ctx,[id]:string[]){
@@ -461,7 +480,7 @@ async function vmSdkObserve(c:Ctx,[vmId]:string[]){
     observeVmSdks(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt,source:redactSecrets(b.source.trim())??'',evidence:redactSecrets(b.evidence?.trim()||null),items},c.db,{tokenLabel:caller(c).tokenLabel??undefined})));
   c.audit.replay=!!r.replay;const show=(await rightsOf(c,projectId)).balanceRead;
   return {replay:!!r.replay,recorded:{vmId:r.vmId,expectedCycle:r.cycle,observedAt:r.observedAt,source:r.source,evidence:show?r.evidence??null:null,vmRevisionAfter:r.vmRevisionAfter,
-    sdks:r.items.map(x=>({code:x.code,sdkId:x.sdkId,placed:x.placed,linkState:x.state,current:x.current,revisionAfter:x.revisionAfter,amount:{outcome:x.amount.outcome,amountUsd:show?x.amount.value:null,observedAt:show?x.amount.observedAt:null}}))},
+    sdks:r.items.map(x=>({code:maskSdk(x.code),sdkId:x.sdkId,placed:x.placed,linkState:x.state,current:x.current,revisionAfter:x.revisionAfter,amount:{outcome:x.amount.outcome,amountUsd:show?x.amount.value:null,observedAt:show?x.amount.observedAt:null}}))},
     current:await vmNow(c,projectId,vmId)};
 }
 // Look up SDK codes before a survey write (22/10/2026): id, revision, state and where each code is (VM list / current VM) in this project,
@@ -477,6 +496,6 @@ async function sdkLookup(c:Ctx){
   const at=(id:string|null)=>{const v=id?vms.find(x=>x.id===id):null;return v?{vmId:v.id,serverCode:v.server.code,vmCode:v.code,deleted:!!v.archivedAt}:null;};
   return {amountsVisible:show,items:[...new Set(codes)].map(code=>{const r=rows.find(x=>x.code===code);
     if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null,failedAt:null,observedCycle:null,observedVmId:null};
-    return {code,found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
+    return {code:maskSdk(code),found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
       amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null,failedAt:show?r.amountFailedAt?.toISOString()??null:null,observedCycle:show?r.amountCycle:null,observedVmId:show?r.amountVmId:null};})};
 }

@@ -33,6 +33,17 @@ model User {
   disabledReason         String?
   authEpoch              Int                      @default(0)
   pinVersion             Int                      @default(0)
+  // 2FA (TOTP, owner decision 23/10/2026): the secret is encrypted with ENCRYPTION_KEY; enabledAt = confirmed; requiredAt = an ADMIN
+  // demands it (the web forces the setup); lastStep = the last 30-second step accepted (never twice); failed/locked share the 3 → 30 min rule;
+  // version changes on setup / reset so older session unlocks end.
+  totpSecretCipher       String?
+  totpEnabledAt          DateTime?
+  totpRequiredAt         DateTime?
+  totpLastStep           Int?
+  totpFailedCount        Int                      @default(0)
+  totpLockedAt           DateTime?
+  totpVersion            Int                      @default(0)
+  backupCodes            UserBackupCode[]
   webSessions            UserSession[]
   memberships            ProjectMember[]
   auditLogs              AuditLog[]
@@ -1706,6 +1717,49 @@ model UserSession {
   revokeReason  String?
   pinUnlockedAt DateTime?
   pinVersion    Int?
+  // TOTP unlock of this session (23/10/2026): proved with the user's TOTP version; totpAtLogin = the code was given at sign-in.
+  totpUnlockedAt DateTime?
+  totpVersion    Int?
+  totpAtLogin    Boolean   @default(false)
 
   @@index([userId, revokedAt])
+}
+
+// One-time backup codes of a user's 2FA (23/10/2026): bcrypt hashes, each usable once.
+model UserBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// A critical ops-API command waiting for an ADMIN's 2FA approval (owner decision 23/10/2026): the AI's request is held with the hash of
+// exactly what it sent; the ADMIN sees the allowed summary and approves with a TOTP code; the AI's retry with the same key then runs once.
+model OpsApproval {
+  id                String    @id @default(cuid())
+  projectId         String
+  tokenId           String
+  userId            String
+  action            String
+  method            String
+  path              String
+  objectId          String?
+  requestKey        String
+  payloadHash       String
+  summary           Json
+  status            String    @default("PENDING")
+  requestedAt       DateTime  @default(now())
+  expiresAt         DateTime
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  consumedAt        DateTime?
+  consumedRequestId String?
+
+  @@index([projectId, status, requestedAt])
+  @@index([requestKey, status])
 }

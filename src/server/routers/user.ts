@@ -7,6 +7,7 @@ import { LOCK_DURATION_MS } from "../auth";
 import { accountState, setOwnPin, setUserDisabled, unlockWebSession } from "../users/access";
 import { checkPinVersion } from "../business-management/pin";
 import { adminProcedure } from "../trpc";
+import { adminRequireTotp, adminResetTotp, beginTotpSetup, checkTotp, confirmTotpSetup, securityStatus, totpMessage, unlockWebSessionTotp } from "../users/totp";
 // The web session of an HTTP call (trpc.ts createTRPCContext), when there is one.
 const webSessionId = (ctx: { web?: unknown }) => { const w = ctx.web as { sessionId?: string } | null | undefined; return w && typeof w.sessionId === "string" ? w.sessionId : null; };
 
@@ -40,11 +41,33 @@ export const userRouter = router({
       return { success: true };
     }),
 
-  // Verify PIN (for sensitive actions)
+  // ─── 2FA (TOTP, owner decision 23/10/2026) ───
+  // What the gate must show: 2FA on / required / setup started, legacy PIN present, and whether THIS session is unlocked.
+  securityStatus: protectedProcedure.query(async ({ ctx }) => securityStatus(ctx.prisma, (ctx.user as any).id, webSessionId(ctx))),
+  // Start the setup: otpauth URL + QR for the authenticator app (the secret is shown once for manual entry; never again after confirm).
+  totpBegin: protectedProcedure.mutation(async ({ ctx }) => {
+    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: (ctx.user as any).id }, select: { username: true, email: true } });
+    try { return await beginTotpSetup(ctx.prisma, (ctx.user as any).id, { label: u.username || u.email }); }
+    catch (e) { throw new Error(e instanceof Error ? e.message : "Không bắt đầu được cài 2FA"); }
+  }),
+  // Confirm with the first code: 2FA on, PIN retired, backup codes returned once, this session unlocked.
+  totpConfirm: protectedProcedure.input(z.object({ code: z.string().min(6).max(8) })).mutation(async ({ ctx, input }) => {
+    try { return await confirmTotpSetup(ctx.prisma, (ctx.user as any).id, input.code, webSessionId(ctx)); }
+    catch (e) { throw new Error(e instanceof Error ? e.message : "Không xác nhận được 2FA"); }
+  }),
+  // Verify the second factor (for sensitive actions): the TOTP / backup code when 2FA is on, else the legacy PIN.
   verifyPin: protectedProcedure
     .input(z.object({ pin: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const userId = (ctx.user as any).id;
+      const totp = await ctx.prisma.user.findUnique({ where: { id: userId }, select: { totpEnabledAt: true, totpLockedAt: true } });
+      if (totp?.totpEnabledAt) {
+        const t = await checkTotp(ctx.prisma, userId, input.pin);
+        if (t.result !== "OK") throw new Error((t.result === "LOCKED" || t.result === "LOCKED_NOW" ? "PIN_LOCKED: " : "") + totpMessage(t.result, totp.totpLockedAt));
+        const sid = webSessionId(ctx);
+        if (sid && !(await unlockWebSessionTotp(ctx.prisma, sid, userId, t.totpVersion))) throw new Error("2FA vừa được đặt lại; đăng nhập lại");
+        return { valid: true };
+      }
       // One rule with the ops API (pin.ts, review fix 21/10/2026): concurrent checks are decided on the user row as it is then.
       const { result: r, pinVersion } = await checkPinVersion(ctx.prisma, userId, input.pin);
       if (r === "NOT_SET") throw new Error("PIN not set");
@@ -428,6 +451,8 @@ export const userRouter = router({
       if (input.type === "PIN" || input.type === "BOTH") {
         data.pinFailedCount = 0;
         data.pinLockedAt = null;
+        data.totpFailedCount = 0;
+        data.totpLockedAt = null;
       }
       await ctx.prisma.user.update({ where: { id: input.userId }, data });
       await createAuditLog({
@@ -489,17 +514,26 @@ export const userRouter = router({
   access: moderatorProcedure
     .input(z.object({ projectId: z.string(), userId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: input.userId }, select: { pin: true, disabledAt: true, disabledReason: true, loginLockedAt: true, pinLockedAt: true, memberships: { select: { projectId: true } } } });
+      const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: input.userId }, select: { pin: true, disabledAt: true, disabledReason: true, loginLockedAt: true, pinLockedAt: true, totpEnabledAt: true, totpRequiredAt: true, totpLockedAt: true, memberships: { select: { projectId: true } } } });
       const tokens = await ctx.prisma.opsToken.count({ where: { userId: input.userId, projectIds: { has: input.projectId }, revokedAt: null, expiresAt: { gt: new Date() } } });
       const otherProjects = u.memberships.filter((m) => m.projectId !== input.projectId).length;
       // The viewer's own role and the project's mode, in THIS project (never the project picked elsewhere in the browser).
       const project = await ctx.prisma.project.findUniqueOrThrow({ where: { id: input.projectId }, select: { name: true, code: true, settings: true } });
       const target = await ctx.prisma.projectMember.findUnique({ where: { userId_projectId: { userId: input.userId, projectId: input.projectId } }, select: { id: true, role: true } });
-      return { hasPin: !!u.pin, state: accountState(u, LOCK_DURATION_MS), loginLocked: !!u.loginLockedAt && u.loginLockedAt.getTime() + LOCK_DURATION_MS > Date.now(), pinLocked: !!u.pinLockedAt && u.pinLockedAt.getTime() + LOCK_DURATION_MS > Date.now(),
+      return { hasPin: !!u.pin, totpEnabled: !!u.totpEnabledAt, totpRequired: !!u.totpRequiredAt, totpLocked: !!u.totpLockedAt && u.totpLockedAt.getTime() + LOCK_DURATION_MS > Date.now(),
+        state: accountState(u, LOCK_DURATION_MS), loginLocked: !!u.loginLockedAt && u.loginLockedAt.getTime() + LOCK_DURATION_MS > Date.now(), pinLocked: (!!u.pinLockedAt && u.pinLockedAt.getTime() + LOCK_DURATION_MS > Date.now()) || (!!u.totpLockedAt && u.totpLockedAt.getTime() + LOCK_DURATION_MS > Date.now()),
         disabledAt: u.disabledAt?.toISOString() ?? null, disabledReason: u.disabledReason, activeTokens: tokens, otherProjects, self: input.userId === (ctx.user as any).id,
         viewerRole: ctx.role, memberId: target?.id ?? null, memberRole: target?.role ?? null, project: { name: project.name, code: project.code, businessMode: (project.settings as { businessMode?: string } | null)?.businessMode ?? null },
         canDisable: ctx.role === "ADMIN" && input.userId !== (ctx.user as any).id };
     }),
+  // 2FA administration (ADMIN of every project of the user: assertUserTarget in trpc.ts). Require = the web forces the setup popup;
+  // reset = lost phone: secret + backup codes gone, every unlock ends, setup required at the next visit.
+  requireTotp: adminProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string(), required: z.boolean() }))
+    .mutation(async ({ ctx, input }) => adminRequireTotp(ctx.prisma, (ctx.user as any).id, input.userId, input.projectId, input.required)),
+  resetTotp: adminProcedure
+    .input(z.object({ projectId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => adminResetTotp(ctx.prisma, (ctx.user as any).id, input.userId, input.projectId)),
   // Disable / enable the whole account (ADMIN of every project of the user: assertUserTarget in trpc.ts).
   setDisabled: adminProcedure
     .input(z.object({ projectId: z.string(), userId: z.string(), disabled: z.boolean(), reason: z.string().max(300).nullish() }))

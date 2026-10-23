@@ -17,6 +17,8 @@ import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { TotpSetup } from "@/components/TotpSetup";
 
 const THEMES: { value: AppTheme; label: string; labelVi: string; desc: string; descVi: string; preview: { bg: string; card: string; accent: string; text: string; sidebar: string; line: string; head: string; ring: string } }[] = [
   {
@@ -97,6 +99,10 @@ export default function SettingsPage() {
   );
 
   const { data: pinStatus } = trpc.user.hasPin.useQuery();
+  // Bảo mật (2FA, 23/10/2026): status from the server; the setup itself is the shared TotpSetup (same as the gate).
+  const security = trpc.user.securityStatus.useQuery(undefined, { retry: false });
+  const [totpOpen, setTotpOpen] = useState(false);
+  const totpOn = !!security.data?.totpEnabled;
   const changePassword = trpc.user.changePassword.useMutation({
     onSuccess: () => {
       toast.success(t("settings_password_updated"));
@@ -320,7 +326,13 @@ export default function SettingsPage() {
             </Button>
           </div>
 
-          {/* Change PIN */}
+          {/* Change PIN (legacy; retired once 2FA is on) */}
+          {totpOn ? (
+            <div className="pt-4 border-t border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-800">{t("settings_change_pin")}</h3>
+              <p className="text-xs text-gray-500 mt-1">Đã bật 2FA: mã Google Authenticator thay cho PIN, không còn PIN để đổi.</p>
+            </div>
+          ) : (
           <div className="space-y-3 pt-4 border-t border-gray-100">
             <h3 className="text-sm font-semibold text-gray-800">
               {pinStatus?.hasPin ? t("settings_change_pin") : t("settings_set_pin")}
@@ -351,6 +363,40 @@ export default function SettingsPage() {
               {setPin.isLoading ? "..." : pinStatus?.hasPin ? t("settings_change_pin") : t("settings_set_pin")}
             </Button>
           </div>
+          )}
+        </div>
+
+        {/* ─── Bảo mật: 2FA (owner decision 23/10/2026) ─── */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6" data-testid="settings-security">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Bảo mật</h2>
+          {security.isLoading ? (
+            <p className="text-sm text-gray-400">Đang tải…</p>
+          ) : security.error ? (
+            <p role="alert" className="text-sm text-red-600">{security.error.message}</p>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-gray-500">Xác thực 2 lớp (Google Authenticator):</span>
+                {totpOn ? <Badge className="bg-green-100 text-green-800 text-xs">Đã bật</Badge> : <Badge className="bg-amber-100 text-amber-800 text-xs">Chưa bật</Badge>}
+                {security.data?.totpRequired && !totpOn && <span className="text-xs text-amber-700">ADMIN yêu cầu bật</span>}
+              </div>
+              {totpOn ? (
+                <p className="text-gray-700">Mã dự phòng còn: <strong>{security.data?.backupCodesLeft ?? 0}</strong> / 8. Mỗi mã dùng một lần khi không có điện thoại.</p>
+              ) : (
+                <>
+                  <p className="text-gray-600">Mã trong ứng dụng thay cho PIN khi đăng nhập, mở khoá và các thao tác nhạy cảm (khuyên dùng; ADMIN cần 2FA để duyệt lệnh AI).</p>
+                  <Button size="sm" onClick={() => setTotpOpen(true)}>Bật 2FA</Button>
+                </>
+              )}
+              <p className="text-xs text-gray-500">Mất điện thoại hoặc hết mã dự phòng: chỉ ADMIN của dự án đặt lại 2FA cho bạn (Nhân viên → tên bạn → PIN và truy cập); bạn cài lại ở lần vào sau.</p>
+            </div>
+          )}
+          <Dialog open={totpOpen} onOpenChange={(v) => { if (!v) setTotpOpen(false); }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogTitle className="sr-only">Bật 2FA</DialogTitle>
+              {totpOpen && <TotpSetup autoStart onDone={() => { setTotpOpen(false); void security.refetch(); void utils.user.invalidate(); }} onCancel={() => setTotpOpen(false)} />}
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* ─── Project Info (Admin/Moderator only) ─── */}

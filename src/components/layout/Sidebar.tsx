@@ -53,6 +53,9 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   const t = useT();
   const projectId=useProjectStore(s=>s.currentProjectId),fresh=trpc.project.myMembership.useQuery({projectId:projectId||''},{enabled:!!projectId});
   const cashMode=!!fresh.data?.teamCashEnabled;
+  // Phê duyệt lệnh AI (23/10/2026): the number waiting for THIS ADMIN's decision, polled every 30 s while the tab is visible.
+  const pending=trpc.opsApproval.pendingCount.useQuery({projectId:projectId||''},{enabled:!!projectId&&currentRole==='ADMIN',refetchInterval:30000,refetchIntervalInBackground:false,refetchOnWindowFocus:true});
+  const badgeFor=(href:string)=>href==='/approvals'&&pending.data?.count?pending.data.count:undefined;
 
   const isAdmin = currentRole === "ADMIN";
   const isModerator = currentRole === "MODERATOR";
@@ -141,8 +144,8 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
             );
           }
           const label=item.label||(proxyMode?item.labelKey:t(item.labelKey));
-          return <Suspense key={item.href} fallback={<NavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} active={[item.href,...(item.also||[])].some(h=>pathname===h)} onNavigate={onNavigate}/>}>
-            <ActiveNavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} also={item.also} siblings={visibleItems.filter((x):x is NavLinkItem=>!('type' in x)).map(x=>x.href)} onNavigate={onNavigate}/>
+          return <Suspense key={item.href} fallback={<NavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} badge={badgeFor(item.href)} active={[item.href,...(item.also||[])].some(h=>pathname===h)} onNavigate={onNavigate}/>}>
+            <ActiveNavLink href={item.href} icon={item.icon} label={label} collapsed={!!collapsed} accentBg={accentBg} badge={badgeFor(item.href)} also={item.also} siblings={visibleItems.filter((x):x is NavLinkItem=>!('type' in x)).map(x=>x.href)} onNavigate={onNavigate}/>
           </Suspense>;
         })}
       </nav>
@@ -217,7 +220,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
     </aside>
   );
 }
-type NavLinkProps={href:string;icon:string;label:string;collapsed:boolean;accentBg:string;onNavigate?:()=>void};
+type NavLinkProps={href:string;icon:string;label:string;collapsed:boolean;accentBg:string;badge?:number;onNavigate?:()=>void};
 // Active when the path matches; links that share a path (Nhận USDT về team / Rút / chuyển gốc) also compare their query.
 function ActiveNavLink({siblings,also,...props}:NavLinkProps&{siblings:string[];also?:string[]}){
   const pathname=usePathname(),search=useSearchParams(),[path,query='']=props.href.split('?');
@@ -226,10 +229,12 @@ function ActiveNavLink({siblings,also,...props}:NavLinkProps&{siblings:string[];
   const moreSpecific=siblings.some(h=>h!==props.href&&h.startsWith(path+'?')&&Array.from(new URLSearchParams(h.split('?')[1]).entries()).every(([k,v])=>search.get(k)===v));
   return <NavLink {...props} active={inSection&&matchesQuery&&(query?true:!moreSpecific)}/>;
 }
-function NavLink({href,icon,label,collapsed,accentBg,active,onNavigate}:NavLinkProps&{active:boolean}){
-  return <Link href={href} onClick={onNavigate} title={collapsed?label:undefined} aria-current={active?'page':undefined}
-    className={`mth-nav-link flex items-center ${collapsed?"justify-center":"gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${active?`mth-nav-active ${accentBg} text-white font-medium shadow-md shadow-blue-500/20`:"text-gray-300 hover:bg-white/[0.06] hover:text-white"}`}>
+function NavLink({href,icon,label,collapsed,accentBg,active,badge,onNavigate}:NavLinkProps&{active:boolean}){
+  const badgeText=badge?(badge>99?'99+':String(badge)):null;
+  return <Link href={href} onClick={onNavigate} title={collapsed?label+(badgeText?' ('+badgeText+' chờ duyệt)':''):undefined} aria-current={active?'page':undefined}
+    className={`mth-nav-link relative flex items-center ${collapsed?"justify-center":"gap-3"} px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ${active?`mth-nav-active ${accentBg} text-white font-medium shadow-md shadow-blue-500/20`:"text-gray-300 hover:bg-white/[0.06] hover:text-white"}`}>
     <span className={`mth-nav-icon w-7 h-7 flex items-center justify-center text-xs font-mono rounded-lg shrink-0 transition-colors ${active?"bg-white/25":"bg-white/[0.07]"}`}>{icon}</span>
-    {!collapsed&&<span>{label}</span>}
+    {!collapsed&&<span className="flex-1 min-w-0 truncate">{label}</span>}
+    {badgeText&&<span aria-label={badgeText+' lệnh chờ duyệt'} className={`mth-nav-badge ${collapsed?"absolute -top-0.5 -right-0.5":""} min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center`}>{badgeText}</span>}
   </Link>;
 }

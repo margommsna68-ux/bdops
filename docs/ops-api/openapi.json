@@ -2,8 +2,8 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.1.0",
-  "description": "Reads MoneyToHome and records EarnApp balances, payout preparation, sent / unknown results and money received on PayPal. It does NOT connect to any VM, does not log in to EarnApp and does not send money. Every answer is the envelope {ok, data, error} with X-Request-Id. Writes need X-Ops-Pin and Idempotency-Key; a write answer is {replay, recorded, current}: `recorded` = this command as first written (identical on a replay), `current` = the state now. Effective rights = the user's current rights ∩ the token's projects ∩ the token's operations."
+  "version": "1.2.0",
+  "description": "Reads MoneyToHome and records EarnApp balances, payout preparation, sent / unknown results and money received on PayPal. It does NOT connect to any VM, does not log in to EarnApp and does not send money. Every answer is the envelope {ok, data, error} with X-Request-Id. Writes need Idempotency-Key only (no X-Ops-Pin since 23/10/2026; the token is the credential). Critical writes (withdrawals/prepare, withdrawals/{id}/status, withdrawals/{id}/receipts, vms/{id}/proxy-credentials, sdks/{id}/reveal) answer HTTP 202 APPROVAL_REQUIRED until an ADMIN approves the request on the web (Phê duyệt, 15 minutes); the same Idempotency-Key + same body then runs (200), APPROVAL_REJECTED = 403, APPROVAL_EXPIRED = 410 (send again with a new key), same key + other body = 409 IDEMPOTENCY_CONFLICT. SDK codes in every read answer are masked (4 đầu + … + 4 cuối); only sdks/{id}/reveal returns one in full, once per approval; a write answer is {replay, recorded, current}: `recorded` = this command as first written (identical on a replay), `current` = the state now. Effective rights = the user's current rights ∩ the token's projects ∩ the token's operations."
  },
  "servers": [
   {
@@ -56,14 +56,6 @@
      "type": "string"
     }
    },
-   "pin": {
-    "name": "X-Ops-Pin",
-    "in": "header",
-    "required": true,
-    "schema": {
-     "type": "string"
-    }
-   },
    "key": {
     "name": "Idempotency-Key",
     "in": "header",
@@ -102,9 +94,8 @@
          "TOKEN_EXPIRED",
          "TOKEN_REVOKED",
          "FORBIDDEN",
-         "PIN_REQUIRED",
-         "PIN_INVALID",
-         "PIN_LOCKED",
+         "APPROVAL_REJECTED",
+         "APPROVAL_EXPIRED",
          "RATE_LIMITED",
          "NOT_FOUND",
          "AMBIGUOUS",
@@ -123,7 +114,7 @@
        },
        "details": {
         "type": "object",
-        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored)."
+        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored). APPROVAL_REJECTED (403): approvalId, status \"REJECTED\". APPROVAL_EXPIRED (410): approvalId, expiredAt. (The 202 APPROVAL_REQUIRED hold has its own schema ApprovalRequired.)"
        }
       },
       "required": [
@@ -311,7 +302,8 @@
         "type": "string"
        },
        "code": {
-        "type": "string"
+        "type": "string",
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -920,7 +912,8 @@
         "type": "string"
        },
        "code": {
-        "type": "string"
+        "type": "string",
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -992,7 +985,8 @@
            "type": "string"
           },
           "code": {
-           "type": "string"
+           "type": "string",
+           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
           },
           "revision": {
            "type": "integer",
@@ -2221,7 +2215,8 @@
         "type": "string"
        },
        "code": {
-        "type": "string"
+        "type": "string",
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -2343,7 +2338,8 @@
      },
      "sdkCode": {
       "type": "string",
-      "nullable": true
+      "nullable": true,
+      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
      },
      "resumeOf": {
       "type": "string",
@@ -2447,7 +2443,8 @@
      },
      "sdkCode": {
       "type": "string",
-      "nullable": true
+      "nullable": true,
+      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
      },
      "resumeOf": {
       "type": "string",
@@ -2711,7 +2708,8 @@
           "type": "string"
          },
          "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
          },
          "revision": {
           "type": "integer"
@@ -2894,7 +2892,8 @@
         "type": "string"
        },
        "sdkCode": {
-        "type": "string"
+        "type": "string",
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
        },
        "configurationId": {
         "type": "string"
@@ -4024,7 +4023,8 @@
          "additionalProperties": false,
          "properties": {
           "code": {
-           "type": "string"
+           "type": "string",
+           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
           },
           "sdkId": {
            "type": "string"
@@ -4192,7 +4192,8 @@
        "additionalProperties": false,
        "properties": {
         "code": {
-         "type": "string"
+         "type": "string",
+         "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
         },
         "found": {
          "type": "boolean",
@@ -4324,6 +4325,223 @@
      "data",
      "error"
     ]
+   },
+   "ApprovalRequired": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "HTTP 202: lệnh quan trọng CHƯA ghi, đang chờ ADMIN của dự án (có 2FA) duyệt trên web (Phê duyệt). Gửi lại CÙNG Idempotency-Key và cùng nội dung sau khi duyệt → chạy một lần (200); cùng key + nội dung khác → 409 IDEMPOTENCY_CONFLICT.",
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       false
+      ]
+     },
+     "data": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     },
+     "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "code": {
+        "type": "string",
+        "enum": [
+         "APPROVAL_REQUIRED"
+        ]
+       },
+       "message": {
+        "type": "string"
+       },
+       "details": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "approvalId": {
+          "type": "string"
+         },
+         "status": {
+          "type": "string",
+          "enum": [
+           "PENDING"
+          ]
+         },
+         "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "15 phút kể từ yêu cầu đầu tiên; sau mốc này gửi lại với key mới"
+         }
+        },
+        "required": [
+         "approvalId",
+         "status",
+         "expiresAt"
+        ]
+       }
+      },
+      "required": [
+       "code",
+       "message",
+       "details"
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ApprovalExpired": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "HTTP 410: yêu cầu duyệt đã hết hạn (15 phút), lệnh chưa ghi; gửi lại với Idempotency-Key MỚI để xin duyệt lại.",
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       false
+      ]
+     },
+     "data": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     },
+     "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "code": {
+        "type": "string",
+        "enum": [
+         "APPROVAL_EXPIRED"
+        ]
+       },
+       "message": {
+        "type": "string"
+       },
+       "details": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "approvalId": {
+          "type": "string"
+         },
+         "expiredAt": {
+          "type": "string",
+          "format": "date-time"
+         }
+        },
+        "required": [
+         "approvalId",
+         "expiredAt"
+        ]
+       }
+      },
+      "required": [
+       "code",
+       "message",
+       "details"
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "SdkReveal": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "sdkId": {
+      "type": "string"
+     },
+     "code": {
+      "type": "string",
+      "description": "Mã SDK ĐẦY ĐỦ (duy nhất chỗ không che); trả một lần sau khi ADMIN duyệt, không ghi vào nhật ký máy hay chat"
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "linkState": {
+      "type": "string",
+      "enum": [
+       "UNLINKED",
+       "LINKED",
+       "UNCONFIRMED"
+      ]
+     },
+     "currentOf": {
+      "nullable": true,
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "serverCode": {
+        "type": "string"
+       },
+       "vmCode": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "vmId",
+       "serverCode",
+       "vmCode"
+      ],
+      "description": "VM đang dùng mã này làm mã hiện hành (null = chưa là mã hiện hành của VM nào)"
+     },
+     "note": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "replay",
+     "sdkId",
+     "code",
+     "revision",
+     "linkState",
+     "currentOf",
+     "note"
+    ]
+   },
+   "OkSdkReveal": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SdkReveal"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -4374,7 +4592,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4384,7 +4602,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4421,7 +4639,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4431,7 +4649,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4478,7 +4696,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4488,7 +4706,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4562,7 +4780,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4572,7 +4790,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4650,7 +4868,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4660,7 +4878,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4740,7 +4958,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4750,7 +4968,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4825,7 +5043,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4835,7 +5053,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4878,6 +5096,130 @@
     "summary": "Look up SDK codes before a survey write: id, revision, state, VM list / current VM; money with the balance read right (scope READ)"
    }
   },
+  "/sdks/{id}/reveal": {
+   "post": {
+    "summary": "Full SDK code once (scope VM_OPS; needs an ADMIN approval on the web: 202 APPROVAL_REQUIRED until approved); audited SDK_REVEAL; never written to logs",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "projectId"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok (sau khi duyệt; gửi lại cùng key → cùng câu trả lời)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSdkReveal"
+        }
+       }
+      }
+     },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token, or an SDK of another project)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: IDEMPOTENCY_CONFLICT (same key, other body)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/earnapp-accounts/{id}": {
    "get": {
     "parameters": [
@@ -4900,7 +5242,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -4910,7 +5252,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -4997,7 +5339,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5007,7 +5349,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5088,7 +5430,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5098,7 +5440,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5162,7 +5504,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5172,7 +5514,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5220,9 +5562,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -5306,7 +5645,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5316,7 +5655,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5372,9 +5711,6 @@
    "post": {
     "summary": "Prepare a payout: hold the chosen email, not used yet (operation PAYOUT)",
     "parameters": [
-     {
-      "$ref": "#/components/parameters/pin"
-     },
      {
       "$ref": "#/components/parameters/key"
      }
@@ -5444,8 +5780,18 @@
        }
       }
      },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5455,7 +5801,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
       "content": {
        "application/json": {
         "schema": {
@@ -5480,6 +5826,16 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -5513,9 +5869,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -5590,8 +5943,18 @@
        }
       }
      },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5601,7 +5964,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
       "content": {
        "application/json": {
         "schema": {
@@ -5626,6 +5989,16 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -5659,9 +6032,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -5726,8 +6096,18 @@
        }
       }
      },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5737,7 +6117,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
       "content": {
        "application/json": {
         "schema": {
@@ -5762,6 +6142,16 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -5811,7 +6201,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5821,7 +6211,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5869,9 +6259,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -5927,7 +6314,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -5937,7 +6324,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -5997,9 +6384,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -6055,7 +6439,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6065,7 +6449,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -6125,9 +6509,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -6167,7 +6548,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6177,7 +6558,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -6237,9 +6618,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -6281,8 +6659,18 @@
        }
       }
      },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6292,7 +6680,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc)",
       "content": {
        "application/json": {
         "schema": {
@@ -6317,6 +6705,16 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -6350,9 +6748,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -6407,7 +6802,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6417,7 +6812,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -6475,9 +6870,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -6585,7 +6977,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6595,7 +6987,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN (also money without BALANCE_WRITE on the token or EARN_BALANCE on the user) / PIN_LOCKED",
+      "description": "FORBIDDEN (also money without BALANCE_WRITE on the token or EARN_BALANCE on the user)",
       "content": {
        "application/json": {
         "schema": {
@@ -6653,9 +7045,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -6719,7 +7108,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6729,7 +7118,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -6789,9 +7178,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -6849,7 +7235,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6859,7 +7245,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -6919,9 +7305,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -6969,7 +7352,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -6979,7 +7362,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -7037,9 +7420,6 @@
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
-     },
-     {
-      "$ref": "#/components/parameters/pin"
      },
      {
       "$ref": "#/components/parameters/key"
@@ -7114,7 +7494,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7124,7 +7504,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {
@@ -7184,9 +7564,6 @@
       "$ref": "#/components/parameters/id"
      },
      {
-      "$ref": "#/components/parameters/pin"
-     },
-     {
       "$ref": "#/components/parameters/key"
      }
     ],
@@ -7241,7 +7618,7 @@
       }
      },
      "401": {
-      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED / PIN_REQUIRED / PIN_INVALID",
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
        "application/json": {
         "schema": {
@@ -7251,7 +7628,7 @@
       }
      },
      "403": {
-      "description": "FORBIDDEN / PIN_LOCKED",
+      "description": "FORBIDDEN",
       "content": {
        "application/json": {
         "schema": {

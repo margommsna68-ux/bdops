@@ -26,6 +26,7 @@ import {businessManagementRouter} from './businessManagement';
 import {accountStoreRouter} from './accountStore';
 import {vmOpsRouter} from './vmOps';
 import {opsTokenRouter} from './opsToken';
+import { opsApprovalRouter } from './opsApproval';
 
 export const appRouter = router({
   project: projectRouter,
@@ -44,6 +45,8 @@ export const appRouter = router({
   accountStore:accountStoreRouter,
   vmOps:vmOpsRouter,
   opsToken:opsTokenRouter,
+
+  opsApproval: opsApprovalRouter,
   gmail: gmailRouter,
   vmTask: vmTaskRouter,
   auditLog: auditLogRouter,

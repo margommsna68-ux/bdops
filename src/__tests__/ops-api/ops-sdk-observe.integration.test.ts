@@ -1,5 +1,6 @@
 import {afterAll,describe,expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
+import {maskSdk} from '@/lib/sdk-mask';
 import {db,AI_PIN,api,setup} from './ops-fixture';
 import {expectConforms} from './openapi-conform';
 import {addManagedVMs} from '@/server/vm-management/metadata';
@@ -45,7 +46,7 @@ describe('POST /vms/{id}/sdk-observations',()=>{
       const b=await f.body(f.a.id,[{code:c,amountUsd:'0.21',amountRead:true,current:true},{code:c,amountUsd:'0.210'}],T1,{evidence:'Ảnh màn hình EarnApp #12'});
       const r=await f.post(t,f.a.id,b,key);
       expect(r.status).toBe(200);
-      expect(r.json.data.recorded.sdks).toEqual([expect.objectContaining({code:c,placed:'CREATED',linkState:'UNCONFIRMED',current:true,amount:{outcome:'SAVED',amountUsd:'0.21',observedAt:T1}})]);
+      expect(r.json.data.recorded.sdks).toEqual([expect.objectContaining({code:maskSdk(c),placed:'CREATED',linkState:'UNCONFIRMED',current:true,amount:{outcome:'SAVED',amountUsd:'0.21',observedAt:T1}})]);
       expect(r.json.data.recorded.evidence).toBe('Ảnh màn hình EarnApp #12');
       const row=await f.rec(c);
       expect(row).toMatchObject({holderVmId:f.a.id,vmId:f.a.id,linkState:'UNCONFIRMED'});
@@ -102,7 +103,7 @@ describe('POST /vms/{id}/sdk-observations',()=>{
       await addVmSdk(f.scope,{key:randomUUID(),vmId:f.a.id,expectedCycle:v.cycle,code:c,amount:'3'},db);
       await db.sdkRecord.update({where:{projectId_code:{projectId:f.P,code:c}},data:{amountObservedAt:null,amountSource:null}}); // as before the migration
       const d=await api('GET','vms/'+f.a.id+'?projectId='+f.P,{token:t});expectConforms('GET','vms/'+f.a.id,d);
-      expect(d.json.data.sdk.items[0]).toMatchObject({code:c,amount:'3',observedAt:null});expect(d.json.data.sdk.items[0].recordedAt).not.toBeNull();
+      expect(d.json.data.sdk.items[0]).toMatchObject({code:maskSdk(c),amount:'3',observedAt:null});expect(d.json.data.sdk.items[0].recordedAt).not.toBeNull();
       const ws=await readVMWorkspace(f.scope,db);expect(ws.vms.find(x=>x.id===f.a.id)!.sdks[0].amountObservedAt).toBeNull();
       const r=await f.post(t,f.a.id,await f.body(f.a.id,[{code:c,amountUsd:'2.75'}],T0));
       expect(r.json.data.recorded.sdks[0].amount).toEqual({outcome:'SAVED',amountUsd:'2.75',observedAt:T0});
@@ -146,7 +147,7 @@ describe('POST /vms/{id}/sdk-observations',()=>{
       expect(await f.rec(seen)).toBeNull();expect((await f.rec(used))!.amount).toBeNull();expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.b.id}})).sdkId).toBe(cur);
       const r=await f.post(t,f.b.id,await f.body(f.b.id,[{code:used,amountUsd:'7.25'},{code:old,amountUsd:'1'},{code:cur,amountUsd:'0.5',current:true}],T1));
       expect(r.status).toBe(200);
-      const by=(c:string)=>r.json.data.recorded.sdks.find((x:{code:string})=>x.code===c);
+      const by=(c:string)=>r.json.data.recorded.sdks.find((x:{code:string})=>x.code===maskSdk(c));
       expect(by(used)).toMatchObject({placed:'IN_LIST',linkState:'LINKED',amount:{outcome:'SAVED',amountUsd:'7.25'}});
       expect(by(old)).toMatchObject({placed:'IN_LIST',linkState:'UNCONFIRMED'});expect(by(cur)).toMatchObject({current:true,linkState:'UNLINKED'});
       expect((await f.rec(used))!.linkState).toBe('LINKED');expect((await f.rec(old))!.linkState).toBe('UNCONFIRMED');
@@ -185,11 +186,11 @@ describe('POST /vms/{id}/sdk-observations',()=>{
       // The VM detail / lookup show each code's own money only with the balance read right; never a VM sum.
       const full=await f.tok(FULL);await f.post(full,f.a.id,await f.body(f.a.id,[{code:c,amountUsd:'3'}],T1));
       const detail=await api('GET','vms/'+f.a.id+'?projectId='+f.P,{token:full});expectConforms('GET','vms/'+f.a.id,detail);
-      expect(detail.json.data.sdk).toMatchObject({amountsVisible:true,items:[expect.objectContaining({code:c,amount:'3',observedAt:T1,current:false})]});
+      expect(detail.json.data.sdk).toMatchObject({amountsVisible:true,items:[expect.objectContaining({code:maskSdk(c),amount:'3',observedAt:T1,current:false})]});
       expect(detail.json.data.sdk.referenceMoney).toBeUndefined();
       expect((await api('GET','vms/'+f.a.id+'?projectId='+f.P,{token:noCap})).json.data.sdk.items[0].amount).toBeNull();
       const look=await api('GET','sdks?projectId='+f.P+'&code='+c+'&code='+f.code('99'),{token:full});expectConforms('GET','sdks',look);
-      expect(look.json.data.items).toEqual([expect.objectContaining({code:c,found:true,revision:(await f.rec(c))!.revision,linkState:'UNCONFIRMED',inListOf:expect.objectContaining({vmId:f.a.id}),currentOf:null,amount:'3'}),expect.objectContaining({found:false,revision:null})]);
+      expect(look.json.data.items).toEqual([expect.objectContaining({code:maskSdk(c),found:true,revision:(await f.rec(c))!.revision,linkState:'UNCONFIRMED',inListOf:expect.objectContaining({vmId:f.a.id}),currentOf:null,amount:'3'}),expect.objectContaining({found:false,revision:null})]);
       expect((await api('GET','sdks?projectId='+f.P+'&code='+c,{token:noCap})).json.data.items[0].amount).toBeNull();
       // Revoked token, then disabled user: refused, nothing changes.
       const tokRow=await db.opsToken.findFirstOrThrow({where:{tokenHash:hashToken(full)}});

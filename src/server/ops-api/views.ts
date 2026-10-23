@@ -1,3 +1,4 @@
+import {maskSdk} from '@/lib/sdk-mask';
 import type {Prisma,PrismaClient} from '@prisma/client';
 import {moneyOfRequest} from '../vm-ops/ops';
 import {neutralHistory} from '../vm-ops/payout';
@@ -32,7 +33,7 @@ export function vmView(vm:VmRow){
     expectedCycle:vm.operation?.cycle??1,revision:vm.revision,statusRevision:vm.operation?.revision??0,proxyState:p.state,proxy:p.proxy,
     // 21/10/2026: the configuration the real machine still has to apply (null = nothing waiting), and the VM's current SDK code.
     applyPending:pend?{configurationId:pend,since:vm.operation?.proxyPendingAt?.toISOString()??null}:null,
-    currentSdk:vm.sdkRecord?{id:vm.sdkRecord.id,code:vm.sdkRecord.code,revision:vm.sdkRecord.revision,linkState:vm.sdkRecord.linkState}:null,
+    currentSdk:vm.sdkRecord?{id:vm.sdkRecord.id,code:maskSdk(vm.sdkRecord.code),revision:vm.sdkRecord.revision,linkState:vm.sdkRecord.linkState}:null,
     earnAppAccount:ea?{id:ea.id,login:maskEmail(ea.login.email)}:null};
 }
 export const requestSelect={id:true,revision:true,vmId:true,cycle:true,earnAppId:true,paypalId:true,paypalEmailId:true,currency:true,amount:true,requestedAt:true,state:true,stateNote:true,submission:true,submittedAt:true,settledAt:true,shortfall:true,consumedAt:true,history:true,createdAt:true,

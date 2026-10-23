@@ -14,6 +14,7 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         username: { label: "Username", type: "text" },
         password: { label: "Password", type: "password" },
+        code: { label: "2FA code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.username || !credentials?.password) return null;
@@ -66,6 +67,18 @@ export const authOptions: NextAuthOptions = {
         // Disabled by an ADMIN (22/10/2026): said only after the right password, never unlocked by time.
         if (user.disabledAt) throw new Error("ACCOUNT_DISABLED: Tài khoản đã bị vô hiệu hoá. Liên hệ quản trị.");
 
+        // 2FA at sign-in (owner decision 23/10/2026): with 2FA on, the password alone is not a sign-in. The form asks for the code
+        // only after TOTP_REQUIRED; wrong codes share the 3 → 30 minutes rule of the unlock.
+        let totpVersion: number | null = null;
+        if (user.totpEnabledAt) {
+          const code = (credentials as { code?: string }).code?.trim();
+          if (!code) throw new Error("TOTP_REQUIRED: Nhập mã Google Authenticator");
+          const { checkTotp, totpMessage } = await import("./users/totp");
+          const t = await checkTotp(prisma, user.id, code);
+          if (t.result !== "OK") throw new Error("TOTP_INVALID: " + totpMessage(t.result, user.totpLockedAt));
+          totpVersion = t.totpVersion;
+        }
+
         // Success — reset counter
         if (currentFailedCount > 0) {
           await prisma.user.update({
@@ -74,7 +87,7 @@ export const authOptions: NextAuthOptions = {
           });
         }
 
-        return { id: user.id, email: user.email, name: user.name };
+        return { id: user.id, email: user.email, name: user.name, totpVersion };
       },
     }),
   ],
@@ -94,7 +107,13 @@ export const authOptions: NextAuthOptions = {
       // Always refresh memberships from DB to get latest role/modules
       const userId = (user as any)?.id ?? token.userId;
       // A new sign-in opens its server session (22/10/2026); the token carries only its id. Checked on every request (trpc.ts).
-      if ((user as any)?.id) token.sid = (await openWebSession(prisma, (user as any).id)).id;
+      if ((user as any)?.id) {
+        const s = await openWebSession(prisma, (user as any).id);
+        token.sid = s.id;
+        // The code given at sign-in also unlocks this session (no second prompt right after signing in).
+        const v = (user as any).totpVersion;
+        if (typeof v === "number") { const { unlockWebSessionTotp } = await import("./users/totp"); await unlockWebSessionTotp(prisma, s.id, (user as any).id, v, true); }
+      }
       if (userId) {
         const dbUser = await prisma.user.findUnique({
           where: { id: userId as string },

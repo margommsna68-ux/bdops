@@ -39,22 +39,13 @@ describe('ops API: tokens, authentication, PIN, limits',()=>{
       expect((await api('GET','servers?projectId='+f.g.scope.projectId,{token:r})).json.error?.code).toBe('NOT_FOUND');
     }finally{await f.cleanup();}
   });
-  it('PIN on every write: missing / wrong / locked (3 wrong lock the user for every token); 5 wrong per token lock that token',async()=>{
+  it('no PIN for the AI (23/10/2026): writes need only the token and an Idempotency-Key; a stale X-Ops-Pin header is ignored',async()=>{
     const f=await setup();try{
-      const t=await f.token(f.ai,['READ','BALANCE_WRITE']),t2=await f.token(f.ai,['READ','BALANCE_WRITE']),path='vms/'+f.vms[0].id+'/balance-check';
-      expect((await api('POST',path,{token:t,pin:null,body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_REQUIRED');
+      const t=await f.token(f.ai,['READ','BALANCE_WRITE']),path='vms/'+f.vms[0].id+'/balance-check';
       expect((await api('POST',path,{token:t,key:null,body:await balanceBody(f,0)})).json.error?.code).toBe('VALIDATION');
-      expect((await api('POST',path,{token:t,pin:'111111',body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_INVALID');
-      expect((await api('POST',path,{token:t,pin:'111111',body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_INVALID');
-      expect((await api('POST',path,{token:t,pin:'111111',body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_LOCKED');
-      // Switching token does not get around the user's lock, even with the right PIN.
-      expect((await api('POST',path,{token:t2,body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_LOCKED');
-      expect(await db.earnBalanceCheck.count({where:{projectId:f.projectId}})).toBe(0);
-      await db.user.update({where:{id:f.ai},data:{pinLockedAt:null,pinFailedCount:0}});
-      // Token limit: wrong PINs spread so the user never reaches 3 in a row still lock this token after 5.
-      for(let i=0;i<5;i++){expect((await api('POST',path,{token:t2,pin:'999999',body:await balanceBody(f,0)})).json.error?.code).toBe('PIN_INVALID');await db.user.update({where:{id:f.ai},data:{pinFailedCount:0}});}
-      const locked=await api('POST',path,{token:t2,body:await balanceBody(f,0)});expect(locked.json.error?.code).toBe('PIN_LOCKED');expect(Number(locked.headers.get('retry-after'))).toBeGreaterThan(0);
-      expect((await api('POST',path,{token:t,body:await balanceBody(f,0)})).json.ok).toBe(true); // the other token of the same user is not locked by it
+      expect((await api('POST',path,{token:t,pin:null,body:await balanceBody(f,0)})).json.ok).toBe(true);
+      expect((await api('POST',path,{token:t,pin:'000000',body:await balanceBody(f,0)})).json.ok).toBe(true);
+      expect((await db.user.findUniqueOrThrow({where:{id:f.ai}})).pinFailedCount).toBe(0);
     }finally{await f.cleanup();}
   });
   it('rate limits are counted in the database (shared by instances); 429 with Retry-After; client-claimed IPs are ignored',async()=>{

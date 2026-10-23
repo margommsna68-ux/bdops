@@ -112,8 +112,9 @@ describe('3. PIN checks are decided on the user row as it is then',()=>{
     try{expect(await checkPin(db,f.ai,AI_PIN)).toBe('INVALID');}finally{spy.mockRestore();}
     try{
       expect(await checkPin(db,f.ai,'135790')).toBe('OK');await db.user.update({where:{id:f.ai},data:{pin:await bcrypt.hash(AI_PIN,4),pinFailedCount:0}});
+      // 23/10/2026: the ops API no longer checks a PIN (token + ADMIN approvals instead); a stray header neither counts nor blocks.
       const t=await f.token(f.ai,['READ','BALANCE_WRITE']),r=await call('POST','vms/'+f.vms[0].id+'/balance-check',{token:t,pin:'999999',body:await balanceBody(f,0)});
-      expect(r.json.error?.code).toBe('PIN_INVALID');expect((await db.user.findUniqueOrThrow({where:{id:f.ai}})).pinFailedCount).toBe(1);expect(await db.earnBalanceCheck.count({where:{projectId:f.projectId}})).toBe(0);
+      expect(r.json.ok).toBe(true);expect((await db.user.findUniqueOrThrow({where:{id:f.ai}})).pinFailedCount).toBe(0);expect(await db.earnBalanceCheck.count({where:{projectId:f.projectId}})).toBe(1);
     }finally{await f.cleanup();}
   });
 });

@@ -14,18 +14,21 @@ export function UserAccessSections({projectId,userId,login}:{projectId:string;us
   const d=access.data,who=login+' · '+(d?projectLabel(d.project):'…');
   const refresh=()=>{void utils.user.access.invalidate();void utils.user.getDetail.invalidate();void utils.user.onlineUsers.invalidate();};
   const [pin,setPin]=useState(''),[reason,setReason]=useState(''),[askDisable,setAskDisable]=useState(false);
-  useEffect(()=>{setPin('');setReason('');setAskDisable(false);},[projectId,userId]);
+  useEffect(()=>{setPin('');setReason('');setAskDisable(false);setAskReset(false);},[projectId,userId]);
   const setPinM=trpc.user.adminResetPin.useMutation({onSuccess:()=>{setPin('');toast.success(d?.hasPin?'Đã đổi PIN; phiên đã mở khoá bằng PIN cũ phải nhập lại':'Đã đặt PIN');refresh();},onError:e=>toast.error(e.message)});
   const removePin=trpc.user.resetPin.useMutation({onSuccess:()=>{toast.success('Đã xoá PIN');refresh();},onError:e=>toast.error(e.message)});
   const unlock=trpc.user.adminUnlockAccount.useMutation({onSuccess:()=>{toast.success('Đã mở khoá tạm');refresh();},onError:e=>toast.error(e.message)});
+  const [askReset,setAskReset]=useState(false);
+  const requireTotp=trpc.user.requireTotp.useMutation({onSuccess:(_r,v)=>{toast.success(v.required?'Đã bắt buộc 2FA: người này phải cài Google Authenticator ở lần vào sau':'Đã bỏ bắt buộc 2FA');refresh();},onError:e=>toast.error(e.message)});
+  const resetTotp=trpc.user.resetTotp.useMutation({onSuccess:()=>{setAskReset(false);toast.success('Đã đặt lại 2FA: khoá cũ và mã dự phòng không còn; người này cài lại ở lần vào sau');refresh();},onError:e=>toast.error(e.message)});
   const disable=trpc.user.setDisabled.useMutation({onSuccess:r=>{setAskDisable(false);setReason('');toast.success(r.disabled?'Đã vô hiệu hoá: thu hồi '+r.revokedTokens+' token, '+r.revokedSessions+' phiên đăng nhập':'Đã bật lại; người này đăng nhập mới, token cũ không dùng lại');refresh();void utils.opsToken.list.invalidate();},onError:e=>toast.error(e.message)});
   if(access.error)return <p role="alert" className="text-sm text-red-600">{access.error.message}</p>;
   if(!d)return <p className="text-sm text-gray-400">Đang tải…</p>;
-  const admin=d.viewerRole==='ADMIN',manager=admin||d.viewerRole==='MODERATOR',proxyVm=d.project.businessMode==='PROXY_VM',busy=setPinM.isLoading||removePin.isLoading||disable.isLoading;
+  const admin=d.viewerRole==='ADMIN',manager=admin||d.viewerRole==='MODERATOR',proxyVm=d.project.businessMode==='PROXY_VM',busy=setPinM.isLoading||removePin.isLoading||disable.isLoading||requireTotp.isLoading||resetTotp.isLoading;
   const state=d.state==='DISABLED'?{t:'Đã vô hiệu hoá',c:'text-red-600'}:d.state==='LOCKED'?{t:'Khoá tạm (sai '+(d.loginLocked?'mật khẩu':'PIN')+' 3 lần, tự mở sau 30 phút)',c:'text-amber-700'}:{t:'Đang hoạt động',c:'text-green-700'};
   return <div className="space-y-4" data-testid="user-access">
     <div className="rounded-lg border bg-white p-4"><p className="text-xs text-gray-500">Đang quản lý</p><p className="text-lg font-semibold" data-testid="user-access-who">{who}</p>
-      <p className="text-xs text-gray-500">Vai trò trong dự án: <strong>{d.memberRole??'—'}</strong> · Tài khoản: <span className={state.c}>{state.t}</span> · PIN: {d.hasPin?'đã đặt':'chưa đặt'} · Token còn hiệu lực: {d.activeTokens}</p></div>
+      <p className="text-xs text-gray-500">Vai trò trong dự án: <strong>{d.memberRole??'—'}</strong> · Tài khoản: <span className={state.c}>{state.t}</span> · 2FA: {d.totpEnabled?'đã bật':d.totpRequired?'bắt buộc, chưa cài':'chưa bật'} · PIN: {d.hasPin?'đã đặt':'chưa đặt'} · Token còn hiệu lực: {d.activeTokens}</p></div>
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="rounded-lg border bg-white p-4 space-y-3" aria-label="Quyền trong dự án">
         <h2 className="text-base font-semibold">Quyền trong dự án <span className="text-sm font-normal text-gray-500">· {projectLabel(d.project)}</span></h2>
@@ -35,15 +38,26 @@ export function UserAccessSections({projectId,userId,login}:{projectId:string;us
       </section>
       <section className="rounded-lg border bg-white p-4 space-y-3" aria-label="PIN và truy cập">
         <h2 className="text-base font-semibold">PIN và truy cập</h2>
-        {d.self&&<p className="text-xs text-gray-500">Đây là tài khoản của bạn: đổi PIN của mình ở Thiết lập.</p>}
-        {manager&&!d.self&&<>
+        {d.self&&<p className="text-xs text-gray-500">Đây là tài khoản của bạn: đổi PIN / bật 2FA của mình ở Thiết lập.</p>}
+        {admin&&<div className="space-y-2" data-testid="user-totp">
+          <p className="text-sm">2FA (Google Authenticator): <strong>{d.totpEnabled?'Đã bật':d.totpRequired?'Bắt buộc (chưa cài)':'Chưa bật'}</strong>{d.totpEnabled&&d.totpRequired?' · bắt buộc':''}{d.totpLocked?<span className="text-amber-700"> · khoá tạm (sai mã 3 lần)</span>:null}</p>
+          {!d.self&&<div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy||d.state==='DISABLED'} onClick={()=>requireTotp.mutate({projectId,userId,required:!d.totpRequired})}>{d.totpRequired?'Bỏ bắt buộc':'Bắt buộc 2FA'}</Button>
+            {(d.totpEnabled||d.totpRequired)&&!askReset&&<Button size="sm" variant="outline" className="text-red-600 border-red-300" disabled={busy} onClick={()=>setAskReset(true)}>Đặt lại 2FA…</Button>}
+          </div>}
+          {askReset&&<div className="rounded border border-red-200 bg-red-50 p-2 space-y-2" role="dialog" aria-label="Đặt lại 2FA">
+            <p className="text-xs text-gray-700">Đặt lại 2FA của {login}: khoá Google Authenticator và mã dự phòng hiện tại bị huỷ, mọi phiên đã mở khoá kết thúc; người này phải cài lại 2FA ở lần vào sau và không duyệt được lệnh AI cho tới khi cài xong.</p>
+            <div className="flex gap-2"><Button size="sm" className="bg-red-600 hover:bg-red-700" disabled={busy} onClick={()=>resetTotp.mutate({projectId,userId})}>Đặt lại 2FA</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>setAskReset(false)}>Huỷ</Button></div></div>}
+          <p className="text-xs text-gray-500">Bắt buộc = popup cài 2FA không bỏ qua được ở lần vào sau. Chỉ ADMIN đặt lại; không ai xem được khoá hay mã của người khác.</p>
+        </div>}
+        {manager&&!d.self&&!d.totpEnabled&&<>
           <div className="flex flex-wrap items-end gap-2"><label className="space-y-1"><span className="text-xs text-gray-600">{d.hasPin?'PIN mới':'PIN (4–6 số)'}</span>
             <Input type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} className="w-36" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,''))}/></label>
             <Button size="sm" disabled={pin.length<4||busy||d.state==='DISABLED'} onClick={()=>setPinM.mutate({projectId,userId,newPin:pin})}>{d.hasPin?'Đổi PIN':'Đặt PIN'}</Button>
             {d.hasPin&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>{if(window.confirm('Xoá PIN của '+login+'? Người này (hoặc AI) không làm được thao tác cần PIN cho tới khi có PIN mới.'))removePin.mutate({projectId,userId});}}>Xoá PIN</Button>}</div>
-          <p className="text-xs text-gray-500">Không hiện PIN hiện tại. Đổi / xoá PIN làm các phiên đã mở khoá bằng PIN cũ phải nhập lại. AI vận hành dùng PIN riêng của user này; ADMIN dùng PIN của mình khi tạo token.</p>
-          {d.state==='LOCKED'&&<Button size="sm" variant="outline" disabled={unlock.isLoading} onClick={()=>unlock.mutate({projectId,userId,type:'BOTH'})}>Mở khoá tạm</Button>}
+          <p className="text-xs text-gray-500">Không hiện PIN hiện tại. Đổi / xoá PIN làm các phiên đã mở khoá bằng PIN cũ phải nhập lại. PIN chỉ còn cho người chưa bật 2FA; ADMIN dùng mã 2FA (hoặc PIN) của mình khi tạo token.</p>
         </>}
+        {manager&&!d.self&&(d.state==='LOCKED'||d.totpLocked)&&<Button size="sm" variant="outline" disabled={unlock.isLoading} onClick={()=>unlock.mutate({projectId,userId,type:'BOTH'})}>Mở khoá tạm</Button>}
         {d.canDisable&&<div className="border-t pt-3 space-y-2">
           {d.state==='DISABLED'?<>
             <p className="text-sm text-red-600">Đã vô hiệu hoá{d.disabledReason?': '+d.disabledReason:''}.</p>

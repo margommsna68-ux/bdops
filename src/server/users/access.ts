@@ -24,14 +24,16 @@ export type WebSessionCheck={ok:true;sessionId:string;pinUnlocked:boolean}|{ok:f
 /** The web session of a request (JWT sid + user), or why it is no longer valid. Touches lastSeenAt at most once a minute. */
 export async function checkWebSession(db:PrismaClient,sid:string|null|undefined,userId:string):Promise<WebSessionCheck>{
   if(!sid)return {ok:false,reason:'NO_SESSION'};
-  const s=await db.userSession.findUnique({where:{id:sid},include:{user:{select:{disabledAt:true,authEpoch:true,password:true,pin:true,pinVersion:true}}}});
+  const s=await db.userSession.findUnique({where:{id:sid},include:{user:{select:{disabledAt:true,authEpoch:true,password:true,pin:true,pinVersion:true,totpEnabledAt:true,totpVersion:true}}}});
   if(!s||s.userId!==userId)return {ok:false,reason:'NO_SESSION'};
   if(s.revokedAt)return {ok:false,reason:'REVOKED'};
   if(s.user.disabledAt)return {ok:false,reason:'DISABLED'};
   if(!s.user.password)return {ok:false,reason:'NO_LOGIN'};
   if(s.epoch!==s.user.authEpoch)return {ok:false,reason:'EPOCH'};
   if(Date.now()-s.lastSeenAt.getTime()>60000)await db.userSession.update({where:{id:s.id},data:{lastSeenAt:new Date()}}).catch(()=>undefined);
-  return {ok:true,sessionId:s.id,pinUnlocked:!!s.user.pin&&!!s.pinUnlockedAt&&s.pinVersion===s.user.pinVersion};
+  // "pinUnlocked" = this session proved the user's second factor: the TOTP of the current version when 2FA is on (23/10/2026), else the PIN.
+  const unlocked=s.user.totpEnabledAt?!!s.totpUnlockedAt&&s.totpVersion===s.user.totpVersion:!!s.user.pin&&!!s.pinUnlockedAt&&s.pinVersion===s.user.pinVersion;
+  return {ok:true,sessionId:s.id,pinUnlocked:unlocked};
 }
 export async function revokeWebSession(db:Db,sid:string,reason:string){
   await db.userSession.updateMany({where:{id:sid,revokedAt:null},data:{revokedAt:new Date(),revokeReason:reason}});

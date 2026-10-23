@@ -24,8 +24,8 @@ export function PinVerifyDialog({
   open,
   onClose,
   onVerified,
-  title = "PIN Required",
-  description = "Enter your PIN to continue",
+  title = "Xác nhận bằng mã 2FA / PIN",
+  description = "Nhập mã Google Authenticator (hoặc PIN nếu chưa bật 2FA) để tiếp tục",
   required = false,
 }: PinVerifyDialogProps) {
   const [pin, setPin] = useState("");
@@ -45,7 +45,7 @@ export function PinVerifyDialog({
       onVerified();
       onClose();
     } catch (e: any) {
-      setError(e.message || "Incorrect PIN");
+      setError((e.message || "Mã chưa đúng").replace(/^PIN_LOCKED:\s*/, ""));
       setPin("");
     }
   };
@@ -60,11 +60,11 @@ export function PinVerifyDialog({
         <div className="space-y-4 pt-2">
           <input
             type="password"
-            inputMode="numeric"
-            maxLength={6}
-            placeholder="Enter PIN"
+            inputMode="text"
+            maxLength={12}
+            placeholder="Mã 2FA / PIN"
             value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => setPin(e.target.value.replace(/[^0-9a-zA-Z-]/g, ""))}
             onKeyDown={(e) => e.key === "Enter" && pin.length >= 4 && handleVerify()}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center text-2xl tracking-[0.5em]"
             autoComplete="new-password"
