@@ -57,6 +57,11 @@ export async function setVmStatus(scope:ActorScope,input:{key:string;items:Statu
         const r=await blockCurrentProxy(tx,images,{projectId:scope.projectId,actorId:current.userId,now,canBlock:canBlock(infra)},vm,item.expectedEndpointId??null,input.note??null);
         rows.push({...base,...r,cycle});continue;
       }
+      if(['OK','NOT_LINKED','LINKED'].includes(item.status)){
+        const position=currentProxyOf(await loadChangeVM(tx,vm.id));
+        const endpoint=position.endpointId?await tx.proxyIP.findUnique({where:{id:position.endpointId},select:{inventoryState:true}}):null;
+        if(endpoint?.inventoryState==='BLOCKED'){rows.push({...base,outcome:'ERROR',message:'Proxy hiện tại đang BLOCKED; thay proxy trước khi ghi '+opsLabel(item.status),status:vm.operation?.status??null,cycle});continue;}
+      }
       const ops=await ensureOps(tx,images,scope.projectId,vm.id);
       // A status chosen by a person replaces a pending Blocked: the replacement will then keep this newer decision.
       // A person who moves "Chờ áp dụng proxy" to a working status has dealt with the machine: the apply mark goes with it.

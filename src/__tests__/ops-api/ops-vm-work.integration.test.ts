@@ -37,6 +37,13 @@ async function work(){
   return {...f,proxy,vmRow,change,ownerStatus,tok,get,post,vmApi,cleanup};
 }
 type W=Awaited<ReturnType<typeof work>>;
+it('refuses working statuses while current proxy is BLOCKED, but keeps OFF available',async()=>{
+ const w=await work();try{
+  const v=await newVm(w,'BLOCKED_STATUS_101');await w.ownerStatus(v.id,'PROXY_BLOCKED');
+  for(const status of ['OK','NOT_LINKED','LINKED'] as const){const result=await setVmStatus(w.scope,{key:randomUUID(),items:[{vmId:v.id,expectedCycle:1,status}]},db);expect(result.errors).toBe(1);expect((await w.vmRow(v.id)).operation?.status).toBe('PROXY_BLOCKED');}
+  expect((await w.ownerStatus(v.id,'OFF')).applied).toBe(1);
+ }finally{await w.cleanup();}
+});
 it('reads the assigned proxy without ADMIN approval, including batch and repeated reads',async()=>{
   const w=await work();try{
     const t=await w.tok(['READ','VM_OPS','PROXY_CREDENTIALS']),v=await newVm(w,'DIRECT_101');
