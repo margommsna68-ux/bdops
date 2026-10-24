@@ -1,0 +1,24 @@
+{
+  "copied": [
+    {
+      "path": "C:/Users/Administrator/Desktop/MoneyToHome/PROMPT_CLAUDE_VAN_HANH_WEB.md",
+      "sha256": "72320f10cd331e2e1c7c123df4257a64cedc45678bd8b36f4f651214076e7cb7"
+    },
+    {
+      "path": "C:/Users/Administrator/Desktop/MoneyToHome/CAP_NHAT_AI_KHO_20261024.md",
+      "sha256": "69be71bf41106105211639dd736a560dc8f69b3b428b8d6513cdc2b232c28f18"
+    }
+  ],
+  "entrypointUpdated": true,
+  "connection": {
+    "connected": true,
+    "approvalRequired": [
+      "WITHDRAWAL_PREPARE",
+      "WITHDRAWAL_STATUS",
+      "WITHDRAWAL_RECEIPT"
+    ],
+    "inventoryNeedsApproval": false
+  },
+  "vmDataWritten": false,
+  "tokenOrPinChanged": false
+}

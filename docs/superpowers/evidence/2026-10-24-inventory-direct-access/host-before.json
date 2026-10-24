@@ -1,0 +1,18 @@
+{
+  "counts": {
+    "servers": 11,
+    "vms": 678,
+    "ops": 511,
+    "proxies": 1463,
+    "sdk": 570,
+    "members": 5
+  },
+  "hash": "7d7d340e6743406069beffcbaa52edb7a7f4c7c9183af5e9c1de3944ac8aefdd",
+  "scopeColumns": 2,
+  "scopeCounts": [
+    {
+      "serverScope": "ALL",
+      "count": 5
+    }
+  ]
+}

@@ -9,3 +9,11 @@ Regression: four new tests fail before the route change and pass after, includin
 Independent source review found no unintended authorization weakening beyond the requested direct inventory reads. Full suite/build and release proof follow after completion. Local synthetic data only; no real VM, EarnApp, proxy credential or SDK was read for testing on the host.
 
 Final verification: 176 files / 907 tests passed; typecheck passed; lint zero errors (existing warnings only); production build passed. Backup moneytohome-20261024-122103.dump and encrypted/decryption-verified moon-01 copy prepared before deployment.
+
+## Release and live verification
+
+Code b36eb6e, build MDoOw3Ft3rAr7-ptSWcGH, SERVER-01 deployment 24/10/2026 12:22 Bangkok. No migration. Public build manifest and /health 200; Web/Tunnel running. Business and membership snapshots identical before/after (11 servers, 678 VM, 511 operations, 1463 proxies, 570 SDK, 5 memberships). No token or user grants changed, no host inventory secrets fetched for testing.
+
+Central moon-01: copied and SHA-256 verified updated PROMPT_CLAUDE_VAN_HANH_WEB.md and CAP_NHAT_AI_KHO_20261024.md into C:/Users/Administrator/Desktop/MoneyToHome; previous versions backed up, AGENTS entry appended. Ran existing mth-wow.ps1 me read-only: connected=true, inventoryNeedsApproval=false, approvalRequired exactly WITHDRAWAL_PREPARE / WITHDRAWAL_STATUS / WITHDRAWAL_RECEIPT. No init, token/PIN change, VM scan or machine operation. Existing client works unchanged; no package installation needed.
+
+Backup moneytohome-20261024-122103.dump; moon-01 encrypted/decryption-verified moneytohome-20261024-122103.mthbk SHA-256 590cc2fec6d9a4fb183b4aad708cb2a7b33ce4747d1dfcf8294a991beafe4a6f. Rollback application at D:\MoneyToHome\app-before-inventory-direct-20261024.
