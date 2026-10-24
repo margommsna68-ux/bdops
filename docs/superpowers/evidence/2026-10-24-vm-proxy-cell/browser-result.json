@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "results": [
+    "Workspace provides current proxy package",
+    "Both copy controls share one action group",
+    "Old chip-row copy control removed",
+    "Package appears below IP",
+    "Report action discoverable in proxy frame",
+    "Click reports BLOCKED and refreshes proxy cell",
+    "Blocked offers replacement, not duplicate report",
+    "Actual theme light",
+    "Copy group fits desktop light",
+    "Actual theme dark",
+    "Copy group fits desktop dark",
+    "Actual theme golden",
+    "Copy group fits desktop golden",
+    "Actual theme bronze",
+    "Copy group fits desktop bronze",
+    "Mobile no document overflow",
+    "Mobile proxy frame fits",
+    "No browser JavaScript errors"
+  ],
+  "errors": []
+}

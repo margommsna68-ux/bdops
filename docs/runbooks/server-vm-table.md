@@ -1,5 +1,13 @@
 # Bảng vận hành Server / VM
 
+## Ô Proxy — cập nhật 24/10/2026
+
+- IP:port ở dòng chính, tên gói ở dòng phụ nhỏ; rê chuột vào tên bị rút gọn để xem đầy đủ. Copy cạnh IP chỉ copy, không mở khung.
+- Báo lỗi tại VM: bấm ô Proxy → **Báo proxy BLOCKED**. Lưu cùng lúc vào Kho proxy và VM; nếu VM đang OFF/SUS/lỗi thì giữ tình trạng đó, ô Proxy vẫn báo BLOCKED. Có thể dùng Tình trạng → Blocked như trước.
+- Nút chỉ hiện khi có quyền và proxy hiện hành xác định rõ. Khung mở mà proxy/lượt/tình trạng bị đổi thì phải đóng và mở lại; không báo nhầm proxy mới.
+- Proxy đã BLOCKED: chọn proxy trong kho hoặc Nhận replace. Thay trên web chưa chứng minh đã áp dụng máy thật; vẫn theo quy trình Chờ áp dụng proxy hiện hành.
+- **Copy proxy BLOCKED** nằm cạnh **Copy danh sách VM**, trên bảng. Có tick thì theo dòng đã chọn; chưa tick thì theo bộ lọc, mọi trang. Không đủ quyền copy thì không hiện.
+
 > **Cập nhật 19/10/2026 (quyết định chủ dự án, thay quy trình xác nhận cài):** gán proxy là xong, không còn Chờ cài / Đang cài / Đã cài, Copy để cài, Bắt đầu cài, Xác nhận đã cài, Việc cài proxy. Ô Proxy chỉ có IP:port, copy và cảnh báo Blocked / Cần kiểm tra; bấm ô mở **Thay proxy**. Dải đếm: Tất cả · Thiếu proxy · Có proxy · Proxy Blocked · Cần kiểm tra · Chưa SDK · Chưa tài khoản · Chưa PayPal · Đã xoá; thêm nút **Copy proxy Blocked (N)**. Các đoạn bên dưới nói về bước cài là lịch sử. Xem [proxy-change.md](proxy-change.md).
 
 Trang `/infrastructure/servers` (tất cả server) và `/infrastructure/servers/<id>` (một server). Cập nhật 19/10/2026: cột *Cài proxy* gộp vào ô **Proxy**, ô **SDK** hai dòng có khung riêng và nút **Kho SDK** (xem [SDK và Kho SDK](vm-sdk.md)), nút Lưu / Áp dụng thống nhất (mục cuối). Triển khai 17/10/2026, nối tiếp phần [quản trị Server / VM](server-vm-admin.md) (tạo theo khoảng, sửa tại chỗ, xoá có khôi phục). Bằng chứng: `../superpowers/evidence/2026-10-17-server-vm-table.md`.
