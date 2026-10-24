@@ -62,7 +62,7 @@ it('returns only the assigned proxy for an owned active job and refreshes its na
  }
 });
 
-it('authorizes bound SDKs before approval and hides stock, other servers and historical money',async()=>{
+it('authorizes direct bound SDK reads and hides stock, other servers and historical money',async()=>{
  const f=await scoped();try{
   const hidden=await db.sdkRecord.create({data:{projectId:f.projectId,code:'HIDDEN-'+f.x,holderVmId:f.vms[1].id,createdById:f.scope.userId}});
   const own=await db.sdkRecord.create({data:{projectId:f.projectId,code:'OWN-SDK-'+f.x,holderVmId:f.vm.id,createdById:f.scope.userId,amount:'19.25',amountVmId:f.vms[1].id,amountCycle:1}});
@@ -71,7 +71,7 @@ it('authorizes bound SDKs before approval and hides stock, other servers and his
   expect((await f.get('sdks?code='+hidden.code)).json.data.items[0].found).toBe(false);
   expect((await f.post('sdks/'+hidden.id+'/reveal')).status).toBe(404);
   expect(await db.opsApproval.count({where:{projectId:f.projectId}})).toBe(0);
-  expect((await f.post('sdks/'+own.id+'/reveal')).status).toBe(202);
+  const direct=await f.post('sdks/'+own.id+'/reveal');expect(direct.status).toBe(200);expect(direct.json.data.code).toBe(own.code);expect(await db.opsApproval.count({where:{projectId:f.projectId}})).toBe(0);
   const detail=await f.get('vms/'+f.vm.id);expect(detail.json.data.sdk.items[0].stored).toBeNull();
  }finally{await f.cleanup();}
 });

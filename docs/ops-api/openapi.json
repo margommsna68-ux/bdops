@@ -2,8 +2,8 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.3.0",
-  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Account credentials and SDK reveals require ADMIN approval via CLI TOTP or web; the TOTP is never persisted. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
+  "version": "1.3.1",
+  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Only withdrawal prepare/status/receipts retain approval. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
   {
@@ -303,7 +303,7 @@
        },
        "code": {
         "type": "string",
-        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -913,7 +913,7 @@
        },
        "code": {
         "type": "string",
-        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -986,7 +986,7 @@
           },
           "code": {
            "type": "string",
-           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
           },
           "revision": {
            "type": "integer",
@@ -2273,7 +2273,7 @@
        },
        "code": {
         "type": "string",
-        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
        },
        "revision": {
         "type": "integer"
@@ -2396,7 +2396,7 @@
      "sdkCode": {
       "type": "string",
       "nullable": true,
-      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
      },
      "resumeOf": {
       "type": "string",
@@ -2501,7 +2501,7 @@
      "sdkCode": {
       "type": "string",
       "nullable": true,
-      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+      "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
      },
      "resumeOf": {
       "type": "string",
@@ -2766,7 +2766,7 @@
          },
          "code": {
           "type": "string",
-          "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+          "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
          },
          "revision": {
           "type": "integer"
@@ -2950,7 +2950,7 @@
        },
        "sdkCode": {
         "type": "string",
-        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+        "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
        },
        "configurationId": {
         "type": "string"
@@ -4081,7 +4081,7 @@
          "properties": {
           "code": {
            "type": "string",
-           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+           "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
           },
           "sdkId": {
            "type": "string"
@@ -4250,7 +4250,7 @@
        "properties": {
         "code": {
          "type": "string",
-         "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (cần ADMIN duyệt)."
+         "description": "Mã SDK đã che (masked): 4 ký tự đầu + \"…\" + 4 ký tự cuối, ví dụ `sdk-…3456`; mã đầy đủ chỉ qua POST /sdks/{id}/reveal (theo quyền hiện tại, không cần duyệt)."
         },
         "found": {
          "type": "boolean",
@@ -4538,7 +4538,7 @@
      },
      "code": {
       "type": "string",
-      "description": "Mã SDK ĐẦY ĐỦ (duy nhất chỗ không che); trả một lần sau khi ADMIN duyệt, không ghi vào nhật ký máy hay chat"
+      "description": "Mã SDK ĐẦY ĐỦ (duy nhất chỗ không che); trả trực tiếp theo quyền hiện tại, không ghi vào nhật ký máy hay chat"
      },
      "revision": {
       "type": "integer"
@@ -6841,21 +6841,11 @@
     },
     "responses": {
      "200": {
-      "description": "ok (sau khi duyệt; gửi lại cùng key → cùng câu trả lời)",
+      "description": "Thông tin trả trực tiếp sau khi kiểm quyền hiện tại; không ghi bí mật vào log/chat.",
       "content": {
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/OkSdkReveal"
-        }
-       }
-      }
-     },
-     "202": {
-      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalRequired"
         }
        }
       }
@@ -6900,16 +6890,6 @@
        }
       }
      },
-     "410": {
-      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalExpired"
-        }
-       }
-      }
-     },
      "422": {
       "description": "VALIDATION",
       "content": {
@@ -6930,7 +6910,8 @@
        }
       }
      }
-    }
+    },
+    "description": " Owner decision 24/10/2026: direct authorized inventory access without ADMIN approval. Token/user/server restrictions remain; account credentials also require the owned current VM job."
    }
   },
   "/earnapp-accounts/{id}": {
@@ -9624,7 +9605,7 @@
   "/earnapp-accounts/{id}/credentials": {
    "post": {
     "summary": "Reveal the current held account credentials",
-    "description": "id is EarnApp accountId, not login stock id. Own token ACTIVE job, VM and current job round are checked. Store secrets only in private ACL-restricted runtime output; never journal, stdout, chat or Git.",
+    "description": "id is EarnApp accountId, not login stock id. Own token ACTIVE job, VM and current job round are checked. Store secrets only in private ACL-restricted runtime output; never journal, stdout, chat or Git. Owner decision 24/10/2026: direct authorized inventory access without ADMIN approval. Token/user/server restrictions remain; account credentials also require the owned current VM job.",
     "x-required-scope": "ACCOUNT_OPS",
     "parameters": [
      {
@@ -9636,21 +9617,11 @@
     ],
     "responses": {
      "200": {
-      "description": "ok",
+      "description": "Thông tin trả trực tiếp sau khi kiểm quyền hiện tại; không ghi bí mật vào log/chat.",
       "content": {
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/OkAccountCredentialResult"
-        }
-       }
-      }
-     },
-     "202": {
-      "description": "ADMIN approval required; command has not run",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalRequired"
         }
        }
       }
@@ -9691,16 +9662,6 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "410": {
-      "description": "Expired key remains expired; use a new command key",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }

@@ -10,7 +10,15 @@ và [2026-10-23-totp-ai-approval-design.md](../superpowers/specs/2026-10-23-totp
 
 **Bổ sung 1.3.0 (23/10 tối):** [Kho / batch / CLI TOTP](ai-stock-batch.md) là hướng dẫn hiện hành cho ACCOUNT_OPS, proxy / SDK từ kho, duyệt CLI hoặc web và lô có kết quả từng phần. Chủ tạo token **90 ngày** trong UI: READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; **không PAYOUT / RECEIPT**. Các ví dụ payout bên dưới chỉ mô tả API cho người đã được cấp quyền tương ứng, không phải quyền của token vận hành này.
 
-## 0. Thay đổi 23/10/2026 (quyết định chủ dự án): AI không còn PIN, lệnh quan trọng chờ ADMIN duyệt
+## Quy tắc hiện hành — quyết định chủ 24/10/2026
+
+- AI lấy bí mật kho trực tiếp bằng Bearer token + Idempotency-Key: `POST earnapp-accounts/{id}/credentials` (ACCOUNT_OPS), `POST sdks/{id}/reveal` (VM_OPS), và `POST vms/{id}/proxy-credentials` (PROXY_CREDENTIALS + VM_PROXY_FOR_OPS). Không approval, không PIN/TOTP, không cần ADMIN có mặt cho các lần đọc này.
+- Không nới quyền: vẫn kiểm token còn hiệu lực, scope, quyền user và dự án/server hiện tại. Account credentials cần tài khoản hiện hành và job ACTIVE của chính user/token đúng VM/lượt; proxy credentials cũng cần job hiện hành đúng VM/lượt. SDK reveal kiểm SDK trong phạm vi hiện tại, không thêm jobId vào body `{projectId}`. User SELECTED không được dùng kho chung hoặc đọc SDK/proxy ngoài server được giao; bỏ duyệt không mở các route đang bị giới hạn server từ chối.
+- Chỉ các lệnh tài chính `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` còn cần ADMIN duyệt bằng 2FA. Token vận hành không PAYOUT/RECEIPT vẫn không được gọi chúng. Không tự xác nhận approval, giả ADMIN hoặc tìm mã TOTP để lấy bí mật kho.
+- Yêu cầu **lẻ** lấy account credentials / SDK reveal / proxy đã PENDING trước thay đổi: `retry <key>` với đúng key/path/body cũ; máy chủ kiểm quyền/job/server hiện tại rồi đọc trực tiếp, không cần duyệt bản ghi cũ. Mất quyền hoặc job hết hạn vẫn bị từ chối; không tạo key mới để vượt kiểm tra. Không coi approval cũ là đã APPROVED/CONSUMED. Lô cũ vẫn đối chiếu từng mục; không suy quy tắc retry lệnh lẻ thành bỏ gate toàn lô.
+- Giữ nguyên cách xử lý bí mật: credential/proxy vào tệp riêng theo client, xoá sau dùng; SDK reveal theo luồng đầu ra bí mật hiện có, không ghi nhật ký/chat/Git. Ví dụ HTTP dưới đây mô tả hợp đồng; không đưa đầu ra bí mật vào log dùng chung. Đây là hướng dẫn cho thay đổi được chủ yêu cầu, không phải bằng chứng đã deploy.
+
+## 0. Lịch sử thay đổi 23/10/2026 — phần duyệt bí mật kho được thay thế bởi quy tắc 24/10 ở trên
 
 - **Không còn `X-Ops-Pin`.** Token là chứng thực duy nhất của AI; `PIN_REQUIRED / PIN_INVALID / PIN_LOCKED` không còn phát sinh. Mọi chỗ bên dưới
   còn nhắc PIN cho AI là lịch sử. (Người dùng web dùng 2FA Google Authenticator thay PIN — xem user-access.md.)
@@ -54,13 +62,13 @@ thành viên có hiệu lực ngay ở request sau (kể cả khi gửi lại m�
 | POST /withdrawals/{id}/receipts | RECEIPT | Người ghi Tiền vào PayPal (quản lý), hoặc USER có Hạ tầng + **PAYPAL_RECEIPT_RECORD** ("Ghi khoản nhận PP của yêu cầu rút") |
 | GET /jobs/{id}, POST /vms/{id}/claim, /jobs/{id}/step, /jobs/{id}/release, /vms/{id}/sdk, /vms/{id}/status, /vms/{id}/proxy-blocked, /vms/{id}/notes, /jobs/{id}/finish-prepare, /jobs/{id}/finish-proxy (21/10/2026) | READ (GET) / **VM_OPS** | USER (không phải VIEWER) có Server / VM (quyền ASSIGN / BLOCK hiện có). Xem docs/runbooks/ai-vm-ops.md |
 | POST /vms/{id}/proxy-credentials (21/10/2026) | **PROXY_CREDENTIALS** | ADMIN, hoặc USER có **VM_PROXY_FOR_OPS** ("Lấy proxy của VM đang xử lý (AI)"), **và** việc đang giữ (claim) của chính token đó trên VM đó; **không cần ADMIN duyệt** (quyết định 24/10/2026) |
-| POST /sdks/{id}/reveal (23/10/2026) | **VM_OPS** | Quyền đọc Server / VM của dự án; **cần ADMIN duyệt**; trả mã SDK đầy đủ một lần (mọi câu trả lời đọc đều che mã) |
-| GET /earnapp-accounts; POST /earnapp-accounts/hold, /earnapp-accounts/{id}/credentials, /used, /release | **ACCOUNT_OPS** | ASSIGN + Hạ tầng; POST cần job ACTIVE của chính token đúng VM / lượt; credentials cần duyệt |
+| POST /sdks/{id}/reveal (23/10/2026) | **VM_OPS** | Quyền đọc Server / VM và SDK trong phạm vi dự án/server hiện tại; **trực tiếp, không approval/PIN/TOTP**; câu trả lời đọc thường vẫn che mã |
+| GET /earnapp-accounts; POST /earnapp-accounts/hold, /earnapp-accounts/{id}/credentials, /used, /release | **ACCOUNT_OPS** | ASSIGN + Hạ tầng; POST cần job ACTIVE của chính token đúng VM / lượt, theo giới hạn server hiện tại; credentials **trực tiếp, không approval/PIN/TOTP** |
 | GET /proxies; POST /vms/{id}/proxy-assign, /sdk-assign, /sdk-linked | READ (GET) / **VM_OPS** (POST) | ASSIGN + job ACTIVE của token; kỳ / VM revision / SDK revision theo từng request |
 | GET /approvals/{id}; POST /approvals/{id}/confirm | READ (GET) / token hợp lệ (POST) | Chỉ approval của token; confirm bằng TOTP ADMIN đúng dự án; Idempotency-Key bắt buộc nhưng không lưu mã |
 | POST /batch | Theo từng mục | 1–100 POST, key riêng; một approval cho mục đặc quyền; 202 mixed / 200 final, kiểm từng item |
 
-Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` cũng **cần ADMIN duyệt** (202 `APPROVAL_REQUIRED`, mục 0).
+Chỉ các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` **cần ADMIN duyệt** (202 `APPROVAL_REQUIRED`; cơ chế tài chính ở mục 0 vẫn giữ).
 
 - `EARN_PAYOUT` không mở: ghi yêu cầu "đã gửi" trực tiếp, thất bại / huỷ / gửi lại / sửa / chốt thiếu, đối chiếu tài khoản cũ, sổ PayPal, chi phí,
   rút / chuyển. Trên web người có quyền này thấy nút "Chuẩn bị rút (giữ email)" và "Đã gửi trên EarnApp / Chưa xác định kết quả".
@@ -72,7 +80,7 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
   Qua token, quyền đi kèm một thao tác ghi (EARN_BALANCE, EARN_PAYOUT, PAYPAL_RECEIPT_RECORD) chỉ mở dữ liệu khi token có thao tác đó: token chỉ READ
   của cùng người không thấy số dư / tiền yêu cầu / email PP đầy đủ nếu quyền đọc đó chỉ đến từ quyền hẹp.
 - Proxy đầy đủ (21/10/2026, ngoại lệ hẹp): danh sách / chi tiết vẫn che; chỉ `POST /vms/{id}/proxy-credentials` trả IP:port:user:pass của cấu hình hiện
-  hành của VM đang xử lý (token, ADMIN duyệt — 23/10/2026 —, đúng dự án / VM / lượt / việc); audit `VM_PROXY_FOR_OPS` (người, token, VM, proxy id, cấu hình), không user / pass.
+  hành của VM đang xử lý (token, không duyệt, đúng dự án / server / VM / lượt / việc); audit `VM_PROXY_FOR_OPS` (người, token, VM, proxy id, cấu hình), không user / pass.
 - Không làm qua API: xoá / tạo lại VM, thay nhóm sở hữu, chuyển SDK của VM khác, xoá SDK, VM deleted, rút / chuyển PayPal, USDT, chi phí, cấp lại email đã dùng. 1.3.0 mở gán proxy đủ điều kiện từ kho, giữ / trả / ghi đã dùng tài khoản và gán / ghi SDK đã nối trong đúng job, không thay quy tắc dùng vĩnh viễn. (Từ 21/10/2026 API ghi được: nhận việc, bước, SDK của lần cài cho VM đang xử lý, tình trạng quan sát, Blocked, ghi chú.)
 
 - SDK khảo sát (22/10/2026): `POST vms/{id}/sdk-observations` ghi mã cần `VM_OPS`; kèm tiền tích luỹ SDK cần thêm `BALANCE_WRITE` (user `EARN_BALANCE`), như ghi số dư EarnApp; đọc tiền SDK (`sdk.items[].amount`, `GET sdks`) cần quyền đọc số dư. Không mở rút tiền, PayPal hay chi phí. Chi tiết: vm-sdk.md (mục cuối).
@@ -81,7 +89,7 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
 
 1. **Cấp quyền** — Kho proxy → Quyền nhân viên (ADMIN): chọn tài khoản (ví dụ `ai-ops`), giữ Hạ tầng, tick các quyền cần
    (Ghi kiểm tra tiền EarnApp / Chuẩn bị rút EarnApp / Ghi khoản nhận PP của yêu cầu rút). Hai quyền mới mặc định tắt.
-2. ~~Đặt PIN cho tài khoản đó~~ — từ 23/10/2026 AI **không cần PIN**; thay vào đó ADMIN duyệt lệnh quan trọng trên trang Phê duyệt (ADMIN phải bật 2FA).
+2. ~~Đặt PIN cho tài khoản đó~~ — AI **không cần PIN/TOTP khi đọc bí mật kho**. Chỉ lệnh tài chính nêu trên cần ADMIN duyệt; việc ADMIN tạo token vẫn theo bảo mật web hiện có.
 3. **Tạo token** — ADMIN mở trang user / Thiết lập → Token API vận hành, chọn dự án và hạn **90 ngày**, scope READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; không PAYOUT / RECEIPT trong đợt này. Xác nhận 2FA → token hiện **một lần**. Copy ngay vào kho bí mật; không gửi qua chat, không dán vào lệnh, file commit hay ví dụ.
 4. **Nạp bí mật ngoài cuộc chat** — mở terminal của chính bạn (không qua ô chat Claude, không dùng cú pháp `!`), trong thư mục source:
    `node scripts/ops-client.mjs init` → gõ token (không hiện ký tự) → lưu ở `~/.mth/ops-secret.json`. Hoặc đặt biến môi trường
@@ -120,7 +128,7 @@ Các lệnh `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/
     công khai thật ở cả 6. Railway thay thế giá trị client tự gửi: `X-Real-IP: 9.9.9.9` / `not-an-ip` → IP thật; `X-Forwarded-For: 1.2.3.4[, 5.6.7.8]`
     → bị viết lại thành `[IP thật, IP nút biên]`; `X-Railway-Request-Id` giả → id mới. Chưa kiểm trên host: IPv6 (máy kiểm không có IPv6), token có
     danh sách IP (chưa có token trên host). Lưu ý: dịch vụ khác trong cùng mạng riêng Railway của dự án có thể gọi thẳng container bỏ qua nút biên.
-- Không trả mật khẩu, 2FA, link lấy mã, token, credentials proxy. Proxy: id + host che + port + nhóm. Email đăng nhập che. Email PP nhận tiền đầy đủ cho
+- Câu trả lời đọc thông thường không trả mật khẩu, 2FA, link lấy mã, token hoặc credentials proxy; các route bí mật riêng trả trực tiếp theo quyền hiện tại, không approval/PIN/TOTP. Proxy ở câu trả lời thường: id + host che + port + nhóm. Email đăng nhập che. Email PP nhận tiền đầy đủ cho
   người có quyền rút / ghi khoản nhận. Ghi chú tự do được che link / mật khẩu / mã trước khi lưu và trước khi trả.
 - Nhật ký: `OpsAudit` (requestId, tokenId, userId, projectId, action, objectId, thời gian, IP đã xác minh, HTTP, kết quả, replay) cho mọi lệnh ghi và
   mọi lần bị từ chối; không có header / body / token. Quyết định duyệt / từ chối ghi `auditLog` `OPS_APPROVE` / `OPS_REJECT` (ADMIN, yêu cầu, hành động);
@@ -155,8 +163,8 @@ curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: sent-$WD-1" -X POST "$B/withdra
 # Tiền thực về PP (từng phần được; không vượt phần còn chờ)
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rcv-$WD-1" -X POST "$B/withdrawals/$WD/receipts" \
   -d '{"projectId":"'$P'","expectedRequestRevision":1,"amount":"6.00","currency":"USD","receivedAt":"2026-10-23T08:00:00+07:00","transactionId":"<mã giao dịch PayPal>","evidenceNote":"PayPal activity"}'
-# prepare / status / receipts / sdks/{id}/reveal: lần đầu trả 202 APPROVAL_REQUIRED (chưa ghi) → ADMIN duyệt CLI hoặc web →
-# gửi lại ĐÚNG lệnh trên (cùng Idempotency-Key, cùng -d) → 200. Mã SDK đầy đủ một lần:
+# Chỉ prepare / status / receipts trả 202 APPROVAL_REQUIRED → ADMIN duyệt → retry cùng key/body.
+# SDK reveal trả trực tiếp theo quyền hiện tại, không PIN/TOTP/approval; giữ đầu ra trong luồng bí mật:
 curl -s "${H[@]}" "${W[@]}" -H "Idempotency-Key: rev-$SDK-1" -X POST "$B/sdks/$SDK/reveal" -d '{"projectId":"'$P'"}'
 ```
 

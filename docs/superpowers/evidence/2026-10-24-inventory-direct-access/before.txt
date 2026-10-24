@@ -1,0 +1,75 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/ops-api/inventory-direct-access.integration.test.ts (4 tests | 4 failed) 837ms
+     × advertises approval only for money commands; account credentials are direct and audited without secrets 257ms
+     × reads SDK immediately even with an old pending approval; normal reads stay masked 200ms
+     × inventory-only batches finish without an approval while payout still waits 187ms
+     × still refuses missing scopes, wrong jobs, revoked tokens and disabled users 185ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/ops-api/inventory-direct-access.integration.test.ts > owner-authorized unattended inventory access > advertises approval only for money commands; account credentials are direct and audited without secrets
+AssertionError: expected [ 'ACCOUNT_CREDENTIALS', …(4) ] to deeply equal [ 'WITHDRAWAL_PREPARE', …(2) ]
+
+- Expected
++ Received
+
+  [
++   "ACCOUNT_CREDENTIALS",
+    "WITHDRAWAL_PREPARE",
+    "WITHDRAWAL_STATUS",
+    "WITHDRAWAL_RECEIPT",
++   "SDK_REVEAL",
+  ]
+
+ ❯ src/__tests__/ops-api/inventory-direct-access.integration.test.ts:18:88
+     16| describe('owner-authorized unattended inventory access',()=>{
+     17|  it('advertises approval only for money commands; account credentials …
+     18|   const me=await api('GET','me',{token:f.token});expect(me.json.data.a…
+       |                                                                                        ^
+     19|   const r=await api('POST',f.accountPath,{token:f.token,pin:null,body:…
+     20|   expect(await db.opsApproval.count({where:{projectId:f.projectId}})).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/__tests__/ops-api/inventory-direct-access.integration.test.ts > owner-authorized unattended inventory access > reads SDK immediately even with an old pending approval; normal reads stay masked
+AssertionError: expected 202 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 202
+
+ ❯ src/__tests__/ops-api/inventory-direct-access.integration.test.ts:26:108
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/__tests__/ops-api/inventory-direct-access.integration.test.ts > owner-authorized unattended inventory access > inventory-only batches finish without an approval while payout still waits
+AssertionError: expected 202 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 202
+
+ ❯ src/__tests__/ops-api/inventory-direct-access.integration.test.ts:32:20
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/__tests__/ops-api/inventory-direct-access.integration.test.ts > owner-authorized unattended inventory access > still refuses missing scopes, wrong jobs, revoked tokens and disabled users
+AssertionError: expected 202 to be greater than or equal to 400
+ ❯ src/__tests__/ops-api/inventory-direct-access.integration.test.ts:37:130
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  12:18:00
+   Duration  1.37s (transform 315ms, setup 21ms, import 425ms, tests 837ms, environment 0ms)

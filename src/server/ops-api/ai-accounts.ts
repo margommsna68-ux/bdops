@@ -119,7 +119,7 @@ export async function holdAiAccount(scope:ActorScope,input:{key:string;vmId:stri
 }
 /**
  * The full login behind the VM's current EarnApp account, for the caller's ACTIVE job on that VM only. The decryption is the same as
- * copyOperatingCredentials; the PIN / web copy right is replaced by the token scope and the ADMIN approval the API layer enforces before
+ * copyOperatingCredentials; owner decision 24/10/2026 permits direct API reads with the current token scope and owned VM job, before
  * calling this. Audited with ids only.
  */
 export async function aiAccountCredentials(scope:ActorScope,input:{vmId:string;jobId:string;accountId:string},db:PrismaClient=prisma,caller:OpsCaller={}){

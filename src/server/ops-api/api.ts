@@ -60,7 +60,7 @@ const routes:Route[]=[
   {method:'GET',path:/^sdks$/,scope:'READ',action:'SDK_LOOKUP',run:sdkLookup},
   {method:'GET',path:/^earnapp-accounts$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_LIST',run:accountList},
   {method:'POST',path:/^earnapp-accounts\/hold$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_HOLD',run:accountHold},
-  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/credentials$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_CREDENTIALS',run:accountCredentials,approval:true},
+  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/credentials$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_CREDENTIALS',run:accountCredentials},
   {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/used$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_USED',run:accountUsed},
   {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/release$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_RELEASE',run:accountRelease},
   {method:'GET',path:/^proxies$/,scope:'READ',action:'PROXY_STOCK',run:proxyStock},
@@ -75,8 +75,8 @@ const routes:Route[]=[
   {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare,approval:true},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status,approval:true},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt,approval:true},
-  // 23/10/2026: the full SDK code is a secret; reads show it masked, this command (approved) shows it once.
-  {method:'POST',path:new RegExp('^sdks/'+ID+'/reveal$'),scope:'VM_OPS',action:'SDK_REVEAL',run:sdkReveal,approval:true},
+  // Owner decision 24/10/2026: inventory secrets are direct with current rights; list reads remain masked and reveals audited.
+  {method:'POST',path:new RegExp('^sdks/'+ID+'/reveal$'),scope:'VM_OPS',action:'SDK_REVEAL',run:sdkReveal},
   // Real machines (21/10/2026): take a VM in hand, steps, the full proxy of that VM, the SDK of this install, status, Blocked, notes.
   {method:'GET',path:new RegExp('^jobs/'+ID+'$'),scope:'READ',action:'JOB',run:jobDetail},
   {method:'POST',path:new RegExp('^vms/'+ID+'/claim$'),scope:'VM_OPS',action:'VM_CLAIM',run:claim},
@@ -509,7 +509,7 @@ async function sdkReveal(c:Ctx,[sdkId]:string[]){
     const s=await tx.sdkRecord.findFirst({where:{id:sdkId,projectId},select:{id:true,code:true,revision:true,linkState:true,vm:{select:{id:true,code:true,server:{select:{code:true}}}}}});
     if(!s)throw fail('NOT_FOUND','Không có mã SDK này trong dự án');
     await tx.auditLog.create({data:{projectId,userId:c.token.userId,action:'SDK_REVEAL',entity:'SdkRecord',entityId:s.id,changes:{tokenId:c.token.id,requestId:c.requestId}}});
-    return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ chỉ trả một lần sau khi ADMIN duyệt; không ghi vào nhật ký máy hay chat'};
+    return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ được trả theo quyền hiện tại; không ghi vào nhật ký máy hay chat'};
   });
 }
 const cycleN=z.number().int().min(1),rev=z.number().int().min(0),opsNote=z.string().max(500).nullish();

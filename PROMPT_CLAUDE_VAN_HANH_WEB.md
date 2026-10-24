@@ -4,7 +4,7 @@ Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. Mo
 
 ## 0. Mục tiêu vận hành từ kho — chủ bổ sung 23/10/2026
 
-- Chủ nhập hàng vào Kho tài khoản (Gmail / Apple ID), Kho proxy và Kho SDK trên web. Khi chủ giao đúng server / VM / khoảng VM và công việc, AI đọc kho qua API, chọn hàng đủ điều kiện, giữ / gán đúng VM, lấy thông tin được duyệt rồi **thao tác cài đặt thực tế bằng AE Mini Tool**. Chủ không phải chép từng tài khoản hoặc proxy lại cho AI.
+- Chủ nhập hàng vào Kho tài khoản (Gmail / Apple ID), Kho proxy và Kho SDK trên web. Khi chủ giao đúng server / VM / khoảng VM và công việc, AI đọc kho qua API trong phạm vi quyền hiện tại, chọn hàng đủ điều kiện, giữ / gán đúng VM, lấy bí mật trực tiếp không chờ duyệt rồi **thao tác cài đặt thực tế bằng AE Mini Tool**. Chủ không phải chép từng tài khoản hoặc proxy lại cho AI.
 - Dùng tài khoản chưa dùng; Gmail hoặc Apple ID đều được nếu chủ không chỉ định loại. Đăng nhập đúng phương thức của loại đó, không đoán từ đuôi email. Tài khoản đã đăng ký và SDK đã dùng không cấp lại. Kết quả đăng ký chưa rõ thì giữ chỗ để đối chiếu.
 - VM đã có proxy hợp lệ đúng trên web thì dùng cấu hình đó. Chỉ lấy proxy FREE từ kho khi công việc cần cấp proxy; không thay proxy tốt đang dùng chỉ vì có hàng mới. Proxy BLOCKED theo luồng chủ thay trên web → AI áp cấu hình mới và kiểm thật.
 - Mỗi lần tạo / cài VM phải kiểm và ghi SDK thực sinh ra, đúng VM / UUID / lượt; có tiền thì ghi số đã quan sát và giờ đọc. Phân biệt mã hiện hành, mã dự phòng chưa dùng, mã đã dùng. Có SDK chưa dùng trong kho không tự chứng minh đó là SDK máy đang chạy.
@@ -23,6 +23,7 @@ Bạn vận hành máy thật bằng AE Mini Tool trong phạm vi chủ giao. Mo
 - Chủ tạo token **90 ngày trong UI**, scope **READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS**. **Không PAYOUT / RECEIPT**. User cần Hạ tầng / ASSIGN, EARN_BALANCE và VM_PROXY_FOR_OPS theo tác vụ. Chỉ ADMIN sửa quyền/token.
 - Nhận token qua kênh riêng, không chat/log/Git/ảnh. PowerShell: `$env:MTH_BASE = 'https://wow.lalamail.sbs'`; CMD: `set MTH_BASE=https://wow.lalamail.sbs`. Trong gói: `node bdops-proxy-app\scripts\ops-client.mjs init` chỉ hỏi token, không PIN. Đọc `me` kiểm `effective`, hạn, `limits`, `approvalRequired`, `pinRequired:false`.
 - Node ≥ 20; giữ nhật ký client khi cập nhật. Không thử mật khẩu owner cũ. Không ghi Sheet nữa. Server-02 → server-09 thuộc AE, ngoài đợt này, chỉ xử lý khi chủ giao riêng.
+- **Chủ quyết định 24/10/2026:** đọc account credentials, SDK reveal và proxy credentials trực tiếp, không approval/PIN/TOTP, không cần ADMIN có mặt. Không nới scope/quyền user/token hay dự án/server: SELECTED chỉ dữ liệu server được giao, không kho chung; bị từ chối thì báo thiếu quyền/hàng, không xin approval để vượt giới hạn. SDK reveal vẫn kiểm SDK được phép, không thêm jobId. Account/proxy giữ kiểm job ACTIVE của chính user/token đúng VM/lượt. Tệp bí mật và xoá sau dùng giữ nguyên.
 
 ## 2. Danh tính, việc và chống lặp
 
@@ -36,7 +37,7 @@ Mọi POST cần `Idempotency-Key`. Lưu key/path/body trước khi gửi. Mất
 
 - `GET earnapp-accounts?projectId=…&state=UNUSED|HELD|USED&type=GMAIL|APPLE&limit=50`: ACCOUNT_OPS, chỉ email che/loại/trạng thái/vị trí/revision. `id` là loginId kho; `accountId` mới dùng trong đường dẫn ghi, có thể null.
 - `POST earnapp-accounts/hold {projectId,vmId,expectedCycle,expectedVmRevision,jobId,loginType}`: giữ một login UNUSED theo thứ tự nhập. VM đã có tài khoản trả `already:true`; không giữ thêm. Giữ chưa có nghĩa đã đăng ký.
-- `POST earnapp-accounts/{accountId}/credentials {projectId,vmId,jobId}`: **cần duyệt**, tài khoản hiện hành và job đúng lượt. Client lưu vào tệp runtime riêng chỉ user hiện tại đọc, `~/.mth/runtime/secret-<hash>-<accountId>.json` (hoặc MTH_RUNTIME_DIR), chỉ trả secretFile; không stdout/journal/chat cho email đầy đủ, password, twoFa, token, twoFaLink, smsLink, phone. Xoá sau dùng.
+- `POST earnapp-accounts/{accountId}/credentials {projectId,vmId,jobId}`: **trực tiếp, không approval/PIN/TOTP**, ACCOUNT_OPS + quyền user/server hiện tại, tài khoản hiện hành và job ACTIVE của chính user/token đúng VM/lượt. Client lưu vào tệp runtime riêng chỉ user hiện tại đọc, `~/.mth/runtime/secret-<hash>-<accountId>.json` (hoặc MTH_RUNTIME_DIR), chỉ trả secretFile; không stdout/journal/chat cho email đầy đủ, password, twoFa, token, twoFaLink, smsLink, phone. Xoá sau dùng.
 - Sau thành công thật trên EarnApp: `POST earnapp-accounts/{accountId}/used {projectId,vmId,expectedCycle,jobId,expectedRevision,evidence}`. Muốn ghi SDK đã nối cùng giao dịch: thêm **cả** `sdkId,expectedSdkRevision`. Đã dùng vĩnh viễn, không suy từ tiền hoặc có SDK.
 - Chỉ khi biết chắc chưa đăng ký: `POST earnapp-accounts/{accountId}/release {projectId,vmId,expectedCycle,jobId,expectedRevision,reason}`. Đã đăng ký/đóng không cấp lại. Chưa rõ kết quả → giữ chỗ, báo chủ. Đọc bí mật không phải bằng chứng đăng ký, không tự cấm trả/tái cấp tài khoản chưa từng đăng ký. Chưa rõ đăng ký thì giữ chỗ; không suy tình trạng từ reveal hoặc bỏ gán.
 
@@ -48,13 +49,15 @@ Mọi POST cần `Idempotency-Key`. Lưu key/path/body trước khi gửi. Mất
 - Tìm SDK chưa dùng: `GET sdks?projectId=…&state=UNLINKED&place=STOCK&limit=50` (READ), không cần biết code. Lấy **sdkId + revision**, code chỉ che; nextCursor → cursor, null là hết. Lọc state=UNLINKED/LINKED/UNCONFIRMED, place=STOCK/VM. Có code thì lookup cũ, không nextCursor. Không dùng mã che làm mã thật; tiền theo quyền đọc.
 - `POST vms/{vmId}/sdk-assign {projectId,expectedCycle,expectedVmRevision,jobId,sdkId,expectedSdkRevision}`: UNLINKED trong kho/danh sách chính VM làm mã hiện hành; mã cũ ở lại danh sách. UNCONFIRMED/LINKED/mã VM khác bị từ chối. Không dùng route SDK lần cài lấy mã VM khác.
 - `POST vms/{vmId}/sdk-linked {projectId,expectedCycle,jobId,sdkId,expectedSdkRevision,accountId,evidence}`: sau nối thật, đúng SDK/tài khoản hiện hành; không có expectedVmRevision ở request này. LINKED vĩnh viễn.
-- SDK bị che trong câu trả lời thường; chỉ `POST sdks/{sdkId}/reveal {projectId}` sau **duyệt** lấy mã đầy đủ. Không mã đầy đủ trong chat/log. Lưu SDK, gán tài khoản, ghi đã nối là ba sự kiện riêng.
+- SDK bị che trong câu trả lời thường; `POST sdks/{sdkId}/reveal {projectId}` lấy mã đầy đủ **trực tiếp, không approval/PIN/TOTP**, với VM_OPS + quyền đọc và SDK thuộc phạm vi dự án/server hiện tại; không thêm jobId. Không mã đầy đủ trong chat/log; giữ luồng xử lý bí mật của client hiện có. Lưu SDK, gán tài khoản, ghi đã nối là ba sự kiện riêng.
 
-## 5. Duyệt CLI 2FA hoặc web
+## 5. Chỉ duyệt tài chính bằng CLI 2FA hoặc web
 
-Account credentials và SDK reveal cần duyệt. Proxy của đúng VM đang nhận việc lấy trực tiếp, không cần duyệt. Payout prepare/status/receipts cũng cần duyệt nhưng token này không được gọi. Cấp kho, SDK quan sát, tình trạng, ghi chú không cần duyệt.
+Account credentials, SDK reveal và proxy của đúng VM đang nhận việc lấy trực tiếp; AI không nhập PIN/TOTP hoặc gọi approve cho kho. Chỉ payout `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` cần duyệt, nhưng token này không được gọi. Cấp kho, SDK quan sát, tình trạng, ghi chú không cần duyệt.
 
-Lệnh lẻ trả 202 APPROVAL_REQUIRED (`ok:false`, chưa chạy) + approvalId/hạn 15 phút. `GET approvals/{id}?projectId=…` đọc status/summary/attemptsLeft của **chính token**.
+Yêu cầu **lẻ** lấy bí mật kho đã PENDING trước thay đổi: `retry <key>` đúng key/path/body cũ; quyền/job/server hiện tại vẫn phải hợp lệ. Không tạo key mới để né kiểm tra, không giả approval/ADMIN hoặc tìm mã TOTP; không tự đánh dấu approval cũ APPROVED/CONSUMED. Phần duyệt dưới chỉ áp dụng tài chính có quyền tương ứng, không phải bước lấy kho. Không suy quy tắc lệnh lẻ thành bỏ gate outer của lô cũ.
+
+Lệnh tài chính lẻ cần duyệt trả 202 APPROVAL_REQUIRED (`ok:false`, chưa chạy) + approvalId/hạn 15 phút. `GET approvals/{id}?projectId=…` đọc status/summary/attemptsLeft của **chính token**.
 
 Client 1.3.0: `approve <approvalId> --admin <username>` hỏi mã ẩn tại terminal (hoặc `--totp-stdin` qua ống dẫn riêng). ADMIN đúng dự án đã bật 2FA nhập mã. Không mã qua chat, đối số, generic `post`, body file/journal. Confirm gọi `POST approvals/{id}/confirm {projectId,admin,totp}` với Idempotency-Key HTTP nhưng **không lưu mã/body vào journal nghiệp vụ/client**. Gửi một lần; mất phản hồi thì đọc approval, không tự lặp mã.
 
@@ -66,7 +69,7 @@ Sai 3 mã khoá ADMIN 30 phút; 5 lần confirm sai khoá approval LOCKED; khôn
 
 `batch <file.json>` gửi POST batch, outer key và `{projectId,items:[{method:"POST",path,body,idempotencyKey}]}`. 1–100 mục, item key khác nhau, path tương đối API; không batch lồng/confirm trong lô. Không ghép lệnh phụ thuộc ID/revision chưa biết: hold trước, đọc lại rồi dùng kết quả.
 
-Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu scope, projectId mục khác lô hoặc lỗi nghiệp vụ không dừng mục khác. Một approval cho mọi mục đặc quyền, hash toàn lô.
+Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu scope, projectId mục khác lô hoặc lỗi nghiệp vụ không dừng mục khác. Chỉ mục tài chính cần duyệt mới tạo approval, hash toàn lô; account credentials / SDK reveal / proxy credentials không yêu cầu duyệt. Lô mới chỉ gồm mục kho chạy trực tiếp theo quyền hiện tại, không chờ ADMIN/PIN/TOTP.
 
 - Pending: **HTTP 202 `ok:true`**, `data.items`, `summary`, `approval`; mục chờ `status:202`, body APPROVAL_REQUIRED. Mục thường có thể đã ghi. Client WAITING_APPROVAL / exit 4.
 - Final: **HTTP 200 `ok:true` vẫn có thể có refused**. Đọc `summary.ok/refused/waiting` và từng item, không tuyên bố cả lô xong chỉ theo HTTP.

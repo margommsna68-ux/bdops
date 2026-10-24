@@ -19,7 +19,7 @@ import {validIpRule} from './safety';
 // EARN_BALANCE), like the EarnApp balance check; it opens no payout, PayPal or cost data.
 export const OPS_SCOPES=['READ','BALANCE_WRITE','PAYOUT','RECEIPT','VM_OPS','PROXY_CREDENTIALS','ACCOUNT_OPS'] as const;
 export type OpsScope=typeof OPS_SCOPES[number];
-export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp / tiền tích luỹ SDK',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút',VM_OPS:'Vận hành VM: nhận việc, ghi bước, SDK, tình trạng, Blocked, ghi chú',ACCOUNT_OPS:'Kho tài khoản EarnApp: xem danh sách che, giữ / trả / đánh dấu đã dùng cho VM đang nhận việc (thông tin đăng nhập cần ADMIN duyệt)',PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM đang xử lý'};
+export const SCOPE_LABEL:Record<OpsScope,string>={READ:'Đọc dự án / server / VM / yêu cầu rút',BALANCE_WRITE:'Ghi số dư EarnApp / tiền tích luỹ SDK',PAYOUT:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ',RECEIPT:'Ghi khoản nhận PP của yêu cầu rút',VM_OPS:'Vận hành VM: nhận việc, ghi bước, SDK, tình trạng, Blocked, ghi chú',ACCOUNT_OPS:'Kho tài khoản EarnApp: xem danh sách che, giữ / trả / đánh dấu đã dùng cho VM đang nhận việc (lấy đăng nhập theo quyền và việc đang giữ)',PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM đang xử lý'};
 export const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
 type Db=PrismaClient|Prisma.TransactionClient;
 /** Which operations this member can do now in this project (the same rules the services check). */

@@ -1,0 +1,10 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ✓ src/__tests__/ops-api/inventory-direct-access.integration.test.ts (4 tests) 1029ms
+     ✓ advertises approval only for money commands; account credentials are direct and audited without secrets  372ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  12:18:16
+   Duration  1.56s (transform 315ms, setup 22ms, import 422ms, tests 1.03s, environment 0ms)

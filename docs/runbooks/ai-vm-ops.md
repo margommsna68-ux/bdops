@@ -7,7 +7,7 @@ Thiết kế: docs/superpowers/specs/2026-10-21-ai-vm-ops-design.md. Service: `s
 ## 1. Tài khoản, quyền, bí mật
 
 - User **ai-ops** (USER, dự án MOON, module Server / VM). Quyền: đọc Server / VM; ghi tình trạng, SDK, Blocked, ghi chú (quyền ASSIGN / BLOCK của USER có
-  Server / VM); `EARN_BALANCE` (số dư); `VM_PROXY_FOR_OPS` (proxy đầy đủ của **VM đang xử lý**). 1.3.0 mở lấy thông tin đăng nhập tài khoản đang giữ sau duyệt và gán proxy đủ điều kiện từ kho. Không: nhập / replace kho proxy,
+  Server / VM); `EARN_BALANCE` (số dư); `VM_PROXY_FOR_OPS` (proxy đầy đủ của **VM đang xử lý**). Lấy thông tin đăng nhập tài khoản đang giữ, SDK reveal và proxy credentials trực tiếp theo quyền hiện tại, không approval/PIN/TOTP (chủ quyết định 24/10/2026); gán proxy đủ điều kiện từ kho theo phạm vi được cấp. Không: nhập / replace kho proxy,
   xoá kho, chi phí, người dùng, `EARN_PAYOUT`, `PAYPAL_RECEIPT_RECORD`.
 - Token theo máy: tên `<máy> · AI vận hành` (ví dụ `SERVER-01-8939C · AI vận hành`), thao tác READ, BALANCE_WRITE, VM_OPS, PROXY_CREDENTIALS, ACCOUNT_OPS, hạn **90 ngày**, chủ tạo qua UI; không PAYOUT / RECEIPT.
   Máy / AI khác → token riêng (cùng user ai-ops), để tra lịch sử theo token.
@@ -15,7 +15,9 @@ Thiết kế: docs/superpowers/specs/2026-10-21-ai-vm-ops-design.md. Service: `s
 - Proxy đầy đủ: `node scripts/ops-client.mjs proxy <projectId> <vmId> <jobId> <lượt>` → file riêng `%USERPROFILE%\.mth\proxy\<vmId>.json`
   (IP, port, user, pass, configurationId). Đưa file này cho AE Mini Tool; **xoá file sau khi cấu hình xong**. Không bao giờ in ra chat / stdout / nhật ký.
 
-**Kho / lô / duyệt CLI 1.3.0:** xem [ai-stock-batch.md](ai-stock-batch.md). Account credentials, proxy credentials và SDK reveal phải được ADMIN duyệt bằng CLI TOTP hoặc web trước khi lấy bí mật. Lô pending trả HTTP 202 `ok:true` và có thể đã ghi một số mục; không coi cả lô chưa chạy. Hold tài khoản, gán proxy / SDK từ kho, used / sdk-linked chỉ ghi web; mọi thao tác thật vẫn cần kiểm máy. Base `https://wow.lalamail.sbs`.
+**Kho / lô 1.3.0, cập nhật quyết định chủ 24/10/2026:** xem [ai-stock-batch.md](ai-stock-batch.md). Account credentials (ACCOUNT_OPS), proxy credentials (PROXY_CREDENTIALS + VM_PROXY_FOR_OPS) và SDK reveal (VM_OPS) lấy trực tiếp, không approval/PIN/TOTP, không cần ADMIN có mặt. Account/proxy cần job ACTIVE của chính user/token đúng VM/lượt; SDK reveal không thêm jobId, vẫn kiểm SDK trong phạm vi dự án/server hiện tại. Quyền user/token, giới hạn server và cấm kho chung cho SELECTED không thay đổi; thiếu quyền thì không lấy bằng approval hoặc danh tính ADMIN. Tệp bí mật và xoá sau dùng giữ nguyên.
+
+Yêu cầu **lẻ** lấy account/proxy/SDK đã PENDING trước thay đổi: `retry <key>` đúng key/path/body cũ; kiểm quyền và job/server hiện tại, không xin duyệt, không tự đổi trạng thái approval cũ. Chỉ tài chính `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` còn duyệt ADMIN/2FA; token vận hành này không PAYOUT/RECEIPT. Lô chờ tài chính vẫn trả HTTP 202 `ok:true` và có thể đã ghi mục khác; kiểm từng mục, không suy lô cũ chưa chạy hoặc đã bỏ gate. Hold, gán, used / sdk-linked chỉ ghi web; thao tác thật vẫn cần kiểm máy. Base `https://wow.lalamail.sbs`. Hướng dẫn này không xác nhận đã phát hành thay đổi.
 
 ## 2. Trên web
 

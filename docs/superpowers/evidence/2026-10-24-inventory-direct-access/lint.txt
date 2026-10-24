@@ -1,0 +1,25 @@
+
+> bdops@8.9.0 lint
+> next lint
+
+`next lint` is deprecated and will be removed in Next.js 16.
+For new projects, use create-next-app to choose your preferred linter.
+For existing projects, migrate to the ESLint CLI:
+npx @next/codemod@canary next-lint-to-eslint-cli .
+
+
+./src/app/(dashboard)/agent-pp/page.tsx
+166:9  Warning: The 'rawItems' logical expression could make the dependencies of useMemo Hook (at line 178) change on every render. To fix this, wrap the initialization of 'rawItems' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+166:9  Warning: The 'rawItems' logical expression could make the dependencies of useMemo Hook (at line 210) change on every render. To fix this, wrap the initialization of 'rawItems' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+
+./src/app/(dashboard)/agent-pp/_CollectorWalletView.tsx
+276:9  Warning: The 'items' logical expression could make the dependencies of useMemo Hook (at line 302) change on every render. To fix this, wrap the initialization of 'items' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+345:6  Warning: React Hook useMemo has a missing dependency: 'LOCK_MS'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/proxy-management/RegistryTable.tsx
+70:95  Warning: React Hook useEffect has a missing dependency: 'reset'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/TotpSetup.tsx
+65:42  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/app/api-reference/config/eslint#disabling-rules

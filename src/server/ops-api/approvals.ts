@@ -10,7 +10,7 @@ import {assertOpsToken} from './context';
 // a later retry replays through the service's own idempotency. A different body under an approved key is refused.
 export const APPROVAL_TTL_MS=15*60000;
 export type ApprovalStatus='PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'|'CONSUMED'|'LOCKED';
-export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT','VM_PROXY_CREDENTIALS','SDK_REVEAL','ACCOUNT_CREDENTIALS'] as const;
+export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT'] as const;
 export const ACTION_LABEL:Record<string,string>={BATCH:'Lô lệnh (nhiều mục cần duyệt)',ACCOUNT_CREDENTIALS:'Lấy thông tin đăng nhập tài khoản EarnApp',WITHDRAWAL_PREPARE:'Chuẩn bị rút tiền (giữ email PayPal)',WITHDRAWAL_STATUS:'Ghi trạng thái yêu cầu rút',WITHDRAWAL_RECEIPT:'Ghi tiền về PayPal',VM_PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM',SDK_REVEAL:'Xem mã SDK đầy đủ'};
 export function canonical(x:unknown):string{
   if(Array.isArray(x))return '['+x.map(canonical).join(',')+']';

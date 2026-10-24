@@ -32,7 +32,7 @@ describe('AI stocks and batch through the real HTTP handler',()=>{
    const replay=await api('POST','earnapp-accounts/hold',{token,key,body});
    expect(replay.json.data.replay).toBe(true);expect(replay.json.data.recorded).toEqual(r);
    const cred=await api('POST',`earnapp-accounts/${r.accountId}/credentials`,{token,autoApprove:false,body:{projectId:f.projectId,vmId:vm.id,jobId}});
-   expect(cred.status).toBe(202);expect(cred.text).not.toContain('Secret-pw');
+   expect(cred.status).toBe(200);expect(cred.json.data.credentials.password).toMatch(/^Secret-pw-/);expect(await db.opsApproval.count({where:{projectId:f.projectId}})).toBe(0);
    const release=await api('POST',`earnapp-accounts/${r.accountId}/release`,{token,body:{projectId:f.projectId,vmId:vm.id,expectedCycle:1,jobId,expectedRevision:r.revision,reason:'Chưa đăng ký, chủ yêu cầu trả kho'}});
    expect(release.status).toBe(200);expect(release.json.data.recorded.released).toBe(true);
    const noScope=await f.token(f.ai,['READ']);

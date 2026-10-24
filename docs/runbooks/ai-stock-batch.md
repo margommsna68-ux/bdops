@@ -10,6 +10,10 @@ Chủ tạo token **90 ngày trong UI**, đúng dự án GROUP MOON, cho user v�
 
 Nạp token ở terminal riêng bằng `node scripts/ops-client.mjs init`. Trong PowerShell đặt `$env:MTH_BASE = 'https://wow.lalamail.sbs'`. Không PIN. Đọc `me` để kiểm `effective`, `pinRequired:false`, `limits` và `approvalRequired`; `projects` lấy projectId thật, không dùng mã MOON thay ID. Không thử đăng nhập owner bằng mật khẩu cũ.
 
+**Chủ quyết định 24/10/2026:** account credentials, SDK reveal và proxy credentials lấy trực tiếp để AI vận hành không cần người trực duyệt; không approval, không PIN/TOTP. Vẫn kiểm quyền user/token, dự án/server hiện tại và job đúng VM/lượt ở các route cần job. SELECTED không có quyền kho chung; bỏ duyệt không mở stock/route hoặc server đang bị từ chối. SDK reveal không nhận jobId, vẫn phải là SDK trong phạm vi được phép. Giữ nguyên tệp bí mật và cách xoá sau dùng. Đây không phải xác nhận đã deploy.
+
+Lệnh **lẻ** lấy bí mật đã chờ duyệt trước thay đổi: `retry <key>` đúng key/path/body cũ, kiểm quyền/job/server hiện tại, không gọi approve hoặc giả ADMIN. Không tự đổi trạng thái approval cũ. Quy tắc này không hứa bỏ gate outer của một lô cũ; lô vẫn cần đối chiếu từng mục.
+
 Mọi POST cần `Idempotency-Key` (8–100 ký tự `A-Za-z0-9._:-`). Mất phản hồi: giữ nguyên key / path / body, `retry <key>`. Chỉ đổi key khi đã đối chiếu kết quả cũ và thực sự gửi lệnh mới. Việc idempotent trên web không bảo đảm một thao tác máy thật chỉ chạy một lần.
 
 ## Kho tài khoản
@@ -21,7 +25,7 @@ Trước khi cấp: resolve VM → đọc VM / lượt / revision → claim → 
 | POST (đường dẫn tương đối) | Body bắt buộc ngoài projectId | Ý nghĩa |
 |---|---|---|
 | `earnapp-accounts/hold` | `vmId, expectedCycle, expectedVmRevision, jobId, loginType` | Giữ một login UNUSED theo thứ tự nhập; VM đã có tài khoản hiện hành trả `already:true`. Không chứng minh đã đăng ký. |
-| `earnapp-accounts/{accountId}/credentials` | `vmId, jobId` | **Cần duyệt**; job vẫn phải đúng lượt hiện tại. Trả email, password, twoFa, token, twoFaLink, smsLink, phone (các bí mật có thể null). |
+| `earnapp-accounts/{accountId}/credentials` | `vmId, jobId` | **Trực tiếp, không approval/PIN/TOTP**; tài khoản hiện hành, job ACTIVE của chính user/token đúng VM/lượt và quyền server hiện tại. Trả email, password, twoFa, token, twoFaLink, smsLink, phone (các bí mật có thể null). |
 | `earnapp-accounts/{accountId}/used` | `vmId, expectedCycle, jobId, expectedRevision, evidence` | Chỉ ghi sau khi quan sát đăng ký / đăng nhập thành công thật. Thêm `sdkId` thì bắt buộc thêm `expectedSdkRevision`; đánh dấu SDK hiện hành đã nối trong cùng giao dịch. |
 | `earnapp-accounts/{accountId}/release` | `vmId, expectedCycle, jobId, expectedRevision, reason` | Chỉ tài khoản chưa đăng ký; đã dùng / đã đóng không được phát lại. Kết quả đăng ký chưa rõ thì giữ chỗ, không release. |
 
@@ -37,7 +41,7 @@ Client lưu credential vào tệp runtime riêng có ACL chỉ user hiện tại
 
 SDK trong kho: `GET sdks?projectId=…&state=UNLINKED&place=STOCK&limit=50` (READ) để tìm **sdkId và revision** mà không cần biết mã đầy đủ. Không có `code` → danh sách theo thời điểm tạo rồi ID; `nextCursor` dùng làm `cursor` trang sau (null là hết), limit 1–200, mặc định 50. Lọc state=UNLINKED/LINKED/UNCONFIRMED, place=STOCK/VM; STOCK nghĩa holderVmId và vmId đều trống, VM nghĩa ít nhất một trường có giá trị. Item danh sách có `found:true`, code che, inListOf/currentOf và tiền theo quyền hiện có. `GET sdks?projectId=…&code=<mã đầy đủ>` vẫn lookup cũ, có thể `found:false`, không nextCursor. Không dùng mã che để gán; dùng sdkId + revision từ danh sách.
 
-Các lệnh dưới cần VM_OPS, ASSIGN và job đang giữ của chính token, đúng VM / lượt; **gán không cần duyệt**, lấy bí mật vẫn cần duyệt.
+Các lệnh gán dưới cần VM_OPS, ASSIGN và job đang giữ của chính token, đúng VM / lượt. Gán và lấy bí mật kho **không cần duyệt/PIN/TOTP**; scope, quyền user, phạm vi server và điều kiện job theo từng route vẫn giữ.
 
 | POST | Body bắt buộc ngoài projectId | Kiểm tra / kết quả |
 |---|---|---|
@@ -45,15 +49,15 @@ Các lệnh dưới cần VM_OPS, ASSIGN và job đang giữ của chính token,
 | `vms/{vmId}/proxy-credentials` | `expectedCycle, jobId` | PROXY_CREDENTIALS + quyền user; **không cần duyệt** (24/10/2026), việc đúng VM/lượt còn hiệu lực, tệp riêng, xoá sau khi áp trên máy thật. |
 | `vms/{vmId}/sdk-assign` | `expectedCycle, expectedVmRevision, jobId, sdkId, expectedSdkRevision` | Chỉ UNLINKED trong kho hoặc danh sách chính VM; mã cũ vẫn ở danh sách VM; UNCONFIRMED / LINKED / mã VM khác bị từ chối. |
 | `vms/{vmId}/sdk-linked` | `expectedCycle, jobId, sdkId, expectedSdkRevision, accountId, evidence` | SDK hiện hành và tài khoản mở hiện hành của VM; ghi sau khi nối thật, vĩnh viễn. Không có expectedVmRevision ở request này. |
-| `sdks/{sdkId}/reveal` | — | VM_OPS; **cần duyệt**; mã đầy đủ chỉ dùng trong luồng bí mật, không vào log/chat. |
+| `sdks/{sdkId}/reveal` | — | VM_OPS + quyền đọc và SDK trong phạm vi dự án/server hiện tại; **trực tiếp, không approval/PIN/TOTP**, không yêu cầu jobId; mã đầy đủ chỉ dùng trong luồng bí mật, không vào log/chat. |
 
 `package` là bộ lọc URL, `pick.packageCode` là trường service, không dùng `pick.package`. Đọc revision SDK từ VM detail hoặc lookup `sdks`; mã trong câu trả lời thường bị che, không dùng mã che làm mã SDK thật. Ghi SDK mới đọc từ lần cài (`vms/{id}/sdk`) khác với dùng mã có sẵn (`sdk-assign`); không dùng đường ghi mã lần cài để lấy mã từ VM khác.
 
-## Duyệt bằng CLI hoặc web
+## Chỉ duyệt tài chính bằng CLI hoặc web
 
-Các lệnh cần duyệt: account credentials, SDK reveal; payout prepare / status / receipts cũng cần duyệt nhưng token vận hành đợt này **không có scope** để gọi chúng. Gán kho, ghi SDK quan sát, tình trạng, ghi chú không tự phát sinh duyệt.
+Chỉ payout `withdrawals/prepare`, `withdrawals/{id}/status`, `withdrawals/{id}/receipts` cần duyệt; token vận hành đợt này **không có scope** để gọi chúng. Account credentials, SDK reveal, proxy credentials, gán kho, ghi SDK quan sát, tình trạng và ghi chú không phát sinh duyệt. Phần confirm dưới đây chỉ dành cho lệnh tài chính có quyền tương ứng, không phải bước vận hành kho.
 
-Lệnh lẻ trả **202 `{ok:false,data:null,error:{code:"APPROVAL_REQUIRED",details:{approvalId,status:"PENDING",expiresAt}}}`**; chưa thực hiện lệnh đó. Hạn 15 phút; chỉ ADMIN đúng dự án đã bật 2FA quyết định được.
+Lệnh tài chính lẻ cần duyệt trả **202 `{ok:false,data:null,error:{code:"APPROVAL_REQUIRED",details:{approvalId,status:"PENDING",expiresAt}}}`**; chưa thực hiện lệnh đó. Hạn 15 phút; chỉ ADMIN đúng dự án đã bật 2FA quyết định được.
 
 1. `GET approvals/{approvalId}?projectId=…` (READ) chỉ đọc approval của chính token: status, summary, expiresAt, attemptsLeft, decidedAt, consumedAt, decisionNote; không bí mật.
 2. `node scripts/ops-client.mjs approve <approvalId> --admin <username>` hỏi mã ẩn trên TTY; `--totp-stdin` chỉ dùng ống dẫn riêng không lưu mã. Không gõ mã vào đối số, body file, generic `post`, chat hay nhật ký.
@@ -68,7 +72,7 @@ Gate lệnh gốc: REJECTED hoặc LOCKED → **403 APPROVAL_REJECTED**, LOCKED 
 
 Mỗi mục đi qua scope / service / audit / replay riêng, chạy **tuần tự**; mục sai route, thiếu scope hoặc bị service từ chối không dừng mục khác. Đây không phải giao dịch nguyên lô. Body lô sai cấu trúc, key trùng hoặc outer key đổi nội dung vẫn có thể làm cả request bị từ chối.
 
-- Có mục đặc quyền: một approval cho các mục đó, hash ràng buộc toàn lô. Trong khi chờ, mục thường vẫn chạy. Outer trả **HTTP 202, `ok:true`**, `data:{batchKey,approval,items,summary}`; mỗi mục chờ có `status:202` và body `ok:false / APPROVAL_REQUIRED`.
+- Có mục tài chính cần duyệt: một approval cho các mục đó, hash ràng buộc toàn lô. Các mục đọc bí mật kho không tự yêu cầu approval; lô mới chỉ có mục kho không chờ ADMIN/PIN/TOTP. Trong khi chờ tài chính, mục thường vẫn chạy. Outer trả **HTTP 202, `ok:true`**, `data:{batchKey,approval,items,summary}`; mỗi mục chờ có `status:202` và body `ok:false / APPROVAL_REQUIRED`.
 - Hết mục chờ: outer **200, `ok:true`**, kể cả có mục bị từ chối. Luôn đọc `summary:{ok,refused,waiting}` và từng `items[]:{index,path,idempotencyKey,status,body}`. HTTP 200 không có nghĩa mọi mục thành công.
 - Retry cùng outer key / body sau duyệt: mục đã xong replay, mục đã được duyệt chạy. Lưu key và payload trước khi gửi; outer key ràng buộc bền với payload kể cả lô không cần duyệt. Không lưu secret results trong bản ghi outer key; client cũng phải che credential / reveal khỏi journal và stdout.
 - Lệnh `batch <file.json>` của client mới giữ journal cho lô; `approve` duyệt rồi retry lô liên quan. Pending vẫn WAITING_APPROVAL (exit 4) dù outer `ok:true`. Khi final có refused, báo từng mục, không tuyên bố DONE toàn bộ chỉ theo outer ok. Mất phản hồi → UNKNOWN (exit 3), không gửi lô mới.

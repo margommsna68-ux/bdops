@@ -56,7 +56,7 @@ describe('ops API without PIN; approvals for critical commands',()=>{
       expect(exp.status).toBe(410);expect(exp.json.error?.code).toBe('APPROVAL_EXPIRED');
     }finally{await db.opsApproval.deleteMany({where:{projectId:f.projectId}});await db.userBackupCode.deleteMany({where:{userId:f.scope.userId}});await f.cleanup();}
   });
-  it('SDK codes are masked in every read; the full code needs an approved reveal',async()=>{
+  it('SDK codes are masked in list reads; a scoped reveal returns directly without approval',async()=>{
     offset=-30000;const f=await setup();try{
       const t=await f.token(f.ai,['READ','BALANCE_WRITE','PAYOUT']),v0=await f.vmNow(0),code='sdk-win-'+f.x+'-abcdef123456';
       const vm=await db.virtualMachine.findUniqueOrThrow({where:{id:v0.id}});
@@ -68,14 +68,11 @@ describe('ops API without PIN; approvals for critical commands',()=>{
       const look=await api('GET','sdks?projectId='+f.projectId+'&code='+encodeURIComponent(code),{token:t});
       expect(look.json.data.items[0]).toMatchObject({found:true,code:'sdk-…3456',sdkId:item.id});
       expect(look.text).not.toContain(code);
-      // Reveal: VM_OPS token + approval.
+      // Current owner policy: VM_OPS scope, audited direct read, no ADMIN interaction.
       const tv=await f.token(f.ai,['READ','VM_OPS' as never]),key=randomUUID();
-      const held=await api('POST','sdks/'+item.id+'/reveal',{token:tv,pin:null,key,body:{projectId:f.projectId},autoApprove:false});
-      expect(held.status).toBe(202);expect(held.text).not.toContain(code);
-      const secret=await enableTotp(f.scope.userId);
-      await decideApproval(db,{approvalId:held.json.error!.details.approvalId,actorId:f.scope.userId,projectId:f.projectId,approve:true,code:nextCode(secret)});
       const shown=await api('POST','sdks/'+item.id+'/reveal',{token:tv,pin:null,key,body:{projectId:f.projectId},autoApprove:false});
       expect(shown.status).toBe(200);expect(shown.json.data.code).toBe(code);
+      expect(await db.opsApproval.count({where:{projectId:f.projectId}})).toBe(0);
     }finally{await db.opsApproval.deleteMany({where:{projectId:f.projectId}});await db.userBackupCode.deleteMany({where:{userId:f.scope.userId}});await db.vMSdkHistory.deleteMany({where:{vmId:{in:f.vms.map(v=>v.id)}}});await f.cleanup();}
   });
 });

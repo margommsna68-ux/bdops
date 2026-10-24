@@ -14,7 +14,7 @@ export const TOKEN_SCOPES:{value:Scope;label:string}[]=[
   {value:'BALANCE_WRITE',label:'Ghi số dư EarnApp / tiền tích luỹ SDK'},
   {value:'VM_OPS',label:'Vận hành VM: nhận việc, tình trạng, Blocked, ghi SDK, ghi chú'},
   {value:'PROXY_CREDENTIALS',label:'Lấy proxy của đúng VM đang xử lý'},
-  {value:'ACCOUNT_OPS',label:'Kho tài khoản: xem, giữ / trả, ghi đã dùng; lấy đăng nhập cần ADMIN duyệt'},
+  {value:'ACCOUNT_OPS',label:'Kho tài khoản: xem, giữ / trả, ghi đã dùng; lấy đăng nhập theo quyền và việc đang giữ'},
   {value:'PAYOUT',label:'Gợi ý PP, chuẩn bị rút, ghi đã gửi / chưa rõ'},
   {value:'RECEIPT',label:'Ghi khoản nhận PP của yêu cầu rút'},
 ];
@@ -42,7 +42,7 @@ export function OpsTokensPanel({projectId,userId,who}:{projectId:string;userId:s
     <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold">Kết nối API <span className="text-sm font-normal text-gray-500">· {who}</span></h2>
       {/* Hidden while a new token is on screen: a stray (double) click must never hide the one-time token before "Đã lưu". */}
       {!open&&!shown&&<Button size="sm" disabled={!can.length} onClick={()=>{setOpen(true);setScopes(can.filter(s=>s.value==='READ').map(s=>s.value));}}>Tạo token</Button>}</div>
-    <p className="text-xs text-gray-500">Token chỉ dùng cho /api/ops/v1, trong đúng quyền hiện tại của {who.split(' · ')[0]}. Lệnh quan trọng (rút tiền, proxy đầy đủ, mã SDK) chờ ADMIN duyệt ở trang Phê duyệt; token không tự thêm quyền.</p>
+    <p className="text-xs text-gray-500">Token chỉ dùng cho /api/ops/v1, trong đúng quyền hiện tại của {who.split(' · ')[0]}. Lấy thông tin kho không cần duyệt; vẫn kiểm quyền và server được giao. Lệnh tiền chờ ADMIN duyệt ở trang Phê duyệt; token không tự thêm quyền.</p>
     {shown&&<div role="status" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm space-y-2 text-gray-900">
       <p className="font-semibold">Token {shown.prefix}… chỉ hiện một lần. Lưu ngay vào kho bí mật của máy chạy; không gửi qua chat, không dán vào lệnh hay file commit.</p>
       <div className="flex flex-wrap gap-2 items-center"><code className="break-all text-xs bg-white border rounded px-2 py-1 flex-1 min-w-0" data-testid="ops-token-once">{shown.token}</code>
