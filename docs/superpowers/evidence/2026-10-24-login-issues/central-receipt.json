@@ -1,0 +1,28 @@
+{
+  "copied": [
+    {
+      "path": "C:/Users/Administrator/Desktop/MoneyToHome/PROMPT_CLAUDE_VAN_HANH_WEB.md",
+      "sha256": "1d9723c05e9c9cdf459a06fe82744dff2aa636da6bef0f07be874fdd4d168e7a"
+    },
+    {
+      "path": "C:/Users/Administrator/Desktop/MoneyToHome/CAP_NHAT_LOI_DANG_NHAP_20261024.md",
+      "sha256": "968b0d47ed3a0c41fb4b4eeb75b376194e5e07f12f10bb7f6b8a1b82dc449cc1"
+    },
+    {
+      "path": "C:/Users/Administrator/Desktop/MoneyToHome/OPENAPI_WEB_HIEN_TAI.json",
+      "sha256": "7a574e4cf0d138207a672b5f6234965d6ce032ee09ad865cb28f34f0736a6c1c"
+    }
+  ],
+  "entrypointUpdated": true,
+  "connection": {
+    "connected": true,
+    "approvalRequired": [
+      "WITHDRAWAL_PREPARE",
+      "WITHDRAWAL_STATUS",
+      "WITHDRAWAL_RECEIPT"
+    ],
+    "inventoryNeedsApproval": false
+  },
+  "vmDataWritten": false,
+  "tokenOrPinChanged": false
+}

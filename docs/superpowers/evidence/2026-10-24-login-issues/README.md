@@ -19,3 +19,11 @@ No stock: records issue, keeps old account bound and reports NO_STOCK. SELECTED 
 - Harness corrections: dev Node native TS loading failed on the old Tailwind require; local process flag restored the existing loader (no Tailwind source change). Browser sign-in changed to the normal local auth HTTP flow because first-render form clicks preceded hydration; UI PIN still entered normally. Sort test waits for URL navigation before reload; light theme correctly has no data-theme attribute. Generated bronze colors rebuilt for new badge utilities.
 
 Release and host verification are appended after deployment.
+
+## Release
+
+Code 9c8762a, build -PMAO_jONEP3IpqVo7_X0, deployed SERVER-01 24/10/2026 15:51 Bangkok. Additive migration 20261024140000_login_issues applied; generated Prisma client copied with the tested schema. Public build and health 200; Web and Tunnel running. Before/after identity/status/revision/financial-link snapshot hash equal (678 VM, 148 login accounts, 1 EarnApp, 570 SDK, 0 payout requests); new metadata columns present, zero real issue reports. No host login was marked, replaced or deleted; no real machine login operation was performed. Rollback app D:\MoneyToHome\app-before-login-issues-20261024.
+
+Backup moneytohome-20261024-154908.dump plus encrypted/decryption-verified moon-01 copy, SHA-256 88f0c63fe7fab0a49ba67f3e107f07f043b23d60ed574fb5b09a5b06b8e44a55.
+
+Central current prompt, CAP_NHAT_LOI_DANG_NHAP_20261024.md and OPENAPI_WEB_HIEN_TAI.json (1.4.0) copied into Desktop/MoneyToHome and SHA-256 verified. AGENTS entry appended. Existing launcher me confirms connected; no token/PIN changed and no VM task started. Generic post in existing client supports the endpoint without a new installation. New top-level schema/instructions override old schema within earlier handoff bundles for this command.

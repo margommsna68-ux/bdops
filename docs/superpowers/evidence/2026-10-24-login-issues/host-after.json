@@ -1,0 +1,13 @@
+{
+  "readOnly": true,
+  "counts": {
+    "vms": 678,
+    "logins": 148,
+    "accounts": 1,
+    "sdk": 570,
+    "requests": 0
+  },
+  "hash": "6fb93694ebfd1b929f83e9fe5c38b138ae53c6bfde2c026d62a34f373bab9169",
+  "issueColumns": 2,
+  "issueCount": 0
+}
