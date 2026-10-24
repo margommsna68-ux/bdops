@@ -32,9 +32,10 @@
 .vm-scope-total{color:var(--ds-text-primary);white-space:nowrap}.vm-scope-total strong{font-weight:650}
 .vm-scope-servers{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
 .vm-chip-sm{padding:2px 8px;font-size:11px;line-height:16px}
-.vm-scope-copy{margin-left:auto;padding:3px 9px;font-size:12px}
+.vm-scope-actions{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap;min-width:0}
+.vm-scope-copy{padding:3px 9px;font-size:12px}
 .vm-filter-tag{display:inline-flex;align-items:center;gap:2px;padding:1px 4px 1px 8px;border-radius:999px;border:1px solid var(--ds-border);background:var(--ds-card);color:var(--ds-text-primary);font-size:11px;line-height:18px}
-@media(max-width:700px){.vm-scope-copy{margin-left:0}}
+@media(max-width:700px){.vm-scope-actions{margin-left:0}}
 .vm-pager{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 12px;border-top:1px solid var(--ds-border);flex-wrap:wrap}.vm-pager-top{border-top:1px solid var(--ds-border);border-bottom:1px solid var(--ds-border)}
 .vm-pager .pm-button{padding:4px 9px}
 .vm-size{width:auto;padding:4px 8px;font-size:12px}
@@ -239,6 +240,10 @@ a.acc-state{text-decoration:none}a.acc-state:hover{text-decoration:underline}
 .vm-sdk-state-free{color:#047857;font-weight:600}.vm-sdk-state-linked{color:#1d4ed8;font-weight:600}.vm-sdk-state-unconfirmed{color:#b45309;font-weight:600}
 [data-theme="dark"] .vm-sdk-state-free{color:#34d399}[data-theme="dark"] .vm-sdk-state-linked{color:#93c5fd}[data-theme="dark"] .vm-sdk-state-unconfirmed,[data-theme="dark"] .vm-sdk-draft{color:#fbbf24}
 .vm-proxy-trigger{gap:2px}
+.vm-proxy-package{display:block;max-width:100%;font-size:11px;line-height:14px;color:var(--ds-text-secondary);font-weight:400}
+.vm-proxy-report{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0}
+.vm-proxy-report .pm-button{font-size:12px}
+.vm-proxy-report>span{font-size:11px;color:var(--ds-text-secondary)}
 .vm-proxy-state{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:650;line-height:15px;width:fit-content;border-radius:4px;padding:0 5px}
 .vm-proxy-state-missing,.vm-proxy-state-deleted{color:var(--ds-text-secondary);background:var(--ds-hover)}
 .vm-proxy-state-pending{color:#92400e;background:rgba(245,158,11,.16)}

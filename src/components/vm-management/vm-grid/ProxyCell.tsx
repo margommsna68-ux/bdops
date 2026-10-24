@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Copy,Loader2,Search} from 'lucide-react';
+import {Copy,Loader2,Search,ShieldAlert} from 'lucide-react';
 import toast from 'react-hot-toast';
 import {trpc} from '@/lib/trpc';
 import {useBusinessKey} from '@/components/business-management/shared';
@@ -13,7 +13,7 @@ import {useAnchored} from './SdkCell';
 // and only the warnings that matter (Blocked, Cần kiểm tra). Clicking the content opens "Thay proxy" next to the cell: the current
 // proxy, a proxy of the stock (search / paste, checked while choosing) or the proxy the provider sent as replacement, one Áp dụng.
 // The button is muted while nothing would change and blue for a valid change; the current proxy again is no change.
-export interface ProxyRights {assign:boolean;copy:boolean;replace:boolean}
+export interface ProxyRights {assign:boolean;copy:boolean;replace:boolean;block?:boolean}
 export type ProxyTone='none'|'ok'|'blocked'|'review';
 export function proxyCellInfo(v:ManagedVM){
   const view=vmView(v),cur=currentOf(v),config=[v.desired,v.installed].find(c=>c&&c.endpointId===cur.endpointId)||null;
@@ -25,7 +25,7 @@ export function proxyCellInfo(v:ManagedVM){
   const tone:ProxyTone=view==='BLOCKED'?'blocked':view==='REVIEW'?'review':config?'ok':'none';
   const warning=view==='BLOCKED'?'Blocked':view==='REVIEW'?'Cần kiểm tra':null;
   const reason=view==='REVIEW'?(cur.review?(candidates.length>1?'Có nhiều proxy cũ trên VM ('+candidates.map(c=>proxyAddress(c)).join(', ')+'); chọn proxy đang dùng':'Chưa rõ VM có dùng '+proxyAddress(candidates[0])+' không; bấm Dùng nếu đúng là proxy đang dùng, hoặc chọn proxy khác'):hold&&hold.owner!=='SELF'&&!hold.shared?'Proxy Genjy / chưa rõ sở hữu':hold?'Proxy đang '+hold.state+'; thay proxy':'Ô cũ chưa đọc được; chọn proxy'):view==='BLOCKED'?'Proxy BLOCKED: thay bằng proxy dự phòng hoặc nhận replace từ nhà cung cấp':null;
-  return {view,tone,current:config?{endpointId:config.endpointId,ip:config.ip,port:config.port,state:hold?.state??null}:null,warning,reason,candidates};
+  return {view,tone,current:config?{endpointId:config.endpointId,ip:config.ip,port:config.port,packageCode:config.packageCode??hold?.packageCode??null,state:hold?.state??null}:null,warning,reason,candidates};
 }
 const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
 type Check={outcome:'READY'|'SKIP'|'ERROR';message:string;endpointId:string|null;label:string|null};
@@ -42,6 +42,7 @@ export function ProxyCell({projectId,vm,rights,onCopy,onBusy}:{projectId:string;
       {info.view==='REVIEW'&&info.candidates.length>1?<div className="vm-proxy">{info.candidates.map(c=><div key={c.endpointId} className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={c.label}>{proxyAddress(c)}</span></div>)}</div>
         :shown?<div className="vm-proxy-line"><span className="pm-ip vm-ellipsis" title={proxyAddress(shown)}>{proxyAddress(shown)}</span>{rights.copy&&info.current&&<button type="button" className="vm-cell-icon" aria-label={'Copy proxy '+vm.code} title="Copy proxy (chỉ copy)" onClick={e=>{e.stopPropagation();onCopy(vm);}} onKeyDown={e=>e.stopPropagation()}><Copy size={13}/></button>}</div>
         :<span className="pm-muted vm-proxy-line">—</span>}
+      {info.current?.packageCode&&<span className="vm-proxy-package vm-ellipsis" title={'Gói '+info.current.packageCode}>Gói {info.current.packageCode}</span>}
       {info.warning&&<span className={'vm-proxy-state vm-proxy-state-'+(info.tone==='blocked'?'review':'failed')}>{info.warning}</span>}
       {vm.applyPending&&vm.ops!=='PROXY_PENDING'&&<span className="vm-apply-mark" title="Web đã có proxy mới; máy thật chưa áp dụng / chưa kiểm tra">Chờ áp dụng trên máy</span>}
     </div>
@@ -54,6 +55,16 @@ export function ChangeProxy({projectId,vm,info,rights,onBusy,onDone,onCancel}:{p
   const blocked=info.tone==='blocked'&&!!info.current;
   const [tab,setTab]=useState<'stock'|'replace'>('stock'),[q,setQ]=useState(''),[picked,setPicked]=useState<string|null>(null),[check,setCheck]=useState<{sig:string;r:Check}|null>(null),[error,setError]=useState(''),[saving,setSaving]=useState(false);
   const eligible=trpc.vmManagement.eligible.useQuery({projectId},{enabled:rights.assign,staleTime:10000}),probe=trpc.vmManagement.proxyCheck.useMutation(),change=trpc.vmManagement.changeProxy.useMutation(),refresh=useVMRefresh(),keyFor=useBusinessKey(),seq=useRef(0);
+  const report=trpc.vmOps.setStatus.useMutation();
+  const [reportTarget]=useState(()=>({vmId:vm.id,status:'PROXY_BLOCKED' as const,expectedCycle:vm.cycle,expectedRevision:vm.opsRevision,expectedEndpointId:info.current?.endpointId??null}));
+  const reportStale=vm.id!==reportTarget.vmId||vm.cycle!==reportTarget.expectedCycle||(info.current?.endpointId??null)!==reportTarget.expectedEndpointId||vm.opsRevision!==reportTarget.expectedRevision;
+  async function reportBlocked(){
+    if(!rights.block||!rights.assign||!reportTarget.expectedEndpointId||reportStale||saving)return;
+    setSaving(true);onBusy(true);setError('');
+    const input={projectId,items:[reportTarget]};
+    try{const r=await report.mutateAsync({...input,key:keyFor(input)});const row=r.rows[0];if(!row||row.outcome==='ERROR')throw new Error(row?.message||'Chưa ghi được BLOCKED');await refresh();toast.success(vm.code+': '+row.message);onBusy(false);setSaving(false);onDone();}
+    catch(e){setError(errorMessage(e));setSaving(false);onBusy(false);}
+  }
   const text=q.trim(),list=useMemo(()=>{const n=text.toLowerCase();return (eligible.data||[]).filter(p=>!n||(p.ip+':'+p.port).includes(n)).slice(0,60);},[eligible.data,text]);
   // What is being checked: a picked row, else the pasted text when it is not just a search inside the list.
   const target=picked?{endpointId:picked}:text&&!list.some(p=>p.ip+':'+p.port===text)&&/^\d{1,3}(\.\d{1,3}){3}/.test(text)&&(text.split(':').length>=2||!list.length)?{text}:null,sig=JSON.stringify(target);
@@ -68,7 +79,10 @@ export function ChangeProxy({projectId,vm,info,rights,onBusy,onDone,onCancel}:{p
   return <div className="space-y-2 text-sm">
     <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · Thay proxy</p>
     <p className="text-xs">Đang dùng: {info.current?<><strong className="pm-ip">{proxyAddress(info.current)}</strong>{info.warning?<span className={'vm-proxy-state vm-proxy-state-'+(blocked?'review':'failed')}> {info.warning}</span>:null}</>:info.candidates.length?<span className="text-amber-700">cần đối chiếu: {info.candidates.map(c=>proxyAddress(c)+' ('+c.label+')').join(', ')}</span>:<span className="pm-muted">chưa có proxy</span>}</p>
+    {info.current?.packageCode&&<p className="text-xs pm-muted">Gói {info.current.packageCode}</p>}
     {info.reason&&<p className="text-xs pm-muted">{info.reason}</p>}
+    {rights.block&&rights.assign&&reportTarget.expectedEndpointId&&!blocked&&<div className="vm-proxy-report"><button type="button" className="pm-button pm-button-quiet" disabled={saving||reportStale} onClick={()=>void reportBlocked()}><ShieldAlert size={14}/>Báo proxy BLOCKED</button><span>Ghi cho proxy đang dùng ở cả VM và Kho proxy.</span></div>}
+    {reportStale&&<p role="alert" className="vm-status-error">Proxy hoặc lượt VM đã đổi, hoặc tình trạng vừa được cập nhật. Đóng khung rồi mở lại để kiểm tra.</p>}
     {!rights.assign?<p className="text-xs pm-muted">Chỉ xem: tài khoản chưa có quyền gán proxy.</p>:<>
     {blocked&&<div className="vm-kind-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab==='stock'} className={tab==='stock'?'active':''} onClick={()=>setTab('stock')}>Proxy trong kho</button><button type="button" role="tab" aria-selected={tab==='replace'} className={tab==='replace'?'active':''} onClick={()=>setTab('replace')}>Nhận replace</button></div>}
     {tab==='stock'?<>

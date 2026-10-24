@@ -12,7 +12,7 @@ const scope=(ctx:{prisma:Parameters<typeof loadInfrastructureScope>[0];user:{id:
 export const vmOpsRouter=router({
   board:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readVmOps(await scope(ctx,input.projectId),ctx.prisma))),
   history:protectedProcedure.input(project.extend({vmId:id})).query(({ctx,input})=>domain(async()=>readVmOpsHistory(await scope(ctx,input.projectId),input,ctx.prisma))),
-  setStatus:protectedProcedure.input(project.extend({key,note:z.string().max(500).nullish(),items:z.array(z.object({vmId:id,status:z.enum(VM_OPS_STATUSES),expectedCycle:cycle})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>setVmStatus(await scope(ctx,input.projectId),input,ctx.prisma))),
+  setStatus:protectedProcedure.input(project.extend({key,note:z.string().max(500).nullish(),items:z.array(z.object({vmId:id,status:z.enum(VM_OPS_STATUSES),expectedCycle:cycle,expectedRevision:revision.nullish(),expectedEndpointId:id.nullish()})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>setVmStatus(await scope(ctx,input.projectId),input,ctx.prisma))),
   recreate:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>recordRecreated(await scope(ctx,input.projectId),input,ctx.prisma))),
   payoutPick:protectedProcedure.input(project.extend({vmId:id,amount:z.string().max(40).nullish()})).query(({ctx,input})=>domain(async()=>readPayoutPick(await scope(ctx,input.projectId),input,ctx.prisma))),
   gather:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readPaypalGather(await scope(ctx,input.projectId),ctx.prisma))),
