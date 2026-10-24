@@ -3,6 +3,7 @@ import {prisma} from '@/lib/prisma';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
+import {normalizeProxySearch,proxySearchEndpoint} from '@/lib/proxy-search';
 import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-terms';
 import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,isShared,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
 type VMRef={id:string;code:string;serverId:string;server:{code:string}};
@@ -25,11 +26,13 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
     db.proxyGroup.findMany({where:{projectId:scope.projectId},select:{id:true,name:true}}).then(list=>list.sort((a,b)=>a.name.localeCompare(b.name,'vi',{sensitivity:'base',numeric:true}))),
   ]);
   const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,groupId:e.groupId,groupName:e.group?.name||null,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),locations:locationsOf(e),statusAt:e.statusAt?.toISOString()||null}]:[]);
+  // Imported/stale NEW labels must never present a held endpoint as unused stock.
+  for(const row of rows)if(row.state==='NEW'&&row.locations.length){row.state=row.locations.some(l=>l.role!=='UNCERTAIN')?'LIVE':'QUARANTINED';}
   const linked=new Set(endpoints.map(e=>e.identityId));
   for(const i of reserved) if(!linked.has(i.id)) rows.push({identityId:i.id,endpointId:null,ip:i.ip,port:null,owner:'GENJY',subgroup:i.subgroup,groupId:null,groupName:null,packageCode:null,state:'QUARANTINED',revision:i.revision,sourceRefs:Array.from(new Set(i.sourceRefs.map(s=>s.sourceRef))),locations:[],statusAt:null});
   const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['QUARANTINED',...HISTORICAL_STATES].includes(r.state)).length,historical:rows.filter(r=>HISTORICAL_STATES.includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY'&&!isShared(r.owner,r.subgroup)).map(r=>r.identityId)).size,shared:new Set(rows.filter(r=>isShared(r.owner,r.subgroup)&&!HISTORICAL_STATES.includes(r.state)).map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
-  const search=filter.search?.trim().toLowerCase(),serverSet=filter.servers?.length?new Set(filter.servers):null;
+  const search=normalizeProxySearch(filter.search||'').trim().toLowerCase(),endpointSearch=proxySearchEndpoint(search),serverSet=filter.servers?.length?new Set(filter.servers):null;
   const inBatch=filter.batchId?new Set((await db.proxyStatusEvent.findMany({where:{projectId:scope.projectId,batchId:filter.batchId,kind:'RECEIVED'},select:{endpointId:true}})).map(e=>e.endpointId)):null;
   // Group filter: the built-in groups map to owners; anything else is a ProxyGroup id.
   const groupKey=registryGroupKey;
@@ -39,7 +42,7 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
     (filter.view==='ALL'||(filter.view==='HISTORY'?HISTORICAL_STATES.includes(r.state):!HISTORICAL_STATES.includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
-    (!search||[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search))));
+    (!search||(endpointSearch?r.ip===endpointSearch.ip&&r.port===endpointSearch.port:[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search)))));
   // Package counts apply every other filter, over all rows before paging.
   const packageCounts:Record<string,number>=Object.create(null);
   for(const r of packageScope)if(groupMatch(r)&&(!filter.state||stateMatches(r.state,filter.state))){const code=r.packageCode||'';packageCounts[code]=(packageCounts[code]||0)+1;}

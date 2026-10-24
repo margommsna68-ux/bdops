@@ -1,4 +1,5 @@
 "use client";
+import {normalizeProxySearch} from '@/lib/proxy-search';
 import Link from 'next/link';
 import {Fragment,useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {useSession} from 'next-auth/react';
@@ -152,7 +153,7 @@ export function RegistryTable({projectId}:{projectId:string}){
       {rights&&!rights.source.connected&&<div className="pm-source-warning">Chưa kết nối được nguồn Genjy. Vẫn xem kho và báo BLOCKED; cần kết nối trước khi nhận proxy mới.</div>}
       <div className="pm-registry-filters">
         <div className="pm-registry-search-row">
-          <label className="pm-search"><Search size={17}/><input aria-label="Tìm IP, gói hoặc server VM" placeholder="Tìm IP, gói, server / VM…" value={search} onChange={e=>setSearch(e.target.value)}/></label>
+          <label className="pm-search"><Search size={17}/><input aria-label="Tìm IP, gói hoặc server VM" placeholder="Tìm IP, gói, server / VM…" value={search} onChange={e=>setSearch(normalizeProxySearch(e.target.value))}/></label>
           <button type="button" className="pm-registry-blocked" aria-label="Chỉ hiện proxy BLOCKED" aria-pressed={state==='BLOCKED'} title="Bật / tắt lọc proxy BLOCKED" onClick={()=>go({state:state==='BLOCKED'?'':'BLOCKED'})}><span className="pm-registry-status-dot"/>BLOCKED <span className="pm-registry-filter-count">{data.data?.stateCounts.BLOCKED??'…'}</span>{state==='BLOCKED'&&<X size={13}/>}</button>
           {hasFilters&&<button type="button" className="pm-button pm-button-quiet pm-registry-reset" onClick={()=>{setSearch('');go({q:'',state:'',group:'',pkg:'',servers:[],batch:''});}}><X size={14}/>Bỏ lọc</button>}
         </div>

@@ -13,6 +13,23 @@ import {saveUsdtCost} from '@/server/business-management/usdt-costs';
 import type {BatchInput} from '@/server/proxy-management/types';
 import {businessDay} from '@/server/proxy-management/package-terms';
 afterAll(()=>db.$disconnect());
+it('registry NEW excludes assigned and uncertain holds; full proxy search matches endpoint without credentials',async()=>{
+ const f=await fixture();try{
+  const ip=randomIp();await saveProviderAccount(f.scope,{code:'search-pkg',label:'search-pkg',username:'search-user',password:'private-password'},db);
+  await (await f.run({kind:'NEW',text:ip+':11000:search-user:private-password',owner:'SELF',packageCode:'search-pkg'})).commit();
+  const endpoint=await db.proxyIP.findFirstOrThrow({where:{projectId:f.projectId,host:ip}});
+  const filter={view:'CURRENT' as const,limit:50,search:ip+':11000:any-user:any-pass'};
+  expect((await queryRegistry(f.scope,filter,db)).total).toBe(1);
+  expect((await queryRegistry(f.scope,{...filter,search:ip+':11001:any-user:any-pass'},db)).total).toBe(0);
+  const config=await db.vMConfiguration.create({data:{projectId:f.projectId,vmId:f.vm.id,endpointId:endpoint.id,version:1,snapshotCipher:'test',configurationHash:randomUUID(),createdById:f.scope.userId}});
+  const hold=await db.vMProxyAllocation.create({data:{projectId:f.projectId,vmId:f.vm.id,endpointId:endpoint.id,configurationId:config.id,createdById:f.scope.userId,allocationKey:endpoint.inventoryKey!,role:'DESIRED'}});
+  let result=await queryRegistry(f.scope,{...filter,state:'NEW'},db);expect(result.total).toBe(0);expect(result.stateCounts.LIVE).toBe(1);
+  await db.vMProxyAllocation.update({where:{id:hold.id},data:{role:'UNCERTAIN'}});
+  result=await queryRegistry(f.scope,{...filter,state:'NEW'},db);expect(result.total).toBe(0);expect(result.stateCounts.QUARANTINED).toBe(1);
+  await db.proxyIP.update({where:{id:endpoint.id},data:{inventoryState:'BLOCKED'}});
+  expect((await queryRegistry(f.scope,{...filter,state:'BLOCKED'},db)).total).toBe(1);
+ }finally{await f.cleanup();}
+});
 const day=(offset:number)=>new Date(businessDay()+offset*86400000);
 const ymd=(d:Date)=>d.toISOString().slice(0,10);
 function randomIp(){return '10.'+[0,0,0].map(()=>Math.floor(Math.random()*254)+1).join('.');}
