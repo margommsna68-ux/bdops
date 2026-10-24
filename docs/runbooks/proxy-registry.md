@@ -53,3 +53,7 @@ Một proxy có nhiều vị trí hợp lệ (ví dụ đang giữ cho một VM 
 - Nút BLOCKED nhỏ cạnh ô tìm kiếm chỉ bật/tắt lọc, giữ nguyên cách sắp xếp; màu đỏ nhẹ là đang bật. Báo BLOCKED ở hàng thao tác mới là lệnh ghi.
 - Gói, server, nhóm, trạng thái và sắp xếp nằm trong một bộ lọc có nhãn. Số lượng nhóm chuyển vào danh sách nhóm, không còn hàng nút nhóm trùng lặp.
 - Bỏ lọc xoá điều kiện tìm/nhóm/trạng thái/gói/server/đợt; giữ tab hiện tại và cách sắp xếp. Bộ lọc vẫn giữ trên URL.
+
+## Tìm chuỗi proxy và NEW — 24/10/2026
+Dán IP:port:user:pass vào ô tìm kiếm: web giữ IP:port để tìm đúng endpoint, bỏ user/pass trước khi đưa vào URL hay gửi tìm kiếm. Không dùng việc tìm thấy làm bằng chứng mật khẩu đúng. IP trần, tên gói/server/VM vẫn tìm như trước.
+NEW không bao gồm proxy có vị trí VM: bản ghi NEW cũ nhưng đã giữ/gán hiện LIVE; chỉ giữ để kiểm tra hiện Cần kiểm tra. BLOCKED và trạng thái lịch sử không bị đổi. Counts, danh sách và copy theo lọc cùng quy tắc. Đây là trạng thái gán trên web, không chứng minh VM thật đã cài hoặc proxy kết nối tốt. Proxy cấp được cho VM còn theo kiểm tra kho đủ điều kiện sẵn có.

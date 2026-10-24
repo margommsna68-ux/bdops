@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "checks": [
+    "Full proxy input searches by IP:port",
+    "Credentials absent from input, URL and outgoing requests",
+    "NEW contains no active/review position",
+    "No JavaScript errors"
+  ]
+}
