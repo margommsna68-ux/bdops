@@ -4,6 +4,8 @@ Quy tắc chốt ngày 16/10/2026. Bằng chứng: `../superpowers/evidence/2026
 
 ## Quy tắc
 
+- Bổ sung 24/10/2026: nếu proxy hiện hành xác định rõ là BLOCKED, không đặt VM thành OK / Chưa nối / LINKED. Thay proxy theo luồng hiện hành; OFF, SUS và lỗi vẫn ghi được. Đây là chặn mâu thuẫn dữ liệu, không phải tự xác nhận máy đã chạy tốt.
+
 - **NEW**: proxy đủ điều kiện trong kho, chưa gán VM.
 - **LIVE**: proxy người dùng ghi nhận **đang sử dụng**, kể cả khi chưa cập nhật vị trí VM (quyết định 16/10, thay quy tắc cũ bắt LIVE phải có VM). Gán VM thành công thì tự chuyển LIVE. LIVE **không** có nghĩa đã cài thật hay đã kiểm tra mạng.
 - Bản *Giữ để kiểm tra* không tính là đã gán. Khi còn bản này, proxy không được đưa lại vào kho NEW.

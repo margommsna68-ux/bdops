@@ -1,0 +1,16 @@
+{
+  "verified": true,
+  "masterRows": 1463,
+  "vmStatuses": 678,
+  "changedProxyCells": 2,
+  "counts": {
+    "LIVE": 1296,
+    "ĐÃ REPLACE": 101,
+    "CẦN KIỂM TRA": 52,
+    "ĐÃ XOÁ": 1,
+    "NEW": 9,
+    "BLOCKED": 4
+  },
+  "newCount": "9",
+  "journalSequence": 926
+}
