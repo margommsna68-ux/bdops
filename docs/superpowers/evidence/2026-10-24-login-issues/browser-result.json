@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "checks": 21,
+  "results": [
+    "Real local HTTP report assigns a fresh account without approval",
+    "Read-back VM points to the replacement",
+    "More than 100 rows paginate",
+    "Three issue types sort before healthy stock across all pages",
+    "Exact status filter APPLE_LOCKED",
+    "Reason and timestamp visible APPLE_LOCKED",
+    "Exact status filter GOOGLE_VERIFY",
+    "Reason and timestamp visible GOOGLE_VERIFY",
+    "Exact status filter GOOGLE_DISABLED",
+    "Reason and timestamp visible GOOGLE_DISABLED",
+    "Reload preserves status and sort",
+    "Back keeps the requested filter",
+    "PayPal clears login-only filters",
+    "Expanded detail contains issue note",
+    "Theme renders issue light",
+    "Theme renders issue dark",
+    "Theme renders issue golden",
+    "Theme renders issue bronze",
+    "Mobile filter visible",
+    "Mobile has no document overflow",
+    "No JavaScript errors"
+  ],
+  "errors": []
+}

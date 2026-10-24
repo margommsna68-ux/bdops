@@ -5,6 +5,7 @@
 [data-theme="bronze"] .bg-amber-50{background-color:#FBF3E1 !important}
 [data-theme="bronze"] .bg-amber-50\/50{background-color:rgba(251,243,225,0.5) !important}
 [data-theme="bronze"] .bg-amber-500{background-color:#B57D20 !important}
+[data-theme="bronze"] .bg-amber-500\/10{background-color:rgba(181,125,32,0.1) !important}
 [data-theme="bronze"] .bg-amber-500\/20{background-color:rgba(181,125,32,0.2) !important}
 [data-theme="bronze"] .bg-amber-600{background-color:#976516 !important}
 [data-theme="bronze"] .bg-blue-100{background-color:#F3E4CF !important}
@@ -58,6 +59,7 @@
 [data-theme="bronze"] .bg-red-50{background-color:#F9EDE9 !important}
 [data-theme="bronze"] .bg-red-50\/50{background-color:rgba(249,237,233,0.5) !important}
 [data-theme="bronze"] .bg-red-500{background-color:#A6503A !important}
+[data-theme="bronze"] .bg-red-500\/10{background-color:rgba(166,80,58,0.1) !important}
 [data-theme="bronze"] .bg-red-500\/20{background-color:rgba(166,80,58,0.2) !important}
 [data-theme="bronze"] .bg-red-600{background-color:#93412D !important}
 [data-theme="bronze"] .bg-rose-100{background-color:#F2D9D1 !important}
@@ -73,6 +75,7 @@
 [data-theme="bronze"] .bg-yellow-500\/20{background-color:rgba(181,125,32,0.2) !important}
 [data-theme="bronze"] .border-amber-200{border-color:#EDCF8C !important}
 [data-theme="bronze"] .border-amber-300{border-color:#E0B35A !important}
+[data-theme="bronze"] .border-amber-500\/40{border-color:rgba(181,125,32,0.4) !important}
 [data-theme="bronze"] .border-blue-200{border-color:#E9D0B0 !important}
 [data-theme="bronze"] .border-blue-300{border-color:#D7B48C !important}
 [data-theme="bronze"] .border-blue-400{border-color:#BF8D5C !important}
@@ -108,6 +111,7 @@
 [data-theme="bronze"] .border-red-300{border-color:#D49381 !important}
 [data-theme="bronze"] .border-red-400{border-color:#BE6B55 !important}
 [data-theme="bronze"] .border-red-500{border-color:#A6503A !important}
+[data-theme="bronze"] .border-red-500\/40{border-color:rgba(166,80,58,0.4) !important}
 [data-theme="bronze"] .border-slate-200{border-color:#EAD9C2 !important}
 [data-theme="bronze"] .border-slate-300{border-color:#DCC6A7 !important}
 [data-theme="bronze"] .border-white\/10{border-color:rgba(255,253,249,0.1) !important}

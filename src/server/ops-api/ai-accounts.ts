@@ -10,8 +10,11 @@ import {ownJob,type OpsCaller} from '../vm-ops/jobs';
 import {staleCycle} from '../vm-ops/ops';
 import {assertOpsToken} from './context';
 import {maskEmail,redactSecrets} from './safety';
+import {applyLoginIssue} from '../account-store/inventory';
+import {hasServerScope} from '../permissions/server-scope';
+import {LOGIN_ISSUE_LABEL,type LoginIssueStatus} from '@/lib/login-issue';
 // EarnApp account stock for an AI operator (design 23/10/2026 section A, scope ACCOUNT_OPS). Pure services: the API layer wires routes,
-// token scope and the ADMIN approval of `credentials`; these functions only check the user's rights (ASSIGN on Server / VM), the
+// token scope (inventory reads need no ADMIN approval); these functions check the user's rights (ASSIGN on Server / VM), the
 // caller's own ACTIVE job on the VM, the round and revisions, and then go through the SAME writers as the web:
 // - hold    = applyLinks' check + write (an EarnAppAccount for the VM; "Đã gán"), the next unused login of the type, oldest import first;
 // - used    = markEarnAppRegistered's rule (registeredAt by the token's user), optionally linkVmSdk's body in the same transaction;
@@ -53,11 +56,12 @@ export async function listAiAccounts(db:PrismaClient|Tx,projectId:string,input:{
 }
 /** The next unused login of the type, oldest import first, row-locked so two parallel holds (serialised by the project's command lock
  *  and the serialisable transaction) never pick the same one; null = the stock of that type is empty. */
-async function nextUnusedLogin(tx:Tx,projectId:string,loginType:AccountLoginType){
+async function nextUnusedLogin(tx:Tx,projectId:string,loginType:AccountLoginType,freshOnly=false){
   let rows:{id:string}[];
   try{rows=await tx.$queryRaw<{id:string}[]>`SELECT g."id" FROM "GmailAccount" g LEFT JOIN "AccountPurchaseBatch" b ON b."id"=g."batchId" LEFT JOIN "EarnAppAccount" e ON e."loginId"=g."id"
     WHERE g."projectId"=${projectId} AND g."archivedAt" IS NULL AND g."status"='ACTIVE' AND g."loginType"=${loginType}::"AccountLoginType"
       AND (e."id" IS NULL OR (e."vmId" IS NULL AND e."closedAt" IS NULL AND e."registeredAt" IS NULL))
+      AND (NOT ${freshOnly} OR (e."id" IS NULL AND g."password" IS NOT NULL))
     ORDER BY b."purchasedAt" ASC NULLS LAST, g."createdAt" ASC, g."email" ASC, g."id" ASC LIMIT 1 FOR UPDATE OF g SKIP LOCKED`;}
   catch(e){
     // A parallel hold just took (and bumped) the first candidate: under the serialisable transaction the row lock reports 40001 through the
@@ -77,7 +81,7 @@ async function vmInHand(tx:Tx,projectId:string,current:ActorScope,caller:OpsCall
   if(input.expectedVmRevision!==undefined&&vm.revision!==input.expectedVmRevision)throw conflict('VM vừa được thay đổi (revision '+vm.revision+'); đọc lại VM rồi gửi lại',{vmRevision:vm.revision});
   return {job,vm,cycle};
 }
-const accountInclude={login:{select:{id:true,email:true,loginType:true}}} as const;
+const accountInclude={login:{select:{id:true,email:true,loginType:true,status:true}}} as const;
 /** The VM's current (open) EarnApp account, which must be the one the caller names. */
 async function currentAccount(tx:Tx,projectId:string,vmId:string,accountId:string){
   const e=await tx.earnAppAccount.findFirst({where:{vmId,projectId},include:accountInclude});
@@ -105,7 +109,7 @@ export async function holdAiAccount(scope:ActorScope,input:{key:string;vmId:stri
     await authorizeVM(current,'ASSIGN',tx);
     const {vm,cycle,job}=await vmInHand(tx,scope.projectId,current,caller,input);
     const open=await tx.earnAppAccount.findFirst({where:{vmId:vm.id,projectId:scope.projectId},include:accountInclude});
-    if(open){if(open.closedAt)throw invalid('Tài khoản EarnApp của VM đã đóng (tạo lại / SUS); chủ xử lý trước');return {...accountView(open),already:true,vmId:vm.id,cycle,jobId:job.id};}
+    if(open){if(open.login.status!=='ACTIVE')throw invalid('Tài khoản hiện tại đang lỗi; ghi lỗi và cấp tài khoản thay thế trước');if(open.closedAt)throw invalid('Tài khoản EarnApp của VM đã đóng (tạo lại / SUS); chủ xử lý trước');return {...accountView(open),already:true,vmId:vm.id,cycle,jobId:job.id};}
     const loginId=await nextUnusedLogin(tx,scope.projectId,loginType);
     if(!loginId)throw new ProxyDomainError('NOT_FOUND','Hết tài khoản '+(loginType==='GMAIL'?'Gmail':'Apple ID')+' chưa dùng trong kho','NOT_FOUND');
     const r=await checkLink(tx,scope.projectId,vm,{login:loginId});
@@ -132,6 +136,7 @@ export async function aiAccountCredentials(scope:ActorScope,input:{vmId:string;j
     const e=await currentAccount(tx,scope.projectId,vm.id,input.accountId);
     const g=await tx.gmailAccount.findFirst({where:{id:e.login.id,projectId:scope.projectId,archivedAt:null}});
     if(!g)throw new ProxyDomainError('NOT_FOUND','Tài khoản đăng nhập không còn trong kho','NOT_FOUND');
+    if(g.status!=='ACTIVE')throw invalid('Tài khoản đang lỗi / ngừng dùng; lấy tài khoản thay thế thay vì đăng nhập lại tài khoản này');
     let out:{email:string;password:string|null;twoFa:string|null;token:string|null;twoFaLink:string|null;smsLink:string|null;phone:string|null};
     try{out={email:g.email,password:g.password?decrypt(g.password):null,twoFa:g.twoFaCurrent?decrypt(g.twoFaCurrent):null,token:g.token?decrypt(g.token):null,twoFaLink:g.twoFaLink?decrypt(g.twoFaLink):null,smsLink:g.smsLink?decrypt(g.smsLink):null,phone:g.phone};}
     catch{throw invalid('Thông tin đăng nhập cũ cần kiểm tra và ghi lại trên web trước');}
@@ -153,6 +158,7 @@ export async function markAiAccountUsed(scope:ActorScope,input:{key:string;vmId:
     await authorizeVM(current,'ASSIGN',tx);
     const {vm,cycle,job}=await vmInHand(tx,scope.projectId,current,caller,input);
     const e=await currentAccount(tx,scope.projectId,vm.id,input.accountId);
+    if(e.login.status!=='ACTIVE')throw invalid('Tài khoản đang lỗi / ngừng dùng; không ghi đăng nhập thành công');
     let changed=false;
     if(!e.registeredAt){
       if(e.revision!==input.expectedRevision)throw conflict('Tài khoản vừa được sửa (revision '+e.revision+'); đọc lại',{revision:e.revision});
@@ -186,4 +192,37 @@ export async function releaseAiAccount(scope:ActorScope,input:{key:string;vmId:s
     const noteId=await opsNote(tx,scope.projectId,current.userId,vm.id,cycle,'AI: trả tài khoản '+maskEmail(e.login.email)+' về kho (chưa đăng ký EarnApp) — '+reason,caller,{jobId:job.id,accountId:e.id,loginId:e.login.id});
     return {released:true,accountId:e.id,loginId:e.login.id,email:maskEmail(e.login.email)!,loginType:e.login.loginType,noteId,vmId:vm.id,cycle,jobId:job.id};
   },db);
+}
+
+/** Record an observed provider login failure, quarantine the login, and take fresh stock only when project-wide stock rights permit.
+ * Closing/detaching the old EarnApp does not transfer its PayPal, withdrawals, money, used SDKs or usage evidence to the replacement. */
+export async function reportAiLoginIssue(scope:ActorScope,input:{key:string;vmId:string;jobId:string;accountId:string;expectedCycle:number;expectedVmRevision:number;expectedLoginRevision:number;issue:LoginIssueStatus;note:string},db:PrismaClient=prisma,caller:OpsCaller={}){
+ const note=(redactSecrets(String(input.note??'').trim())??'').slice(0,500);if(!note)throw invalid('Ghi thông báo lỗi đã quan sát, không ghi mật khẩu hay mã xác thực');
+ const payload={...input,note};
+ return runBusinessCommand(scope,{key:input.key,payload,kind:'AI_LOGIN_ISSUE',module:'INFRASTRUCTURE',reversible:false,authorize:tx=>authorizeVM(scope,'ASSIGN',tx)},async(tx,images,current)=>{
+  const {vm,cycle,job}=await vmInHand(tx,scope.projectId,current,caller,input);
+  const old=await currentAccount(tx,scope.projectId,vm.id,input.accountId);
+  await images.remember('GMAIL',old.loginId);
+  const login=await applyLoginIssue(tx,{projectId:scope.projectId,id:old.loginId,expectedRevision:input.expectedLoginRevision,status:input.issue,note});
+  const currentSdk=await tx.sdkRecord.findUnique({where:{vmId:vm.id},select:{linkState:true}});
+  const sdkReuseBlocked=currentSdk?.linkState==='LINKED';
+  const types:('GMAIL'|'APPLE_ID')[]=old.login.loginType==='APPLE_ID'?['APPLE_ID','GMAIL']:['GMAIL','APPLE_ID'];
+  let replacementId:string|null=null;
+  // Server-limited operators cannot take common stock, even through this automatic recovery path.
+  if(!hasServerScope(current))for(const type of types){replacementId=await nextUnusedLogin(tx,scope.projectId,type,true);if(replacementId)break;}
+  let replacement:{accountId:string;loginId:string;loginType:AccountLoginType|null;email:string;revision:number;loginRevision:number}|null=null;
+  const replacementStatus=replacementId?'ASSIGNED':hasServerScope(current)?'NEEDS_ADMIN_STOCK':'NO_STOCK';
+  if(replacementId){
+   const plan=await checkLink(tx,scope.projectId,vm,{login:replacementId});if(!plan.ok||plan.skip||!plan.plan)throw conflict(plan.message);
+   await images.remember('EARNAPP',old.id);
+   await writeLink(tx,images,scope.projectId,vm,plan.plan,current.userId);
+   const closedAt=new Date();await tx.earnAppAccount.update({where:{id:old.id},data:{closedAt,closedReason:'LOGIN_ISSUE',revision:{increment:1}}});
+   const periods=await tx.earnAppPayout.findMany({where:{earnAppId:old.id,endedAt:null},select:{id:true}});
+   for(const period of periods){await images.remember('PAYOUT',period.id);await tx.earnAppPayout.update({where:{id:period.id},data:{endedAt:closedAt}});}
+   const next=await tx.earnAppAccount.findUniqueOrThrow({where:{vmId:vm.id},include:{login:{select:{revision:true,email:true,loginType:true}}}});
+   replacement={accountId:next.id,loginId:next.loginId,loginType:next.login.loginType,email:maskEmail(next.login.email)!,revision:next.revision,loginRevision:next.login.revision};
+  }
+  const noteId=await opsNote(tx,scope.projectId,current.userId,vm.id,cycle,'AI: '+LOGIN_ISSUE_LABEL[input.issue]+' — '+maskEmail(old.login.email)+' — '+note+(replacement?' · Đã cấp tài khoản mới; chưa chứng minh đăng nhập thành công':replacementStatus==='NO_STOCK'?' · Hết tài khoản thay thế':' · Chờ ADMIN cấp tài khoản vào server'),caller,{jobId:job.id,accountId:old.id,loginId:old.loginId,issue:input.issue,replacementAccountId:replacement?.accountId??null});
+  return {accountId:old.id,loginId:old.loginId,status:input.issue,loginRevision:login.revision,loginIssueNote:login.loginIssueNote,loginIssueAt:login.loginIssueAt?.toISOString()??null,replacementStatus,replacement,sdkReuseBlocked,noteId,vmId:vm.id,cycle,jobId:job.id};
+ },db);
 }

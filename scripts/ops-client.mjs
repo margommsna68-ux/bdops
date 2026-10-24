@@ -20,6 +20,7 @@
 //   get 'earnapp-accounts?projectId=P&state=UNUSED&type=GMAIL&limit=50'
 //   get 'proxies?projectId=P&state=FREE&group=TUT' | get 'sdks?projectId=P'
 //   post earnapp-accounts/hold body.json  # projectId,vmId,expectedCycle,expectedVmRevision,jobId,loginType
+//   post earnapp-accounts/A/login-issue issue.json # observed Locked/Verify/Disabled; auto replacement; read current login revision first
 //   post earnapp-accounts/A/credentials body.json # projectId,vmId,jobId; current rights/job; direct; file only
 //   post earnapp-accounts/A/used body.json # projectId,vmId,expectedCycle,jobId,expectedRevision,evidence[,sdkId,expectedSdkRevision]
 //   post earnapp-accounts/A/release body.json # projectId,vmId,expectedCycle,jobId,expectedRevision,reason

@@ -1,0 +1,28 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts (9 tests | 1 failed | 8 skipped) 301ms
+     × never takes a released unregistered account with prior PayPal state as a fresh replacement 295ms
+     ↓ a server-limited operator can report its own account but cannot take common stock
+     ↓ two reports racing on the same old account never allocate two replacements
+     ↓ records GOOGLE_VERIFY, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice
+     ↓ records GOOGLE_DISABLED, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice
+     ↓ Apple Locked is distinct and can fall back to an unused Gmail; old used SDK stays with the old account
+     ↓ when stock is empty records the error and keeps the bad account in place for supplier/delete handling
+     ↓ refuses wrong provider, stale cycle/revision and wrong job without changing account or links
+     ↓ does not allow a read-only or disabled operator to report or auto-replace accounts
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > never takes a released unregistered account with prior PayPal state as a fresh replacement
+AssertionError: expected 'cmvm5bj98001d119mlvjkpiii' not to be 'cmvm5bj98001d119mlvjkpiii' // Object.is equality
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts:9:583
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  15:37:34
+   Duration  836ms (transform 317ms, setup 21ms, import 427ms, tests 301ms, environment 0ms)

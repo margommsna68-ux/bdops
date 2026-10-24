@@ -1,5 +1,35 @@
 # Kho tài khoản và tài khoản EarnApp của VM
 
+## Hiện hành 24/10/2026 — lỗi đăng nhập và tự lấy tài khoản chưa dùng
+
+Chủ chọn **tự ghi lỗi → lấy tài khoản chưa dùng → tiếp tục công việc đã giao**, không chờ duyệt từng lỗi. Đây là tình trạng đăng nhập của Gmail / Apple ID, tách biệt với đã gán, đã đăng ký EarnApp, tiền và SDK đã dùng. Các mốc cũ bên dưới giữ làm lịch sử; khi khác nhau, quy tắc hiện hành này áp dụng cho lỗi đăng nhập.
+
+| Badge / trạng thái chính xác | Khi ghi |
+|---|---|
+| Apple Locked (`APPLE_LOCKED`) | Apple ID thực tế báo khoá; chỉ loại APPLE_ID. |
+| Google Verify (`GOOGLE_VERIFY`) | Google thực tế yêu cầu xác minh; chỉ loại GMAIL. |
+| Google Disabled (`GOOGLE_DISABLED`) | Google thực tế báo vô hiệu hoá; chỉ loại GMAIL. |
+
+Kho Gmail / Apple ID có ba badge trên, lọc chính xác `status=APPLE_LOCKED|GOOGLE_VERIFY|GOOGLE_DISABLED` và sắp xếp `sort=ERRORS_FIRST` (lỗi trước), `LATEST_ISSUE` (lỗi mới nhất trước), `EMAIL` (email); không chọn sort giữ thứ tự tạo hiện có. Ví dụ `/gmails?status=GOOGLE_VERIFY&sort=LATEST_ISSUE`. Lọc/sort nằm trong URL, áp dụng trước phân trang; đổi lọc về trang 1, tải lại/Back/Forward giữ lựa chọn. `status` là tình trạng đăng nhập, khác `state` là tình trạng kho/gán. Không suy nhà cung cấp từ đuôi email.
+
+Người vận hành lọc các tài khoản lỗi để đối chiếu/đề nghị nơi bán đổi, hoặc ADMIN dùng Xoá khỏi kho theo quy tắc hiện có; tài khoản còn gán vẫn bị chặn xoá. Không thêm trường hay quy trình theo dõi nhà cung cấp mới, không tự xoá lỗi hoặc đưa tài khoản lỗi trở lại hàng chưa dùng.
+
+### AI ghi lỗi và thay tài khoản
+
+1. Quan sát đúng lỗi trên máy thật trong công việc được giao. Đọc VM và `GET earnapp-accounts/{accountId}?projectId=…` để lấy `loginId`, `loginRevision`, `loginStatus`, `loginIssueNote`, `loginIssueAt`. Chụp đúng tài khoản hiện hành, `expectedCycle`, `expectedVmRevision`, job ACTIVE của chính user/token; revision login không phải revision EarnApp.
+2. `POST earnapp-accounts/{accountId}/login-issue` cần ACCOUNT_OPS, không approval/PIN/TOTP, body `{projectId,vmId,jobId,expectedCycle,expectedVmRevision,expectedLoginRevision,issue,note}`. `issue` là một trong ba mã trên; `note` dài 1–500 ký tự, mô tả quan sát, không mật khẩu/2FA/token/link bí mật. Quyền dự án/server và các revision vẫn được kiểm.
+3. Phản hồi `{replay,recorded,current}`: `recorded` giữ accountId/loginId cũ, status/loginRevision và thông tin lỗi; kèm `replacementStatus`, `replacement`, `sdkReuseBlocked`. `replacement` null hoặc `{accountId,loginId,loginType,email,revision,loginRevision}`; email đã che. `current` là VM đọc lại, không thay cho kết quả lệnh đã ghi.
+
+| `replacementStatus` | Hành động tiếp |
+|---|---|
+| `ASSIGNED` | Tự chọn hàng chưa dùng hợp lệ cùng nhà cung cấp trước, rồi loại còn lại (Gmail / Apple ID). Tài khoản thay luôn khác tài khoản lỗi. Khi thay thành công, EarnApp cũ đóng/tách khỏi VM; tài khoản mới chỉ được giữ, chưa chứng minh đăng nhập/đăng ký. Đọc lại VM/tài khoản mới rồi lấy credentials theo job hiện hành, dùng đúng phương thức của `loginType` và tiếp tục công việc đã giao. |
+| `NO_STOCK` | Đã ghi lỗi nhưng giữ tài khoản lỗi hiện hành; dừng bước tài khoản, báo thiếu hàng, không ghi OK. |
+| `NEEDS_ADMIN_STOCK` | User SELECTED được ghi lỗi của VM thuộc server mình, nhưng không được lấy kho chung. Dừng và nhờ ADMIN cấp hàng theo phạm vi, không dùng token khác/approval để vượt quyền. |
+
+PP, tiền, payout và SDK đã dùng vẫn thuộc tài khoản/lịch sử cũ; không chuyển sang tài khoản mới. Chỉ sau khi thực sự đăng nhập/đăng ký thành công mới ghi `/used` và `sdk-linked` với SDK chưa dùng hợp lệ. Kiểm `sdkReuseBlocked`; SDK hiện hành đã LINKED không được dùng lại, không tự cài lại/xoá SDK hoặc tạo lại máy nếu công việc chưa cho phép. Nếu thiếu SDK hợp lệ thì ghi bước bị chặn, không tuyên bố đã nối xong.
+
+Mất phản hồi → retry **cùng key/path/body**. Key cũ replay kết quả cũ, kể cả `NO_STOCK`; bổ sung hàng không làm lần retry ấy tự cấp tài khoản. Sau khi có hàng/quyền phù hợp, đọc lại VM/login/job và revision mới, rồi gửi **lệnh mới/key mới** theo trạng thái hiện tại. Không sửa body của key cũ, không tạo key mới chỉ vì chưa rõ kết quả lần trước. Tệp credentials và cách xoá sau dùng giữ nguyên. Tài liệu không phải bằng chứng đã triển khai/chạy máy thật.
+
 Owner brief 17/10/2026. Replaces the old "Tài khoản VM" page and the rule that one Gmail could be used on several VMs.
 
 ## Rules

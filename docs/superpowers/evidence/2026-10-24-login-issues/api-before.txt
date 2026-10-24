@@ -1,0 +1,75 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts (6 tests | 5 failed) 1073ms
+     × records GOOGLE_VERIFY, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice 244ms
+     × records GOOGLE_DISABLED, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice 175ms
+     × Apple Locked is distinct and can fall back to an unused Gmail; old used SDK stays with the old account 163ms
+     × when stock is empty records the error and keeps the bad account in place for supplier/delete handling 157ms
+     ✓ refuses wrong provider, stale cycle/revision and wrong job without changing account or links 162ms
+     × does not allow a read-only or disabled operator to report or auto-replace accounts 165ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > records GOOGLE_VERIFY, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > records GOOGLE_DISABLED, blocks reuse and atomically assigns a fresh unused login; retry never assigns twice
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts:9:326
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > Apple Locked is distinct and can fall back to an unused Gmail; old used SDK stays with the old account
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts:10:657
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > when stock is empty records the error and keeps the bad account in place for supplier/delete handling
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts:11:369
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/__tests__/ops-api/login-issues.integration.test.ts > AI reports login problems and takes a fresh account > does not allow a read-only or disabled operator to report or auto-replace accounts
+AssertionError: expected 404 to be 403 // Object.is equality
+
+- Expected
++ Received
+
+- 403
++ 404
+
+ ❯ src/__tests__/ops-api/login-issues.integration.test.ts:13:254
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  15:31:38
+   Duration  1.61s (transform 318ms, setup 21ms, import 426ms, tests 1.07s, environment 0ms)

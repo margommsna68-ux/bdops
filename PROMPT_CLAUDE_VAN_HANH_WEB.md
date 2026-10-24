@@ -41,6 +41,21 @@ Mọi POST cần `Idempotency-Key`. Lưu key/path/body trước khi gửi. Mất
 - Sau thành công thật trên EarnApp: `POST earnapp-accounts/{accountId}/used {projectId,vmId,expectedCycle,jobId,expectedRevision,evidence}`. Muốn ghi SDK đã nối cùng giao dịch: thêm **cả** `sdkId,expectedSdkRevision`. Đã dùng vĩnh viễn, không suy từ tiền hoặc có SDK.
 - Chỉ khi biết chắc chưa đăng ký: `POST earnapp-accounts/{accountId}/release {projectId,vmId,expectedCycle,jobId,expectedRevision,reason}`. Đã đăng ký/đóng không cấp lại. Chưa rõ kết quả → giữ chỗ, báo chủ. Đọc bí mật không phải bằng chứng đăng ký, không tự cấm trả/tái cấp tài khoản chưa từng đăng ký. Chưa rõ đăng ký thì giữ chỗ; không suy tình trạng từ reveal hoặc bỏ gán.
 
+### Lỗi đăng nhập tài khoản — chủ chọn tự ghi lỗi, lấy hàng chưa dùng và tiếp tục (24/10/2026)
+
+Trong nhiệm vụ đăng nhập/đăng ký đã được giao, nếu máy thật báo **Apple Locked / Google Verify / Google Disabled**, tự ghi lỗi qua API rồi nhận tài khoản chưa dùng để tiếp tục; không chờ người duyệt từng lỗi. Không dùng luồng này để mở rộng một nhiệm vụ chỉ tạo/cài VM thành nhiệm vụ đăng ký tài khoản.
+
+1. Đọc lại VM và `GET earnapp-accounts/{accountId}?projectId=…` lấy `loginId`, `loginRevision`, `loginStatus`, `loginIssueNote`, `loginIssueAt`. Giữ đúng accountId hiện hành, job ACTIVE của chính user/token, `expectedCycle`, `expectedVmRevision`; revision login không phải revision EarnApp.
+2. Gửi `POST earnapp-accounts/{accountId}/login-issue` với `{projectId,vmId,jobId,expectedCycle,expectedVmRevision,expectedLoginRevision,issue,note}`; **ACCOUNT_OPS, không approval/PIN/TOTP**. `issue` chỉ `APPLE_LOCKED` (APPLE_ID), `GOOGLE_VERIFY` hoặc `GOOGLE_DISABLED` (GMAIL). `note` 1–500 ký tự mô tả quan sát, không bí mật/password/2FA/token/link.
+3. Đọc stockAck `{replay,recorded,current}`. `recorded` giữ accountId/loginId cũ, status/loginRevision và thông tin lỗi, `replacementStatus`, `replacement`, `sdkReuseBlocked`; replacement null hoặc `{accountId,loginId,loginType,email,revision,loginRevision}`, email che.
+4. `ASSIGNED`: cùng nhà cung cấp trước, rồi loại còn lại trong hàng chưa dùng hợp lệ; không lấy lại tài khoản lỗi. EarnApp cũ đóng/tách khi thay thành công, PP/tiền/payout/SDK đã dùng vẫn ở lịch sử cũ. Tài khoản mới **chỉ được giữ**: đọc lại VM/tài khoản mới, lấy credentials theo job hiện hành, dùng đúng `loginType` rồi tiếp tục thao tác thật. Không coi thay tài khoản là đã đăng nhập/đăng ký.
+5. `NO_STOCK`: lỗi đã ghi, tài khoản lỗi vẫn hiện hành; dừng bước này và báo thiếu hàng. `NEEDS_ADMIN_STOCK`: user SELECTED được ghi lỗi VM của mình nhưng không được lấy kho chung; nhờ ADMIN cấp hàng trong phạm vi, không đổi token/approval để vượt quyền.
+6. Sau khi đăng nhập/đăng ký thật thành công mới `/used` + `sdk-linked` với SDK chưa dùng hợp lệ. Kiểm `sdkReuseBlocked`; SDK hiện hành LINKED không tái dùng cho tài khoản mới, không tự cài lại/xoá SDK/tạo lại VM nếu chủ chưa giao. Nếu thiếu SDK hợp lệ thì ghi bước bị chặn, không ghi đã nối hoặc OK cho xong.
+
+Mất phản hồi retry đúng key/path/body. Key cũ replay kết quả cũ, kể cả NO_STOCK; có hàng mới không tự cấp khi retry key đó. Khi có hàng/quyền phù hợp, đọc lại VM/login/job và revision mới rồi gửi **lệnh mới/key mới**; trước đó phải đối chiếu kết quả cũ, không né UNKNOWN bằng key mới. Không batch lệnh phụ thuộc accountId/revision chưa biết sau login-issue. Giữ nguyên tệp bí mật và xoá sau dùng.
+
+Chủ/người quản lý xem kho bằng ba badge, lọc chính xác `status=APPLE_LOCKED|GOOGLE_VERIFY|GOOGLE_DISABLED`, sắp xếp `sort=ERRORS_FIRST|LATEST_ISSUE|EMAIL` trong URL để đề nghị nơi bán đổi hoặc ADMIN xoá theo quy tắc hiện có; tài khoản còn gán vẫn chặn xoá. Không thêm trường theo dõi nhà cung cấp; AI không tự xoá tài khoản lỗi.
+
 ## 4. Kho proxy và SDK
 
 - `GET proxies?projectId=…&state=FREE&group=TUT|SHARED&package=…`: READ, không user-pass. Chỉ FREE đủ điều kiện; không Genjy riêng, BLOCKED hoặc proxy VM khác.

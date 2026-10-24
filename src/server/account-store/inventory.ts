@@ -1,3 +1,4 @@
+import {LOGIN_ISSUE_LABEL,isLoginIssueStatus,validateLoginIssue,type LoginIssueStatus} from '@/lib/login-issue';
 import {createHash} from 'node:crypto';
 import type {AccountLoginType,GmailStatus,PayPalStatus,Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
@@ -241,7 +242,7 @@ export async function recordBatchCost(scope:ActorScope,input:{batchId:string;exp
     return {id:batch.id,costId:cost.id};
   },db);
 }
-export const LOGIN_STATUS:GmailStatus[]=['ACTIVE','SUSPENDED','NEEDS_RECOVERY','NEEDS_2FA_UPDATE','BLOCKED','DISABLED'];
+export const LOGIN_STATUS:GmailStatus[]=['ACTIVE','SUSPENDED','NEEDS_RECOVERY','NEEDS_2FA_UPDATE','BLOCKED','DISABLED','APPLE_LOCKED','GOOGLE_VERIFY','GOOGLE_DISABLED'];
 export const PP_STATUS:PayPalStatus[]=['ACTIVE','LIMITED','SUSPENDED','CLOSED','PENDING_VERIFY'];
 // Status in the table cell or for many rows: same value = nothing written. Error / stopped accounts keep their links and history.
 export const STOCK_NOTE_MAX=2000;
@@ -260,20 +261,46 @@ export async function setStockNote(scope:ActorScope,input:{id:string;expectedRev
     return {changed:true,notes:row.notes,revision:row.revision,message:'Đã lưu'};
   },db);
 }
-export async function setStockStatus(scope:ActorScope,input:{kind:StockKind;items:{id:string;expectedRevision:number}[];status:string;key:string},db:PrismaClient=prisma){
-  const list:string[]=input.kind==='LOGIN'?LOGIN_STATUS:PP_STATUS;
-  if(!list.includes(input.status)||!input.items.length||input.items.length>1000)throw new ProxyDomainError('INVALID_INPUT');
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'ACCOUNT_STOCK_STATUS',module:area(input.kind),skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    assertStockWrite(current,input.kind);const rows:{id:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string}[]=[];
-    for(const item of input.items){
-      const old=input.kind==='LOGIN'?await tx.gmailAccount.findFirst({where:{id:item.id,projectId:scope.projectId,archivedAt:null}}):await tx.payPalAccount.findFirst({where:{id:item.id,projectId:scope.projectId,archivedAt:null}});
-      if(!old){rows.push({id:item.id,outcome:'ERROR',message:'Không còn trong kho'});continue;}
-      if(old.status===input.status){rows.push({id:item.id,outcome:'SKIP',message:'Không thay đổi'});continue;}
-      if(old.revision!==item.expectedRevision){rows.push({id:item.id,outcome:'ERROR',message:'Vừa được sửa; tải lại'});continue;}
-      if(input.kind==='LOGIN'){await images.remember('GMAIL',old.id);await tx.gmailAccount.update({where:{id:old.id},data:{status:input.status as GmailStatus,revision:{increment:1}}});}
-      else{await images.remember('PAYPAL',old.id);await tx.payPalAccount.update({where:{id:old.id},data:{status:input.status as PayPalStatus,revision:{increment:1}}});}
-      rows.push({id:item.id,outcome:'APPLIED',message:'Đã lưu'});
-    }
-    return {rows,applied:rows.filter(r=>r.outcome==='APPLIED').length};
-  },db);
+/** Shared by the stock command and the parent AI command. The caller owns authorization, journaling and transaction boundaries.
+ * Only account health changes here: no release, replacement, EarnApp, VM, SDK, PayPal or payout writes. */
+export function cleanLoginIssueNote(status:LoginIssueStatus,note?:string|null){
+ if(note!=null&&typeof note!=='string')throw new ProxyDomainError('INVALID_INPUT','Ghi chú lỗi đăng nhập không hợp lệ');
+ const cleaned=note?.replace(/\r/g,'').trim()||LOGIN_ISSUE_LABEL[status];
+ if(cleaned.length>STOCK_NOTE_MAX)throw new ProxyDomainError('INVALID_INPUT','Ghi chú lỗi đăng nhập tối đa '+STOCK_NOTE_MAX+' ký tự');
+ return cleaned;
+}
+export async function applyLoginIssue(tx:Prisma.TransactionClient,input:{projectId:string;id:string;expectedRevision:number;status:LoginIssueStatus;note?:string|null}){
+ if(!isLoginIssueStatus(input.status))throw new ProxyDomainError('INVALID_INPUT','Tình trạng lỗi đăng nhập không hợp lệ');
+ const old=await tx.gmailAccount.findFirst({where:{id:input.id,projectId:input.projectId,archivedAt:null}});
+ if(!old)throw new ProxyDomainError('NOT_FOUND','Tài khoản không còn trong kho');
+ if(!validateLoginIssue(old.loginType,input.status))throw new ProxyDomainError('INVALID_INPUT','Tình trạng lỗi không phù hợp loại Gmail / Apple ID');
+ if(old.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','Tài khoản vừa được sửa; tải lại');
+ const note=input.note===undefined&&old.status===input.status?old.loginIssueNote:cleanLoginIssueNote(input.status,input.note);
+ if(old.status===input.status&&old.loginIssueNote===note)return old;
+ return tx.gmailAccount.update({where:{id:old.id,projectId:input.projectId,revision:input.expectedRevision,archivedAt:null},data:{status:input.status,loginIssueNote:note,loginIssueAt:new Date(),revision:{increment:1}}});
+}
+export async function setStockStatus(scope:ActorScope,input:{kind:StockKind;items:{id:string;expectedRevision:number}[];status:string;key:string;issueNote?:string|null},db:PrismaClient=prisma){
+ const list:string[]=input.kind==='LOGIN'?LOGIN_STATUS:PP_STATUS;
+ if(!list.includes(input.status)||!input.items.length||input.items.length>1000)throw new ProxyDomainError('INVALID_INPUT');
+ const issue=isLoginIssueStatus(input.status);
+ if(issue&&input.issueNote!==undefined)cleanLoginIssueNote(input.status as LoginIssueStatus,input.issueNote);
+ return runBusinessCommand(scope,{key:input.key,payload:input,kind:'ACCOUNT_STOCK_STATUS',module:area(input.kind),skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+  assertStockWrite(current,input.kind);const rows:{id:string;outcome:'APPLIED'|'SKIP'|'ERROR';message:string}[]=[];
+  for(const item of input.items){
+   const old=input.kind==='LOGIN'?await tx.gmailAccount.findFirst({where:{id:item.id,projectId:scope.projectId,archivedAt:null}}):await tx.payPalAccount.findFirst({where:{id:item.id,projectId:scope.projectId,archivedAt:null}});
+   if(!old){rows.push({id:item.id,outcome:'ERROR',message:'Không còn trong kho'});continue;}
+   if(input.kind==='LOGIN'&&issue&&!validateLoginIssue('loginType' in old?old.loginType:null,input.status)){rows.push({id:item.id,outcome:'ERROR',message:'Tình trạng lỗi không phù hợp loại Gmail / Apple ID'});continue;}
+   const noteChanged=issue&&input.issueNote!==undefined&&('loginIssueNote' in old?old.loginIssueNote:null)!==cleanLoginIssueNote(input.status as LoginIssueStatus,input.issueNote);
+   const clearIssue=input.kind==='LOGIN'&&input.status==='ACTIVE'&&('loginIssueNote' in old&&old.loginIssueNote!=null||'loginIssueAt' in old&&old.loginIssueAt!=null);
+   if(old.status===input.status&&!noteChanged&&!clearIssue){rows.push({id:item.id,outcome:'SKIP',message:'Không thay đổi'});continue;}
+   if(old.revision!==item.expectedRevision){rows.push({id:item.id,outcome:'ERROR',message:'Vừa được sửa; tải lại'});continue;}
+   if(input.kind==='LOGIN'){
+    await images.remember('GMAIL',old.id);
+    if(issue)await applyLoginIssue(tx,{projectId:scope.projectId,id:old.id,expectedRevision:item.expectedRevision,status:input.status as LoginIssueStatus,note:input.issueNote});
+    else await tx.gmailAccount.update({where:{id:old.id},data:{status:input.status as GmailStatus,...(input.status==='ACTIVE'?{loginIssueNote:null,loginIssueAt:null}:{}),revision:{increment:1}}});
+   }else{await images.remember('PAYPAL',old.id);await tx.payPalAccount.update({where:{id:old.id},data:{status:input.status as PayPalStatus,revision:{increment:1}}});}
+   rows.push({id:item.id,outcome:'APPLIED',message:'Đã lưu'});
+  }
+  return {rows,applied:rows.filter(r=>r.outcome==='APPLIED').length};
+ },db);
 }

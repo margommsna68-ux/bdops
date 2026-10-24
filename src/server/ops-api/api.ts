@@ -22,7 +22,7 @@ import {sdkVisibleVmIds,sdkBindingVisible} from '../vm-management/sdk-scope';
 import {vmMoneyState} from '@/lib/vm-money';
 import {maskSdk} from '@/lib/sdk-mask';
 import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
-import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount} from './ai-accounts';
+import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount,reportAiLoginIssue} from './ai-accounts';
 import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
 // the web uses (they check the user's current rights inside their transaction). Answers keep one envelope:
@@ -61,6 +61,7 @@ const routes:Route[]=[
   {method:'GET',path:/^earnapp-accounts$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_LIST',run:accountList},
   {method:'POST',path:/^earnapp-accounts\/hold$/,scope:'ACCOUNT_OPS',action:'ACCOUNT_HOLD',run:accountHold},
   {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/credentials$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_CREDENTIALS',run:accountCredentials},
+  {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/login-issue$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_LOGIN_ISSUE',run:accountLoginIssue},
   {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/used$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_USED',run:accountUsed},
   {method:'POST',path:new RegExp('^earnapp-accounts/'+ID+'/release$'),scope:'ACCOUNT_OPS',action:'ACCOUNT_RELEASE',run:accountRelease},
   {method:'GET',path:/^proxies$/,scope:'READ',action:'PROXY_STOCK',run:proxyStock},
@@ -246,7 +247,7 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
   return {status:summary.waiting?202:200,result:summary.waiting?'WAITING_APPROVAL':summary.refused?'PARTIAL':'OK',body:{ok:true,data:{batchKey,approval:approvalInfo,items:results,summary},error:null},audit};
 }
 // Only bound operational data is available to selected-server members. New routes fail closed.
-const SCOPED_ACTIONS=new Set(['ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
+const SCOPED_ACTIONS=new Set(['ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
 function routeTargets(c:Ctx,path:string,params:string[]){
  const root=path.split('/')[0],id=params[0];
  const identity=id?(root==='vms'?{vmId:id}:root==='jobs'?{jobId:id}:root==='sdks'?{sdkId:id}:root==='earnapp-accounts'?{earnAppId:id}:root==='withdrawals'?{requestId:id}:{}):{};
@@ -360,9 +361,9 @@ async function vmDetail(c:Ctx,[id]:string[]){
 }
 async function earnAppDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),rights=await rightsOf(c,projectId);
-  const ea=await c.db.earnAppAccount.findFirst({where:{id,projectId},select:{id:true,closedAt:true,closedReason:true,registeredAt:true,login:{select:{email:true,loginType:true}},vm:{select:{id:true,code:true,archivedAt:true,server:{select:{code:true}},operation:{select:{cycle:true}}}},paypalEmail:{select:{id:true,email:true,paypal:{select:{code:true}}}},payoutRequest:{select:requestSelect}}});
+  const ea=await c.db.earnAppAccount.findFirst({where:{id,projectId},select:{id:true,closedAt:true,closedReason:true,registeredAt:true,login:{select:{id:true,email:true,loginType:true,revision:true,status:true,loginIssueNote:true,loginIssueAt:true}},vm:{select:{id:true,code:true,archivedAt:true,server:{select:{code:true}},operation:{select:{cycle:true}}}},paypalEmail:{select:{id:true,email:true,paypal:{select:{code:true}}}},payoutRequest:{select:requestSelect}}});
   if(!ea)throw fail('NOT_FOUND','Không có tài khoản EarnApp này trong dự án');c.audit.objectId=ea.id;
-  return {id:ea.id,state:ea.closedAt?'CLOSED':ea.vm?'ON_VM':'NOT_ON_VM',closedAt:ea.closedAt?.toISOString()??null,closedReason:ea.closedReason,registeredAt:ea.registeredAt?.toISOString()??null,login:maskEmail(ea.login.email),loginType:ea.login.loginType,
+  return {id:ea.id,state:ea.closedAt?'CLOSED':ea.vm?'ON_VM':'NOT_ON_VM',closedAt:ea.closedAt?.toISOString()??null,closedReason:ea.closedReason,registeredAt:ea.registeredAt?.toISOString()??null,login:maskEmail(ea.login.email),loginType:ea.login.loginType,loginId:ea.login.id,loginRevision:ea.login.revision,loginStatus:ea.login.status,loginIssueNote:ea.login.loginIssueNote,loginIssueAt:ea.login.loginIssueAt?.toISOString()??null,
     vm:ea.vm&&!ea.vm.archivedAt?{id:ea.vm.id,code:ea.vm.code,serverCode:ea.vm.server.code,expectedCycle:ea.vm.operation?.cycle??1}:null,
     receivingEmail:ea.paypalEmail?{paypalEmailId:ea.paypalEmail.id,paypalCode:ea.paypalEmail.paypal.code,email:rights.payoutEmail?ea.paypalEmail.email:maskEmail(ea.paypalEmail.email)}:null,
     withdrawal:ea.payoutRequest&&(!hasServerScope(await loadInfrastructureScope(c.db,c.token.userId,projectId))||ea.payoutRequest.vmId===ea.vm?.id)?withdrawalView(ea.payoutRequest,rights,{currentCycle:ea.vm?.operation?.cycle??null}):null};
@@ -527,6 +528,8 @@ async function accountList(c:Ctx){
 }
 async function accountHold(c:Ctx){const b=AccountHoldBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>holdAiAccount(scopeOf(c,projectId),{...b,key:serviceKey(c,projectId)},c.db,caller(c)));}
 async function accountCredentials(c:Ctx,[accountId]:string[]){const b=AccountCredentialBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=accountId;return {replay:false,accountId,vmId:b.vmId,credentials:await aiAccountCredentials(scopeOf(c,projectId),{...b,accountId},c.db,caller(c))};}
+const AccountLoginIssueBody=z.object({projectId:id64,vmId:id64,jobId:id64,expectedCycle:cycleN,expectedVmRevision:rev,expectedLoginRevision:rev,issue:z.enum(['APPLE_LOCKED','GOOGLE_VERIFY','GOOGLE_DISABLED']),note:z.string().trim().min(1).max(500)}).strict();
+async function accountLoginIssue(c:Ctx,[accountId]:string[]){const b=AccountLoginIssueBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>reportAiLoginIssue(scopeOf(c,projectId),{...b,accountId,key:serviceKey(c,projectId)},c.db,caller(c)));}
 async function accountUsed(c:Ctx,[accountId]:string[]){const b=AccountUsedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>markAiAccountUsed(scopeOf(c,projectId),{...b,accountId,key:serviceKey(c,projectId)},c.db,caller(c)));}
 async function accountRelease(c:Ctx,[accountId]:string[]){const b=AccountReleaseBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,b.vmId,()=>releaseAiAccount(scopeOf(c,projectId),{...b,accountId,key:serviceKey(c,projectId)},c.db,caller(c)));}
 async function proxyStock(c:Ctx){const {projectId}=await projectOf(c,q(c,'projectId'));const state=z.enum(['FREE','ASSIGNED','BLOCKED']).optional().parse(q(c,'state')??undefined),group=z.enum(['TUT','SHARED']).optional().parse(q(c,'group')??undefined);return listAiProxies(c.db,projectId,{...page(c),state,group,packageCode:q(c,'package')});}

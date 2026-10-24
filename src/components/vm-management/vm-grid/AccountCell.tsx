@@ -6,6 +6,7 @@ import {ChevronDown,Loader2} from 'lucide-react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
+import {LOGIN_STATUS_LABEL} from '@/lib/login-issue';
 import {errorMessage,type ManagedVM} from '../shared';
 export type VmAccount=inferRouterOutputs<AppRouter>['accountStore']['vmAccounts'][number];
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
@@ -20,7 +21,7 @@ export function AccountCell({projectId,vm,link,focus,canAssign,face,onSaved,onBu
     place();const raf=requestAnimationFrame(place),timer=setTimeout(place,400);window.addEventListener('scroll',place,true);window.addEventListener('resize',place);return ()=>{cancelAnimationFrame(raf);clearTimeout(timer);window.removeEventListener('scroll',place,true);window.removeEventListener('resize',place);};},[open]);
   useEffect(()=>{if(!open)return;const down=(ev:MouseEvent)=>{if(!pop.current?.contains(ev.target as Node)&&!button.current?.contains(ev.target as Node))setOpen(false);};const key=(ev:KeyboardEvent)=>{if(ev.key==='Escape'){ev.stopPropagation();closeRef.current();}};
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
-  const view=focus==='login'?(e?<span className="vm-account-view"><span className="vm-ellipsis" title={e.login.email}>{e.login.email}</span><span className="pm-badge pm-badge-muted vm-type-badge">{TYPE_LABEL[e.login.type||'']||'?'}</span>{e.login.status!=='ACTIVE'&&<span className="pm-badge pm-badge-red">{e.login.status}</span>}</span>
+  const view=focus==='login'?(e?<span className="vm-account-view"><span className="vm-ellipsis" title={e.login.email}>{e.login.email}</span><span className="pm-badge pm-badge-muted vm-type-badge">{TYPE_LABEL[e.login.type||'']||'?'}</span>{e.login.status!=='ACTIVE'&&<span className={e.login.status==='GOOGLE_VERIFY'?'pm-badge pm-badge-amber':'pm-badge pm-badge-red'} title={[e.login.loginIssueNote,e.login.loginIssueAt].filter(Boolean).join(' · ')}>{LOGIN_STATUS_LABEL[e.login.status as keyof typeof LOGIN_STATUS_LABEL]||e.login.status}</span>}</span>
       :link?.legacyGmail?<span className="pm-muted vm-ellipsis" title="Gmail cũ trước quy tắc mới; chưa có tài khoản EarnApp">Cũ: {link.legacyGmail}</span>:<span className="pm-muted">Chưa có tài khoản</span>)
     :(e?.paypal?<span className="vm-ellipsis" title={e.paypal.code+' · '+(e.paypal.email||'chưa xác định email')}>{e.paypal.code} · {e.paypal.email||<span className="pm-muted">chưa rõ email</span>}</span>:<span className="pm-muted">{e&&canAssign?'Chọn PayPal':'—'}</span>);
   if(vm.archivedAt)return <span className="pm-muted vm-ellipsis">{focus==='login'?e?.login.email||'—':e?.paypal?.code||'—'}</span>;

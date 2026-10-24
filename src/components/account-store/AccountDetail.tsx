@@ -6,12 +6,25 @@ import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
+import {isLoginIssueStatus,LOGIN_ISSUE_LABEL,type LoginIssueStatus} from '@/lib/login-issue';
 type Login=inferRouterOutputs<AppRouter>['accountStore']['store']['logins'][number];
 type Field='email'|'password'|'twoFa'|'token'|'recoveryEmail'|'twoFaLink'|'smsLink'|'phone'|'notes';
 type Secrets={secret:string;twoFa:string|null;token:string|null;twoFaLink:string|null;smsLink:string|null;phone:string|null};
 const LABEL:Record<Field,string>={email:'Email đăng nhập',password:'Mật khẩu',twoFa:'Mã 2FA (TOTP)',token:'Token',recoveryEmail:'Email khôi phục',twoFaLink:'Link lấy mã 2FA',smsLink:'Link SMS',phone:'Số điện thoại',notes:'Ghi chú'};
 const SECRET:Field[]=['password','twoFa','token','twoFaLink','smsLink'];
 const EMAIL=/^[^\s@|:\t]+@[^\s@|:\t]+\.[^\s@|:\t]+$/,PHONE=/^\+?[0-9][0-9 .()-]{2,39}$/,LINK=/^https?:\/\/\S+$/i;
+export const LOGIN_ISSUE_DISPLAY_LABEL:Record<LoginIssueStatus,string>={APPLE_LOCKED:'Apple Locked',GOOGLE_VERIFY:'Google Verify',GOOGLE_DISABLED:'Google Disabled'};
+/** Non-secret health metadata, shared by the stock row and expanded detail. */
+export function LoginIssueBadge({status,loginIssueNote,loginIssueAt}:{status:string;loginIssueNote?:string|null;loginIssueAt?:string|null}){
+  if(!isLoginIssueStatus(status))return null;
+  const at=loginIssueAt?new Date(loginIssueAt):null,validAt=at&&Number.isFinite(at.getTime());
+  const color=status==='GOOGLE_VERIFY'?'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300':'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300';
+  return <div className="mt-1 max-w-xs space-y-1 text-xs whitespace-normal">
+    <span data-login-issue={status} title={LOGIN_ISSUE_LABEL[status]} className={'inline-flex rounded border px-2 py-0.5 font-medium '+color}>{LOGIN_ISSUE_DISPLAY_LABEL[status]}</span>
+    {loginIssueNote&&<p className="line-clamp-2 break-words pm-muted" title={loginIssueNote}>{loginIssueNote}</p>}
+    {validAt&&<time className="block pm-muted" dateTime={loginIssueAt!} title={at.toLocaleString('vi-VN')}>Ghi nhận {at.toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</time>}
+  </div>;
+}
 // Khung chi tiết of one Gmail / Apple ID (owner brief 20/10/2026), opened from the email in the table, inside the page.
 // - Apple ID (five-column list): Email đăng nhập, Mật khẩu, Link lấy mã 2FA, Link SMS, Số điện thoại, Ghi chú. An account recorded with
 //   the older pattern shows what it stored (2FA TOTP, Email khôi phục, Token); empty secret kinds are never offered.
@@ -90,6 +103,7 @@ export function AccountDetail({projectId,login,canEdit,canCopy,onSaved,onClose}:
   return <div className="acc-detail" role="group" aria-label={'Chi tiết '+login.email} data-account-id={login.id}>
     <div className="flex justify-between gap-2 items-center"><strong className="text-sm">{login.type==='APPLE_ID'?'Apple ID':'Gmail'} · {login.email}</strong>
       <div className="flex gap-2">{canEdit&&!editing&&<button type="button" className="pm-button pm-button-sm" onClick={startEdit}>Sửa</button>}<button type="button" className="pm-icon-button" aria-label="Đóng chi tiết" onClick={onClose}><X size={16}/></button></div></div>
+    <LoginIssueBadge {...login}/>
     {askPin&&<form className="acc-detail-pin flex gap-2 items-center flex-wrap" onSubmit={e=>{e.preventDefault();void unlock();}}><Lock size={14}/><span className="text-xs">Nhập PIN để xem / copy thông tin bí mật</span><input autoFocus type="password" autoComplete="off" className="pm-input pm-input-sm w-28" aria-label="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button className="pm-button pm-button-sm" disabled={!pin||copyAcc.isLoading}>{copyAcc.isLoading?<Loader2 size={14} className="animate-spin"/>:null}Mở</button><button type="button" className="pm-button pm-button-sm pm-button-quiet" onClick={()=>{setAskPin(false);pending.current=undefined;}}>Huỷ</button>{pinError&&<span className="vm-cell-error" role="alert">{pinError}</span>}</form>}
     {stale&&<div className="pm-review text-sm flex gap-2 items-center flex-wrap" role="status">Tài khoản vừa được cập nhật ở nơi khác. Nội dung bạn đang sửa vẫn giữ; giá trị mới hiện dưới từng ô.
       <button type="button" className="pm-button pm-button-sm" onClick={()=>{setBase({revision:login.revision,values:current});keyRef.current=null;}}>Đối chiếu bản mới</button></div>}

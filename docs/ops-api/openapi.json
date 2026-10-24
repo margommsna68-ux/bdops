@@ -2,7 +2,7 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Only withdrawal prepare/status/receipts retain approval. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
@@ -1302,6 +1302,24 @@
         "$ref": "#/components/schemas/Withdrawal"
        }
       ]
+     },
+     "loginId": {
+      "type": "string"
+     },
+     "loginRevision": {
+      "type": "integer"
+     },
+     "loginStatus": {
+      "type": "string"
+     },
+     "loginIssueNote": {
+      "type": "string",
+      "nullable": true
+     },
+     "loginIssueAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
      }
     },
     "required": [
@@ -1314,7 +1332,12 @@
      "loginType",
      "vm",
      "receivingEmail",
-     "withdrawal"
+     "withdrawal",
+     "loginId",
+     "loginRevision",
+     "loginStatus",
+     "loginIssueNote",
+     "loginIssueAt"
     ]
    },
    "Suggestion": {
@@ -6221,6 +6244,160 @@
      "data",
      "error"
     ]
+   },
+   "LoginIssueReplacement": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "accountId": {
+      "type": "string"
+     },
+     "loginId": {
+      "type": "string"
+     },
+     "loginType": {
+      "type": "string",
+      "nullable": true
+     },
+     "email": {
+      "type": "string"
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "loginRevision": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "accountId",
+     "loginId",
+     "loginType",
+     "email",
+     "revision",
+     "loginRevision"
+    ],
+    "nullable": true
+   },
+   "LoginIssueRecord": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "accountId": {
+      "type": "string"
+     },
+     "loginId": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "APPLE_LOCKED",
+       "GOOGLE_VERIFY",
+       "GOOGLE_DISABLED"
+      ]
+     },
+     "loginRevision": {
+      "type": "integer"
+     },
+     "loginIssueNote": {
+      "type": "string",
+      "nullable": true
+     },
+     "loginIssueAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+     },
+     "replacementStatus": {
+      "type": "string",
+      "enum": [
+       "ASSIGNED",
+       "NO_STOCK",
+       "NEEDS_ADMIN_STOCK"
+      ]
+     },
+     "replacement": {
+      "$ref": "#/components/schemas/LoginIssueReplacement"
+     },
+     "sdkReuseBlocked": {
+      "type": "boolean"
+     },
+     "noteId": {
+      "type": "string"
+     },
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "jobId": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "accountId",
+     "loginId",
+     "status",
+     "loginRevision",
+     "loginIssueNote",
+     "loginIssueAt",
+     "replacementStatus",
+     "replacement",
+     "sdkReuseBlocked",
+     "noteId",
+     "vmId",
+     "cycle",
+     "jobId"
+    ]
+   },
+   "LoginIssueAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "$ref": "#/components/schemas/LoginIssueRecord"
+     },
+     "current": {
+      "$ref": "#/components/schemas/VmNow",
+      "nullable": true
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkLoginIssueAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/LoginIssueAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -10776,6 +10953,158 @@
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/BatchBody"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/earnapp-accounts/{id}/login-issue": {
+   "post": {
+    "summary": "Report provider login failure and take a fresh unused account",
+    "description": "ACCOUNT_OPS; no approval. Current token-owned ACTIVE job, VM cycle/revision, current account and login revision checked in one transaction. Quarantines Apple Locked/Google Verify/Google Disabled; assigns a never-used replacement (same type preferred, then other type). Old EarnApp closed/detached only after replacement; its PayPal, payouts and used SDK never transfer. Empty stock retains the bad account and reports NO_STOCK. Server-limited users report only and receive NEEDS_ADMIN_STOCK. Same key replays original result, including shortages; a later attempt after restocking needs a fresh read and command.",
+    "x-required-scope": "ACCOUNT_OPS",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkLoginIssueAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "jobId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer",
+          "minimum": 1
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "expectedLoginRevision": {
+          "type": "integer"
+         },
+         "issue": {
+          "type": "string",
+          "enum": [
+           "APPLE_LOCKED",
+           "GOOGLE_VERIFY",
+           "GOOGLE_DISABLED"
+          ]
+         },
+         "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "jobId",
+         "expectedCycle",
+         "expectedVmRevision",
+         "expectedLoginRevision",
+         "issue",
+         "note"
+        ]
        }
       }
      }
