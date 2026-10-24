@@ -1,0 +1,15 @@
+Environment variables loaded from .env
+Prisma schema loaded from prisma\schema.prisma
+Datasource "db": PostgreSQL database "moneytohome", schema "public" at "127.0.0.1:5432"
+
+37 migrations found in prisma/migrations
+
+Applying migration `20261024120000_member_server_scope`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20261024120000_member_server_scope/
+    └─ migration.sql
+
+All migrations have been successfully applied.

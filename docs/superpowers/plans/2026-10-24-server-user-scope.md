@@ -18,7 +18,7 @@
 - [x] Proxy inventory counts/search/copy filtered; shared-location redaction and affected-server validation; deny global stock administration for restricted users.
 - [x] Central web/API fail-closed routing, VM/ops/account projections, token/job/replay enforcement. Deny project-wide money, global journals/import/undo and legacy side doors for server-limited users.
 - [x] Integration tests using A/B/common-stock with direct IDs, mixed bulk, stale grants, replay, retained job, transfer and secrets; real local browser with admin + scoped user.
-- [ ] Review all changed boundaries; types/lint/build + related tests; backup, additive migration and production deployment; read-only host verification, docs and handoff.
+- [x] Review all changed boundaries; types/lint/build + related tests; backup, additive migration and production deployment; read-only host verification, docs and handoff.
 
 ## Review focus
 

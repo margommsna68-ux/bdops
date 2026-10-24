@@ -1,0 +1,10 @@
+{
+  "readOnly": true,
+  "allExistingMembersUnrestricted": true,
+  "members": 5,
+  "servers": 11,
+  "vms": 678,
+  "migrationApplied": true,
+  "unauthenticatedMe": 401,
+  "health": 200
+}

@@ -19,3 +19,10 @@ Owner: a user assigned An-01 sees/operates only that server and its bound VM, SD
 
 Full-suite result and deployment proof are recorded after their final completion below.
 Final full suite: 175 files / 903 tests passed (127.34 s). Browser: 18/18, no JS errors. Build completed successfully. Backup before release: moneytohome-20261024-114054.dump; moon-01 encrypted copy verified including decryption.
+## Release
+
+Code commit 3169af6; build arjyYUobeL-P-67mPrLZn; deployed 24/10/2026 11:42 Bangkok to SERVER-01 / https://wow.lalamail.sbs. Migration 20261024120000_member_server_scope adds two membership columns. Generated Prisma client deployed with the tested schema. Rollback application preserved at D:\MoneyToHome\app-before-server-scope-20261024 (additive database fields are old-app compatible).
+
+Host verified read-only: public build manifest and health 200; /me without token 401; grant reader returns all five existing memberships ALL with empty allowlists, eleven server choices; workspace 678 VM. Before/after business-data and membership hash identical (servers 11, VM 678, operations 511, proxy 1463, SDK 570, members 5). No live user grants or operational data changed. Web and Tunnel services running. Local Chrome evidence uses synthetic data; no scoped-user write test was run on production.
+
+Backup: local moneytohome-20261024-114054.dump; moon-01 encrypted moneytohome-20261024-114054.mthbk, destination SHA-256 a7b243fe313a019bf6aed7bbab39c6adb845030060e5b7fd580e0a1c077c5695; destination and decryption verified.
