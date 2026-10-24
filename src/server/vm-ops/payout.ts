@@ -1,5 +1,6 @@
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
+import {vmWhere,assertScopedVmIds,hasServerScope} from '../permissions/server-scope';
 import {fromCents,gatherOf,milestoneOf,suggestPaypal,toCents} from '@/lib/vm-ops';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
@@ -41,6 +42,7 @@ export async function payoutRights(scope:ActorScope,db:PrismaClient|Tx=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),r=await ledgerRights(current,db as PrismaClient);
   let assign=false;try{assertInfrastructureAction(current,'ASSIGN');assign=current.businessMode==='PROXY_VM';}catch{assign=false;}
   const proxyVm=current.businessMode==='PROXY_VM',narrow=(cap:string)=>proxyVm&&assign&&current.capabilities.includes(cap);
+  if(hasServerScope(current))return {current,money:false,balance:false,writeMoney:false,assign,payout:false,receipt:false,requestMoney:false};
   const payout=r.writeFunds&&proxyVm||narrow('EARN_PAYOUT'),receipt=r.writeFunds&&proxyVm||narrow('PAYPAL_RECEIPT_RECORD');
   return {current,money:r.funds,balance:r.funds&&r.withdrawals,writeMoney:r.writeFunds,assign,payout,receipt,requestMoney:r.funds||payout||receipt};
 }
@@ -296,8 +298,8 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
 // Operating state of every VM for the Server / VM grid: recorded status and round, the money milestone of the current round, and
 // (only with the money rights) the amounts.
 export async function readVmOps(scope:ActorScope,db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);const {money:book,writeMoney,assign,payout,receipt,requestMoney:money}=await payoutRights(scope,db),bal=await balanceRights(scope,db);
-  const [vms,users]=await Promise.all([db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,operation:true,earnApp:{select:{id:true,closedAt:true,payoutRequest:{include:requestInclude}}}}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
+  const current=await authorizeVM(scope,'READ',db);const {money:book,writeMoney,assign,payout,receipt,requestMoney:money}=await payoutRights(scope,db),bal=await balanceRights(scope,db);
+  const [vms,users]=await Promise.all([db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true},...vmWhere(current)},select:{id:true,operation:true,earnApp:{select:{id:true,closedAt:true,payoutRequest:{include:requestInclude}}}}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
   const who=(id:string|null|undefined)=>{const u=id?users.find(x=>x.id===id):null;return u?u.name||u.username||'Tài khoản cũ':null;};
   const balances=await currentBalances(db,scope.projectId,vms.map(v=>({id:v.id,cycle:v.operation?.cycle??1,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null})),bal.read);
   // money = amounts of payout requests (PayPal money readers, or EARN_PAYOUT / PAYPAL_RECEIPT_RECORD); book = the PayPal book itself.
@@ -310,15 +312,16 @@ export async function readVmOps(scope:ActorScope,db:PrismaClient=prisma){
 }
 // History of one VM position: recorded statuses, closed rounds and the payout requests of every round.
 export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);const {money,writeMoney}=await payoutRights(scope,db);
+  await assertScopedVmIds(db,scope,[input.vmId]);
+  const current=await authorizeVM(scope,'READ',db);const {money,writeMoney}=await payoutRights(scope,db);
   const vm=await db.virtualMachine.findFirst({where:{id:input.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,operation:{select:{cycle:true}}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');
   const [events,cycles,requests,users]=await Promise.all([db.vmOpsEvent.findMany({where:{vmId:vm.id,projectId:scope.projectId},orderBy:{createdAt:'desc'},take:200}),db.vmCycle.findMany({where:{vmId:vm.id,projectId:scope.projectId},orderBy:{number:'desc'}}),
     db.earnPayoutRequest.findMany({where:{vmId:vm.id,projectId:scope.projectId},include:{...requestInclude,earnApp:{select:{login:{select:{email:true}},closedAt:true,vmId:true}}},orderBy:{createdAt:'desc'}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
   const who=(id:string|null|undefined)=>{const u=id?users.find(x=>x.id===id):null;return u?u.name||u.username||'Tài khoản cũ':'—';};
   const logins=await db.gmailAccount.findMany({where:{id:{in:cycles.map(c=>c.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
   return {
-    events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:e.note,detail:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
-    cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
+    events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:hasServerScope(current)?null:e.note,detail:hasServerScope(current)?null:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
+    cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:hasServerScope(current)?null:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
     // old = the request's account has left this VM or round: only reconciling it is offered (never on the account now on the VM).
     rights:{writeMoney},
     requests:requests.map(r=>{const m=moneyOfRequest(r),old=!(r.earnApp.vmId===vm.id&&!r.earnApp.closedAt&&(vm.operation?.cycle??1)===r.cycle);return {id:r.id,revision:r.revision,vmId:r.vmId,earnAppId:r.earnAppId,submission:r.submission,old,cycle:r.cycle,login:r.earnApp.login.email,paypal:r.paypal.code,email:r.paypalEmail.email,requestedAt:dayText(r.requestedAt),state:r.state,phase:m.phase,consumed:!!r.consumedAt,reviewAfterRecreate:m.reviewAfterRecreate,

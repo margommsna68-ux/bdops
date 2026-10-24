@@ -1,3 +1,4 @@
+import {hasServerScope} from '@/server/permissions/server-scope';
 import {randomBytes} from 'node:crypto';
 import {assignProxyToVm} from './proxy-change';
 import {Prisma,type PrismaClient} from '@prisma/client';
@@ -50,17 +51,17 @@ export function createVMService(db:PrismaClient=prisma,deps:{refreshSource?:(pro
   const refresh=deps.refreshSource||refreshGenjy;
   const dto=(batch:{token:string;previewRows:Prisma.JsonValue})=>{const rows=batch.previewRows as unknown as AllocationRow[];return {token:batch.token,rows,ready:rows.filter(r=>r.outcome==='READY').length,errors:rows.filter(r=>r.outcome==='ERROR').length,skipped:rows.filter(r=>r.outcome==='SKIP').length};};
   async function preview(scope:ActorScope,input:AllocationInput):Promise<AllocationPreview>{
-    await authorizeVM(scope,'ASSIGN',db);const hash=vmHash(input),prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
+    scope=await authorizeVM(scope,'ASSIGN',db);if(hasServerScope(scope))throw new ProxyDomainError('FORBIDDEN','Cấp proxy từ kho chung cần quyền toàn bộ máy chủ');const hash=vmHash(input),prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
     if(prior){if(prior.actorId!==scope.userId)throw new ProxyDomainError('FORBIDDEN');if(prior.kind!=='VM_ALLOCATION'||prior.payloadHash!==hash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');if(prior.status==='APPLIED')return dto(prior);}
     const source=await requireGenjy(scope,db,refresh),plan=await planAllocation(scope.projectId,input,db),data={actorId:scope.userId,kind:'VM_ALLOCATION',payloadHash:hash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,plan})),sourceHash:source.hash,revisionFacts:plan.facts as unknown as Prisma.InputJsonValue,previewRows:plan.rows as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
     const batch=prior?await db.proxyBatch.update({where:{id:prior.id},data}):await db.proxyBatch.create({data:{...data,projectId:scope.projectId,idempotencyKey:input.idempotencyKey}});return dto(batch);
   }
   async function commit(scope:ActorScope,token:string,key:string){
-    await authorizeVM(scope,'ASSIGN',db);const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:'VM_ALLOCATION'}});if(!original)throw new ProxyDomainError('NOT_FOUND');if(original.idempotencyKey!==key)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
+    scope=await authorizeVM(scope,'ASSIGN',db);if(hasServerScope(scope))throw new ProxyDomainError('FORBIDDEN','Cấp proxy từ kho chung cần quyền toàn bộ máy chủ');const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:'VM_ALLOCATION'}});if(!original)throw new ProxyDomainError('NOT_FOUND');if(original.idempotencyKey!==key)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
     const replay=async(reader:VMReader,batch:NonNullable<typeof original>)=>{const op=await reader.operationJournal.findUnique({where:{batchId:batch.id}}),undo=op?await reader.operationJournal.findUnique({where:{undoOfId:op.id}}):null;return {...batch.result as unknown as {batchId:string;applied:number;errors:number;rows:AllocationRow[]},replay:true,undone:!!undo};};
     if(original.status==='APPLIED')return replay(db,original);if(original.expiresAt.getTime()<=Date.now())throw new ProxyDomainError('STALE_PREVIEW');const source=await requireGenjy(scope,db,refresh);
     return withProxyTransaction(async tx=>{
-      const current=await authorizeVM(scope,'ASSIGN',tx),batch=await tx.proxyBatch.findUniqueOrThrow({where:{id:original.id}});if(batch.status==='APPLIED')return replay(tx,batch);
+      const current=await authorizeVM(scope,'ASSIGN',tx);if(hasServerScope(current))throw new ProxyDomainError('FORBIDDEN');const batch=await tx.proxyBatch.findUniqueOrThrow({where:{id:original.id}});if(batch.status==='APPLIED')return replay(tx,batch);
       const latest=await tx.proxySourceSnapshot.findFirst({where:{projectId:scope.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}});if(!latest?.scanSucceeded)throw new ProxyDomainError('SOURCE_UNAVAILABLE');if(latest.hash!==source.hash)throw new ProxyDomainError('STALE_PREVIEW','Nguồn Genjy đã đổi; kiểm tra lại');
       if(batch.token!==token||batch.expiresAt.getTime()<=Date.now())throw new ProxyDomainError('STALE_PREVIEW');
       const saved=JSON.parse(decrypt(batch.encryptedPlan)) as {input:AllocationInput;plan:Awaited<ReturnType<typeof planAllocation>>};if(vmHash(saved.input)!==batch.payloadHash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');

@@ -1,3 +1,5 @@
+import {assertScopedVmIds,assertScopedEndpointIds,hasServerScope} from '@/server/permissions/server-scope';
+import {loadInfrastructureScope,assertInfrastructureAction,type InfrastructureAction} from '@/server/permissions/infrastructure';
 import type {Prisma,VmOpsStatus} from '@prisma/client';
 import {encrypt} from '@/lib/encryption';
 import {decodeEndpoint} from '../proxy-management/repository';
@@ -17,6 +19,11 @@ export interface ChangeCtx {projectId:string;actorId:string;now:Date;via:string}
 const vmInclude={server:true,desiredConfiguration:{include:{endpoint:true}},installedConfiguration:{include:{endpoint:true}},allocations:{where:{releasedAt:null},include:{endpoint:true}},operation:true} as const;
 export type ChangeVM=Prisma.VirtualMachineGetPayload<{include:typeof vmInclude}>;
 export const loadChangeVM=(tx:Tx,vmId:string)=>tx.virtualMachine.findUniqueOrThrow({where:{id:vmId},include:vmInclude});
+// Shared entry points reload membership inside the caller's transaction, including no-op paths.
+async function scopedChange(tx:Tx,ctx:ChangeCtx,action:InfrastructureAction,vmIds:string[],endpointIds:string[]=[]){
+  const scope=await loadInfrastructureScope(tx,ctx.actorId,ctx.projectId);assertInfrastructureAction(scope,action);
+  await assertScopedVmIds(tx,scope,vmIds);await assertScopedEndpointIds(tx,scope,endpointIds,{write:true});return scope;
+}
 const label=(e:{host:string|null;port:number|null}|null|undefined)=>e?e.host+(e.port?':'+e.port:''):'—';
 /**
  * The proxy a VM uses now. One clear position (an assigned configuration, or only a confirmed one, with no other hold) is the current
@@ -43,7 +50,9 @@ async function event(tx:Tx,ctx:ChangeCtx,endpoint:{id:string;identityId:string|n
  * is marked as still to be applied on the real machine (markProxyPending), whatever the status (owner brief 21/10/2026).
  */
 export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:string,endpointId:string){
+  const scope=await scopedChange(tx,ctx,'ASSIGN',[vmId],[endpointId]);
   const vm=await loadChangeVM(tx,vmId),cur=currentProxyOf(vm);
+  if(hasServerScope(scope))await assertScopedEndpointIds(tx,scope,Array.from(new Set([...cur.candidates,...vm.allocations.map(a=>a.endpointId),...(vm.proxyId?[vm.proxyId]:[])])),{write:true});
   if(cur.endpointId===endpointId)return {changed:false,from:[] as string[],vm};
   const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:endpointId,projectId:ctx.projectId}}),proxy=decodeEndpoint(endpoint);
   if(!proxy||proxy.format!=='FULL'||!endpoint.inventoryKey||!endpoint.identityId)throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ điều kiện (cần đủ IP:port:user:pass)');
@@ -100,6 +109,8 @@ async function ensureOps(tx:Tx,images:Collector,projectId:string,vmId:string){
 }
 /** Set "Blocked" on the VM that uses `endpointId` (its current proxy), remembering the status before it. Returns what happened. */
 export async function markVmBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:string,endpointId:string,note:string){
+  const scope=await scopedChange(tx,ctx,'BLOCK',[vmId],[endpointId]);
+  if(hasServerScope(scope)&&currentProxyOf(await loadChangeVM(tx,vmId)).endpointId!==endpointId)throw new ProxyDomainError('NOT_FOUND','Proxy không phải proxy hiện tại của VM');
   const ops=await ensureOps(tx,images,ctx.projectId,vmId),cycle=ops.cycle;
   if(ops.status&&KEEP.includes(ops.status))return 'KEPT' as const;
   if(ops.status==='PROXY_BLOCKED'){
@@ -115,6 +126,7 @@ export async function markVmBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:st
 }
 /** Mark the VMs whose current proxy is `endpointId` as Blocked (the registry reported it BLOCKED). */
 export async function markUsersBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,endpointId:string,note:string){
+  await scopedChange(tx,ctx,'BLOCK',[],[endpointId]);
   const holds=await tx.vMProxyAllocation.findMany({where:{endpointId,releasedAt:null,role:{in:['DESIRED','INSTALLED']},vm:{managed:true,archivedAt:null}},select:{vmId:true}});
   const out:{vmId:string;result:string}[]=[];
   for(const vmId of Array.from(new Set(holds.map(h=>h.vmId)))){const vm=await loadChangeVM(tx,vmId);if(currentProxyOf(vm).endpointId!==endpointId)continue;out.push({vmId,result:await markVmBlocked(tx,images,ctx,vmId,endpointId,note)});}
@@ -144,8 +156,10 @@ export async function blockedSource(db:Pick<Tx,'vmOpsEvent'>,vmId:string,ops:Ops
 }
 /** After the proxies `oldIds` left the VM: "Chờ áp dụng proxy" when the VM still carries the Blocked of one of them. */
 export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,vm:{id:string;operation:OpsRow|null},oldIds:string[]){
+  await scopedChange(tx,ctx,'ASSIGN',[vm.id]);
   const ops=vm.operation;if(!ops)return null;
   const row=await tx.vmOperation.findUniqueOrThrow({where:{id:ops.id}});
+  if(row.vmId!==vm.id||row.projectId!==ctx.projectId)throw new ProxyDomainError('NOT_FOUND');
   const clear={blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null};
   const source=await blockedSource(tx,vm.id,row,oldIds);
   if(!source){
@@ -167,6 +181,8 @@ export async function restoreAfterBlocked(tx:Tx,images:Collector,ctx:ChangeCtx,v
  * the mark counts only while it names the VM's current configuration (pendingApply), so an undone change leaves no stale mark.
  */
 export async function markProxyPending(tx:Tx,_images:Collector,ctx:ChangeCtx,vmId:string,configId:string){
+  const scope=await scopedChange(tx,ctx,'ASSIGN',[vmId]);
+  if(hasServerScope(scope)&&!await tx.vMConfiguration.findFirst({where:{id:configId,vmId,projectId:ctx.projectId},select:{id:true}}))throw new ProxyDomainError('NOT_FOUND');
   await tx.vmOperation.upsert({where:{vmId},create:{projectId:ctx.projectId,vmId,proxyPendingConfigId:configId,proxyPendingAt:ctx.now},update:{proxyPendingConfigId:configId,proxyPendingAt:ctx.now}});
 }
 /** The configuration the real machine still has to apply, or null: the mark names the VM's current configuration. */

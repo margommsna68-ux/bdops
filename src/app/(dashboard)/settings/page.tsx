@@ -68,8 +68,6 @@ export default function SettingsPage() {
 
   const [editingName, setEditingName] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
-  const isAdmin = currentRole === "ADMIN";
-  const isAdminOrMod = currentRole === "ADMIN" || currentRole === "MODERATOR";
 
   // Password change
   const [curPassword, setCurPassword] = useState("");
@@ -97,6 +95,8 @@ export default function SettingsPage() {
     { projectId: projectId! },
     { enabled: !!projectId }
   );
+  const isAdmin = currentRole === "ADMIN" && !(project && 'scopeLimited' in project && project.scopeLimited);
+  const isAdminOrMod = (currentRole === "ADMIN" || currentRole === "MODERATOR") && !(project && 'scopeLimited' in project && project.scopeLimited);
 
   const { data: pinStatus } = trpc.user.hasPin.useQuery();
   // Bảo mật (2FA, 23/10/2026): status from the server; the setup itself is the shared TotpSetup (same as the gate).

@@ -6,16 +6,17 @@ import {type SdkLinkState} from '@/lib/sdk-money';
 import {vmSdkLists} from './sdk-list';
 import {sdkMoneyRights} from './sdk-money-rights';
 import {pendingApply} from './proxy-change';
+import {serverWhere,hasServerScope} from '../permissions/server-scope';
 export type VMReader=PrismaClient|Prisma.TransactionClient;
 export async function authorizeVM(scope:ActorScope,action:InfrastructureAction,db:VMReader){const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,action);if(current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');return current;}
 export async function requireGenjy(scope:ActorScope,db:PrismaClient,refresh:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>=refreshGenjy){const source=await refresh(scope.projectId,db);if(!source.scanSucceeded)throw new ProxyDomainError('SOURCE_UNAVAILABLE');return source;}
 export const vmInclude={operation:true,server:true,sdkRecord:{select:{id:true,code:true,revision:true,amount:true,note:true,linkState:true}},desiredConfiguration:{include:{endpoint:{select:{host:true,port:true,packageCode:true}}}},installedConfiguration:{include:{endpoint:{select:{host:true,port:true,packageCode:true}}}},allocations:{where:{releasedAt:null},include:{endpoint:{select:{host:true,port:true,packageCode:true,inventoryState:true,identity:{select:{owner:true,subgroup:true}}}}}}} as const;
 export async function readManagedVMs(projectId:string,db:VMReader){return db.virtualMachine.findMany({where:{managed:true,server:{projectId,managed:true}},include:vmInclude,orderBy:[{server:{code:'asc'}},{code:'asc'}]});}
 export async function readVMWorkspace(scope:ActorScope,db:PrismaClient){
-  await authorizeVM(scope,'READ',db);const [servers,vms,users]=await Promise.all([db.server.findMany({where:{projectId:scope.projectId,managed:true},select:{id:true,code:true,ipAddress:true,notes:true,archivedAt:true,revision:true},orderBy:{code:'asc'}}),readManagedVMs(scope.projectId,db),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
+  const current=await authorizeVM(scope,'READ',db);const [servers,vms,users]=await Promise.all([db.server.findMany({where:{projectId:scope.projectId,managed:true,...serverWhere(current)},select:{id:true,code:true,ipAddress:true,notes:true,archivedAt:true,revision:true},orderBy:{code:'asc'}}),readManagedVMs(scope.projectId,db).then(rows=>hasServerScope(current)?rows.filter(v=>current.serverIds!.includes(v.serverId)):rows),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
   const actor=(id:string|null)=>{const u=id?users.find(u=>u.id===id):null;return u?u.name||u.username||'Tài khoản cũ':null;};
   // The SDK list of every VM (owner brief 20/10/2026): unused first, used after; `sdk` stays the current code.
-  const sdkMoney=await sdkMoneyRights(scope,db),lists=await vmSdkLists(db,scope.projectId,vms.map(v=>v.id),sdkMoney.read);
+  const sdkMoney=await sdkMoneyRights(scope,db),lists=await vmSdkLists(db,scope.projectId,vms.map(v=>v.id),sdkMoney.read,current);
   // Work in hand on a real machine (21/10/2026): one active, unexpired job per VM, with who / which token / until when.
   const jobs=await db.vmJob.findMany({where:{projectId:scope.projectId,state:'ACTIVE',expiresAt:{gt:new Date()}},select:{vmId:true,kind:true,step:true,expiresAt:true,claimedById:true,tokenId:true}});
   const tokens=jobs.some(j=>j.tokenId)?await db.opsToken.findMany({where:{id:{in:jobs.map(j=>j.tokenId).filter((x):x is string=>!!x)}},select:{id:true,name:true}}):[];

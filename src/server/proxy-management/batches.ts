@@ -1,3 +1,4 @@
+import {hasServerScope} from '@/server/permissions/server-scope';
 import {createHash,randomBytes} from 'node:crypto';
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
@@ -135,6 +136,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
   const refresh=deps.refreshSource||refreshGenjy;
   const scoped=async(scope:ActorScope,operation:InfrastructureAction,reader:PrismaClient|Prisma.TransactionClient=db)=>{
     const current=await loadInfrastructureScope(reader,scope.userId,scope.projectId);assertInfrastructureAction(current,operation);
+    if(hasServerScope(current))throw new ProxyDomainError('FORBIDDEN','Đợt proxy toàn dự án cần quyền toàn bộ máy chủ');
     if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');return current;
   };
   async function loadSheet(scope:ActorScope,input:BatchInput,reader:PrismaClient|Prisma.TransactionClient=db):Promise<SheetSnapshot|undefined>{
@@ -166,6 +168,7 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     return dto(batch);
   }
   async function commit(scope:ActorScope,token:string,idempotencyKey:string):Promise<CommitResult>{
+    await scoped(scope,'READ');
     const vmBatch=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:{in:['VM_ALLOCATION','PROXY_EDIT']}},select:{id:true}});
     if(vmBatch)throw new ProxyDomainError('INVALID_INPUT','Đợt gán VM phải lưu qua luồng Server/VM');
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId}});if(!original) throw new ProxyDomainError('NOT_FOUND');

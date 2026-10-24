@@ -9,6 +9,8 @@ import {assertLegacyInfrastructureTargets} from './permissions/legacy-infrastruc
 import {assertUserTarget} from './permissions/user-target';
 import {loadInfrastructureScope} from './permissions/infrastructure';
 import {checkWebSession} from './users/access';
+import {assertServerWebRequest} from './permissions/server-web-policy';
+import {ProxyDomainError,userMessage} from './proxy-management/types';
 
 export const APP_MODULES = [
   "FUNDS",
@@ -59,7 +61,7 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-const enforceAuth = t.middleware(({ ctx, next, path }) => {
+const enforceAuth = t.middleware(async ({ ctx, next, path, rawInput }) => {
   if (!ctx.session?.user) {
     const ended = ctx.web && "ended" in ctx.web ? ctx.web.ended : null;
     throw new TRPCError({ code: "UNAUTHORIZED", message: ended ? "SESSION_ENDED: " + (ended === "DISABLED" ? "Tài khoản đã bị vô hiệu hoá" : "Phiên đăng nhập đã hết; đăng nhập lại") : undefined });
@@ -67,6 +69,7 @@ const enforceAuth = t.middleware(({ ctx, next, path }) => {
   if (ctx.web && "pinUnlocked" in ctx.web && !ctx.web.pinUnlocked && !PIN_FREE.has(path)) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "PIN_REQUIRED: Nhập PIN để tiếp tục" });
   }
+  try{await assertServerWebRequest(ctx.prisma,(ctx.session.user as {id:string}).id,path,rawInput);}catch(e){if(e instanceof ProxyDomainError)throw new TRPCError({code:e.code==='NOT_FOUND'?'NOT_FOUND':'FORBIDDEN',message:userMessage(e)});throw e;}
   return next({
     ctx: {
       session: ctx.session,

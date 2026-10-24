@@ -1602,6 +1602,14 @@
           "PROXY_CREDENTIALS",
           "ACCOUNT_OPS"
          ]
+        },
+        "serverIds": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "nullable": true,
+         "description": "null: all project servers; array: assigned server IDs only, empty means none."
         }
        },
        "required": [
@@ -1610,7 +1618,8 @@
         "name",
         "role",
         "capabilities",
-        "effective"
+        "effective",
+        "serverIds"
        ]
       }
      },

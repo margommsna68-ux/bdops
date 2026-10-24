@@ -6,6 +6,7 @@ import {decodeEndpoint} from '../proxy-management/repository';
 import {runBusinessCommand} from '../business-management/idempotency';
 import {loadInfrastructureScope,assertInfrastructureAction} from '../permissions/infrastructure';
 import {assertOpsToken} from '../ops-api/context';
+import {assertScopedTargets,assertScopedSdkCodes} from '../permissions/server-scope';
 import {authorizeVM} from '../vm-management/repository';
 import {currentProxyOf,pendingApply} from '../vm-management/proxy-change';
 import {placeVmSdk} from '../vm-management/sdk-store';
@@ -52,6 +53,7 @@ async function lockOps(tx:Tx,projectId:string,vmId:string){
 async function expire(tx:Tx,vmId:string,now:Date){await tx.vmJob.updateMany({where:{vmId,state:'ACTIVE',expiresAt:{lte:now}},data:{state:'RELEASED',result:'EXPIRED',finishedAt:now}});}
 /** The caller's own active job, locked; anything else (expired, released, another operator or token, another VM) is refused. */
 export async function ownJob(tx:Tx,projectId:string,userId:string,caller:OpsCaller,jobId:string,vmId?:string){
+  await assertScopedTargets(tx,{projectId,userId,role:'USER',capabilities:[]},{jobId,...(vmId?{vmId}:{})});
   const [row]=await tx.$queryRaw<{id:string}[]>`SELECT "id" FROM "VmJob" WHERE "id"=${jobId} AND "projectId"=${projectId} FOR UPDATE`;
   if(!row)throw new ProxyDomainError('NOT_FOUND','Không có việc này trong dự án','NOT_FOUND');
   const job=await tx.vmJob.findUniqueOrThrow({where:{id:jobId}});
@@ -138,6 +140,7 @@ export async function proxyForJob(scope:ActorScope,input:{vmId:string;jobId:stri
     if(current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');
     if(current.role!=='ADMIN'&&!current.capabilities.includes('VM_PROXY_FOR_OPS'))throw new ProxyDomainError('FORBIDDEN','Cần quyền "Lấy proxy của VM đang xử lý (AI)"');
     await assertOpsToken(tx,scope);
+    await assertScopedTargets(tx,current,input);
     const job=await ownJob(tx,scope.projectId,current.userId,caller,input.jobId,input.vmId);
     const vm=await loadVm(tx,scope.projectId,input.vmId),cycle=vm.operation?.cycle??1;
     if(cycle!==input.expectedCycle||job.cycle!==cycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle),'CYCLE_CHANGED');
@@ -174,6 +177,7 @@ export async function recordJobSdk(scope:ActorScope,input:{key:string;vmId:strin
     await authorizeVM(current,'ASSIGN',tx);
     const job=await ownJob(tx,scope.projectId,current.userId,caller,input.jobId,input.vmId);
     if(job.cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(job.cycle),'CYCLE_CHANGED');
+    await assertScopedSdkCodes(tx,current,[code],{allowNew:true});
     const start=job.resumeOf?(await tx.vmJob.findUnique({where:{id:job.resumeOf},select:{claimedAt:true}}))?.claimedAt??job.claimedAt:job.claimedAt;
     const existing=await tx.sdkRecord.findFirst({where:{projectId:scope.projectId,code}});
     if(existing&&existing.createdAt<start&&existing.id!==job.sdkId)throw invalid('SDK '+code+' đã có trên web từ trước lần cài này; mỗi lần cài EarnApp phải ghi SDK mới lấy từ máy');
@@ -241,6 +245,7 @@ export async function finishProxyJob(scope:ActorScope,input:{key:string;jobId:st
     if(!config||config.id!==input.configurationId||job.configurationId!==config.id)throw conflict('Proxy trên web đã đổi sau khi lấy (hoặc chưa lấy proxy cho việc này); kết quả lần trước không xác nhận cấu hình mới. Lấy proxy mới và làm lại',{currentConfigurationId:config?.id??null});
     const now=new Date(),was=ops.status;let status:VmOpsStatus|null=was,message:string;
     if(input.result==='PROXY_BLOCKED'){
+      await assertScopedTargets(tx,current,{endpointId:config.endpointId});
       const r=await blockCurrentProxy(tx,images,{projectId:scope.projectId,actorId:current.userId,now,canBlock:(()=>{try{assertInfrastructureAction(infra,'BLOCK');return true;}catch{return false;}})()},vm,config.endpointId,input.note??null);
       if(r.outcome==='ERROR')throw invalid(r.message);status=r.status;message=r.message;
     }else if(was&&KEEP_ON_APPLY.includes(was)){message='Đã áp dụng proxy; giữ tình trạng '+opsLabel(was);}

@@ -71,7 +71,9 @@ it('import can register a new group or pick an existing one; grouped proxies are
     expect((await getEligibleInventory(f.projectId,db)).map(e=>e.ip).sort()).toEqual([f.net+'2',f.net+'5']); // grouped proxies stay out of the TUT pool (held/installed TUT rows are out as before)
     const page=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:group.id},db);expect(page.rows.map(r=>r.ip).sort()).toEqual([f.net+'21',f.net+'22',f.net+'23']);expect(page.rows[0]).toMatchObject({owner:'OTHER',groupId:group.id,groupName:'Khách C'});expect(page.groups).toEqual([{id:group.id,name:'Khách C'}]);
     const tut=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:GROUP_TUT},db);expect(tut.rows.map(r=>r.ip).sort()).toEqual([f.net+'1',f.net+'2',f.net+'3',f.net+'4',f.net+'5']);
-    const combined=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:GROUP_TUT,servers:['moon1'],state:'NEW'},db);expect(combined.rows.map(r=>r.ip).sort()).toEqual([f.net+'1',f.net+'4']);
+    const combined=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:GROUP_TUT,servers:['moon1']},db);expect(combined.rows.map(r=>r.ip).sort()).toEqual([f.net+'1',f.net+'4']);
+    const unused=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:GROUP_TUT,servers:['moon1'],state:'NEW'},db);expect(unused.rows).toEqual([]);
+    const live=await queryRegistry(f.scope,{view:'CURRENT',limit:50,group:GROUP_TUT,servers:['moon1'],state:'LIVE'},db);expect(live.rows.map(r=>r.ip)).toEqual([f.net+'1']); // UNCERTAIN e4 stays REVIEW, not NEW or LIVE
     await expect(batches.preview(f.scope,{kind:'NEW',text:f.net+'24:80:u24:p24',owner:'OTHER',idempotencyKey:key()})).rejects.toMatchObject({code:'INVALID_INPUT'}); // OTHER needs a group
   }finally{await f.cleanup();}
 });

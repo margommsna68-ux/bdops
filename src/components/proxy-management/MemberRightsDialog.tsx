@@ -12,25 +12,41 @@ export const CAPABILITY_CHOICES:{value:Capability;label:string}[]=[{value:'COPY_
  */
 export function MemberRightsForm({projectId,memberId,onCancel,onSaved}:{projectId:string;memberId?:string;onCancel?:()=>void;onSaved?:()=>void}){
   const utils=trpc.useUtils(),members=trpc.proxyManagement.members.useQuery({projectId},{refetchOnWindowFocus:false});
+  const servers=trpc.proxyManagement.serverAccessChoices.useQuery({projectId},{refetchOnWindowFocus:false});
   const [id,setId]=useState(memberId??''),[capabilities,setCapabilities]=useState<Capability[]>([]),[allowInfrastructure,setAllowInfrastructure]=useState(false);
+  const [serverMode,setServerMode]=useState<'ALL'|'SELECTED'>('ALL'),[serverIds,setServerIds]=useState<string[]>([]);
   useEffect(()=>{setId(memberId??'');},[memberId,projectId]);
   const selected=members.data?.find(m=>m.id===id);
   useEffect(()=>{if(!memberId&&!id&&members.data?.length)setId((members.data.find(m=>m.role!=='ADMIN')||members.data[0]).id);},[id,memberId,members.data]);
-  useEffect(()=>{if(selected){setCapabilities(CAPABILITY_CHOICES.filter(c=>selected.capabilities.includes(c.value)).map(c=>c.value));setAllowInfrastructure(selected.role==='ADMIN'||selected.allowedModules.includes('INFRASTRUCTURE'));}},[selected]);
+  useEffect(()=>{if(selected){setCapabilities(CAPABILITY_CHOICES.filter(c=>selected.capabilities.includes(c.value)).map(c=>c.value));setAllowInfrastructure(selected.role==='ADMIN'||selected.allowedModules.includes('INFRASTRUCTURE'));setServerMode(selected.role==='ADMIN'||selected.serverScope==='ALL'?'ALL':'SELECTED');setServerIds([...selected.allowedServerIds]);}},[selected]);
   const save=trpc.proxyManagement.setCapabilities.useMutation({onSuccess:()=>{toast.success('Đã cập nhật quyền trong dự án');void members.refetch();void utils.proxyManagement.access.invalidate();void utils.opsToken.candidates.invalidate();onSaved?.();},onError:e=>toast.error(e.message)});
   const fixed=selected?.role==='ADMIN',viewer=selected?.role==='VIEWER';
-  const changed=!!selected&&(allowInfrastructure!==(selected.role==='ADMIN'||selected.allowedModules.includes('INFRASTRUCTURE'))||[...capabilities].sort().join()!==CAPABILITY_CHOICES.filter(c=>selected.capabilities.includes(c.value)).map(c=>c.value).sort().join());
+  const scopeChanged=!!selected&&(serverMode!==selected.serverScope||(serverMode==='SELECTED'&&JSON.stringify([...serverIds].sort())!==JSON.stringify([...selected.allowedServerIds].sort())));
+  const changed=!!selected&&(scopeChanged||allowInfrastructure!==(selected.role==='ADMIN'||selected.allowedModules.includes('INFRASTRUCTURE'))||[...capabilities].sort().join()!==CAPABILITY_CHOICES.filter(c=>selected.capabilities.includes(c.value)).map(c=>c.value).sort().join());
   if(members.error)return <p className="pm-error" role="alert">{members.error.message}</p>;
   if(memberId&&members.data&&!selected)return <p className="pm-muted text-sm">Người này không phải thành viên của dự án đang chọn.</p>;
   return <div className="space-y-3">
     {!memberId&&<label className="pm-label">Thành viên<select className="pm-input" disabled={members.isLoading||save.isLoading} value={id} onChange={e=>setId(e.target.value)}>{members.data?.map(m=><option key={m.id} value={m.id}>{m.user.name||m.user.username||m.user.email} · {m.role}</option>)}</select></label>}
     <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={allowInfrastructure} disabled={fixed||!selected||save.isLoading} onChange={e=>{setAllowInfrastructure(e.target.checked);if(!e.target.checked)setCapabilities([]);}}/>Được truy cập Proxy / Server / VM</label>
+    <fieldset className="space-y-3 border-t pt-3" disabled={fixed||!selected||save.isLoading}>
+      <legend className="pm-label pt-3">Phạm vi server</legend>
+      <label className="flex items-center gap-3 text-sm"><input type="radio" name={`serverScope-${id}`} checked={serverMode==='ALL'} onChange={()=>setServerMode('ALL')}/>Toàn bộ server</label>
+      <label className="flex items-center gap-3 text-sm"><input type="radio" name={`serverScope-${id}`} checked={serverMode==='SELECTED'} onChange={()=>setServerMode('SELECTED')}/>Chỉ server được chọn</label>
+      {serverMode==='SELECTED'&&<div className="max-h-48 space-y-2 overflow-y-auto pl-6" aria-label="Server được phép truy cập">
+        {servers.isLoading&&<p className="pm-muted text-xs">Đang tải server…</p>}
+        {servers.error&&<p className="pm-error text-xs" role="alert">{servers.error.message}</p>}
+        {servers.data?.map(server=><label key={server.id} className="flex items-center gap-3 text-sm"><input type="checkbox" checked={serverIds.includes(server.id)} onChange={e=>setServerIds(e.target.checked?[...serverIds,server.id]:serverIds.filter(id=>id!==server.id))}/>{server.code}</label>)}
+        {servers.data?.length===0&&<p className="pm-muted text-xs">Dự án chưa có server.</p>}
+        {serverIds.length===0&&<p className="pm-muted text-xs">Chưa chọn server: không được truy cập server nào.</p>}
+      </div>}
+      <p className="pm-muted text-xs">{fixed?'ADMIN luôn có quyền trên toàn bộ server.':'Giới hạn cả VM, SDK và proxy gắn với server được chọn. Không bao gồm SDK / proxy trong kho chung chưa gắn server. Các quyền thao tác vẫn cần được cấp riêng.'}</p>
+    </fieldset>
     <div className="space-y-3 border-t pt-3">{CAPABILITY_CHOICES.map(c=><label key={c.value} className="flex items-center gap-3 text-sm"><input type="checkbox" checked={fixed||capabilities.includes(c.value)} disabled={fixed||viewer||!allowInfrastructure||save.isLoading} onChange={e=>setCapabilities(e.target.checked?[...capabilities,c.value]:capabilities.filter(v=>v!==c.value))}/>{c.label}</label>)}</div>
     <p className="pm-muted text-xs">{fixed?'ADMIN có toàn bộ quyền trong dự án.':viewer?'Chỉ xem: không thay đổi dữ liệu và không copy mật khẩu.':'Báo BLOCKED và thao tác VM đi theo quyền vận hành; các quyền trên cấp riêng.'}</p>
     {/* Shared buttons (22/10/2026): readable on the user page and in the dialog, in every theme; muted until something changes. */}
-    <div className="flex justify-end gap-2">{onCancel&&<Button size="sm" variant="outline" disabled={save.isLoading} onClick={onCancel}>Đóng</Button>}<Button size="sm" variant={changed?'default':'outline'} disabled={!selected||fixed||!changed||save.isLoading} onClick={()=>save.mutate({projectId,memberId:id,capabilities,allowInfrastructure})}>Lưu quyền</Button></div>
+    <div className="flex justify-end gap-2">{onCancel&&<Button size="sm" variant="outline" disabled={save.isLoading} onClick={onCancel}>Đóng</Button>}<Button size="sm" variant={changed?'default':'outline'} disabled={!selected||fixed||!changed||save.isLoading||(serverMode==='SELECTED'&&!servers.data)} onClick={()=>{if(selected)save.mutate({projectId,memberId:id,capabilities,allowInfrastructure,serverAccess:{mode:serverMode,serverIds:serverMode==='ALL'?[]:serverIds,expectedAccessRevision:selected.accessRevision}});}}>Lưu quyền</Button></div>
   </div>;
 }
 export function MemberRightsDialog({projectId,onClose}:{projectId:string;onClose:()=>void}){
-  return <Dialog open onOpenChange={open=>{if(!open)onClose();}}><DialogContent className="pm-dialog max-w-lg"><DialogHeader><DialogTitle>Quyền nhân viên</DialogTitle><DialogDescription>Cấp quyền trong dự án đang chọn. Nhân viên thao tác trên toàn bộ VM của dự án. Cũng quản lý được trong trang của từng người (Nhân viên → bấm tên).</DialogDescription></DialogHeader><MemberRightsForm projectId={projectId} onCancel={onClose}/></DialogContent></Dialog>;
+  return <Dialog open onOpenChange={open=>{if(!open)onClose();}}><DialogContent className="pm-dialog max-w-lg max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Quyền nhân viên</DialogTitle><DialogDescription>Cấp quyền và chọn phạm vi server trong dự án đang chọn. Cũng quản lý được trong trang của từng người (Nhân viên → bấm tên).</DialogDescription></DialogHeader><MemberRightsForm projectId={projectId} onCancel={onClose}/></DialogContent></Dialog>;
 }

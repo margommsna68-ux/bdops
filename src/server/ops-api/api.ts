@@ -3,20 +3,22 @@ import type {PrismaClient} from '@prisma/client';
 import {z} from 'zod';
 import {prisma} from '@/lib/prisma';
 import {ProxyDomainError,userMessage,type DomainReason} from '../proxy-management/types';
-import {loadInfrastructureScope} from '../permissions/infrastructure';
+import {loadInfrastructureScope,assertInfrastructureAction} from '../permissions/infrastructure';
+import {assertScopedTargets,assertScopedSdkCodes,hasServerScope,serverWhere,vmWhere,sdkWhere} from '../permissions/server-scope';
 import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
 import {hashToken,memberOps,userActive,OPS_SCOPES,type OpsScope} from './tokens';
 import {activeJobs,addVmOpsNote,claimVmJob,finishPrepareJob,finishProxyJob,jobView,proxyForJob,recordJobSdk,releaseVmJob,stepVmJob,APPLY_RESULTS,JOB_KINDS,type OpsCaller} from '../vm-ops/jobs';
 import {setVmStatus} from '../vm-ops/ops';
-import {runWithOpsAuth} from './context';
+import {runWithOpsAuth,assertOpsToken} from './context';
 import {hasAmounts,observeVmSdks,OBSERVE_MAX} from '../vm-management/sdk-observe';
 import {hit,peek,LIMITS} from './limits';
 import {ipAllowed,maskEmail,normalIp,redactSecrets,requestIp} from './safety';
 import {balanceAsOf,balanceView,requestSelect,vmSelect,vmView,withdrawalView,type ViewRights} from './views';
 import {canonicalAmount} from '@/lib/sdk-money';
 import {normalizeSdk} from '../vm-management/sdk-parse';
+import {sdkVisibleVmIds,sdkBindingVisible} from '../vm-management/sdk-scope';
 import {vmMoneyState} from '@/lib/vm-money';
 import {maskSdk} from '@/lib/sdk-mask';
 import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
@@ -180,6 +182,7 @@ async function executeRoute(db:PrismaClient,caller:CallerRow,route:Route,params:
   const write=method==='POST';
   try{
     if(route.scope&&!caller.row.scopes.includes(route.scope))throw fail('FORBIDDEN','Token không được cấp '+route.scope);
+    const targets=await authorizeRouteScope(c,route,params,path);
     let approval:{id:string}|null=null;
     if(write&&route.approval&&!gate.approvalHandled){
       if(typeof pid!=='string'||!caller.row.projectIds.includes(pid))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
@@ -188,7 +191,7 @@ async function executeRoute(db:PrismaClient,caller:CallerRow,route:Route,params:
       catch(e){if(!(e instanceof ApprovalHold)||!await committedCritical(c,route))throw e;}
     }
     if(write&&route.approval&&gate.approvalHandled&&!gate.approved&&!await committedCritical(c,route))throw new ApprovalHold('APPROVAL_REQUIRED','Mục này nằm trong lô đang chờ ADMIN duyệt',{});
-    const data=write?await runWithOpsAuth({tokenId:caller.row.id,userId:caller.row.userId,operation:route.scope},()=>route.run(c,params)):await route.run(c,params);
+    const data=write?await runWithOpsAuth({tokenId:caller.row.id,userId:caller.row.userId,operation:route.scope,targets,unrestrictedServers:!SCOPED_ACTIONS.has(route.action)},()=>route.run(c,params)):await route.run(c,params);
     if(approval)await consumeApproval(db,approval.id,caller.requestId);
     return {status:200,result:audit.replay?'REPLAY':'OK',body:{ok:true,data,error:null},headers:{},audit};
   }catch(e){
@@ -202,6 +205,9 @@ async function executeRoute(db:PrismaClient,caller:CallerRow,route:Route,params:
 // approved they answer 202 while the others run; after approval the retry of the same batch key runs them (done items replay).
 const BatchBody=z.object({projectId:z.string().min(1).max(64),items:z.array(z.object({method:z.literal('POST').default('POST'),path:z.string().min(1).max(200),body:z.object({}).passthrough().default({}),idempotencyKey:z.string().regex(KEY,'idempotencyKey 8–100 ký tự A-Z a-z 0-9 . _ : -')}).strict()).min(1).max(100)}).strict();
 async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKey:string):Promise<{status:number;result:string;body:unknown;audit:Ctx['audit']}>{
+  // Refuse before parsing items, persisting batch keys or building approval summaries.
+  const rawProject=(rawBody as {projectId?:unknown})?.projectId;
+  if(typeof rawProject==='string'&&caller.token.projectIds.includes(rawProject)&&hasServerScope(await loadInfrastructureScope(db,caller.token.userId,rawProject)))throw fail('FORBIDDEN','Lô thao tác cần quyền toàn bộ server');
   const b=BatchBody.parse(rawBody),audit:Ctx['audit']={projectId:b.projectId};
   const c:Ctx={db,requestId:caller.requestId,ip:caller.ip,token:caller.token,url:caller.url,body:b,key:batchKey,audit};
   await projectOf(c,b.projectId);
@@ -239,6 +245,33 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
   const summary={ok:results.filter(r=>r.status===200).length,refused:results.filter(r=>r.status>=400).length,waiting:results.filter(r=>r.status===202).length};
   return {status:summary.waiting?202:200,result:summary.waiting?'WAITING_APPROVAL':summary.refused?'PARTIAL':'OK',body:{ok:true,data:{batchKey,approval:approvalInfo,items:results,summary},error:null},audit};
 }
+// Only bound operational data is available to selected-server members. New routes fail closed.
+const SCOPED_ACTIONS=new Set(['ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
+function routeTargets(c:Ctx,path:string,params:string[]){
+ const root=path.split('/')[0],id=params[0];
+ const identity=id?(root==='vms'?{vmId:id}:root==='jobs'?{jobId:id}:root==='sdks'?{sdkId:id}:root==='earnapp-accounts'?{earnAppId:id}:root==='withdrawals'?{requestId:id}:{}):{};
+ return {body:c.body,...identity};
+}
+async function authorizeRouteScope(c:Ctx,route:Route,params:string[],path:string){
+ const targets=routeTargets(c,path,params);
+ if(route.action==='ME'||route.action==='PROJECTS')return targets;
+ const raw=route.method==='POST'?(c.body as {projectId?:unknown})?.projectId:q(c,'projectId');
+ const {projectId,ops}=await projectOf(c,raw),scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+ if(route.scope&&!ops[route.scope])throw fail('FORBIDDEN','Tài khoản không còn quyền thực hiện thao tác này');
+ if(hasServerScope(scope)&&!SCOPED_ACTIONS.has(route.action))throw fail('FORBIDDEN','Thao tác này cần quyền toàn bộ server; ADMIN cấp kho cho VM');
+ await assertScopedTargets(c.db,scope,targets,{write:route.method==='POST'});
+ if(route.action==='VM_PROXY_BLOCKED'){
+  const cfg=await c.db.vMConfiguration.findFirst({where:{id:(c.body as {configurationId?:string})?.configurationId??'',projectId},select:{endpointId:true}});
+  if(cfg?.endpointId){Object.assign(targets,{endpointId:cfg.endpointId});await assertScopedTargets(c.db,scope,targets);}
+ }
+ if(route.action==='VM_SDK'||route.action==='VM_SDK_OBSERVE'){
+  const b=c.body as {code?:string;sdks?:{code:string}[]};
+  const codes=[...(typeof b?.code==='string'?[b.code]:[]),...(Array.isArray(b?.sdks)?b.sdks.map(x=>x?.code).filter((x):x is string=>typeof x==='string'):[])].map(normalizeSdk).filter((x):x is string=>!!x);
+  await assertScopedSdkCodes(c.db,scope,codes,{allowNew:true});
+ }
+ if(path.startsWith('jobs/')&&params[0])await jobOf(c,projectId,params[0]);
+ return targets;
+}
 // ─── Scope helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 // A project outside the token, or one the user is no longer a member of, is "not found" (nothing about other projects leaks).
 async function projectOf(c:Ctx,raw:unknown){
@@ -266,7 +299,8 @@ async function me(c:Ctx){
   const u=await c.db.user.findUniqueOrThrow({where:{id:c.token.userId},select:{id:true,username:true,name:true}});
   const projects=await c.db.project.findMany({where:{id:{in:c.token.projectIds},members:{some:{userId:u.id}}},select:{id:true,code:true,name:true},orderBy:{name:'asc'}});
   const list=await Promise.all(projects.map(async p=>{const can=await memberOps(c.db,u.id,p.id),m=await c.db.projectMember.findUniqueOrThrow({where:{userId_projectId:{userId:u.id,projectId:p.id}}});
-    return {projectId:p.id,code:p.code,name:p.name,role:m.role,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'].includes(x)),
+    const scope=await loadInfrastructureScope(c.db,u.id,p.id);
+    return {projectId:p.id,code:p.code,name:p.name,role:m.role,serverIds:scope.serverIds??null,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'].includes(x)),
       effective:Object.fromEntries((OPS_SCOPES).map(s=>[s,can[s]&&c.token.scopes.includes(s)]))};}));
   return {user:{id:u.id,username:u.username,name:u.name},token:{id:c.token.id,prefix:c.token.prefix,name:c.token.name,expiresAt:c.token.expiresAt.toISOString(),scopes:c.token.scopes},projects:list,
     limits:{readPerMinute:LIMITS.read.max,writePerMinute:LIMITS.write.max,batchPerMinute:LIMITS.batch.max,batchMaxItems:100},approvalRequired:routes.filter(r=>r.approval).map(r=>r.action),pinRequired:false};
@@ -277,25 +311,25 @@ async function projects(c:Ctx){
 }
 async function servers(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),{limit,cursor}=page(c);
-  const rows=await c.db.server.findMany({where:{projectId,managed:true,archivedAt:null},select:{id:true,code:true,_count:{select:{vms:{where:{managed:true,archivedAt:null}}}}},orderBy:[{code:'asc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  const rows=await c.db.server.findMany({where:{projectId,managed:true,archivedAt:null,...serverWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId))},select:{id:true,code:true,_count:{select:{vms:{where:{managed:true,archivedAt:null}}}}},orderBy:[{code:'asc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   const r=paged(rows,limit);return {items:r.items.map(s=>({id:s.id,code:s.code,vmCount:s._count.vms})),nextCursor:r.nextCursor};
 }
 async function vms(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),{limit,cursor}=page(c),serverId=q(c,'serverId');
-  const rows=await c.db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null},...(serverId?{serverId}:{})},select:vmSelect,orderBy:[{server:{code:'asc'}},{code:'asc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  const rows=await c.db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null},AND:[vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),...(serverId?[{serverId}]:[])]},select:vmSelect,orderBy:[{server:{code:'asc'}},{code:'asc'},{id:'asc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   const r=paged(rows,limit);return {items:r.items.map(vmView),nextCursor:r.nextCursor};
 }
 async function resolveVm(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),server=q(c,'server')?.trim(),vm=q(c,'vm')?.trim();
   if(!server||!vm)throw fail('VALIDATION','Cần server và vm (mã đúng như trên web)');
   // Exact codes (case-insensitive, no partial match); a deleted VM or server never matches.
-  const rows=await c.db.virtualMachine.findMany({where:{managed:true,archivedAt:null,code:{equals:vm,mode:'insensitive'},server:{projectId,managed:true,archivedAt:null,code:{equals:server,mode:'insensitive'}}},select:vmSelect,take:3});
+  const rows=await c.db.virtualMachine.findMany({where:{...vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),managed:true,archivedAt:null,code:{equals:vm,mode:'insensitive'},server:{projectId,managed:true,archivedAt:null,code:{equals:server,mode:'insensitive'}}},select:vmSelect,take:3});
   if(!rows.length)throw fail('NOT_FOUND','Không có VM '+vm+' trên server '+server+' trong dự án');
   if(rows.length>1)throw fail('AMBIGUOUS','Có '+rows.length+' VM khớp '+server+' / '+vm+' (khác hoa / thường); gọi /vms?serverId= rồi dùng id',{candidates:rows.map(r=>({id:r.id,serverCode:r.server.code,code:r.code}))});
   c.audit.objectId=rows[0].id;return vmView(rows[0]);
 }
 async function loadVm(c:Ctx,projectId:string,id:string){
-  const vm=await c.db.virtualMachine.findFirst({where:{id,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)throw fail('NOT_FOUND','Không có VM này trong dự án');return vm;
+  const vm=await c.db.virtualMachine.findFirst({where:{id,...vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)throw fail('NOT_FOUND','Không có VM này trong dự án');return vm;
 }
 async function vmDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),vm=await loadVm(c,projectId,id),rights=await rightsOf(c,projectId),{limit,cursor}=page(c);c.audit.objectId=vm.id;
@@ -307,17 +341,18 @@ async function vmDetail(c:Ctx,[id]:string[]){
   ]);
   const logins=await c.db.gmailAccount.findMany({where:{id:{in:cycles.map(x=>x.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
   // SDK money (22/10/2026): per code, never added up into a VM figure; shown with the balance read right (as the EarnApp balance).
-  const sdkMoney=rights.balanceRead;
+  const sdkMoney=rights.balanceRead,scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+  const moneyVms=await sdkVisibleVmIds(c.db,scope,sdks.map(s=>s.amountVmId));
   const pc=paged(cycles,limit),job=(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null;
   return {...view,activeJob:job,
     sdk:{total:sdks.length,unused:sdks.filter(s=>s.linkState==='UNLINKED').length,used:sdks.filter(s=>s.linkState==='LINKED').length,unconfirmed:sdks.filter(s=>s.linkState==='UNCONFIRMED').length,amountsVisible:sdkMoney,
       // Each code: the readings checked on THIS VM in THIS round (amount / observedAt / failedAt, moneyState as the web shows it) and the
       // code's own stored figure apart (`stored`: history, e.g. read in an earlier round or on another VM). Review 22/10/2026.
-      items:sdks.map(s=>{const bound=s.amountVmId===vm.id&&s.amountCycle===cycle,boundFailed=s.amountFailedVmId===vm.id&&s.amountFailedCycle===cycle,stored=canonicalAmount(s.amount?.toString()??null);
+      items:sdks.map(s=>{const bound=s.amountVmId===vm.id&&s.amountCycle===cycle,boundFailed=s.amountFailedVmId===vm.id&&s.amountFailedCycle===cycle,storedAllowed=sdkBindingVisible(moneyVms,s.amountVmId),stored=storedAllowed?canonicalAmount(s.amount?.toString()??null):null;
         const src=sdkMoney?{code:s.code,amount:bound?stored:null,observedAt:bound?s.amountObservedAt?.toISOString()??null:null,failedAt:boundFailed?s.amountFailedAt?.toISOString()??null:null,moneyHidden:false,stored:{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,cycle:s.amountCycle,vmId:s.amountVmId}}:{code:s.code,amount:null,observedAt:null,failedAt:null,moneyHidden:true};
         const st=vmMoneyState(src);
         return {id:s.id,code:maskSdk(s.code),revision:s.revision,linkState:s.linkState,current:s.vmId===vm.id,amount:src.amount,currency:s.currency,observedAt:src.observedAt,failedAt:src.failedAt,moneyState:st.kind,recordedAt:sdkMoney&&bound?s.amountAt?.toISOString()??null:null,source:sdkMoney&&bound?s.amountSource:null,
-          stored:sdkMoney?{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,recordedAt:s.amountAt?.toISOString()??null,source:s.amountSource,cycle:s.amountCycle,vmId:s.amountVmId}:null};}),
+          stored:sdkMoney&&storedAllowed?{amount:stored,observedAt:s.amountObservedAt?.toISOString()??null,recordedAt:s.amountAt?.toISOString()??null,source:s.amountSource,cycle:s.amountCycle,vmId:s.amountVmId}:null};}),
       note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
@@ -330,7 +365,7 @@ async function earnAppDetail(c:Ctx,[id]:string[]){
   return {id:ea.id,state:ea.closedAt?'CLOSED':ea.vm?'ON_VM':'NOT_ON_VM',closedAt:ea.closedAt?.toISOString()??null,closedReason:ea.closedReason,registeredAt:ea.registeredAt?.toISOString()??null,login:maskEmail(ea.login.email),loginType:ea.login.loginType,
     vm:ea.vm&&!ea.vm.archivedAt?{id:ea.vm.id,code:ea.vm.code,serverCode:ea.vm.server.code,expectedCycle:ea.vm.operation?.cycle??1}:null,
     receivingEmail:ea.paypalEmail?{paypalEmailId:ea.paypalEmail.id,paypalCode:ea.paypalEmail.paypal.code,email:rights.payoutEmail?ea.paypalEmail.email:maskEmail(ea.paypalEmail.email)}:null,
-    withdrawal:ea.payoutRequest?withdrawalView(ea.payoutRequest,rights,{currentCycle:ea.vm?.operation?.cycle??null}):null};
+    withdrawal:ea.payoutRequest&&(!hasServerScope(await loadInfrastructureScope(c.db,c.token.userId,projectId))||ea.payoutRequest.vmId===ea.vm?.id)?withdrawalView(ea.payoutRequest,rights,{currentCycle:ea.vm?.operation?.cycle??null}):null};
 }
 async function paypalSuggest(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),earnAppId=q(c,'earnAppAccountId'),currency=q(c,'currency'),amount=q(c,'amount');
@@ -376,7 +411,7 @@ async function balanceCheck(c:Ctx,[vmId]:string[]){
   }catch(e){throw await withCurrentVm(c,projectId,vmId,e);}
   if(!rec)throw fail('INTERNAL','Lệnh ghi không trả bản ghi; dùng lại cùng Idempotency-Key');
   // recorded / vm / balance = this command as it was first written (also on a replay); current = the VM now, named apart.
-  const rights=await rightsOf(c,projectId),vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect}),view=vm?vmView(vm):null;c.audit.objectId=rec.checkId;
+  const rights=await rightsOf(c,projectId),vm=await c.db.virtualMachine.findFirst({where:{id:vmId,...vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),managed:true,server:{projectId,managed:true}},select:vmSelect}),view=vm?vmView(vm):null;c.audit.objectId=rec.checkId;
   return {replay:!!c.audit.replay,
     recorded:{checkId:rec.checkId,vmId:rec.vmId,expectedCycle:rec.cycle,earnAppAccountId:rec.earnAppId,status:rec.outcome==='OK'?'OK':'ERROR',amount:rights.balanceRead?rec.amount:null,currency:rec.currency,withdrawable:rec.withdrawable==='YES'?true:rec.withdrawable==='NO'?false:null,checkedAt:rec.checkedAt,recordedAt:rec.recordedAt},
     vm:{id:rec.vmId,expectedCycle:rec.cycle,earnAppAccountId:rec.earnAppId},
@@ -388,7 +423,7 @@ async function balanceCheck(c:Ctx,[vmId]:string[]){
 async function withCurrentVm(c:Ctx,projectId:string,vmId:string,e:unknown){
   const err=e instanceof ProxyDomainError?fromDomain(e):e;
   if(err instanceof OpsError&&['REVISION_CONFLICT','CYCLE_CHANGED','ACCOUNT_CHANGED'].includes(err.code)){
-    const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});
+    const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,...vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),managed:true,server:{projectId,managed:true}},select:vmSelect});
     if(vm){const v=vmView(vm);return fail(err.code,err.message,{...err.details,current:{vmId:v.id,expectedCycle:v.expectedCycle,revision:v.revision,earnAppAccountId:v.earnAppAccount?.id??null,deleted:v.deleted}});}
   }
   return err;
@@ -467,10 +502,15 @@ async function approvalDetail(c:Ctx,[id]:string[]){
 const SdkRevealBody=z.object({projectId:id64}).strict();
 async function sdkReveal(c:Ctx,[sdkId]:string[]){
   const b=SdkRevealBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=sdkId;
-  const s=await c.db.sdkRecord.findFirst({where:{id:sdkId,projectId},select:{id:true,code:true,revision:true,linkState:true,vm:{select:{id:true,code:true,server:{select:{code:true}}}}}});
-  if(!s)throw fail('NOT_FOUND','Không có mã SDK này trong dự án');
-  await c.db.auditLog.create({data:{projectId,userId:c.token.userId,action:'SDK_REVEAL',entity:'SdkRecord',entityId:s.id,changes:{tokenId:c.token.id,requestId:c.requestId}}});
-  return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ chỉ trả một lần sau khi ADMIN duyệt; không ghi vào nhật ký máy hay chat'};
+  return c.db.$transaction(async tx=>{
+    await assertOpsToken(tx,scopeOf(c,projectId));
+    const current=await loadInfrastructureScope(tx,c.token.userId,projectId);assertInfrastructureAction(current,'ASSIGN');
+    await assertScopedTargets(tx,scopeOf(c,projectId),{sdkId});
+    const s=await tx.sdkRecord.findFirst({where:{id:sdkId,projectId},select:{id:true,code:true,revision:true,linkState:true,vm:{select:{id:true,code:true,server:{select:{code:true}}}}}});
+    if(!s)throw fail('NOT_FOUND','Không có mã SDK này trong dự án');
+    await tx.auditLog.create({data:{projectId,userId:c.token.userId,action:'SDK_REVEAL',entity:'SdkRecord',entityId:s.id,changes:{tokenId:c.token.id,requestId:c.requestId}}});
+    return {replay:false,sdkId:s.id,code:s.code,revision:s.revision,linkState:s.linkState,currentOf:s.vm?{vmId:s.vm.id,serverCode:s.vm.server.code,vmCode:s.vm.code}:null,note:'Mã đầy đủ chỉ trả một lần sau khi ADMIN duyệt; không ghi vào nhật ký máy hay chat'};
+  });
 }
 const cycleN=z.number().int().min(1),rev=z.number().int().min(0),opsNote=z.string().max(500).nullish();
 const AccountHoldBody=z.object({projectId:id64,vmId:id64,expectedCycle:cycleN,expectedVmRevision:rev,jobId:id64,loginType:z.enum(['GMAIL','APPLE','APPLE_ID'])}).strict();
@@ -495,15 +535,20 @@ async function sdkAssign(c:Ctx,[vmId]:string[]){const b=SdkAssignBody.parse(c.bo
 async function sdkLinked(c:Ctx,[vmId]:string[]){const b=SdkLinkedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);return stockAck(c,projectId,vmId,()=>linkAiSdk(scopeOf(c,projectId),{...b,evidence:redactSecrets(b.evidence)!,vmId,key:serviceKey(c,projectId)},c.db,caller(c)));}
 async function stockAck<T extends Record<string,unknown>&{replay?:boolean;undone?:boolean}>(c:Ctx,projectId:string,vmId:string,fn:()=>Promise<T>){const r=await asOps(c,projectId,vmId,fn);c.audit.objectId=vmId;c.audit.replay=!!r.replay;const {replay,undone:_undone,...recorded}=r;return {replay:!!replay,recorded,current:await vmNow(c,projectId,vmId)};}
 async function vmNow(c:Ctx,projectId:string,vmId:string){
-  const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)return null;
+  const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,...vmWhere(await loadInfrastructureScope(c.db,c.token.userId,projectId)),managed:true,server:{projectId,managed:true}},select:vmSelect});if(!vm)return null;
   return {...vmView(vm),activeJob:(await activeJobs(c.db,projectId,[vm.id])).get(vm.id)??null};
 }
-async function jobOf(c:Ctx,projectId:string,id:string){const job=await c.db.vmJob.findFirst({where:{id,projectId}});if(!job)throw fail('NOT_FOUND','Không có việc này trong dự án');return job;}
+async function jobOf(c:Ctx,projectId:string,id:string){
+ await assertScopedTargets(c.db,scopeOf(c,projectId),{jobId:id});
+ const job=await c.db.vmJob.findFirst({where:{id,projectId}});if(!job)throw fail('NOT_FOUND','Không có việc này trong dự án');
+ if(job.claimedById!==c.token.userId||job.tokenId!==c.token.id)throw fail('FORBIDDEN','Việc này do người / token khác nhận');return job;
+}
 async function asOps<T>(c:Ctx,projectId:string,vmId:string,fn:()=>Promise<T>):Promise<T>{try{return await fn();}catch(e){throw await withCurrentVm(c,projectId,vmId,e);}}
 async function jobDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId')),job=await jobOf(c,projectId,id);c.audit.objectId=job.id;
-  const sdk=job.sdkId?await c.db.sdkRecord.findUnique({where:{id:job.sdkId},select:{code:true}}):null;
-  return {...maskJob(jobView(job,{sdkCode:sdk?.code})),current:await vmNow(c,projectId,job.vmId)};
+  const scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+  const sdk=job.sdkId?await c.db.sdkRecord.findFirst({where:{id:job.sdkId,projectId,...sdkWhere(scope)},select:{code:true}}):null;
+  return {...maskJob(jobView({...job,sdkId:sdk?job.sdkId:null},{sdkCode:sdk?.code})),current:await vmNow(c,projectId,job.vmId)};
 }
 const ClaimBody=z.object({projectId:id64,expectedCycle:cycleN,kind:z.enum(JOB_KINDS),ttlMinutes:z.number().int().min(5).max(240).nullish()}).strict();
 async function claim(c:Ctx,[vmId]:string[]){
@@ -601,7 +646,7 @@ async function vmSdkObserve(c:Ctx,[vmId]:string[]){
   const money=hasAmounts(items);
   if(money&&!c.token.scopes.includes('BALANCE_WRITE'))throw fail('FORBIDDEN','Token chưa được cấp ghi tiền (BALANCE_WRITE); gửi mã không kèm tiền hoặc xin cấp quyền');
   if(money&&!ops.BALANCE_WRITE)throw fail('FORBIDDEN','Tài khoản chưa có quyền ghi kiểm tra tiền EarnApp (EARN_BALANCE)');
-  const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:money?['BALANCE_WRITE']:[]},()=>
+  const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:money?['BALANCE_WRITE']:[],targets:{vmId,body:b}},()=>
     observeVmSdks(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,observedAt:b.observedAt,source:redactSecrets(b.source.trim())??'',evidence:redactSecrets(b.evidence?.trim()||null),items},c.db,{tokenLabel:caller(c).tokenLabel??undefined})));
   c.audit.replay=!!r.replay;const show=(await rightsOf(c,projectId)).balanceRead;
   return {replay:!!r.replay,recorded:{vmId:r.vmId,expectedCycle:r.cycle,observedAt:r.observedAt,source:r.source,evidence:show?r.evidence??null:null,vmRevisionAfter:r.vmRevisionAfter,
@@ -616,13 +661,16 @@ async function sdkLookup(c:Ctx){
   const codes=raw.map(x=>{const n=normalizeSdk(x);if(!n)throw fail('VALIDATION','Mã SDK không hợp lệ: '+x.slice(0,20));return n;});
   const show=(await rightsOf(c,projectId)).balanceRead;
   const state=z.enum(['UNLINKED','LINKED','UNCONFIRMED']).optional().parse(q(c,'state')??undefined),place=z.enum(['STOCK','VM']).optional().parse(q(c,'place')??undefined),paging=page(c);
-  const allRows=await c.db.sdkRecord.findMany({where:{projectId,...(codes.length?{code:{in:codes}}:{}),...(state?{linkState:state}:{}),...(place==='STOCK'?{holderVmId:null,vmId:null}:place==='VM'?{OR:[{holderVmId:{not:null}},{vmId:{not:null}}]}:{})},...(!codes.length?{orderBy:[{createdAt:'asc' as const},{id:'asc' as const}],take:paging.limit+1,...(paging.cursor?{cursor:{id:paging.cursor},skip:1}:{})}:{}),select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountVmId:true,amountCycle:true}});
+  const scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+  const allRows=await c.db.sdkRecord.findMany({where:{projectId,AND:[sdkWhere(scope),...(hasServerScope(scope)?[{OR:[{vmId:null},{vm:{serverId:{in:scope.serverIds!}}}]}]:[])],...(codes.length?{code:{in:codes}}:{}),...(state?{linkState:state}:{}),...(place==='STOCK'?{holderVmId:null,vmId:null}:place==='VM'?{OR:[{holderVmId:{not:null}},{vmId:{not:null}}]}:{})},...(!codes.length?{orderBy:[{createdAt:'asc' as const},{id:'asc' as const}],take:paging.limit+1,...(paging.cursor?{cursor:{id:paging.cursor},skip:1}:{})}:{}),select:{id:true,code:true,revision:true,linkState:true,vmId:true,holderVmId:true,amount:true,currency:true,amountAt:true,amountObservedAt:true,amountSource:true,amountFailedAt:true,amountFailedVmId:true,amountVmId:true,amountCycle:true}});
   const rows=codes.length?allRows:allRows.slice(0,paging.limit);
   const vmIds=[...new Set(rows.flatMap(r=>[r.vmId,r.holderVmId]).filter((x):x is string=>!!x))];
-  const vms=await c.db.virtualMachine.findMany({where:{id:{in:vmIds}},select:{id:true,code:true,archivedAt:true,server:{select:{code:true}}}});
+  const vms=await c.db.virtualMachine.findMany({where:{id:{in:vmIds},server:{projectId},...vmWhere(scope)},select:{id:true,code:true,archivedAt:true,server:{select:{code:true}}}});
+  const moneyVms=await sdkVisibleVmIds(c.db,scope,rows.flatMap(r=>[r.amountVmId,r.amountFailedVmId]));
   const at=(id:string|null)=>{const v=id?vms.find(x=>x.id===id):null;return v?{vmId:v.id,serverCode:v.server.code,vmCode:v.code,deleted:!!v.archivedAt}:null;};
   return {amountsVisible:show,...(!codes.length?{nextCursor:allRows.length>paging.limit?rows[rows.length-1]?.id??null:null}:{}),items:[...new Set(codes.length?codes:rows.map(r=>r.code))].map(code=>{const r=rows.find(x=>x.code===code);
     if(!r)return {code,found:false,sdkId:null,revision:null,linkState:null,inListOf:null,currentOf:null,amount:null,currency:null,observedAt:null,recordedAt:null,source:null,failedAt:null,observedCycle:null,observedVmId:null};
+    const money=show&&sdkBindingVisible(moneyVms,r.amountVmId),failure=show&&sdkBindingVisible(moneyVms,r.amountFailedVmId);
     return {code:maskSdk(code),found:true,sdkId:r.id,revision:r.revision,linkState:r.linkState,inListOf:at(r.holderVmId??r.vmId),currentOf:at(r.vmId),
-      amount:show&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:show?r.amountObservedAt?.toISOString()??null:null,recordedAt:show?r.amountAt?.toISOString()??null:null,source:show?r.amountSource:null,failedAt:show?r.amountFailedAt?.toISOString()??null:null,observedCycle:show?r.amountCycle:null,observedVmId:show?r.amountVmId:null};})};
+      amount:money&&r.amount!=null?canonicalAmount(r.amount.toString()):null,currency:r.currency,observedAt:money?r.amountObservedAt?.toISOString()??null:null,recordedAt:money?r.amountAt?.toISOString()??null:null,source:money?r.amountSource:null,failedAt:failure?r.amountFailedAt?.toISOString()??null:null,observedCycle:money?r.amountCycle:null,observedVmId:money?r.amountVmId:null};})};
 }

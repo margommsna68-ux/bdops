@@ -1,6 +1,7 @@
 import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
+import {hasServerScope,endpointWhere,assertScopedEndpointIds} from '@/server/permissions/server-scope';
 import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
 import {normalizeProxySearch,proxySearchEndpoint} from '@/lib/proxy-search';
@@ -8,9 +9,11 @@ import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-te
 import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,isShared,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
 type VMRef={id:string;code:string;serverId:string;server:{code:string}};
 // Every valid position of an endpoint: active holds (with their role) plus the VM link recorded from the Sheet (role null) when it is not already held.
-function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VMRef}[]}):RegistryLocation[]{
+function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VMRef}[];vmConfigurations?:{desiredBy:VMRef|null;installedBy:VMRef|null}[]}):RegistryLocation[]{
   const out:RegistryLocation[]=e.allocations.map(a=>({serverId:a.vm.serverId,serverCode:a.vm.server.code,vmId:a.vmId,vmCode:a.vm.code,role:a.role as RegistryLocation['role']}));
   if(e.vm&&!out.some(l=>l.vmId===e.vm!.id)) out.push({serverId:e.vm.serverId,serverCode:e.vm.server.code,vmId:e.vm.id,vmCode:e.vm.code,role:null});
+  // Only current pointers prove a position; an old configuration never reveals historical stock.
+  for(const c of e.vmConfigurations||[])for(const vm of [c.desiredBy,c.installedBy])if(vm&&!out.some(l=>l.vmId===vm.id))out.push({serverId:vm.serverId,serverCode:vm.server.code,vmId:vm.id,vmCode:vm.code,role:null});
   return sortLocations(out);
 }
 type RowsFilter=Omit<RegistryFilter,'cursor'|'limit'>;
@@ -20,12 +23,14 @@ export const registryGroupKey=(r:Pick<RegistryRow,'owner'|'subgroup'|'groupId'>)
 export function stateMatches(state:string,filter:string){return filter==='OTHER'?!MAIN_STATES.includes(state):state===filter;}
 // Whole registry of the project, filtered and sorted; callers paginate or copy from it.
 export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClient){
+  scope=await authorize(scope,false,db);
+  const restricted=hasServerScope(scope);
   const [endpoints,reserved,groups]=await Promise.all([
-    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null}},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},group:{select:{id:true,name:true}},vm:{include:{server:true}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
-    db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
+    db.proxyIP.findMany({where:{projectId:scope.projectId,identityId:{not:null},...endpointWhere(scope)},include:{identity:{include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}},group:{select:{id:true,name:true}},vm:{include:{server:true}},vmConfigurations:{where:{OR:[{desiredBy:{isNot:null}},{installedBy:{isNot:null}}]},select:{desiredBy:{include:{server:true}},installedBy:{include:{server:true}}}},allocations:{where:{releasedAt:null},include:{vm:{include:{server:true}}}}}}),
+    restricted?Promise.resolve([]):db.proxyIdentity.findMany({where:{owner:'GENJY',sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}},include:{sourceRefs:{where:{snapshot:{projectId:scope.projectId}}}}}),
     db.proxyGroup.findMany({where:{projectId:scope.projectId},select:{id:true,name:true}}).then(list=>list.sort((a,b)=>a.name.localeCompare(b.name,'vi',{sensitivity:'base',numeric:true}))),
   ]);
-  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,groupId:e.groupId,groupName:e.group?.name||null,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),locations:locationsOf(e),statusAt:e.statusAt?.toISOString()||null}]:[]);
+  const rows:RegistryRow[]=endpoints.flatMap(e=>e.identity?[{identityId:e.identity.id,endpointId:e.id,ip:e.identity.ip,port:e.port,owner:e.identity.owner,subgroup:e.identity.subgroup,groupId:e.groupId,groupName:e.group?.name||null,packageCode:e.packageCode,state:e.inventoryState,revision:e.revision,sourceRefs:restricted?[]:Array.from(new Set(e.identity.sourceRefs.map(s=>s.sourceRef))),locations:locationsOf(e).filter(l=>!restricted||scope.serverIds!.includes(l.serverId)),statusAt:e.statusAt?.toISOString()||null}]:[]);
   // Imported/stale NEW labels must never present a held endpoint as unused stock.
   for(const row of rows)if(row.state==='NEW'&&row.locations.length){row.state=row.locations.some(l=>l.role!=='UNCERTAIN')?'LIVE':'QUARANTINED';}
   const linked=new Set(endpoints.map(e=>e.identityId));
@@ -54,13 +59,13 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
   for(const r of stateScoped){const k=groupKey(r);groupCounts[k]=(groupCounts[k]||0)+1;}
   const filtered=stateScoped.filter(groupMatch);
   sortRegistryRows(filtered,filter.sort);
-  return {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts};
+  return {rows:filtered,counts,servers,groups:restricted?groups.filter(g=>rows.some(r=>r.groupId===g.id)):groups,groupCounts,stateCounts,packageCounts};
 }
 async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
 }
 export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:PrismaClient=prisma):Promise<RegistryPage>{
-  await authorize(scope,false,db);
+  scope=await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
   const {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts}=await loadRegistryRows(scope,filter,db);
   // ?page= of the registry: a page past the end (rows changed since the link was made) is served as the last page and reported back.
@@ -71,7 +76,8 @@ export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:Pr
   return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,packageCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
 }
 export async function getProxyTimeline(scope:ActorScope,identityId:string,db:PrismaClient=prisma):Promise<ProxyTimeline>{
-  await authorize(scope,false,db);
+  scope=await authorize(scope,false,db);
+  if(hasServerScope(scope))throw new ProxyDomainError('FORBIDDEN','Lịch sử proxy toàn dự án không hỗ trợ phạm vi máy chủ');
   const identity=await db.proxyIdentity.findFirst({where:{id:identityId,OR:[{endpoints:{some:{projectId:scope.projectId}}},{sourceRefs:{some:{snapshot:{projectId:scope.projectId}}}}]}});
   if(!identity) throw new ProxyDomainError('NOT_FOUND');
   const replacements=await db.proxyReplacement.findMany({where:{projectId:scope.projectId},include:{oldEndpoint:{include:{identity:true}},newEndpoint:{include:{identity:true}}},orderBy:{recordedAt:'asc'}});
@@ -86,8 +92,8 @@ export async function getProxyTimeline(scope:ActorScope,identityId:string,db:Pri
   return {identity:{id:identity.id,ip:identity.ip,owner:identity.owner,subgroup:identity.subgroup,revision:identity.revision,allocationMode:identity.allocationMode},events:events.map(e=>({kind:e.kind,occurredAt:e.occurredAt?.toISOString()||null,recordedAt:e.recordedAt.toISOString(),reversedAt:e.reversedAt?.toISOString()||null,actor:e.actorId,sourceRef:e.sourceRef})),replacements:replacements.filter(r=>r.oldEndpoint.identityId&&connected.has(r.oldEndpoint.identityId)).map(r=>({oldIp:r.oldEndpoint.identity!.ip,newIp:r.newEndpoint.identity!.ip,receivedDate:r.receivedDate?.toISOString().slice(0,10)||null,recordedAt:r.recordedAt.toISOString(),status:r.status as 'APPLIED'|'VOID'})),vmRefs:[...holds.map(h=>h.vm.server.code+'/'+h.vm.code+' · '+(h.role==='DESIRED'?'Chờ cài':h.role==='INSTALLED'?'Đã cài':'Giữ để kiểm tra')),...vms.filter(v=>!occupied.has(v.id)).map(v=>v.server.code+'/'+v.code)]};
 }
 export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
-  await authorize(scope,true,db);
-  const rows=await db.proxyIP.findMany({where:{projectId:scope.projectId,inventoryState:'BLOCKED',retiredAt:null},orderBy:[{packageCode:'asc'},{host:'asc'}]});
+  scope=await authorize(scope,true,db);
+  const rows=await db.proxyIP.findMany({where:{projectId:scope.projectId,inventoryState:'BLOCKED',retiredAt:null,...endpointWhere(scope)},orderBy:[{packageCode:'asc'},{host:'asc'}]});
   const result=rows.flatMap(r=>{const p=decodeEndpoint(r);return p?.format==='FULL'?[{packageCode:r.packageCode||'Chưa rõ gói',proxy:fullProxy(p),status:'BLOCKED' as const}]:[];});
   await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'blocked-export',changes:{count:result.length}}});
   return result;
@@ -104,10 +110,11 @@ export const MAX_COPY_ROWS=2000;
 // onlyBlocked ("Copy proxy Blocked", 19/10/2026): only rows whose proxy is current and BLOCKED (structured state, never a note), each
 // endpoint once, in display order; the full IP:port:user:pass only, nothing else in the line.
 export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma,options:{onlyBlocked?:boolean}={}):Promise<CopyResult>{
-  await authorize(scope,true,db);
+  scope=await authorize(scope,true,db);
   let ordered:{endpointId:string|null}[];
   if('endpointIds' in selection){
     const ids=Array.from(new Set(selection.endpointIds));if(!ids.length||ids.length>MAX_COPY_ROWS) throw new ProxyDomainError('INVALID_INPUT');
+    await assertScopedEndpointIds(db,scope,ids);
     const found=new Set((await db.proxyIP.findMany({where:{id:{in:ids},projectId:scope.projectId,identityId:{not:null}},select:{id:true}})).map(e=>e.id));
     if(found.size!==ids.length) throw new ProxyDomainError('NOT_FOUND','Có dòng không thuộc dự án này');
     ordered=ids.map(id=>({endpointId:id}));

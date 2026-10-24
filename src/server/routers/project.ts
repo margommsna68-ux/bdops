@@ -8,11 +8,12 @@ import { APP_MODULES } from "../trpc";
 import bcrypt from "bcryptjs";
 import { createAuditLog } from "@/lib/audit";
 import {loadInfrastructureScope} from '../permissions/infrastructure';
+import {hasServerScope} from '../permissions/server-scope';
 
 export const projectRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     const userId = (ctx.user as any).id;
-    return ctx.prisma.project.findMany({
+    const rows=await ctx.prisma.project.findMany({
       where: {
         members: { some: { userId } },
       },
@@ -27,6 +28,7 @@ export const projectRouter = router({
       },
       orderBy: { code: "asc" },
     });
+    return Promise.all(rows.map(async p=>{const s=await loadInfrastructureScope(ctx.prisma,userId,p.id);if(!hasServerScope(s))return p;const servers=await ctx.prisma.server.count({where:{projectId:p.id,id:{in:s.serverIds!}}});return {...p,_count:{servers,paypalAccounts:0,fundTransactions:0},scopeLimited:true};}));
   }),
 
   // Get current user's membership for a project (role + modules, fresh from DB)
@@ -37,7 +39,7 @@ export const projectRouter = router({
       const [membership, project] = await Promise.all([
         ctx.prisma.projectMember.findFirst({
           where: { userId, projectId: input.projectId },
-          select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true,capabilities:true },
+          select: { id: true, role: true, allowedModules: true, canManageUsers: true, managerId: true,capabilities:true,serverScope:true,allowedServerIds:true },
         }),
         ctx.prisma.project.findUnique({
           where: { id: input.projectId },
@@ -45,8 +47,10 @@ export const projectRouter = router({
         }),
       ]);
       if(!membership) throw new TRPCError({code:'FORBIDDEN',message:'Không có quyền truy cập dự án'});
+      const current=await loadInfrastructureScope(ctx.prisma,userId,input.projectId);
       return {
         ...(membership ?? { id: "", role: "USER" as const, allowedModules: [] as string[], canManageUsers: false, managerId: null }),
+        allowedModules:current.allowedModules??[],canManageUsers:hasServerScope(current)?false:membership.canManageUsers,
         projectType: project?.type ?? "FULL",
         businessMode:(project?.settings as {businessMode?:string}|null)?.businessMode||null,
         teamCashEnabled:(await loadInfrastructureScope(ctx.prisma,userId,input.projectId)).teamCashEnabled||false,
@@ -60,7 +64,7 @@ export const projectRouter = router({
       await ctx.prisma.projectMember.findFirstOrThrow({
         where: { projectId: input.projectId, userId },
       });
-      return ctx.prisma.project.findUniqueOrThrow({
+      const row=await ctx.prisma.project.findUniqueOrThrow({
         where: { id: input.projectId },
         include: {
           members: {
@@ -86,6 +90,10 @@ export const projectRouter = router({
           },
         },
       });
+      const current=await loadInfrastructureScope(ctx.prisma,userId,input.projectId);
+      if(!hasServerScope(current))return row;
+      const servers=await ctx.prisma.server.count({where:{projectId:input.projectId,id:{in:current.serverIds!}}});
+      return {...row,settings:{businessMode:'PROXY_VM'},members:[],_count:{servers,paypalAccounts:0,fundTransactions:0,withdrawals:0},scopeLimited:true};
     }),
 
   create: protectedProcedure

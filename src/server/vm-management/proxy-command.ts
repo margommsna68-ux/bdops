@@ -1,3 +1,4 @@
+import {assertScopedVmIds,assertScopedEndpointIds,hasServerScope} from '@/server/permissions/server-scope';
 import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
@@ -39,10 +40,14 @@ async function judge(db:VMReader,projectId:string,vmId:string,pick:{endpointId?:
   return {...base,restore,outcome:'READY',message:(cur.review?'Chọn proxy này làm proxy đang dùng; các proxy cần đối chiếu rời VM':cur.endpointId?'Thay proxy':'Gán proxy')+(restore?'; tình trạng VM thành '+restore+' (máy thật cần áp dụng và kiểm tra)':'; máy thật cần áp dụng proxy mới')};
 }
 export async function checkVmProxyChange(scope:ActorScope,input:{vmId:string;endpointId?:string;text?:string},db:PrismaClient=prisma){
-  await authorizeVM(scope,'ASSIGN',db);return judge(db,scope.projectId,input.vmId,input);
+  scope=await authorizeVM(scope,'ASSIGN',db);
+  await assertScopedVmIds(db,scope,[input.vmId]);
+  if(input.endpointId)await assertScopedEndpointIds(db,scope,[input.endpointId],{write:true});
+  if(hasServerScope(scope)&&!input.endpointId)throw new ProxyDomainError('FORBIDDEN','Chọn proxy đã được giao trong phạm vi máy chủ');
+  return judge(db,scope.projectId,input.vmId,input);
 }
 export async function changeVmProxy(scope:ActorScope,input:{key:string;vmId:string;expectedVmRevision:number;expectedCycle:number;endpointId:string},db:PrismaClient=prisma){
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_PROXY_CHANGE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_PROXY_CHANGE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:async tx=>{const current=await authorizeVM(scope,'ASSIGN',tx);await assertScopedVmIds(tx,current,[input.vmId]);await assertScopedEndpointIds(tx,current,[input.endpointId],{write:true});return current;}},async(tx,images,current)=>{
     await authorizeVM(current,'ASSIGN',tx);
     const vm=await loadChangeVM(tx,input.vmId);if(vm.server.projectId!==scope.projectId)throw new ProxyDomainError('NOT_FOUND');
     const cycle=vm.operation?.cycle??1;

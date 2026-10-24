@@ -33,10 +33,10 @@ export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose
     <div className="vm-panel-body">
       {cause&&CAUSE[cause]&&<p className="pm-review text-sm" role="note"><strong>Lý do bị chặn:</strong> {CAUSE[cause]}</p>}
       {tab==='overview'&&<Overview projectId={projectId} vm={vm} rights={rights} account={account} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
-      {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:<div className="vm-panel-card"><ChangeProxy projectId={projectId} vm={vm} info={proxyCellInfo(vm)} rights={{assign:rights.assign,copy:rights.copy,replace:!!rights.replace}} onBusy={()=>undefined} onDone={onSaved} onCancel={()=>onTab('overview')}/></div>)}
+      {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:<div className="vm-panel-card"><ChangeProxy projectId={projectId} vm={vm} info={proxyCellInfo(vm)} rights={{assign:rights.assign,copy:rights.copy,replace:!!rights.replace,block:!!rights.block}} onBusy={()=>undefined} onDone={onSaved} onCancel={()=>onTab('overview')}/></div>)}
       {tab==='work'&&!moduleOn('WORK')&&<p className="pm-muted text-sm">Giao việc đang tạm ẩn. Dữ liệu việc cũ vẫn được giữ.</p>}
       {tab==='work'&&moduleOn('WORK')&&<WorkTab projectId={projectId} vm={vm}/>}
-      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} onSaved={onSaved}/>}
+      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={(rights.accountAssign??rights.assign)&&!deleted} onSaved={onSaved}/>}
       {tab==='history'&&<HistoryTab projectId={projectId} vm={vm}/>}
     </div>
   </aside>;
@@ -56,7 +56,7 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
     </section>
     <section className="vm-panel-card"><h3>SDK EarnApp</h3>
       <SdkEditor key={vm.id} embedded projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} money={{read:!!rights.sdkMoneyRead,write:!!rights.sdkMoneyWrite&&!deleted}} draft={null} onDraft={()=>undefined}/></section>
-    <section className="vm-panel-card"><h3>Tài khoản EarnApp</h3><p>{account?.earnApp?<>{account.earnApp.login.email} <span className="pm-muted">({TYPE_LABEL[account.earnApp.login.type||'']||'chưa chọn loại'})</span> · PayPal {account.earnApp.paypal?account.earnApp.paypal.code+' · '+(account.earnApp.paypal.email||'chưa xác định email'):'chưa có'}</>:account?.legacyGmail?<span className="pm-muted">Gmail cũ: {account.legacyGmail} (chưa có tài khoản EarnApp)</span>:<span className="pm-muted">Chưa gán</span>}</p><p className="pm-muted text-xs">{account?.earnApp?.registeredAt?'Đã ghi đăng ký EarnApp':'Chưa ghi đăng ký EarnApp'}. Sửa ngay tại ô Tài khoản EarnApp trong bảng.</p>{!deleted&&rights.assign&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi tài khoản / PayPal</button>}</section>
+    <section className="vm-panel-card"><h3>Tài khoản EarnApp</h3><p>{account?.earnApp?<>{account.earnApp.login.email} <span className="pm-muted">({TYPE_LABEL[account.earnApp.login.type||'']||'chưa chọn loại'})</span> · PayPal {account.earnApp.paypal?account.earnApp.paypal.code+' · '+(account.earnApp.paypal.email||'chưa xác định email'):'chưa có'}</>:account?.legacyGmail?<span className="pm-muted">Gmail cũ: {account.legacyGmail} (chưa có tài khoản EarnApp)</span>:<span className="pm-muted">Chưa gán</span>}</p><p className="pm-muted text-xs">{account?.earnApp?.registeredAt?'Đã ghi đăng ký EarnApp':'Chưa ghi đăng ký EarnApp'}. Sửa ngay tại ô Tài khoản EarnApp trong bảng.</p>{!deleted&&(rights.accountAssign??rights.assign)&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi tài khoản / PayPal</button>}</section>
     <section className="vm-panel-card"><h3>Ghi chú</h3><InlineText value={displayNote(vm.notes)} label={'ghi chú '+vm.code} placeholder="thêm ghi chú" canEdit={rights.manage&&!deleted} multiline className="vm-panel-note" onSave={saveNotes}/></section>
   </div>;
 }

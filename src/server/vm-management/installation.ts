@@ -1,3 +1,4 @@
+import {assertScopedVmIds,assertScopedEndpointIds} from '@/server/permissions/server-scope';
 import type {PrismaClient,Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {decrypt,encrypt} from '@/lib/encryption';
@@ -12,7 +13,10 @@ import {vmHash,type ConfigurationSnapshot} from './types';
 import {syncAssignmentState} from '../proxy-management/assignment-state';
 async function currentConfiguration(tx:Prisma.TransactionClient,scope:ActorScope,id:string){
   const config=await tx.vMConfiguration.findFirst({where:{id,projectId:scope.projectId,vm:{managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}}},include:{vm:{include:{server:true}},endpoint:{include:{identity:true}},task:true}});
-  if(!config)throw new ProxyDomainError('NOT_FOUND');if(config.vm.desiredConfigurationId!==id&&config.vm.installedConfigurationId!==id)throw new ProxyDomainError('STALE_PREVIEW','Cấu hình này đã được thay bằng phiên bản mới');return config;
+  if(!config)throw new ProxyDomainError('NOT_FOUND');
+  await assertScopedVmIds(tx,scope,[config.vmId]);
+  if(config.endpointId)await assertScopedEndpointIds(tx,scope,[config.endpointId],{write:true});
+  if(config.vm.desiredConfigurationId!==id&&config.vm.installedConfigurationId!==id)throw new ProxyDomainError('STALE_PREVIEW','Cấu hình này đã được thay bằng phiên bản mới');return config;
 }
 async function begin(tx:Prisma.TransactionClient,scope:ActorScope,id:string){
   const config=await currentConfiguration(tx,scope,id);
@@ -46,6 +50,7 @@ export async function copyConfiguration(scope:ActorScope,id:string,db:PrismaClie
 export async function copyVmConfigurations(scope:ActorScope,input:{vmIds:string[];which:'DESIRED'|'INSTALLED'},db:PrismaClient=prisma){
   if(!input.vmIds.length||input.vmIds.length>2000||!['DESIRED','INSTALLED'].includes(input.which))throw new ProxyDomainError('INVALID_INPUT');
   const current=await authorizeVM(scope,'COPY_CREDENTIALS',db);
+  await assertScopedVmIds(db,current,input.vmIds);
   const vms=await db.virtualMachine.findMany({where:{id:{in:input.vmIds},managed:true,server:{projectId:scope.projectId,managed:true}},include:{server:{select:{code:true}},desiredConfiguration:true,installedConfiguration:true}});
   if(vms.length!==new Set(input.vmIds).size)throw new ProxyDomainError('NOT_FOUND','Có VM không thuộc dự án này');
   const byId=new Map(vms.map(v=>[v.id,v])),items:{vmId:string;server:string;vm:string;version:number;proxy:string}[]=[],skipped:{vmId:string;server:string;vm:string;reason:string}[]=[];
@@ -68,7 +73,9 @@ export async function reportInstallFailure(scope:ActorScope,id:string,note:strin
   },db);
 }
 export async function confirmInstalled(scope:ActorScope,input:{configurationId:string;configurationHash:string;expectedVmRevision:number},db:PrismaClient=prisma,deps:{refreshSource?:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>}={}){
-  await authorizeVM(scope,'CONFIRM',db);const source=await requireGenjy(scope,db,deps.refreshSource||refreshGenjy);
+  scope=await authorizeVM(scope,'CONFIRM',db);
+  await currentConfiguration(db,scope,input.configurationId);
+  const source=await requireGenjy(scope,db,deps.refreshSource||refreshGenjy);
   return withProxyTransaction(async tx=>{
     const current=await authorizeVM(scope,'CONFIRM',tx),config=await currentConfiguration(tx,current,input.configurationId);
     const latest=await tx.proxySourceSnapshot.findFirst({where:{projectId:scope.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}});if(!latest?.scanSucceeded)throw new ProxyDomainError('SOURCE_UNAVAILABLE');if(latest.hash!==source.hash)throw new ProxyDomainError('STALE_PREVIEW');
@@ -77,7 +84,9 @@ export async function confirmInstalled(scope:ActorScope,input:{configurationId:s
     if(config.vm.revision!==input.expectedVmRevision||!config.startedAt||!['IN_PROGRESS','FAILED'].includes(config.status))throw new ProxyDomainError('STALE_PREVIEW','Thông tin cài đã thay đổi; tải lại trước khi xác nhận');
     const endpoint=config.endpoint;if(!endpoint?.identity||(endpoint.identity.owner!=='SELF'&&!isShared(endpoint.identity.owner,endpoint.identity.subgroup)))throw new ProxyDomainError('OWNER_CONFLICT','Sở hữu Genjy/chưa rõ: giữ proxy và kiểm tra thực tế trước khi xác nhận');
     if(endpoint.retiredAt||['VOID','REPLACED','DIE','QUARANTINED'].includes(endpoint.inventoryState))throw new ProxyDomainError('INVALID_INPUT','Proxy đã ngừng dùng hoặc cần kiểm tra');
-    const holds=await tx.vMProxyAllocation.findMany({where:{vmId:config.vmId,releasedAt:null}}),target=holds.find(h=>h.endpointId===endpoint.id);if(!target)throw new ProxyDomainError('STALE_PREVIEW','Không còn bản giữ proxy đúng máy');
+    const holds=await tx.vMProxyAllocation.findMany({where:{vmId:config.vmId,releasedAt:null}}),target=holds.find(h=>h.endpointId===endpoint.id);
+    await assertScopedEndpointIds(tx,current,holds.map(h=>h.endpointId),{write:true});
+    if(!target)throw new ProxyDomainError('STALE_PREVIEW','Không còn bản giữ proxy đúng máy');
     const images=await snapshotCollector(tx,current);await images.remember('VM',config.vmId);await images.remember('VM_CONFIG',config.id);await images.remember('ENDPOINT',endpoint.id);if(config.task)await images.remember('VM_TASK',config.task.id);
     for(const hold of holds){await images.remember('VM_ALLOCATION',hold.id);if(hold.id!==target.id){await images.remember('ENDPOINT',hold.endpointId);await tx.vMProxyAllocation.update({where:{id:hold.id},data:{releasedAt:new Date(),releaseReason:'Đã xác nhận cấu hình mới trên máy',revision:{increment:1}}});const released=await tx.proxyIP.findUniqueOrThrow({where:{id:hold.endpointId}});const attempted=hold.role==='UNCERTAIN'&&(released.inventoryState==='NEW'||released.inventoryState==='LIVE')&&!released.retiredAt;/* started on a machine: never back to unused NEW stock */await tx.proxyIP.update({where:{id:hold.endpointId},data:{...(attempted?{inventoryState:'QUARANTINED' as const,status:'RESERVED' as const,notesCipher:encrypt(JSON.stringify({quarantineReason:'INSTALL_ATTEMPT',message:'Đã bắt đầu cài trước đây; không coi là NEW chưa dùng',previousNotesCipher:released.notesCipher}))}:{}),revision:{increment:1}}});await syncAssignmentState(tx,hold.endpointId,{released:true});}}
     await tx.vMProxyAllocation.update({where:{id:target.id},data:{role:'INSTALLED',revision:{increment:1}}});await tx.vMConfiguration.update({where:{id:config.id},data:{status:'CONFIRMED',confirmedAt:new Date(),confirmedById:scope.userId,failureNote:null,revision:{increment:1}}});

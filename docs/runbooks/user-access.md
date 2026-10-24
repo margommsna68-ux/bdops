@@ -56,3 +56,18 @@ chống dùng lại cùng bước) thay cho PIN ở mọi chỗ web từng hỏi
 ## Kiểm (22/10/2026)
 
 Test `src/__tests__/users/user-access.integration.test.ts`; trình duyệt local 30/30 (evidence docs/superpowers/evidence/2026-10-22-user-access/).
+
+## Phạm vi server của từng user — 24/10/2026
+
+ADMIN vào Nhân viên → chọn user → Quyền trong dự án → Phạm vi server. Chọn **Toàn bộ server** hoặc **Chỉ server được chọn**, tick các server rồi **Lưu quyền**. Có thể chọn nhiều server; chọn chế độ giới hạn nhưng không tick server nào nghĩa là không được xem server nào. ADMIN luôn có toàn bộ server. Các thành viên có sẵn giữ ALL; migration không tự đổi quyền của người thật.
+
+Phạm vi là giới hạn thêm bên cạnh vai trò, capability và token scope hiện có. Không tự cấp quyền ghi tiền/copy bí mật/xoá hay nâng vai trò. User chỉ có Server/VM, Kho proxy và Thiết lập; dashboard chuyển về Server/VM. Các dữ liệu trả về, bộ đếm, tìm kiếm, phân trang, copy, API và lệnh gửi lại đều theo server được giao.
+
+- SDK/proxy phải đang thuộc server được giao. Kho chung chưa gắn server không được thấy hoặc lấy; ADMIN cấp vào server trước. Có thể ghi mã SDK mới đọc được cho VM được giao, không lấy mã có sẵn ở server khác.
+- Proxy đang dùng chung với server ngoài quyền có thể xem vị trí thuộc phạm vi, nhưng lệnh làm thay đổi các vị trí ngoài quyền bị chặn. Lịch sử toàn kho và nguồn mua không hiện cho user giới hạn.
+- Lịch sử SDK toàn mã, mã SDK/ghi chú tự do của lượt VM cũ được che khi có thể mang dữ liệu đã chuyển nơi khác. Không xoá lịch sử gốc. Tiền hiện tại vẫn theo quyền đọc tiền riêng.
+- Không mở Kho tài khoản/PayPal, chi phí, số liệu tài chính toàn dự án, lịch sử toàn dự án hoặc AutoType bằng cách gọi đường cũ trực tiếp. Thiết lập cá nhân và bảo mật vẫn dùng được.
+- Khi ADMIN bỏ server khỏi quyền, request kế tiếp và transaction ghi/gửi lại kiểm lại quyền hiện tại. Không hứa dừng lệnh đang chạy bên ngoài web (AE/GEN2).
+- Danh sách server lưu bằng ID, không phụ thuộc tên. Đổi tên không đổi quyền. Không tự coi một tên máy thật là alias của server web.
+
+API `/me`: mỗi dự án có `serverIds`: `null` là ALL, `[]` là không có server, mảng ID là danh sách được giao. Token không vượt phạm vi membership; token cũ áp dụng phạm vi hiện tại mà không cần tạo lại.

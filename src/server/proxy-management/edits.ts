@@ -1,3 +1,4 @@
+import {hasServerScope,vmWhere} from '@/server/permissions/server-scope';
 import {randomBytes} from 'node:crypto';
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
@@ -68,8 +69,8 @@ export function assignableReason(e:EndpointRow):{code:IssueCode;message:string}|
   return null;
 }
 export async function listVmTargets(scope:ActorScope,db:Reader=prisma):Promise<VmTarget[]>{
-  assertInfrastructureAction(await loadInfrastructureScope(db,scope.userId,scope.projectId),'READ');
-  const vms=await db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:vmInclude});
+  scope=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(scope,'READ');
+  const vms=await db.virtualMachine.findMany({where:{...vmWhere(scope),managed:true,archivedAt:null,server:{projectId:scope.projectId,managed:true,archivedAt:null}},include:vmInclude});
   return vms.sort((a,b)=>compareCodes(a.server.code,b.server.code)||compareCodes(a.code,b.code)).map(v=>({id:v.id,code:v.code,serverId:v.serverId,serverCode:v.server.code,occupant:occupantOf(v)}));
 }
 type GroupTarget={owner:'SELF'|'OTHER'|'GENJY';subgroup:'PC_CHUNG'|null;groupId:string|null;newName:string|null};
@@ -284,6 +285,7 @@ async function facts(scope:ActorScope,plan:Plan,db:Reader){
 }
 async function authorize(scope:ActorScope,needs:Plan['needs'],db:Reader){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
+  if(hasServerScope(current))throw new ProxyDomainError('FORBIDDEN','Sửa kho proxy cần quyền toàn bộ máy chủ');
   assertInfrastructureAction(current,'READ');if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');
   if(needs.group||needs.manage||needs.share||needs.sync) assertInfrastructureAction(current,'IMPORT');
   // Xoá / Khôi phục (20/10/2026): ADMIN of the project only; checked again inside the commit transaction (a right dropped meanwhile refuses).
@@ -327,12 +329,14 @@ export function createProxyEditService(db:PrismaClient=prisma){
     return dto(batch);
   }
   async function commit(scope:ActorScope,token:string,idempotencyKey:string):Promise<EditResult>{
+    await authorize(scope,{group:false,location:false,manage:false},db);
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:'PROXY_EDIT'}});if(!original) throw new ProxyDomainError('NOT_FOUND');
     if(original.idempotencyKey!==idempotencyKey) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
     const replay=async(reader:Reader,batch:NonNullable<typeof original>)=>{const op=await reader.operationJournal.findUnique({where:{batchId:batch.id}}),undo=op?await reader.operationJournal.findUnique({where:{undoOfId:op.id}}):null;return {...batch.result as unknown as EditResult,replay:true,undone:!!undo};};
     if(original.status==='APPLIED') return replay(db,original);
     if(original.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW','Bản xem trước đã hết hạn; kiểm tra lại');
     return withProxyTransaction(async tx=>{
+      await authorize(scope,{group:false,location:false,manage:false},tx);
       const batch=await tx.proxyBatch.findUniqueOrThrow({where:{id:original.id}});if(batch.status==='APPLIED') return replay(tx,batch);
       if(batch.token!==token||batch.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW');
       const saved=JSON.parse(decrypt(batch.encryptedPlan)) as {input:EditInput;plan:Plan;facts:Awaited<ReturnType<typeof facts>>};if(vmHash(saved.input)!==batch.payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');

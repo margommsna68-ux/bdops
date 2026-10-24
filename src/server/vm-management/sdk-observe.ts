@@ -4,6 +4,8 @@ import {canonicalAmount,parseSdkAmount} from '@/lib/sdk-money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand} from '../business-management/idempotency';
 import {assertSdkMoneyWrite} from './sdk-money-rights';
+import {assertScopedVmIds,assertScopedSdkIds,hasServerScope} from '../permissions/server-scope';
+import {authorizeSdkCodes,assertSdkPlacementScope,sdkVisibleVmIds,sdkBindingVisible} from './sdk-scope';
 import {authorizeVM} from './repository';
 import {normalizeSdk} from './sdk-parse';
 import {cycleOf,syncMirror,where} from './sdk-store';
@@ -60,9 +62,9 @@ export function normalizeObservation(input:Omit<ObserveInput,'key'>){
 }
 export const hasAmounts=(items:{amount?:string|null}[])=>items.some(i=>i.amount!==undefined);
 const conflict=(m:string,details:Record<string,unknown>)=>new ProxyDomainError('STALE_PREVIEW',m,'SDK_CONFLICT',details);
-async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null,at:{vmId:string;cycle:number}):Promise<ObservedRow['amount']>{
+async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null,at:{vmId:string;cycle:number},visible=true):Promise<ObservedRow['amount']>{
   const now=canonicalAmount(rec.amount?.toString()??null),prev=rec.amountObservedAt;
-  const kept={value:now,observedAt:prev?.toISOString()??null,source:rec.amountSource};
+  const kept=visible?{value:now,observedAt:prev?.toISOString()??null,source:rec.amountSource}:{value:null,observedAt:null,source:null};
   if(amount===undefined)return {outcome:'NOT_SENT',...kept};
   if(amount===null){
     // Could not read: the figure and its time stay; only the latest failed-reading time moves forward (Tiền VM shows "Kiểm tra lỗi").
@@ -72,6 +74,7 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
   // A reading older than the one stored never replaces it; the same moment with another figure is a conflict to look at.
   if(prev&&observedAt<prev)return {outcome:'OLDER',...kept};
   if(prev&&observedAt.getTime()===prev.getTime()){
+    if(!visible)throw conflict('SDK có số đọc cùng thời điểm; cần người có quyền toàn bộ server đối chiếu (không ghi gì)',{kind:'SAME_TIME_OTHER_AMOUNT',code:rec.code,sdkId:rec.id,revision:rec.revision});
     if(now===amount)return {outcome:'SAME',...kept};
     throw conflict('SDK '+rec.code+' đã có số '+now+' USD đọc đúng lúc này; cùng thời điểm khác tiền, đọc lại máy (không ghi gì)',{kind:'SAME_TIME_OTHER_AMOUNT',code:rec.code,sdkId:rec.id,revision:rec.revision,storedAmountUsd:now,observedAt:prev.toISOString()});
   }
@@ -84,22 +87,25 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
 export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:PrismaClient=prisma,caller:{tokenLabel?:string}={}){
   const request=normalizeObservation(input);
   const source=(caller.tokenLabel?'AI '+caller.tokenLabel+' · ':'')+request.source;
-  return runBusinessCommand(scope,{key:input.key,payload:request,kind:'VM_SDK_OBSERVE',module:'INFRASTRUCTURE',reversible:false},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
-    if(hasAmounts(request.items))await assertSdkMoneyWrite(scope,tx);
+  const result=await runBusinessCommand(scope,{key:input.key,payload:request,kind:'VM_SDK_OBSERVE',module:'INFRASTRUCTURE',reversible:false,authorize:tx=>authorizeSdkCodes(tx,scope,request.items.map(i=>i.code))},async(tx,images,current)=>{
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedVmIds(tx,current,[request.vmId]);
+    for(const it of request.items)await assertSdkPlacementScope(tx,current,request.vmId,it.code);
+    if(hasAmounts(request.items))await assertSdkMoneyWrite(current,tx);
     const vm=await loadVM(tx,scope.projectId,request.vmId),cycle=cycleOf(vm);
     if(cycle!==request.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW','VM đã sang lượt '+cycle+'; đọc lại VM','CYCLE_CHANGED');
     if(vm.revision!==request.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW',where(vm)+' vừa thay đổi; đọc lại VM rồi gửi lại (không ghi gì)','REVISION_CONFLICT');
     // Every code is checked before anything is written: one refusal and nothing of this command is saved.
     const plans=[];
     for(const it of request.items){
-      const p=await planListAdd(tx,scope.projectId,vm,it.code,null);
+      const p=await planListAdd(tx,scope.projectId,vm,it.code,null,current);
       if('error' in p)throw new ProxyDomainError(p.code==='OWNER_CONFLICT'?'OWNER_CONFLICT':'STALE_PREVIEW',p.error+' (không ghi gì; web không tự chuyển mã)','DUPLICATE',{code:it.code});
       const stale=staleRecord(p.plan,it.expectedSdkRevision);
       if(stale)throw new ProxyDomainError('STALE_PREVIEW',stale.replace(' (nội dung đang nhập được giữ)','')+' (không ghi gì)','REVISION_CONFLICT',{code:it.code,sdk:p.plan.record?{sdkId:p.plan.record.id,revision:p.plan.record.revision,linkState:p.plan.record.linkState}:null});
       plans.push({it,plan:p.plan});
     }
     const running=request.items.find(i=>i.current),held=running?await tx.sdkRecord.findUnique({where:{vmId:vm.id}}):null;
+    if(held)await assertScopedSdkIds(tx,current,[held.id]);
     if(running&&held&&held.code!==running.code)throw conflict(where(vm)+' đang có SDK hiện hành '+held.code+' trên web, khác mã máy đang chạy '+running.code+'; web không tự thay mã, đối chiếu trên máy (không ghi gì)',
       {kind:'CURRENT_DIFFERS',observedCode:running.code,currentCode:held.code,currentSdkId:held.id,currentRevision:held.revision,currentLinkState:held.linkState});
     const now=new Date(),ctx:Ctx={projectId:scope.projectId,actorId:current.userId,images,now,via:'AI ghi nhận SDK đang chạy'},observedAt=new Date(request.observedAt);
@@ -107,7 +113,8 @@ export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:Prism
     for(const {it,plan} of plans){
       if(plan.kind!=='SAME')await applyListAdd(tx,ctx,vm,plan,{},{createState:'UNCONFIRMED'});
       let rec=await tx.sdkRecord.findUniqueOrThrow({where:{projectId_code:{projectId:scope.projectId,code:it.code}}});
-      const amount=await observeAmount(tx,ctx,rec,it.amount,observedAt,source,request.evidence,{vmId:vm.id,cycle});
+      const visible=await sdkVisibleVmIds(tx,current,[rec.amountVmId]);
+      const amount=await observeAmount(tx,ctx,rec,it.amount,observedAt,source,request.evidence,{vmId:vm.id,cycle},sdkBindingVisible(visible,rec.amountVmId));
       rec=await tx.sdkRecord.findUniqueOrThrow({where:{id:rec.id}});
       if(it.current&&rec.vmId!==vm.id){
         await images.remember('SDK_SLOT',vm.id);await images.remember('SDK',rec.id);
@@ -123,4 +130,9 @@ export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:Prism
     const after=await tx.virtualMachine.findUniqueOrThrow({where:{id:vm.id},select:{revision:true}});
     return {vmId:vm.id,cycle,observedAt:request.observedAt,source,evidence:request.evidence,items:rows,vmRevisionAfter:after.revision};
   },db);
+  const current=await authorizeVM(scope,'READ',db);
+  // Retained figures in old acknowledgements have no immutable VM binding. For scoped readers only a figure supplied
+  // and accepted in this request is safe; current retained money remains available through the scoped store/list.
+  if(hasServerScope(current))return {...result,items:result.items.map(row=>{const it=request.items.find(i=>i.code===row.code);return row.amount.outcome==='SAVED'||row.amount.outcome==='SAME'&&typeof it?.amount==='string'?row:{...row,amount:{...row.amount,value:null,observedAt:null,source:null}};})};
+  return result;
 }

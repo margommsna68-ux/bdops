@@ -52,7 +52,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   const theme = useSettingsStore((s) => s.theme);
   const t = useT();
   const projectId=useProjectStore(s=>s.currentProjectId),fresh=trpc.project.myMembership.useQuery({projectId:projectId||''},{enabled:!!projectId});
-  const cashMode=!!fresh.data?.teamCashEnabled;
+  const cashMode=!!fresh.data?.teamCashEnabled,serverScoped=fresh.data?.serverScope==='SELECTED';
   // Phê duyệt lệnh AI (23/10/2026): the number waiting for THIS ADMIN's decision, polled every 30 s while the tab is visible.
   const pending=trpc.opsApproval.pendingCount.useQuery({projectId:projectId||''},{enabled:!!projectId&&currentRole==='ADMIN',refetchInterval:30000,refetchIntervalInBackground:false,refetchOnWindowFocus:true});
   const badgeFor=(href:string)=>href==='/approvals'&&pending.data?.count?pending.data.count:undefined;
@@ -69,8 +69,9 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
 
   const cashItems:NavItem[]=navItems.filter(item=>'type' in item||!item.infraOnly).flatMap(item=>!('type' in item)&&item.href==='/funds'?[]:!('type' in item)&&item.href==='/withdrawals'?moneyItems(true):[item]).concat([{href:'/history',labelKey:'Lịch sử thao tác',label:'Lịch sử thao tác',icon:'H'}]);
   // One rule for every mode (src/components/layout/nav.ts): role, modules, optional modules; no project → dashboard/settings/admin.
-  const visibleItems=visibleMenu(proxyMode?personalItems(cashMode):cashMode?cashItems:navItems,{role:currentRole||null,modules:currentModules,paypalOnlyProject:isPaypalOnly,canManageUsers});
+  const baseVisibleItems=visibleMenu(proxyMode?personalItems(cashMode):cashMode?cashItems:navItems,{role:currentRole||null,modules:currentModules,paypalOnlyProject:isPaypalOnly,canManageUsers});
 
+  const visibleItems=serverScoped?baseVisibleItems.filter(item=>!('type' in item)&&['/infrastructure/servers','/infrastructure/proxies','/settings'].includes(item.href)):baseVisibleItems;
   const {name:userName,handle:userHandle,initial:userInitial}=sidebarIdentity({name:session?.user?.name,username:(session?.user as {username?:string|null}|undefined)?.username,email:session?.user?.email});
   const projectName=useProjectStore(s=>s.currentProjectName);
 

@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "results": [
+    "Save rights active after choosing server",
+    "Scoped selection saved",
+    "User sees only assigned server",
+    "No common account/financial menus",
+    "Workspace API contains exactly seven allowed VMs",
+    "Hidden VM direct ID denied",
+    "SDK store excludes other server and common stock",
+    "SDK store renders scoped data",
+    "Proxy inventory shows own proxy only",
+    "Settings readable without project-wide members",
+    "Scoped personal settings page loads",
+    "Common stock direct API denied",
+    "Allowed VM write succeeds",
+    "Other server write denied",
+    "Mobile does not overflow",
+    "Empty grants return no servers or VMs",
+    "Old open-page target denied after revocation",
+    "No JS errors"
+  ],
+  "errors": []
+}

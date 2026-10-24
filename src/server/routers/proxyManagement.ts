@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {TRPCError} from '@trpc/server';
+import {hasServerScope} from '../permissions/server-scope';
 import {Prisma} from '@prisma/client';
 import {router,protectedProcedure} from '../trpc';
 import {assertInfrastructureAction,loadInfrastructureScope,type InfrastructureAction} from '../permissions/infrastructure';
@@ -8,7 +9,7 @@ import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint,copyProxy
 import {refreshGenjy} from '../proxy-management/sources';
 import {ProxyDomainError,userMessage} from '../proxy-management/types';
 import {saveProviderAccount,listPackages,setPackageRenewal} from '../proxy-management/catalog-management';
-import {listProxyMembers,proxyCapabilities,setProxyCapabilities} from '../proxy-management/capabilities';
+import {listProxyMembers,listServerAccessChoices,proxyCapabilities,setProxyCapabilities} from '../proxy-management/capabilities';
 import {archiveGroup,createGroup,listGroups,renameGroup,MAX_GROUP_NAME} from '../proxy-management/groups';
 import {createProxyEditService,listVmTargets,MAX_EDIT_ROWS} from '../proxy-management/edits';
 import {listOperations,inspectOperation} from '../operation-history/journal';
@@ -40,7 +41,7 @@ export const proxyManagementRouter=router({
     const can=(action:InfrastructureAction)=>{try{assertInfrastructureAction(scope,action);return true;}catch{return false;}};
     const source=await ctx.prisma.proxySourceSnapshot.findFirst({where:{projectId:input.projectId,sourceKey:'GENJY'},orderBy:{fetchedAt:'desc'}});
     let sourceMode:string|null=null;try{sourceMode=JSON.parse(process.env.GENJY_SOURCE_JSON||'{}').mode||null;}catch{}
-    return {businessMode:scope.businessMode||null,role:scope.role,canBlock:can('BLOCK'),canImport:can('IMPORT'),canReplace:can('REPLACE'),canCopy:can('COPY_CREDENTIALS'),canManage:can('MANAGE'),canDelete:scope.role==='ADMIN',canGrant:scope.role==='ADMIN',canBackup:!!process.env.SYSTEM_OWNER_USER_ID&&ctx.user.id===process.env.SYSTEM_OWNER_USER_ID,source:{connected:source?.scanSucceeded||false,lastScan:source?.fetchedAt.toISOString()||null,mode:sourceMode},trial:['trial','staging'].includes(process.env.APP_ENV||'')};
+    return {businessMode:scope.businessMode||null,role:scope.role,canBlock:!hasServerScope(scope)&&can('BLOCK'),canImport:!hasServerScope(scope)&&can('IMPORT'),canReplace:!hasServerScope(scope)&&can('REPLACE'),canCopy:can('COPY_CREDENTIALS'),canManage:!hasServerScope(scope)&&can('MANAGE'),serverScoped:hasServerScope(scope),canDelete:scope.role==='ADMIN',canGrant:scope.role==='ADMIN',canBackup:!!process.env.SYSTEM_OWNER_USER_ID&&ctx.user.id===process.env.SYSTEM_OWNER_USER_ID,source:{connected:source?.scanSucceeded||false,lastScan:source?.fetchedAt.toISOString()||null,mode:sourceMode},trial:['trial','staging'].includes(process.env.APP_ENV||'')};
   })),
   list:protectedProcedure.input(registryFilter.extend({cursor:z.string().max(200).optional(),page:z.number().int().min(1).max(100000).optional(),limit:z.number().int().min(1).max(100).default(50)})).query(({ctx,input})=>domain(async()=>queryRegistry(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
   copyEndpoints:protectedProcedure.input(project.extend({endpointIds:z.array(z.string().min(1).max(64)).min(1).max(MAX_COPY_ROWS)})).mutation(({ctx,input})=>domain(async()=>copyProxyRows(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),{endpointIds:input.endpointIds},ctx.prisma))),
@@ -62,7 +63,8 @@ export const proxyManagementRouter=router({
   editPreview:protectedProcedure.input(editInput).mutation(({ctx,input})=>domain(async()=>createProxyEditService(ctx.prisma).preview(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input))),
   editCommit:protectedProcedure.input(project.extend({token:z.string().max(100),idempotencyKey:z.string().min(8).max(100)})).mutation(({ctx,input})=>domain(async()=>createProxyEditService(ctx.prisma).commit(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.token,input.idempotencyKey))),
   members:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>listProxyMembers(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
-  setCapabilities:protectedProcedure.input(project.extend({memberId:z.string().min(1),capabilities:z.array(z.enum(proxyCapabilities)).max(proxyCapabilities.length),allowInfrastructure:z.boolean().optional()})).mutation(({ctx,input})=>domain(async()=>setProxyCapabilities(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.memberId,input.capabilities,ctx.prisma,input.allowInfrastructure))),
+  serverAccessChoices:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>listServerAccessChoices(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
+  setCapabilities:protectedProcedure.input(project.extend({memberId:z.string().min(1),capabilities:z.array(z.enum(proxyCapabilities)).max(proxyCapabilities.length),allowInfrastructure:z.boolean().optional(),serverAccess:z.object({mode:z.enum(['ALL','SELECTED']),serverIds:z.array(z.string().min(1).max(64)).max(10000),expectedAccessRevision:z.number().int().min(0)}).optional()})).mutation(({ctx,input})=>domain(async()=>setProxyCapabilities(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input.memberId,input.capabilities,ctx.prisma,input.allowInfrastructure,input.serverAccess))),
   sync:protectedProcedure.input(project).mutation(({ctx,input})=>domain(async()=>{const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'BLOCK');return refreshGenjy(input.projectId,ctx.prisma);})),
   catalog:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>listPackages(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
   saveCatalog:protectedProcedure.input(project.extend({code:z.string().min(1).max(80),label:z.string().min(1).max(100),username:z.string().max(100).nullable().optional(),password:z.string().max(500).nullable().optional(),site:z.string().max(120).nullable().optional(),note:z.string().max(500).nullable().optional(),price:z.string().max(40).nullable().optional(),priceCurrency:z.string().max(8).nullable().optional(),cycleMonths:z.number().int().min(1).max(60).nullable().optional(),nextDueDate:z.string().max(10).nullable().optional(),reminderDays:z.number().int().min(1).max(90).nullable().optional(),disabled:z.boolean().optional()})).mutation(({ctx,input})=>domain(async()=>saveProviderAccount(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),

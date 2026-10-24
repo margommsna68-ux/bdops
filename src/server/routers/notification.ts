@@ -4,6 +4,8 @@ import {readVMWorkspace} from '../vm-management/repository';
 import {summarizeVMs} from '../vm-management/state';
 import {packageReminders} from '../proxy-management/reminders';
 import {links} from '@/lib/links';
+import {loadInfrastructureScope} from '../permissions/infrastructure';
+import {endpointWhere,hasServerScope} from '../permissions/server-scope';
 
 export const notificationRouter = router({
   // Compute real-time alerts — filtered by user's role & modules
@@ -30,16 +32,17 @@ export const notificationRouter = router({
       }[] = [];
       if((ctx.membership.project.settings as {businessMode?:string}|null)?.businessMode==='PROXY_VM'){
         if(!hasModule('INFRASTRUCTURE'))return alerts;
+        const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,projectId);
         const workspace=await readVMWorkspace({projectId,userId:ctx.user.id,role:ctx.role,capabilities:ctx.membership.capabilities},ctx.prisma);
         const active=new Set(workspace.servers.filter(s=>!s.archivedAt).map(s=>s.id)),counts=summarizeVMs(workspace.vms.filter(v=>active.has(v.serverId)));
         // Same rule as the registry filter it opens (current endpoints with a proxy identity in state BLOCKED).
-        const blocked=await ctx.prisma.proxyIP.count({where:{projectId,identityId:{not:null},inventoryState:'BLOCKED'}});
+        const blocked=await ctx.prisma.proxyIP.count({where:{projectId,identityId:{not:null},inventoryState:'BLOCKED',...endpointWhere(scope)}});
         if(blocked)alerts.push({id:'proxy-blocked',type:'PROXY_BLOCKED',severity:'error',title:`${blocked} proxy BLOCKED`,message:'Báo nhà cung cấp hoặc nhận replace',link:links.proxies({state:'BLOCKED'}),createdAt:now});
         if(counts.missing)alerts.push({id:'vm-missing',type:'VM_MISSING',severity:'warning',title:`${counts.missing} VM thiếu proxy`,message:'Điền NEW TUT chưa dùng',link:links.vms({view:'MISSING'}),createdAt:now});
         if(counts.blocked)alerts.push({id:'vm-blocked',type:'PROXY_BLOCKED',severity:'error',title:`${counts.blocked} VM dùng proxy Blocked`,message:'Bấm ô Proxy của VM để thay (proxy dự phòng hoặc nhận replace)',link:links.vms({view:'BLOCKED'}),createdAt:now});
         if(counts.review)alerts.push({id:'vm-review',type:'VM_REVIEW',severity:'warning',title:`${counts.review} VM cần kiểm tra`,message:'Kiểm tra proxy lỗi, sở hữu và dữ liệu cũ',link:links.vms({view:'REVIEW'}),createdAt:now});
         // One live reminder per package (stable id), amounts only for members with the COSTS module.
-        const packages=await ctx.prisma.proxyProviderAccount.findMany({where:{projectId,nextDueDate:{not:null},renewalStoppedAt:null}});
+        const packages=hasServerScope(scope)?[]:await ctx.prisma.proxyProviderAccount.findMany({where:{projectId,nextDueDate:{not:null},renewalStoppedAt:null}});
         for(const r of packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,hasModule('COSTS')))alerts.push({id:r.id,type:r.type,severity:r.severity,title:r.title,message:r.message,link:r.link,createdAt:r.createdAt});
         return alerts;
       }

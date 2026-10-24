@@ -1,0 +1,378 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ✓ src/__tests__/proxy-management/proxy-edit.integration.test.ts (10 tests) 1526ms
+ ✓ src/__tests__/users/user-ai-review.integration.test.ts (17 tests) 4506ms
+     ✓ a PIN-locked user cannot bypass the lock using setPin with the old PIN  325ms
+     ✓ changing an own PIN: first PIN needs none; a change needs the current PIN, counted by the shared rule; the admin unlock still works  1613ms
+     ✓ admin set / change / remove change hash and version together; older unlocks stop  311ms
+     ✓ replay after the job was released, after it expired and after the VM changed: same recorded, nothing written; another body is refused; a revoked token gets no replay  321ms
+ ✓ src/__tests__/ops-api/ops-vm-work.integration.test.ts (13 tests) 4059ms
+   ✓ refuses working statuses while current proxy is BLOCKED, but keeps OFF available  356ms
+   ✓ reads the assigned proxy without ADMIN approval, including batch and repeated reads  330ms
+     ✓ finishes only with the SDK of this install saved and read back, the proxy fetched and all checks passed  569ms
+     ✓ an unfinished attempt resumes with its machine and SDK; another machine name is refused; no second SDK  412ms
+     ✓ replace sets Chờ áp dụng proxy; a second replace while the AI works refuses the earlier result; the new one then finishes  501ms
+     ✓ OFF / SUS kept on apply (mark cleared); a status changed by the owner after the job was taken is never overwritten  501ms
+     ✓ proxy needs its own right, the token operation and an active job of the caller; wrong PIN, revoked token and old round are refused  327ms
+ ✓ src/__tests__/proxy-management/vm-ops.integration.test.ts (20 tests) 3198ms
+     ✓ 4a. BLOCKED proxy at recreation: the old installation is history; the VM shows the Blocked proxy for the replacement (19/10/2026)  356ms
+ ✓ src/__tests__/ops-api/ops-api.integration.test.ts (7 tests) 3131ms
+     ✓ token lifecycle: shown once, stored hashed, revoked / expired / locked user / removed member refused on the next call  373ms
+     ✓ OK needs a decimal string (0.00 is a value); ERROR takes no amount; stale round / account / revision answer 409 with the current state; same key replays  574ms
+     ✓ suggest → prepare (holds the email) → status → receipts 6 + 4; duplicates, contention, retries and the old account are handled by the shared services  1369ms
+ ✓ src/__tests__/ops-api/ops-api-review.integration.test.ts (10 tests) 3190ms
+     ✓ balance A, then account B with $99: the retry of A still answers A and $10, B is only under current; no extra row  408ms
+     ✓ prepare, status and receipts: recorded = what that command wrote; current = the request now  409ms
+     ✓ a USER with only the narrow right records parts through the cell route and the API; the general ledger writes stay closed  342ms
+     ✓ a VM that had an UNCERTAIN hold and then got a clear new proxy: list, resolve and detail say ASSIGNED with the new proxy  414ms
+     ✓ reads, writes and errors of every endpoint conform to docs/ops-api/openapi.json (envelope included)  717ms
+ ✓ src/__tests__/ops-api/ops-sdk-observe.integration.test.ts (9 tests) 2910ms
+     ✓ a VM without EarnApp records the running SDK and $0.21 on the code (Chưa xác nhận, current); two files of one code = one SDK; a replay answers the first ack; nothing financial  332ms
+     ✓ late older result kept out; same time + other amount is a conflict; a newer same figure moves the check time; $0 is a value; OCR text and "could not read" are not money  593ms
+     ✓ wrong round / VM revision / SDK revision / VM and codes held elsewhere refuse the whole command and write nothing  360ms
+     ✓ two writers at once on the same code: one lands, the other is refused with nothing half-written  337ms
+     ✓ money needs BALANCE_WRITE on the token and EARN_BALANCE on the user; codes alone need VM_OPS; revoked token / disabled user write nothing  399ms
+ ✓ src/__tests__/ops-api/stock-batch-http.integration.test.ts (9 tests) 2676ms
+     ✓ lists masked stock; holds one login for an owned VM job; releases only before registration  484ms
+     ✓ runs ordinary items, holds one approval for secrets, confirms at CLI then replays without duplicate money  467ms
+     ✓ wires proxy inventory and SDK assignment/linking to an owned job without exposing SDK codes  348ms
+     ✓ five incorrect confirmations lock the approval, which cannot recreate itself under the same key  339ms
+ ✓ src/__tests__/ops-api/ops-client-retry.test.ts (13 tests) 2476ms
+     ✓ keys that differ by ":" / "_" or by letter case are stored apart, and each retry sends its own key and body  533ms
+     ✓ an old journal file of this exact key still works and is kept; an old file of another key or a broken record stops without sending or touching it  339ms
+ ✓ src/__tests__/proxy-management/proxy-change.integration.test.ts (12 tests) 2221ms
+     ✓ a newer status chosen while waiting is kept; SUS is never overwritten by Blocked; a new round never uses the old round mark  318ms
+ ✓ src/__tests__/vm-management/sdk-money-rights.integration.test.ts (9 tests) 2191ms
+     ✓ money checked in an earlier round, or on another VM, is history: the new round / the other VM reads Chưa kiểm tra until checked again (web, API, summary alike)  336ms
+     ✓ the binding backfill binds a figure only with evidence (written in the current round, code not moved since); a round-1 figure on a recreated VM stays history  318ms
+ ✓ src/__tests__/proxy-management/team-cash-migration.integration.test.ts (4 tests) 2472ms
+   ✓ detects missing original rows and refuses nonempty restore targets  397ms
+   ✓ migrates a matching old schema without changing original numeric values or relations  2070ms
+ ✓ src/__tests__/ops-api/server-scope.integration.test.ts (7 tests) 2090ms
+   ✓ filters before paging and resolving and conceals inaccessible VM details  313ms
+   ✓ revokes job reads, writes and command replay immediately when a server grant is removed  320ms
+   ✓ allows own VM status, SDK observation, balance and steps but refuses other-server writes without error details  430ms
+ ✓ src/__tests__/proxy-management/sdk-store.integration.test.ts (11 tests) 1952ms
+     ✓ 1–3, 8. A = 12,40 USD with a note; a new code B replaces it without inheriting; A stays in the store and keeps its money on another server; editing the money never touches the books  362ms
+ ✓ src/__tests__/ops-api/cli-stock-batch.test.ts (11 tests) 2027ms
+   ✓ LOCKED and expired confirmation settle the local approval and explicitly require a new key  341ms
+ ✓ src/__tests__/ops-api/ai-inventory.integration.test.ts (9 tests) 1873ms
+     ✓ Blocked → AI replaces: the VM becomes Chờ áp dụng proxy exactly like the web path; a working status is kept with the apply mark  329ms
+ ✓ src/__tests__/ops-api/ops-client-state.test.ts (10 tests) 1896ms
+     ✓ several unclear and refused retries in a row keep the command UNKNOWN until a success  338ms
+ ✓ src/__tests__/proxy-management/earn-money.integration.test.ts (11 tests) 1871ms
+     ✓ $10 without the condition is not "có thể rút"; 0 ≠ never checked; a failed check keeps the last figure; a late older check never replaces a newer one  370ms
+stderr | src/__tests__/users/user-access.integration.test.ts > web session and PIN unlock are held by the server > a session is valid only while open, for its user and epoch; the PIN unlock belongs to it and to the PIN version
+Failed to create audit log {
+  action: 'CHANGE_PIN',
+  entity: 'User',
+  entityId: '65ac62cf-109f-4c91-b978-43d377037bd4'
+}
+
+stderr | src/__tests__/users/user-access.integration.test.ts > web session and PIN unlock are held by the server > a session is valid only while open, for its user and epoch; the PIN unlock belongs to it and to the PIN version
+Failed to create audit log {
+  action: 'REMOVE_PIN',
+  entity: 'User',
+  entityId: '65ac62cf-109f-4c91-b978-43d377037bd4'
+}
+
+ ✓ src/__tests__/users/user-access.integration.test.ts (6 tests) 1892ms
+     ✓ a session is valid only while open, for its user and epoch; the PIN unlock belongs to it and to the PIN version  684ms
+     ✓ a write that passed its check before the disabling commits; any write after it is refused (no write slips past the cut)  542ms
+ ✓ src/__tests__/proxy-management/vm-management.integration.test.ts (13 tests) 1726ms
+ ✓ src/__tests__/ops-api/approval-confirm-race.integration.test.ts (5 tests) 1515ms
+     ✓ reset-2fa cannot approve after the code was checked  462ms
+ ✓ src/__tests__/ops-api/ops-client.test.ts (6 tests) 1403ms
+     ✓ 202 APPROVAL_REQUIRED → WAITING_APPROVAL (exit 4, not recorded, listed by `approvals`); after the ADMIN approves, retry with the same key and body runs once → DONE  319ms
+     ✓ 403 APPROVAL_REJECTED → REJECTED (final, exit 1); 410 APPROVAL_EXPIRED → EXPIRED (exit 1, new key needed)  378ms
+     ✓ refuses traversal (plain and encoded), https-less remote bases and redirects, before any credential is sent elsewhere  317ms
+ ✓ src/__tests__/ops-api/ai-accounts.integration.test.ts (7 tests) 1404ms
+ ✓ src/__tests__/proxy-management/duplicate-check.integration.test.ts (6 tests) 1124ms
+ ✓ src/__tests__/proxy-management/account-store.integration.test.ts (13 tests) 1195ms
+ ✓ src/__tests__/proxy-management/sdk-list.integration.test.ts (6 tests) 1024ms
+stdout | .runtime/review-sdk-survey-20261021.test.ts > Independent SDK survey review > a user without EARN_BALANCE cannot edit SDK money through the service used by the web
+PLAIN_SDK_WRITE {"denied":true,"amount":"731.25"}
+
+stdout | .runtime/review-sdk-survey-20261021.test.ts > Independent SDK survey review > undoing a web money edit restores the observation time and source with its old amount
+SDK_UNDO {"oldObservedAt":"2026-10-24T03:41:00.116Z","afterObservedAt":"2026-10-24T03:41:00.116Z","oldSource":"AI SDK review (mth_OjuW8EgM) · Synthetic OCR","afterSource":"AI SDK review (mth_OjuW8EgM) · Synthetic OCR"}
+
+ ✓ .runtime/review-sdk-survey-20261021.test.ts (4 tests) 1278ms
+     ✓ an old survey missing capture-time identity must not be rebound to the latest VM cycle by the client  410ms
+     ✓ a user without money-read permission cannot recover SDK amounts via web reads or operation history  410ms
+ ✓ src/__tests__/proxy-management/vm-table.integration.test.ts (8 tests) 848ms
+ ✓ src/__tests__/proxy-management/assignment-state.integration.test.ts (3 tests) 939ms
+   ✓ assigning makes NEW → LIVE on every path; unassigning the last hold returns to NEW; BLOCKED and installed/started holds are kept  464ms
+   ✓ the status action saves directly: LIVE without a VM is allowed (in use), NEW on a held row needs an unassign, BLOCKED goes through the controlled path  366ms
+ ✓ .runtime/review-user-ai-20261022.test.ts (4 tests) 1037ms
+     ✓ a PIN-locked user cannot bypass the lock using setPin with the old PIN  319ms
+     ✓ identical HTTP SDK retry must return original acknowledgement, not a payload mismatch  379ms
+ ✓ src/__tests__/ops-api/ops-approvals.integration.test.ts (2 tests) 1137ms
+     ✓ a plain write needs no X-Ops-Pin; prepare is held until an ADMIN with 2FA approves; the same key then runs once and replays  752ms
+     ✓ SDK codes are masked in every read; the full code needs an approved reveal  377ms
+ ✓ src/__tests__/proxy-management/server-scope-sdk.integration.test.ts (10 tests) 814ms
+ ✓ src/__tests__/proxy-management/proxy-retire.integration.test.ts (4 tests) 870ms
+   ✓ retires rows (single and bulk, one reason) keeping IP/credentials/ownership/history, hides them from the current view, blocks re-import, restores and undoes  532ms
+ ✓ src/__tests__/proxy-management/business-review-regressions.integration.test.ts (6 tests) 855ms
+   ✓ create user rejects global duplicate names without changing password, PIN or role  429ms
+stdout | .runtime/review-vm-money-eced7af.test.ts > Independent Tiền VM acceptance review at eced7af > SDK store preview does not reveal stored money to a user without money rights, even when only a code or a malformed row is pasted
+PREVIEW_READ {"outcome":"SAME","before":{"amount":null,"note":null}}
+
+stdout | .runtime/review-vm-money-eced7af.test.ts > Independent Tiền VM acceptance review at eced7af > SDK store preview does not reveal stored money to a user without money rights, even when only a code or a malformed row is pasted
+PREVIEW_READ {"outcome":"ERROR","before":{"amount":null,"note":null}}
+
+stdout | .runtime/review-vm-money-eced7af.test.ts > Independent Tiền VM acceptance review at eced7af > putting an unused SDK back after recreation must not label its previous-cycle money as checked on the new VM round
+MONEY_AFTER_RECREATE_REUSE {"cycle":2,"state":{"kind":"UNCHECKED","code":"REVIEW-MONEY-7660f3d8-84ca-4251-ab55-7ecf662a9ee4","stored":null}}
+
+stdout | .runtime/review-vm-money-eced7af.test.ts > Independent Tiền VM acceptance review at eced7af > API read-back exposes a failed latest money check as the web does, while keeping the last good amount
+API_MONEY_READBACK {"id":"cmvlwvhyf00bkk86aqu2y3oqd","code":"REVI…bfa4","revision":3,"linkState":"UNCONFIRMED","current":true,"amount":"0.21","currency":"USD","observedAt":"2026-10-24T04:31:09.514Z","failedAt":"2026-10-24T04:36:09.514Z","moneyState":"FAILED","recordedAt":"2026-10-24T04:41:09.542Z","source":"AI Money review (mth_aIIVU4wM) · Synthetic independent review","stored":{"amount":"0.21","observedAt":"2026-10-24T04:31:09.514Z","recordedAt":"2026-10-24T04:41:09.542Z","source":"AI Money review (mth_aIIVU4wM) · Synthetic independent review","cycle":1,"vmId":"cmvlwvhv0008ik86aqb44um7u"}}
+
+ ✓ .runtime/review-vm-money-eced7af.test.ts (3 tests) 911ms
+     ✓ SDK store preview does not reveal stored money to a user without money rights, even when only a code or a malformed row is pasted  378ms
+ ✓ src/__tests__/proxy-management/sdk-list-review.integration.test.ts (8 tests) 700ms
+ ✓ src/__tests__/proxy-management/proxy-package.integration.test.ts (6 tests) 690ms
+ ✓ src/__tests__/proxy-management/shared-group.integration.test.ts (4 tests) 895ms
+   ✓ shared proxies are assigned to VMs by hand (single and paste), never autofilled; Genjy riêng and occupied VMs are refused; replace keeps the shared class  390ms
+stdout | .runtime/review-sdk-binding-12ba8af.test.ts > Independent SDK money binding review at 12ba8af > migration must not assign old stored money and failure to a new VM cycle merely from the current placement
+MIGRATION_BINDING {"actualObservationCycle":1,"currentCycle":2,"backfilledMoneyCycle":null,"backfilledFailureCycle":null,"state":"UNCHECKED","amount":"12.34"}
+
+stdout | .runtime/review-sdk-binding-12ba8af.test.ts > Independent SDK money binding review at 12ba8af > moving an SDK and explicitly recording new money must bind it to the destination, not the old holder
+MOVE_BINDING {"holderIsTarget":true,"moneyIsTarget":true,"moneyIsSource":false,"amount":"20","state":"OK"}
+
+stdout | .runtime/review-sdk-binding-12ba8af.test.ts > Independent SDK money binding review at 12ba8af > the existing SDK bulk endpoint must not record fresh money as cycle 1 on a recreated VM
+BULK_BINDING {"currentCycle":2,"recordedCycle":2,"amount":"4.56","state":"OK"}
+
+ ✓ .runtime/review-sdk-binding-12ba8af.test.ts (3 tests) 655ms
+ ✓ src/__tests__/proxy-management/dashboard-overview.integration.test.ts (5 tests) 749ms
+ ✓ src/__tests__/proxy-management/paypal-email-ledger.integration.test.ts (4 tests) 935ms
+   ✓ parses "Mã PP email1 email2 …" with spaces, tabs or |; a code with 5 emails is one PayPal, repeated codes are grouped  373ms
+stdout | .runtime/review-ops-client-retry-refused-20261021.test.ts > Independent review: retry refusal cannot resolve an earlier uncertain commit > 502 after commit then 401 TOKEN_REVOKED must remain pending until the original outcome is recovered
+{"mode":"revoked","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+
+stdout | .runtime/review-ops-client-retry-refused-20261021.test.ts > Independent review: retry refusal cannot resolve an earlier uncertain commit > 502 after commit then 403 FORBIDDEN must remain pending until the original outcome is recovered
+{"mode":"rights","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+
+stdout | .runtime/review-ops-client-retry-refused-20261021.test.ts > Independent review: retry refusal cannot resolve an earlier uncertain commit > 502 after commit then 429 RATE_LIMITED must remain pending until the original outcome is recovered
+{"mode":"rate","recordedEffects":1,"retryExit":3,"retryCode":"RESULT_UNKNOWN","pendingAfterRefusal":1}
+
+ ✓ .runtime/review-ops-client-retry-refused-20261021.test.ts (3 tests) 726ms
+stdout | .runtime/review-ops-api-ack-20261021.test.ts > Independent review: write acknowledgement stays with original EarnApp > retry of balance A after account switch must not acknowledge current balance B
+{"replayAcknowledgesOriginalAccount":true,"replayBalance":"10.00","originalBalance":"10.00","noDuplicateWrites":true}
+
+stdout | .runtime/review-ops-api-ack-20261021.test.ts > Independent review: revoked before business transaction > must refuse when the token is revoked before the write transaction starts
+{"tokenRevokedBeforeTransaction":true,"httpStatus":401,"writeCount":0,"errorCode":"TOKEN_REVOKED"}
+
+stdout | .runtime/review-ops-api-ack-20261021.test.ts > Independent review: concurrent PIN checks > a request waiting on comparison must not accept PIN after another request has locked the user
+{"userLockedBeforeFourthCompareFinishes":true,"fourthResult":"LOCKED"}
+
+ ✓ .runtime/review-ops-api-ack-20261021.test.ts (3 tests) 718ms
+     ✓ retry of balance A after account switch must not acknowledge current balance B  424ms
+ ✓ src/__tests__/proxy-management/operations.integration.test.ts (7 tests) 718ms
+ ✓ src/__tests__/proxy-management/team-cash-linked-period.integration.test.ts (9 tests) 493ms
+ ✓ src/__tests__/proxy-management/business-finance.integration.test.ts (4 tests) 458ms
+ ✓ src/__tests__/proxy-management/account-delete.integration.test.ts (3 tests) 567ms
+   ✓ logins: ADMIN deletes one or many; rows in use are refused with their VM; restore keeps the state; import sees the deleted row; undo and retry  304ms
+stdout | .runtime/review-vm-ops-20261019.test.ts > Independent acceptance review 2026-10-19 > does not expose generated payout amounts through VM history to infrastructure-only staff
+INDEPENDENT_HISTORY {"money":null,"history":[{"at":"2026-10-24T04:41:20.225Z","by":"Tài khoản cũ","what":"Ghi yêu cầu rút"}]}
+
+stdout | .runtime/review-vm-ops-20261019.test.ts > Independent acceptance review 2026-10-19 > does not reopen the closed cycle or regrant recreation after undo
+INDEPENDENT_UNDO {"cycle":2,"milestone":"","closedCycles":1,"oldEarnAppReactivated":false,"closedAt":"2026-10-24T04:41:20.449Z","consumedAt":"2026-10-24T04:41:20.449Z"}
+
+stdout | .runtime/review-vm-ops-20261019.test.ts > Independent acceptance review 2026-10-19 > does not present the previous installation as current after recreating with a blocked proxy
+INDEPENDENT_INSTALL {"cycle":2,"ops":"NEW_VM","desiredStatus":"PLANNED","oldInstallationStillCurrent":false}
+
+stdout | .runtime/review-vm-ops-20261019.test.ts > Independent acceptance review 2026-10-19 > keeps email lifetime reservation even when the first assignment is undone before money arrives
+INDEPENDENT_EMAIL_UNDO {"usedEarnAppId":"cmvlwvqlv008xnbkpzs8mk52x","usedAt":"2026-10-24T04:41:20.757Z"}
+
+ ✓ .runtime/review-vm-ops-20261019.test.ts (4 tests) 651ms
+ ✓ src/__tests__/proxy-management/business-profit.integration.test.ts (3 tests) 348ms
+ ✓ src/__tests__/proxy-management/vm-sdk.integration.test.ts (4 tests) 533ms
+ ✓ src/__tests__/proxy-management/server-scope-workspace.integration.test.ts (10 tests) 432ms
+ ✓ src/__tests__/ops-api/ops-client-survey.test.ts (2 tests) 538ms
+     ✓ prepare captures the identity; the survey is sent exactly as captured (no read at send time); rerun / retry / --redo keep it  469ms
+ ✓ src/__tests__/proxy-management/batches.integration.test.ts (5 tests) 724ms
+   ✓ import -> block -> replace inherits credentials, dates and replays without extra events  376ms
+ ✓ src/__tests__/proxy-management/sdk-stale.integration.test.ts (4 tests) 554ms
+ ✓ .runtime/review-money-proxy-20261019.test.ts (4 tests) 520ms
+ ✓ src/__tests__/proxy-management/team-cash-races.integration.test.ts (10 tests) 604ms
+ ✓ src/__tests__/users/totp.integration.test.ts (3 tests) 505ms
+     ✓ a user sets up 2FA with the code of the scanned secret; the PIN is retired; backup codes work once; replay of a step is refused  498ms
+ ✓ src/__tests__/proxy-management/registry-copy.integration.test.ts (3 tests) 292ms
+stdout | .runtime/review-sdk-evidence-abf6c12.test.ts > Evidence migration review at abf6c12 > does not erase an explicitly recorded current-cycle observation when the money stayed the same after recreation
+FRESH_SAME_AMOUNT_AFTER_MIGRATION {"beforeCycle":2,"afterCycle":2,"amount":"12.34","amountAt":"2026-10-24T04:41:28.675Z","observedAt":"2026-10-24T04:41:28.714Z","state":"OK"}
+
+stdout | .runtime/review-sdk-evidence-abf6c12.test.ts > Evidence migration review at abf6c12 > does not erase a real failed scan because the SDK was placed in the same command after the observation timestamp
+FRESH_FAILED_AFTER_MIGRATION {"beforeCycle":1,"afterCycle":1,"failedAt":"2026-10-24T04:41:28.907Z","state":"FAILED"}
+
+ ✓ .runtime/review-sdk-evidence-abf6c12.test.ts (2 tests) 453ms
+ ✓ src/__tests__/proxy-management/vm-admin.integration.test.ts (5 tests) 452ms
+ ✓ src/__tests__/proxy-management/public-genjy.test.ts (9 tests) 438ms
+ ✓ src/__tests__/proxy-management/project-destroy.integration.test.ts (2 tests) 411ms
+   ✓ destroyProject removes every row of a PROXY_VM project, including proxies, journal, configurations and SDK history, and leaves other projects untouched  346ms
+ ✓ src/__tests__/proxy-management/server-scope-proxy.integration.test.ts (10 tests) 405ms
+ ✓ src/__tests__/ops-api/ops-ip.integration.test.ts (6 tests) 385ms
+ ✓ src/__tests__/proxy-management/paypal-review-fixes.integration.test.ts (3 tests) 275ms
+stdout | .runtime/review-sdk-stale-20261019.test.ts > Independent SDK stale-value checks (test database only) > a checked paste must not overwrite money changed in Kho SDK after preview
+STALE_PASTE {"outcome":"ERROR","amountAfter":"20"}
+
+stdout | .runtime/review-sdk-stale-20261019.test.ts > Independent SDK stale-value checks (test database only) > sdkSave without the SDK revision cannot bypass stale money protection
+MISSING_SDK_REVISION {"refused":true,"amountAfter":"20"}
+
+ ✓ .runtime/review-sdk-stale-20261019.test.ts (2 tests) 240ms
+ ✓ .runtime/review-earn-money-20261020.test.ts (3 tests) 356ms
+ ✓ src/__tests__/proxy-management/business-accounts.integration.test.ts (5 tests) 424ms
+ ✓ src/__tests__/proxy-management/final-review.integration.test.ts (5 tests) 213ms
+ ✓ src/__tests__/proxy-management/paypal-cost-chain.integration.test.ts (1 test) 207ms
+ ✓ src/__tests__/proxy-management/team-receipts.integration.test.ts (5 tests) 320ms
+ ✓ src/__tests__/proxy-management/package-reminders.integration.test.ts (5 tests) 307ms
+stderr | src/__tests__/proxy-management/business-access.integration.test.ts > creating a business project is explicit and an existing code never grants admin access
+Failed to create audit log {
+  action: 'CREATE',
+  entity: 'Project',
+  entityId: 'cmvlww3c1001i13dex23yq3as'
+}
+
+ ✓ src/__tests__/proxy-management/business-access.integration.test.ts (3 tests) 191ms
+ ✓ .runtime/review-stock-delete-apple-20261020.test.ts (2 tests) 262ms
+ ✓ .runtime/review-sdk-list-20261020.with-cycle.test.ts (3 tests) 362ms
+ ✓ src/__tests__/proxy-management/team-cash-profit.integration.test.ts (2 tests) 260ms
+ ✓ .runtime/review-sdk-list-20261020.test.ts (3 tests) 356ms
+stdout | .runtime/review-ops-client-retry-20261021.test.ts > Independent client retry edge checks > a gateway failure after accepting POST stays unresolved and appears in pending
+{"gatewayAcceptedRequest":true,"clientExit":3,"pendingCount":1}
+
+stdout | .runtime/review-ops-client-retry-20261021.test.ts > Independent client retry edge checks > two distinct valid keys must keep distinct command records and retry exact requested key
+{"requestedKey":"review:collision:1","actuallySentKey":"review:collision:1"}
+
+ ✓ .runtime/review-ops-client-retry-20261021.test.ts (2 tests) 242ms
+ ✓ src/__tests__/proxy-management/apple-id-import.integration.test.ts (1 test) 112ms
+ ✓ src/__tests__/proxy-management/team-cash-api.integration.test.ts (1 test) 211ms
+ ✓ src/__tests__/proxy-management/account-note.integration.test.ts (1 test) 209ms
+ ✓ src/__tests__/proxy-management/catalog-resolution.integration.test.ts (1 test) 108ms
+ ✓ src/__tests__/proxy-management/team-cash-access.integration.test.ts (1 test) 198ms
+ ✓ src/__tests__/proxy-management/stock-detail-state.test.tsx (5 tests) 181ms
+ ✓ src/__tests__/proxy-management/history.integration.test.ts (1 test) 181ms
+ ✓ src/__tests__/proxy-management/api-permissions.test.ts (1 test) 177ms
+stdout | .runtime/review-vm-journal-money-20261019.test.ts > Independent journal money permission review 2026-10-19 > infrastructure-only staff cannot read payout money through a VM_RECREATE journal detail
+INDEPENDENT_JOURNAL_PERMISSION {"operationVisibleToStaff":true,"rows":[{"resource":"Yêu cầu rút EarnApp","label":"cmvlww88q001r10o8rqpy2ung","before":"Yêu cầu rút · REQUESTED","after":"Yêu cầu rút · REQUESTED · đã dùng để tạo lại VM","onUndo":"Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật"}]}
+
+ ✓ .runtime/review-vm-journal-money-20261019.test.ts (1 test) 278ms
+ ✓ src/__tests__/ops-api/ops-client-proxy.test.ts (1 test) 167ms
+ ✓ src/__tests__/proxy-management/repository.integration.test.ts (1 test) 58ms
+ ✓ src/__tests__/proxy-management/account-edit.integration.test.ts (1 test) 144ms
+ ✓ src/__tests__/proxy-management/usdt-costs.integration.test.ts (2 tests) 236ms
+ ✓ src/__tests__/proxy-management/sheet-intake.integration.test.ts (1 test) 125ms
+ ✓ src/__tests__/proxy-management/member-server-scope-ui.test.tsx (5 tests) 113ms
+ ✓ .runtime/review-stock-detail-state-20261020.test.tsx (3 tests) 108ms
+ ✓ src/__tests__/proxy-management/vm-proxy-cell.test.tsx (6 tests) 95ms
+ ✓ src/__tests__/proxy-management/theme-bronze-sync.test.ts (2 tests) 107ms
+ ✓ src/__tests__/proxy-management/paypal-cost-controls.test.tsx (7 tests) 106ms
+ ✓ src/__tests__/proxy-management/paypal-email-migration.integration.test.ts (1 test) 206ms
+ ✓ src/__tests__/proxy-management/team-cash-report.integration.test.ts (1 test) 202ms
+ ✓ src/__tests__/proxy-management/member-server-scope.integration.test.ts (3 tests) 199ms
+ ✓ src/__tests__/proxy-management/backups.test.ts (5 tests) 197ms
+ ✓ src/__tests__/layout/pin-gate-totp.test.tsx (6 tests) 94ms
+ ✓ src/__tests__/proxy-management/business-journal.integration.test.ts (1 test) 195ms
+ ✓ src/__tests__/proxy-management/earn-money-ui.test.tsx (4 tests) 84ms
+ ✓ src/__tests__/proxy-management/money-column-ui.test.tsx (6 tests) 77ms
+ ✓ .runtime/review-earn-money-ui-20261020.test.tsx (2 tests) 70ms
+ ✓ src/__tests__/proxy-management/team-cash-history.integration.test.ts (1 test) 152ms
+ ✓ src/__tests__/proxy-management/collector-reconciliation.integration.test.ts (1 test) 53ms
+ ✓ src/__tests__/proxy-management/vm-sdk-ui.test.tsx (4 tests) 54ms
+ ✓ src/__tests__/proxy-management/team-cash-schema.integration.test.ts (1 test) 150ms
+ ✓ src/__tests__/proxy-management/source-persistence.integration.test.ts (2 tests) 48ms
+ ✓ src/__tests__/proxy-management/legacy-writers.test.ts (1 test) 48ms
+ ✓ src/__tests__/proxy-management/legacy-scope.test.ts (1 test) 148ms
+ ✓ src/__tests__/proxy-management/registry-ui.test.tsx (7 tests) 41ms
+ ✓ src/__tests__/proxy-management/registry.integration.test.ts (2 tests) 31ms
+ ✓ src/__tests__/proxy-management/money-input.test.ts (55 tests) 24ms
+ ✓ src/__tests__/proxy-management/test-net.integration.test.ts (1 test) 25ms
+ ✓ src/__tests__/excel-export.test.ts (1 test) 20ms
+ ✓ src/__tests__/proxy-management/team-cash-period-ui.test.tsx (1 test) 18ms
+ ✓ src/__tests__/excel.test.ts (6 tests) 16ms
+ ✓ src/__tests__/proxy-management/sources.test.ts (4 tests) 14ms
+ ✓ src/__tests__/utils.test.ts (8 tests) 13ms
+ ✓ src/__tests__/proxy-management/paypal-cost-purchase.test.ts (5 tests) 13ms
+ ✓ src/__tests__/proxy-management/policy.test.ts (16 tests) 13ms
+ ✓ src/__tests__/proxy-management/package-terms.test.ts (9 tests) 12ms
+ ✓ src/__tests__/proxy-management/binance-p2p.test.ts (1 test) 12ms
+ ✓ .runtime/review-purchase-inexact-20261019.test.ts (1 test) 11ms
+ ✓ src/__tests__/proxy-management/sdk-money.test.ts (5 tests) 12ms
+ ✓ src/__tests__/proxy-management/account-detail-ui.test.tsx (2 tests) 11ms
+ ✓ .runtime/review-purchase-mode-matrix-20261019.test.ts (4 tests) 11ms
+ ✓ src/__tests__/proxy-management/earn-money-rules.test.ts (7 tests) 9ms
+ ✓ src/__tests__/proxy-management/proxy-package-ui.test.tsx (5 tests) 8ms
+ ✓ src/__tests__/proxy-management/vm-filter-model.test.ts (6 tests) 8ms
+ ✓ src/__tests__/proxy-management/stock-bulk-import.test.tsx (5 tests) 8ms
+ ✓ src/__tests__/proxy-management/member-server-scope.test.ts (15 tests) 7ms
+ ✓ src/__tests__/proxy-management/batches.test.ts (6 tests) 5ms
+ ✓ src/__tests__/encryption.test.ts (6 tests) 5ms
+ ✓ src/__tests__/proxy-management/parse.test.ts (7 tests) 5ms
+ ✓ src/__tests__/ops-api/ops-safety.test.ts (4 tests) 4ms
+ ✓ src/__tests__/proxy-management/usdt-money.test.ts (3 tests) 5ms
+ ✓ src/__tests__/proxy-management/vm-grid-model.test.ts (11 tests) 4ms
+ ✓ src/__tests__/ops-api/ops-client-sdk.test.ts (6 tests) 4ms
+ ✓ src/__tests__/proxy-management/business-contract.test.ts (3 tests) 4ms
+ ✓ src/__tests__/proxy-management/links.test.ts (5 tests) 4ms
+ ✓ src/__tests__/proxy-management/menu-modules.test.ts (5 tests) 4ms
+ ✓ src/__tests__/proxy-management/quick-save.test.ts (4 tests) 4ms
+ ✓ src/__tests__/proxy-management/paypal-transfer-rule.test.ts (10 tests) 3ms
+ ✓ src/__tests__/proxy-management/vm-workflow.test.ts (4 tests) 4ms
+ ✓ src/__tests__/vm-money.test.ts (6 tests) 3ms
+ ✓ src/__tests__/business-logic.test.ts (17 tests) 3ms
+ ✓ src/__tests__/proxy-management/account-url.test.ts (5 tests) 3ms
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > changing project MOON → AE → MOON drops the ticks of both Server / VM and Kho proxy, also when those pages are not open
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > changing project MOON → AE → MOON drops the ticks of both Server / VM and Kho proxy, also when those pages are not open
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > only changing the theme (same project) keeps them as before
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > only changing the theme (same project) keeps them as before
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > a selection of the project switched to is kept until that project is left
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/proxy-management/session-selection-project.test.ts > selection after leaving the page > a selection of the project switched to is kept until that project is left
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+ ✓ src/__tests__/proxy-management/session-selection-project.test.ts (3 tests) 3ms
+ ✓ src/__tests__/proxy-management/account-parse.test.ts (4 tests) 3ms
+ ✓ src/__tests__/proxy-management/paypal-cost-rate.test.ts (4 tests) 3ms
+ ✓ src/__tests__/proxy-management/vm-ops-rules.test.ts (6 tests) 3ms
+ ✓ src/__tests__/proxy-management/reconcile.test.ts (3 tests) 3ms
+ ✓ src/__tests__/proxy-management/dashboard-finance-links.test.ts (3 tests) 3ms
+ ✓ src/__tests__/ops-api/cli-stock-batch-hidden.test.ts (4 tests) 3ms
+ ✓ src/__tests__/proxy-management/vm-sdk-parse.test.ts (5 tests) 3ms
+ ✓ src/__tests__/proxy-management/session-selection.test.ts (4 tests) 2ms
+ ✓ src/__tests__/proxy-management/money-display.test.ts (2 tests) 2ms
+ ✓ src/__tests__/proxy-management/test-database.test.ts (4 tests) 2ms
+stderr | src/__tests__/store.test.ts > useProjectStore > sets current project
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+stderr | src/__tests__/store.test.ts > useProjectStore > switches between projects
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'bdops-project', the given storage is currently unavailable.
+
+ ✓ src/__tests__/store.test.ts (3 tests) 2ms
+ ✓ src/__tests__/proxy-management/team-cash-rehearsal-guard.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/permissions.test.ts (2 tests) 2ms
+ ✓ src/__tests__/proxy-management/business-workflow.test.ts (2 tests) 2ms
+ ✓ src/__tests__/proxy-management/vm-codes.test.ts (3 tests) 2ms
+ ✓ src/__tests__/layout/sidebar-identity.test.ts (4 tests) 2ms
+ ✓ src/__tests__/proxy-management/batch-format.test.ts (3 tests) 2ms
+ ✓ src/__tests__/proxy-management/proxy-search.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/usdt-cost-workflow.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/team-cash-workflow.test.ts (1 test) 2ms
+ ✓ src/__tests__/ops-api/stock-token-controls.test.ts (1 test) 1ms
+ ✓ src/__tests__/proxy-management/catalog.test.ts (1 test) 1ms
+ ✓ src/__tests__/proxy-management/seed-guard.test.ts (1 test) 1ms
+
+ Test Files  175 passed (175)
+      Tests  903 passed (903)
+   Start at  11:39:54
+   Duration  127.34s (transform 2.06s, setup 1.05s, import 19.19s, tests 92.14s, environment 12ms)

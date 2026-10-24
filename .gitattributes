@@ -1,0 +1,2 @@
+# Vite must see the CLI hashbang at the start of a LF-terminated line on Windows.
+scripts/ops-client.mjs text eol=lf

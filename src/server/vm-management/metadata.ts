@@ -6,6 +6,7 @@ import {recordOperation} from '../operation-history/journal';
 import {authorizeVM} from './repository';
 import {snapshotCollector} from './allocation';
 import {expandVmRange,VmCodeError} from './vm-codes';
+import {assertScopedVmIds,assertScopedServerIds,assertUnrestrictedServers} from '../permissions/server-scope';
 // A VM added on the web is a machine still to be created and prepared (owner brief 21/10/2026): only the rows created here start as
 // New VM (round 1, with a history line). Adding a server or a range never claims the real machines exist; older VMs are never touched.
 // Undoing the creation archives the VM; its status row stays with it.
@@ -17,7 +18,7 @@ function validateCodes(codes:string[]){if(!codes.length||codes.length>500||new S
 export async function createManagedServer(scope:ActorScope,input:{code:string;vmCodes:string[];ipAddress?:string},db:PrismaClient=prisma){
   validateCodes(input.vmCodes);if(!input.code.trim()||input.code.length>80)throw new ProxyDomainError('INVALID_INPUT');
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx);if(await tx.server.findFirst({where:{projectId:scope.projectId,code:input.code.trim()},select:{id:true}}))throw new ProxyDomainError('DUPLICATE_INPUT','Server '+input.code.trim()+' đã có trong dự án (kể cả đã xoá)');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertUnrestrictedServers(tx,current);if(await tx.server.findFirst({where:{projectId:scope.projectId,code:input.code.trim()},select:{id:true}}))throw new ProxyDomainError('DUPLICATE_INPUT','Server '+input.code.trim()+' đã có trong dự án (kể cả đã xoá)');
     const images=await snapshotCollector(tx,current),server=await tx.server.create({data:{projectId:scope.projectId,code:input.code.trim(),ipAddress:input.ipAddress||null,managed:true}});await images.remember('SERVER',server.id,true);
     const now=new Date();for(const code of input.vmCodes){const vm=await tx.virtualMachine.create({data:{serverId:server.id,code,managed:true,proxySlotState:'BLANK',slotSourceRef:'MANUAL'}});await images.remember('VM',vm.id,true);await startAsNewVm(tx,scope.projectId,vm.id,current.userId,now);}
     await recordOperation(tx,{scope:current,kind:'SERVER_CREATE',summary:{server:server.code,count:input.vmCodes.length},snapshot:await images.finish()});return {id:server.id};
@@ -29,7 +30,7 @@ export function parseVmRange(from:string,to:string):string[]{try{return expandVm
 // never recreated. Re-evaluated inside the transaction; the (serverId, code) unique index stops concurrent duplicates.
 export async function addManagedVMs(scope:ActorScope,serverId:string,codes:string[],db:PrismaClient=prisma){
   validateCodes(codes);return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:null}});if(!server)throw new ProxyDomainError('NOT_FOUND','Server không có hoặc đã xoá');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedServerIds(tx,current,[serverId]);const server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:null}});if(!server)throw new ProxyDomainError('NOT_FOUND','Server không có hoặc đã xoá');
     const known=await tx.virtualMachine.findMany({where:{serverId,code:{in:codes}},select:{code:true,archivedAt:true}});
     const existing=known.filter(v=>!v.archivedAt).map(v=>v.code).sort(),archived=known.filter(v=>v.archivedAt).map(v=>v.code).sort(),fresh=codes.filter(c=>!known.some(k=>k.code===c));
     if(!fresh.length) return {created:0,existing,archived,operationId:null as string|null};
@@ -44,7 +45,7 @@ export async function updateManagedVM(scope:ActorScope,vmId:string,input:{code?:
   const code=input.code?.trim();if(code!==undefined&&!/^[a-zA-Z0-9_-]{1,64}$/.test(code))throw new ProxyDomainError('INVALID_INPUT','Mã VM chỉ gồm chữ, số, - hoặc _ (tối đa 64 ký tự)');
   const notes=input.notes===undefined?undefined:(input.notes||'').trim()||null;if(notes&&notes.length>1000)throw new ProxyDomainError('INVALID_INPUT','Ghi chú tối đa 1000 ký tự');
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),vm=await tx.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId:scope.projectId,managed:true}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedVmIds(tx,current,[vmId]);const vm=await tx.virtualMachine.findFirst({where:{id:vmId,managed:true,server:{projectId:scope.projectId,managed:true}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');
     if(vm.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','VM vừa được sửa; tải lại để xem bản mới');
     const nextCode=code??vm.code,nextNotes=notes===undefined?vm.notes:notes;
     if(nextCode===vm.code&&nextNotes===vm.notes) return {saved:false};
@@ -56,7 +57,7 @@ export async function updateManagedVM(scope:ActorScope,vmId:string,input:{code?:
 }
 export async function updateManagedServer(scope:ActorScope,serverId:string,input:{code:string;ipAddress?:string;notes?:string;expectedRevision:number},db:PrismaClient=prisma){
   if(!input.code.trim()||input.code.length>80)throw new ProxyDomainError('INVALID_INPUT');return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true}});if(!server)throw new ProxyDomainError('NOT_FOUND');if(server.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedServerIds(tx,current,[serverId]);const server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true}});if(!server)throw new ProxyDomainError('NOT_FOUND');if(server.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW');
     const next={code:input.code.trim(),ipAddress:input.ipAddress===undefined?server.ipAddress:input.ipAddress.trim()||null,notes:input.notes===undefined?server.notes:input.notes.trim()||null};
     if(next.code===server.code&&next.ipAddress===server.ipAddress&&next.notes===server.notes) return {saved:false};
     if(next.code!==server.code&&await tx.server.findFirst({where:{projectId:scope.projectId,code:next.code,id:{not:server.id}},select:{id:true}}))throw new ProxyDomainError('DUPLICATE_INPUT','Server '+next.code+' đã có trong dự án (kể cả đã xoá)');
@@ -82,7 +83,7 @@ const byCode=(a:{code:string},b:{code:string})=>a.code.localeCompare(b.code,unde
 export async function archiveVMs(scope:ActorScope,vmIds:string[],db:PrismaClient=prisma){
   const ids=Array.from(new Set(vmIds));if(!ids.length||ids.length>1000)throw new ProxyDomainError('INVALID_INPUT');
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),vms=await tx.virtualMachine.findMany({where:{id:{in:ids},managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,code:true,archivedAt:true}});
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedVmIds(tx,current,ids);const vms=await tx.virtualMachine.findMany({where:{id:{in:ids},managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,code:true,archivedAt:true}});
     if(vms.length!==ids.length)throw new ProxyDomainError('NOT_FOUND','Có VM không thuộc dự án này');
     const why=await deleteBlockers(tx,ids),blocked:Blocked[]=[],images=await snapshotCollector(tx,current),now=new Date();let archived=0;
     for(const vm of vms.sort(byCode)){
@@ -96,7 +97,7 @@ export async function archiveVMs(scope:ActorScope,vmIds:string[],db:PrismaClient
 export async function restoreVMs(scope:ActorScope,vmIds:string[],db:PrismaClient=prisma){
   const ids=Array.from(new Set(vmIds));if(!ids.length||ids.length>1000)throw new ProxyDomainError('INVALID_INPUT');
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),vms=await tx.virtualMachine.findMany({where:{id:{in:ids},managed:true,server:{projectId:scope.projectId,managed:true}},include:{server:{select:{code:true,archivedAt:true}}}});
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedVmIds(tx,current,ids);const vms=await tx.virtualMachine.findMany({where:{id:{in:ids},managed:true,server:{projectId:scope.projectId,managed:true}},include:{server:{select:{code:true,archivedAt:true}}}});
     if(vms.length!==ids.length)throw new ProxyDomainError('NOT_FOUND','Có VM không thuộc dự án này');
     const blocked:Blocked[]=[],images=await snapshotCollector(tx,current);let restored=0;
     for(const vm of vms.sort(byCode)){
@@ -113,7 +114,7 @@ export async function restoreVMs(scope:ActorScope,vmIds:string[],db:PrismaClient
 // together (same instant, one journal entry) so a restore brings exactly those VMs back.
 export async function archiveServer(scope:ActorScope,serverId:string,db:PrismaClient=prisma){
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:null},include:{vms:{where:{archivedAt:null},select:{id:true,code:true}}}});if(!server)throw new ProxyDomainError('NOT_FOUND');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedServerIds(tx,current,[serverId]);const server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:null},include:{vms:{where:{archivedAt:null},select:{id:true,code:true}}}});if(!server)throw new ProxyDomainError('NOT_FOUND');
     const why=await deleteBlockers(tx,server.vms.map(v=>v.id)),blocked=server.vms.filter(v=>why.get(v.id)).sort(byCode);
     if(blocked.length)throw new ProxyDomainError('INVALID_INPUT',blocked.length+' VM còn proxy: '+blocked.slice(0,5).map(v=>v.code).join(', ')+(blocked.length>5?'…':'')+'. Xử lý các VM đó trước khi xoá server');
     const images=await snapshotCollector(tx,current),now=new Date();await images.remember('SERVER',server.id);
@@ -125,7 +126,7 @@ export async function archiveServer(scope:ActorScope,serverId:string,db:PrismaCl
 }
 export async function restoreServer(scope:ActorScope,serverId:string,db:PrismaClient=prisma){
   return withProxyTransaction(async tx=>{
-    const current=await authorizeVM(scope,'MANAGE',tx),server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:{not:null}}});if(!server)throw new ProxyDomainError('NOT_FOUND','Server không ở trạng thái đã xoá');
+    const current=await authorizeVM(scope,'MANAGE',tx);await assertScopedServerIds(tx,current,[serverId]);const server=await tx.server.findFirst({where:{id:serverId,projectId:scope.projectId,managed:true,archivedAt:{not:null}}});if(!server)throw new ProxyDomainError('NOT_FOUND','Server không ở trạng thái đã xoá');
     const vms=await tx.virtualMachine.findMany({where:{serverId,archivedAt:server.archivedAt}}),images=await snapshotCollector(tx,current),skipped:Blocked[]=[];let restoredVMs=0;
     await images.remember('SERVER',server.id);await tx.server.update({where:{id:server.id},data:{archivedAt:null,revision:{increment:1}}});
     for(const vm of vms){

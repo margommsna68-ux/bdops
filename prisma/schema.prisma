@@ -126,6 +126,8 @@ model ProjectMember {
   allowedModules     String[]        @default([])
   capabilities       String[]        @default([])
   accessRevision     Int             @default(0)
+  serverScope        String          @default("ALL")
+  allowedServerIds   String[]        @default([])
   canManageUsers     Boolean         @default(false)
   managerId          String?
   maxAutotypeDevices Int             @default(2)

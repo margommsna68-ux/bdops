@@ -4,6 +4,8 @@ import {canonicalAmount,formatSdkAmount,parseSdkAmount,SDK_NOTE_MAX} from '@/lib
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
 import {authorizeVM,type VMReader} from './repository';
+import {assertScopedSdkIds,assertScopedVmIds,serverWhere,vmWhere} from '../permissions/server-scope';
+import {authorizeSdkCodes,assertSdkPlacementScope,SDK_SCOPE_REFUSAL,sdkVisibleVmIds,sdkBindingVisible} from './sdk-scope';
 import {normalizeSdk} from './sdk-parse';
 import {assertSdkMoneyWrite,carriesMoney,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
 import {checkInfo,cycleOf,FOREIGN_CODE,infoChanges,moneyBinding,syncMirror,where,type SdkInfo} from './sdk-store';
@@ -40,7 +42,8 @@ export type ListPlan={kind:'CREATE'|'SAME'|'TAKE'|'MOVE';code:string;record:SdkR
  * What adding `code` to the list of `vm` means, without writing. Errors come back as text (a paste reports them at the line).
  * `from` = the VM the person explicitly moves the code from ("Chọn SDK đã lưu → Dùng cho VM này").
  */
-export async function planListAdd(db:VMReader,projectId:string,vm:ListVM,code:string,from?:{vmId:string;expectedRevision:number}|null):Promise<{plan:ListPlan}|{error:string;code:'OWNER_CONFLICT'|'STALE_PREVIEW'|'NOT_FOUND'}>{
+export async function planListAdd(db:VMReader,projectId:string,vm:ListVM,code:string,from?:{vmId:string;expectedRevision:number}|null,scope?:ActorScope):Promise<{plan:ListPlan}|{error:string;code:'OWNER_CONFLICT'|'STALE_PREVIEW'|'NOT_FOUND'}>{
+  if(scope)try{await assertSdkPlacementScope(db,scope,vm.id,code,from);}catch(e){if(e instanceof ProxyDomainError&&e.code==='NOT_FOUND')return {error:SDK_SCOPE_REFUSAL,code:'NOT_FOUND'};throw e;}
   const record=await db.sdkRecord.findUnique({where:{projectId_code:{projectId,code}}});
   if(!record){if(await foreign(db,projectId,code))return {error:FOREIGN_CODE,code:'OWNER_CONFLICT'};return {plan:{kind:'CREATE',code,record:null,source:null}};}
   const holder=holderOf(record);
@@ -120,10 +123,12 @@ export interface ListAddInput {key:string;vmId:string;expectedCycle:number;code:
 export async function addVmSdk(scope:ActorScope,input:ListAddInput,db:PrismaClient=prisma){
   const code=normalizeSdk(input.code);if(!code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
   const info=checkInfo({amount:input.amount,note:input.note});
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_LIST',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_LIST',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:tx=>authorizeSdkCodes(tx,scope,[code])},async(tx,images,current)=>{
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedVmIds(tx,current,[input.vmId,...(input.from?[input.from.vmId]:[])]);
+    if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
-    const planned=await planListAdd(tx,scope.projectId,vm,code,input.from??null);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
+    const planned=await planListAdd(tx,scope.projectId,vm,code,input.from??null,current);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
     if(planned.plan.kind==='SAME'&&!hasChanges(planned.plan,info))return {changed:false,message:'Đã có trong danh sách của VM; giữ nguyên'};
     const stale=staleRecord(planned.plan,input.expectedSdkRevision);if(stale)throw new ProxyDomainError('STALE_PREVIEW',stale);
     const r=await applyListAdd(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:input.from?'Chuyển SDK':'Ô SDK'},vm,planned.plan,info);
@@ -133,7 +138,9 @@ export async function addVmSdk(scope:ActorScope,input:ListAddInput,db:PrismaClie
 /** Tick "Đã dùng" on a code of this VM's list: final, with who / when / round; no account is invented. */
 export async function markVmSdkUsed(scope:ActorScope,input:{key:string;vmId:string;expectedCycle:number;sdkId:string;expectedRevision:number},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_USED',module:'INFRASTRUCTURE',reversible:false,skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedVmIds(tx,current,[input.vmId]);
+    await assertScopedSdkIds(tx,current,[input.sdkId]);
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     const rec=await tx.sdkRecord.findFirst({where:{id:input.sdkId,projectId:scope.projectId}});if(!rec)throw new ProxyDomainError('NOT_FOUND','SDK không còn trong dự án');
     if(holderOf(rec)!==vm.id)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' không còn trong danh sách của '+where(vm)+'; tải lại');
@@ -149,7 +156,9 @@ export async function markVmSdkUsed(scope:ActorScope,input:{key:string;vmId:stri
 /** Take an unused code out of this VM's list (back to the store, money / note kept). A used code stays for lookup. */
 export async function removeVmSdk(scope:ActorScope,input:{key:string;vmId:string;expectedCycle:number;sdkId:string;expectedRevision:number},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_LIST',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedVmIds(tx,current,[input.vmId]);
+    await assertScopedSdkIds(tx,current,[input.sdkId]);
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     const rec=await tx.sdkRecord.findFirst({where:{id:input.sdkId,projectId:scope.projectId}});if(!rec)throw new ProxyDomainError('NOT_FOUND','SDK không còn trong dự án');
     if(holderOf(rec)!==vm.id)return {changed:false,message:'SDK '+rec.code+' không còn ở VM này'};
@@ -213,13 +222,13 @@ function infoText(ch:ReturnType<typeof infoChanges>){
   return parts.join(' · ')||null;
 }
 export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;text:string;serverId?:string|null;startVmId?:string|null},db:PrismaClient=prisma):Promise<PastePreview>{
-  await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa '+MAX+' dòng mỗi đợt');
-  const server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true}}):null;
+  scope=await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa '+MAX+' dòng mỗi đợt');
+  const server=input.serverId?await db.server.findFirst({where:{AND:[{id:input.serverId},serverWhere(scope)],projectId:scope.projectId,managed:true}}):null;
   if(input.serverId&&!server)throw new ProxyDomainError('NOT_FOUND','Server không thuộc dự án này');
   if(input.mode==='RANGE'&&(!server||!input.startVmId))throw new ProxyDomainError('INVALID_INPUT','Chọn server và VM bắt đầu');
-  const serverRows=await db.server.findMany({where:{projectId:scope.projectId,managed:true},select:{code:true}});
+  const serverRows=await db.server.findMany({where:{projectId:scope.projectId,managed:true,...serverWhere(scope)},select:{code:true}});
   const lines=parseSdkPaste(input.mode,input.text,server?.code??null,serverRows.map(x=>x.code));if(!lines.length||lines.length>MAX)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến '+MAX+' dòng mỗi đợt');
-  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:vmSelect}),money=await sdkMoneyRights(scope,db);
+  const vms=await db.virtualMachine.findMany({where:{managed:true,...vmWhere(scope),server:{projectId:scope.projectId,managed:true}},select:vmSelect}),money=await sdkMoneyRights(scope,db);
   const key=(s:string,v:string)=>s.toLowerCase()+'\u0000'+v.toLowerCase(),byKey=new Map<string,ListVM>();
   for(const v of vms){const k=key(v.server.code,v.code),old=byKey.get(k);if(!old||old.archivedAt&&!v.archivedAt)byKey.set(k,v);} // an active VM wins over a deleted one with the same code
   let range:PastePreview['range']=null,start:ReturnType<typeof rangeStart>=null;
@@ -241,8 +250,10 @@ export async function previewSdkPaste(scope:ActorScope,input:{mode:PasteMode;tex
     if(t.vm.archivedAt||t.vm.server.archivedAt){rows.push({...base,message:label(t.vm)+' đã xoá; không ghi'});continue;}
     const found={...base,vm:t.vm.code,server:t.vm.server.code,vmId:t.vm.id,expectedCycle:cycleOf(t.vm)};
     const twice=codeLines.get(t.l.code)!;if(twice.length>1){rows.push({...found,message:'Cùng SDK với dòng '+twice.filter(n=>n!==t.l.line).join(', ')+'; một mã chỉ ghi một lần'});continue;}
-    const planned=await planListAdd(db,scope.projectId,t.vm,t.l.code,null);if('error' in planned){rows.push({...found,message:planned.error});continue;}
-    const {plan}=planned,ch=infoChanges(plan.record,{amount:t.l.amount,note:t.l.note}),info=infoText(ch),values={amount:t.l.amount,note:t.l.note};
+    const planned=await planListAdd(db,scope.projectId,t.vm,t.l.code,null,scope);if('error' in planned){rows.push({...found,message:planned.error});continue;}
+    const {plan}=planned,visible=await sdkVisibleVmIds(db,scope,[plan.record?.amountVmId??null]);
+    const previewRecord=plan.record&&!sdkBindingVisible(visible,plan.record.amountVmId)?{...plan.record,amount:null}:plan.record;
+    const ch=infoChanges(previewRecord,{amount:t.l.amount,note:t.l.note}),info=infoText(ch),values={amount:t.l.amount,note:t.l.note};
     if(plan.kind==='SAME'){if(!ch.amount&&!ch.note){rows.push({...found,outcome:'SAME',message:'Đã có trong danh sách của VM; giữ nguyên'});continue;}
       rows.push({...found,...values,outcome:'UPDATE',info,expectedSdkRevision:plan.record!.revision,message:'Cập nhật tiền / ghi chú'});continue;}
     rows.push({...found,...values,outcome:plan.kind==='CREATE'?'NEW':'TAKE',info,expectedSdkRevision:plan.record?.revision??null,message:plan.kind==='CREATE'?'Thêm SDK mới':'Lấy SDK trong kho (chưa dùng)'});
@@ -253,8 +264,10 @@ export interface PasteApplyItem {line:number;vmId:string;expectedCycle:number;co
 export async function applySdkPaste(scope:ActorScope,input:{key:string;items:PasteApplyItem[]},db:PrismaClient=prisma){
   if(!input.items.length||input.items.length>MAX||new Set(input.items.map(i=>i.code)).size!==input.items.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi mã SDK một dòng, tối đa '+MAX+' dòng');
   for(const i of input.items){if(normalizeSdk(i.code)!==i.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+i.line);if(!Number.isInteger(i.expectedCycle)||i.expectedCycle<1)throw new ProxyDomainError('INVALID_INPUT','Thiếu lượt VM ở dòng '+i.line+'; kiểm tra lại bản dán');checkInfo(i);}
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_PASTE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney(input.items))await assertSdkMoneyWrite(current,tx);
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_SDK_PASTE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:tx=>authorizeSdkCodes(tx,scope,input.items.map(i=>i.code))},async(tx,images,current)=>{
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedVmIds(tx,current,input.items.map(i=>i.vmId));
+    if(carriesMoney(input.items))await assertSdkMoneyWrite(current,tx);
     const now=new Date(),ctx:Ctx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Dán bảng'};
     const rows:{line:number;vmId:string;code:string;outcome:'APPLIED'|'SAME'|'ERROR';message:string}[]=[];
     for(const item of [...input.items].sort((a,b)=>a.line-b.line)){
@@ -263,7 +276,7 @@ export async function applySdkPaste(scope:ActorScope,input:{key:string;items:Pas
       if(!vm||vm.archivedAt||vm.server.archivedAt){row('ERROR','VM không còn hoạt động (đã xoá hoặc không thuộc dự án)');continue;}
       // The line was checked for one round of this VM; after a recreation it is an old request: never moved to the new round.
       if(cycleOf(vm)!==item.expectedCycle){row('ERROR',RECREATED_LINE);continue;}
-      const planned=await planListAdd(tx,scope.projectId,vm,item.code,null);if('error' in planned){row('ERROR',planned.error);continue;}
+      const planned=await planListAdd(tx,scope.projectId,vm,item.code,null,current);if('error' in planned){row('ERROR',planned.error);continue;}
       const {plan}=planned,info=checkInfo(item);
       // The code is already in this VM's list with the same values (or blank fields): nothing to write, whoever saved it.
       if(plan.kind==='SAME'&&!hasChanges(plan,info)){row('SAME','Đã có trong danh sách của VM; giữ nguyên');continue;}
@@ -279,16 +292,20 @@ const ORDER={UNLINKED:0,UNCONFIRMED:1,LINKED:2} as const;
 /** amount / amountObservedAt / amountFailedAt = readings checked on THIS VM in its current round (null elsewhere); `stored` = the code's
  *  own latest figure wherever it was read (history for the frame; never the row figure). */
 export type VmSdkItem={recordId:string;code:string;revision:number;amount:string|null;amountObservedAt:string|null;amountFailedAt:string|null;amountSource:string|null;moneyHidden:boolean;stored:{amount:string|null;observedAt:string|null;cycle:number|null;vmId:string|null}|null;note:string|null;state:'UNLINKED'|'LINKED'|'UNCONFIRMED';current:boolean;usedAt:string|null;usedBy:string|null;heldAt:string|null};
-/** `money` = the caller may read SDK money (sdk-money-rights.ts); without it amount / observedAt / source are null and `moneyHidden`. */
-export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[],money=true){
-  const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
+/** `money` = the caller may read SDK money (sdk-money-rights.ts); without it amount / observedAt / source are null and `moneyHidden`.
+ * Pass the actor as the fifth argument on authenticated reads; it is refreshed before resolving historical money/link bindings.
+ * Omission keeps the legacy internal ALL-server contract. */
+export async function vmSdkLists(db:VMReader,projectId:string,vmIds:string[],money=true,scope?:ActorScope){
+  if(scope){scope=await authorizeVM(scope,'READ',db);await assertScopedVmIds(db,scope,vmIds);}
+  const rows=await db.sdkRecord.findMany({where:{projectId,OR:[{holderVmId:{in:vmIds}},{holderVmId:null,vmId:{in:vmIds}}]},orderBy:[{heldAt:'asc'},{code:'asc'}]});
+  const visible=scope?await sdkVisibleVmIds(db,scope,rows.flatMap(r=>[r.amountVmId,r.linkedVmId])):null;
   const cycles=new Map((await db.vmOperation.findMany({where:{vmId:{in:vmIds}},select:{vmId:true,cycle:true}})).map(o=>[o.vmId,o.cycle]));
   const ids=Array.from(new Set(rows.map(r=>r.linkedById).filter((s):s is string=>!!s))),users=ids.length?await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}}):[];
   const out=new Map<string,VmSdkItem[]>();
   for(const r of rows){const vmId=holderOf(r)!;const list=out.get(vmId)||[];const u=users.find(x=>x.id===r.linkedById),cycle=cycles.get(vmId)??1;
     const bound=r.amountVmId===vmId&&r.amountCycle===cycle,boundFailed=r.amountFailedVmId===vmId&&r.amountFailedCycle===cycle;
     list.push({recordId:r.id,code:r.code,revision:r.revision,amount:money&&bound?canonicalAmount(r.amount?.toString()??null):null,amountObservedAt:money&&bound?r.amountObservedAt?.toISOString()??null:null,amountFailedAt:money&&boundFailed?r.amountFailedAt?.toISOString()??null:null,amountSource:money&&bound?r.amountSource:null,moneyHidden:!money,
-      stored:money?{amount:canonicalAmount(r.amount?.toString()??null),observedAt:r.amountObservedAt?.toISOString()??null,cycle:r.amountCycle,vmId:r.amountVmId}:null,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
+      stored:money&&sdkBindingVisible(visible,r.amountVmId)?{amount:canonicalAmount(r.amount?.toString()??null),observedAt:r.amountObservedAt?.toISOString()??null,cycle:r.amountCycle,vmId:r.amountVmId}:null,note:r.note,state:r.linkState,current:r.vmId===vmId,usedAt:r.linkState==='LINKED'&&sdkBindingVisible(visible,r.linkedVmId)?r.linkedAt?.toISOString()??null:null,usedBy:r.linkState==='LINKED'&&sdkBindingVisible(visible,r.linkedVmId)&&r.linkedById?(u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ'):null,heldAt:r.heldAt?.toISOString()??null});out.set(vmId,list);}
   for(const list of out.values())list.sort((a,b)=>ORDER[a.state]-ORDER[b.state]);
   return out;
 }

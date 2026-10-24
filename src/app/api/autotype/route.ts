@@ -3,6 +3,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt } from "@/lib/encryption";
+import {updateUnrestrictedAutotypePassword} from '@/server/permissions/autotype-server-scope';
+import {ProxyDomainError} from '@/server/proxy-management/types';
 
 // --- Rate limiter (in-memory) ---
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -68,7 +70,9 @@ async function verifyActiveToken(token: string) {
   if (!data) return null;
   const u = await prisma.user.findUnique({ where: { id: data.userId }, select: { disabledAt: true, authEpoch: true } });
   if (!u || u.disabledAt || (data.epoch ?? 0) !== u.authEpoch) return null;
-  return data;
+  const members=await prisma.projectMember.findMany({where:{userId:data.userId,projectId:{in:data.projectIds},serverScope:'ALL',OR:[{role:'ADMIN'},{allowedModules:{has:'AUTOTYPE'}}]},select:{projectId:true}});
+  const allowed=new Set(members.map(m=>m.projectId)),projectIds=data.projectIds.filter(id=>allowed.has(id));
+  return projectIds.length?{...data,projectIds}:null;
 }
 
 // --- Helpers ---
@@ -166,7 +170,7 @@ export async function POST(request: Request) {
 
       // Get project memberships — only projects where user has AUTOTYPE access (or ADMIN)
       const memberships = await prisma.projectMember.findMany({
-        where: { userId: user.id },
+        where: { userId: user.id, serverScope:'ALL' },
         include: { project: { select: { id: true, name: true, code: true } } },
       });
 
@@ -292,7 +296,7 @@ export async function POST(request: Request) {
 
       // Verify user still has AUTOTYPE access in at least one project
       const credMemberships = await prisma.projectMember.findMany({
-        where: { userId: tokenData.userId, projectId: { in: searchProjectIds } },
+        where: { userId: tokenData.userId, projectId: { in: searchProjectIds },serverScope:'ALL' },
       });
       const allowedProjectIds = credMemberships
         .filter((m) => m.role === "ADMIN" || ((m.allowedModules || []) as string[]).includes("AUTOTYPE"))
@@ -520,19 +524,7 @@ export async function POST(request: Request) {
       const firstEmail = paypal.emails[0];
       const emailRecord = primaryEmail || firstEmail;
 
-      // Always update PayPalAccount (legacy field) so main listing page sees it
-      await prisma.payPalAccount.update({
-        where: { id: paypal.id },
-        data: { password: encryptedPassword },
-      });
-
-      // Also update PayPalEmail if exists (detail page reads from here)
-      if (emailRecord) {
-        await prisma.payPalEmail.update({
-          where: { id: emailRecord.id },
-          data: { password: encryptedPassword },
-        });
-      }
+      await updateUnrestrictedAutotypePassword(prisma,{userId:tokenData.userId,projectId:paypal.projectId,paypalId:paypal.id,emailId:emailRecord?.id??null,encryptedPassword,authEpoch:tokenData.epoch??0});
 
       return NextResponse.json({
         success: true,
@@ -563,6 +555,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   } catch (error) {
+    if(error instanceof ProxyDomainError)return NextResponse.json({error:error.code==='FORBIDDEN'?'Quyền truy cập đã thay đổi':'Không tìm thấy dữ liệu'},{status:error.code==='FORBIDDEN'?403:404});
     console.error("[autotype] Error:", error);
     return NextResponse.json(
       { error: "Internal server error" },

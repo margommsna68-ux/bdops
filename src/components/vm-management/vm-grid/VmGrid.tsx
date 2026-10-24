@@ -14,7 +14,7 @@ import {SdkCell,type SdkDraft} from './SdkCell';
 import {OpsStatusCell,PayoutCell,type OpsRow,type OpsRights} from './OpsCells';
 import type {VmOpsStatus} from '@/lib/vm-ops';
 import {FIXED,editableFields,nextCell,resizeColumn,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
-export interface GridRights {manage:boolean;assign:boolean;sdkMoneyRead?:boolean;sdkMoneyWrite?:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean;replace?:boolean;block?:boolean}
+export interface GridRights {manage:boolean;assign:boolean;accountAssign?:boolean;sdkMoneyRead?:boolean;sdkMoneyWrite?:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean;replace?:boolean;block?:boolean}
 export type CopyWhich='DESIRED'|'INSTALLED';
 type Draft=Record<string,string>;
 const draftKey=(vmId:string,field:EditField)=>vmId+'|'+field;
@@ -88,7 +88,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
 
     if(key==='proxy') return <ProxyCell projectId={props.projectId} vm={v} rights={{assign:rights.assign&&!deletedView,copy:rights.copy,replace:!!rights.replace&&!deletedView,block:!!rights.block&&!deletedView}} onCopy={x=>props.onCopy(x,x.desired?'DESIRED':'INSTALLED')} onBusy={markBusy}/>;
     if(key==='sdk') return <SdkCell projectId={props.projectId} vm={v} account={props.accountOf(v.id)} canEdit={rights.assign&&!deletedView} money={{read:!!rights.sdkMoneyRead,write:!!rights.sdkMoneyWrite&&!deletedView}} draft={sdkDraft(v.id)} onDraft={d=>d?drafts.set(v.id,'sdk',JSON.stringify(d)):drafts.drop(v.id,'sdk')} onBusy={markBusy}/>;
-    if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={rights.assign&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
+    if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={(rights.accountAssign??rights.assign)&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
     if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version'){const c=v.desired||v.installed;return c?<span className="text-xs">#{c.version}</span>:<span className="pm-muted">—</span>;}

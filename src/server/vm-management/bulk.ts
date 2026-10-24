@@ -1,7 +1,9 @@
 import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
+import {hasServerScope,assertScopedServerIds,assertScopedVmIds,assertScopedSdkCodes,assertUnrestrictedServers} from '../permissions/server-scope';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand} from '../business-management/idempotency';
+import {authorizeSdkCodes} from './sdk-scope';
 import {decodeEndpoint} from '../proxy-management/repository';
 import {fullProxy,parseProxy} from '../proxy-management/parse';
 import {syncAssignmentState} from '../proxy-management/assignment-state';
@@ -93,13 +95,14 @@ function infoText(ch:ReturnType<typeof infoChanges>){
 export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;serverId?:string;text?:string;items?:{vmId:string;value:string}[]},db:PrismaClient=prisma):Promise<BulkPreview>{
   const kind=input.kind;if(!RIGHT[kind]||(input.text===undefined)===(input.items===undefined)) throw new ProxyDomainError('INVALID_INPUT');
   refuseGmail(kind);
-  await authorizeVM(scope,RIGHT[kind],db);const money=kind==='SDK'?await sdkMoneyRights(scope,db):{read:true,write:true};
-  const vms=await activeVMs(scope.projectId,db),server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true,archivedAt:null}}):null;
+  const current=await authorizeVM(scope,RIGHT[kind],db);if(hasServerScope(current)&&kind!=='SDK'&&kind!=='NOTE')await assertUnrestrictedServers(db,current);if(input.serverId)await assertScopedServerIds(db,current,[input.serverId]);if(input.items)await assertScopedVmIds(db,current,input.items.map(i=>i.vmId));const money=kind==='SDK'?await sdkMoneyRights(scope,db):{read:true,write:true};
+  const vms=(await activeVMs(scope.projectId,db)).filter(v=>!hasServerScope(current)||current.serverIds!.includes(v.serverId)),server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true,archivedAt:null}}):null;
   if(input.serverId&&!server) throw new ProxyDomainError('NOT_FOUND','Server không thuộc dự án này hoặc đã xoá');
   const byId=new Map(vms.map(v=>[v.id,v])),byKey=new Map(vms.map(v=>[v.server.code.toLowerCase()+'\u0000'+v.code.toLowerCase(),v])),servers=new Set(vms.map(v=>v.server.code.toLowerCase()));if(server) servers.add(server.code.toLowerCase());
   let lines:Line[];
   if(input.items){if(!input.items.length||input.items.length>MAX_ROWS) throw new ProxyDomainError('INVALID_INPUT','Từ 1 đến 1000 VM mỗi đợt');lines=input.items.map((i,n)=>{const vm=byId.get(i.vmId);return {line:n+1,server:vm?.server.code??null,vm:vm?.code??i.vmId,value:i.value,extra:false};});}
   else{if((input.text||'').length>200000) throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');lines=parseBulkLines(kind,input.text||'',server?.code||null);if(!lines.length||lines.length>MAX_ROWS) throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng mỗi đợt');}
+  if(kind==='SDK')await assertScopedSdkCodes(db,current,lines.map(l=>l.value).filter(v=>!!v&&v!==CLEAR_TOKEN),{allowNew:true});
   const [gmailRows,endpoints]=await Promise.all([kind==='GMAIL'?db.gmailAccount.findMany({where:{projectId:scope.projectId,archivedAt:null},select:{id:true,email:true}}):Promise.resolve([]),kind==='PROXY'?proxyEndpoints(scope.projectId,db):Promise.resolve([] as EndpointRow[])]);
   const gmails=new Map(gmailRows.map(g=>[g.id,g.email])),gmailByEmail=new Map(gmailRows.map(g=>[g.email.toLowerCase(),g]));
   if(kind==='GMAIL'){const bound=Array.from(new Set(vms.map(v=>v.gmailId).filter((s):s is string=>!!s&&!gmails.has(s))));if(bound.length) for(const g of await db.gmailAccount.findMany({where:{id:{in:bound}},select:{id:true,email:true}})) gmails.set(g.id,g.email+' (đã lưu trữ)');}
@@ -152,14 +155,14 @@ export async function previewVmBulk(scope:ActorScope,input:{kind:BulkKind;server
   return {kind,rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
 export async function applyVmBulk(scope:ActorScope,input:{kind:BulkKind;key:string;items:{line:number;vmId:string;expectedRevision:number;expectedCycle?:number|null;expectedSdkRevision?:number|null;value:string|null;amount?:string|null;note?:string|null}[]},db:PrismaClient=prisma){
-  refuseGmail(input.kind);
+  refuseGmail(input.kind);if(input.kind!=='SDK'&&input.kind!=='NOTE')await assertUnrestrictedServers(db,scope);
   const kind=input.kind;if(!RIGHT[kind]||!input.items.length||input.items.length>MAX_ROWS||new Set(input.items.map(i=>i.vmId)).size!==input.items.length) throw new ProxyDomainError('INVALID_INPUT','Mỗi VM một dòng, tối đa 1000 VM mỗi đợt');
   for(const i of input.items){
     if(kind==='SDK'&&i.value!==null&&normalizeSdk(i.value)!==i.value) throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ');
     if(kind==='NOTE'&&i.value!==null&&(!i.value.trim()||i.value.length>NOTE_MAX)) throw new ProxyDomainError('INVALID_INPUT','Ghi chú tối đa '+NOTE_MAX+' ký tự');
     if(kind==='PROXY'&&!i.value) throw new ProxyDomainError('INVALID_INPUT');
   }
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_BULK_'+kind,module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'VM_BULK_'+kind,module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:async tx=>{if(kind==='SDK')return authorizeSdkCodes(tx,scope,input.items.map(i=>i.value).filter((v):v is string=>!!v));const current=await authorizeVM(scope,RIGHT[kind],tx);if(kind!=='NOTE')await assertUnrestrictedServers(tx,current);return current;}},async(tx,images,current)=>{
     await authorizeVM(current,RIGHT[kind],tx);
     const rows:BulkApplyRow[]=[],now=new Date(),usedSdk=new Map<string,string>(),usedProxy=new Set<string>();
     for(const item of [...input.items].sort((a,b)=>a.line-b.line)){

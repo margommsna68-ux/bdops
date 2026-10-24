@@ -31,7 +31,7 @@ describe('Tiền VM cell (owner brief 22/10/2026): the current SDK code money at
   const withSdks=(sdks:unknown[])=>({...(vm as object),sdks}) as never;
   it('no EarnApp account and no SDK: "Chưa kiểm tra" (never $0, never "Chưa gán tài khoản"); the button still opens the Tiền VM frame',async()=>{
     await render(<PayoutCell projectId="p" vm={withSdks([])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    const b=container.querySelector('button[aria-label="Tiền VM Sv-synthetic / VM_001"]') as HTMLButtonElement;
+    const b=container.querySelector('button[aria-label="Tiền trong VM Sv-synthetic / VM_001"]') as HTMLButtonElement;
     expect(b).toBeTruthy();expect(b.getAttribute('aria-haspopup')).toBe('dialog');expect(b.textContent).toContain('Chưa kiểm tra');
     expect(container.textContent).not.toMatch(/\$|Chưa gán tài khoản/);
   });

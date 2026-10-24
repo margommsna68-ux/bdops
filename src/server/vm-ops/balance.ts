@@ -1,5 +1,6 @@
 import type {Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
+import {vmWhere,serverWhere,assertScopedVmIds,assertScopedServerIds} from '../permissions/server-scope';
 import {ProxyDomainError,type ActorScope,type DomainReason} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {runBusinessCommand} from '../business-management/idempotency';
@@ -84,6 +85,7 @@ export async function currentBalances(db:PrismaClient,projectId:string,vms:{id:s
   return out;
 }
 export async function readBalanceHistory(scope:ActorScope,input:{vmId:string},db:PrismaClient=prisma){
+  await assertScopedVmIds(db,scope,[input.vmId]);
   await authorizeVM(scope,'READ',db);const r=await balanceRights(scope,db);
   const vm=await db.virtualMachine.findFirst({where:{id:input.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true}});if(!vm)throw new ProxyDomainError('NOT_FOUND');
   const [rows,users]=await Promise.all([db.earnBalanceCheck.findMany({where:{projectId:scope.projectId,vmId:vm.id},orderBy:[{checkedAt:'desc'}],take:100}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
@@ -94,11 +96,12 @@ export async function readBalanceHistory(scope:ActorScope,input:{vmId:string},db
 // current round and EarnApp are taken at the check and sent with each line (the save refuses a line if they changed). An empty amount
 // keeps the stored figure (nothing written); 0 is a value. A paste never says "có thể rút".
 export async function previewBalancePaste(scope:ActorScope,input:{text:string;serverId?:string|null},db:PrismaClient=prisma){
+  const current=await authorizeVM(scope,'READ',db);if(input.serverId)await assertScopedServerIds(db,current,[input.serverId]);
   const r=await balanceRights(scope,db);if(!r.write)throw new ProxyDomainError('FORBIDDEN','Ghi số dư EarnApp cần quyền ghi Server / VM (quản lý) hoặc quyền "Ghi kiểm tra tiền EarnApp"');
   if(input.text.length>200000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng');
   const server=input.serverId?await db.server.findFirst({where:{id:input.serverId,projectId:scope.projectId,managed:true}}):null;if(input.serverId&&!server)throw new ProxyDomainError('NOT_FOUND','Server không thuộc dự án');
-  const servers=await db.server.findMany({where:{projectId:scope.projectId,managed:true},select:{code:true}}),codes=new Set(servers.map(s=>s.code.toLowerCase()));
-  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}},operation:{select:{cycle:true}},earnApp:{select:{id:true,closedAt:true,login:{select:{email:true}}}}}});
+  const servers=await db.server.findMany({where:{projectId:scope.projectId,managed:true,...serverWhere(current)},select:{code:true}}),codes=new Set(servers.map(s=>s.code.toLowerCase()));
+  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true},...vmWhere(current)},select:{id:true,code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}},operation:{select:{cycle:true}},earnApp:{select:{id:true,closedAt:true,login:{select:{email:true}}}}}});
   const byKey=new Map(vms.map(v=>[v.server.code.toLowerCase()+'\u0000'+v.code.toLowerCase(),v]));
   const lines=input.text.replace(/\r/g,'').split('\n').map((raw,i)=>({raw,line:i+1})).filter(l=>l.raw.trim());
   if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng');

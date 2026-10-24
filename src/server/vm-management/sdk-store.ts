@@ -3,7 +3,10 @@ import {prisma} from '@/lib/prisma';
 import {canonicalAmount,parseSdkAmount,SDK_NOTE_MAX} from '@/lib/sdk-money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
+import {authorizeBusiness} from '../business-management/scope';
 import {authorizeVM,type VMReader} from './repository';
+import {assertScopedSdkIds,assertScopedVmIds,assertUnrestrictedServers,sdkWhere} from '../permissions/server-scope';
+import {authorizeSdkCodes,assertSdkPlacementScope,SDK_SCOPE_REFUSAL,sdkVisibleVmIds,sdkBindingVisible,denyScopedSdkHistory} from './sdk-scope';
 import {assertSdkMoneyWrite,carriesMoney,maskSdkEventDetail,sdkMoneyRights,SDK_MONEY_WRITE_REFUSAL} from './sdk-money-rights';
 import {normalizeSdk} from './sdk-parse';
 // SDK store (owner brief 19/10/2026). One rule for every path that writes an SDK: the SDK cell, Kho SDK, Dán bảng, the older
@@ -59,7 +62,8 @@ export type PlacementPlan={kind:'SAME'|'NONE'|'CREATE'|'PLACE'|'MOVE'|'REMOVE';c
  * Decide what putting `code` (null = remove) on `vm` means, without writing. A refusal is returned as text so a paste can report it at
  * its line; the single-VM commands throw it. `from` names the VM a moved code comes from (explicit transfer only).
  */
-export async function planPlacement(db:VMReader,projectId:string,vm:SdkVM,code:string|null,from?:{vmId:string;expectedRevision:number}|null):Promise<{plan:PlacementPlan}|{error:string;code:'OWNER_CONFLICT'|'STALE_PREVIEW'|'INVALID_INPUT'|'NOT_FOUND'}>{
+export async function planPlacement(db:VMReader,projectId:string,vm:SdkVM,code:string|null,from?:{vmId:string;expectedRevision:number}|null,scope?:ActorScope):Promise<{plan:PlacementPlan}|{error:string;code:'OWNER_CONFLICT'|'STALE_PREVIEW'|'INVALID_INPUT'|'NOT_FOUND'}>{
+  if(scope)try{await assertSdkPlacementScope(db,scope,vm.id,code,from);const current=await db.sdkRecord.findUnique({where:{vmId:vm.id},select:{id:true}});if(current)await assertScopedSdkIds(db,scope,[current.id]);}catch(e){if(e instanceof ProxyDomainError&&e.code==='NOT_FOUND')return {error:SDK_SCOPE_REFUSAL,code:'NOT_FOUND'};throw e;}
   if(vm.archivedAt||vm.server.archivedAt)return {error:where(vm)+' đã xoá; khôi phục VM trước khi ghi SDK',code:'INVALID_INPUT'};
   const current=await db.sdkRecord.findUnique({where:{vmId:vm.id}});
   if(code===null)return {plan:{kind:current?'REMOVE':'NONE',code:null,current,target:null,source:null}};
@@ -156,8 +160,9 @@ export interface SdkSaveInput {key:string;vmId:string;expectedVmRevision:number;
 export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaClient=prisma){
   const code=input.code===null?null:normalizeSdk(input.code);if(input.code!==null&&!code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ (8–128 ký tự chữ/số/._:-)');
   const info=checkInfo({amount:input.amount,note:input.note});
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_RECORD',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:input.from?'SDK_MOVE':'VM_SDK_RECORD',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:tx=>authorizeSdkCodes(tx,scope,code===null?[]:[code])},async(tx,images,current)=>{
+    current=await authorizeVM(current,'ASSIGN',tx);
+    if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     return placeVmSdk(tx,images,current,{...input,code},info);
   },db);
 }
@@ -167,11 +172,13 @@ export async function saveVmSdk(scope:ActorScope,input:SdkSaveInput,db:PrismaCli
  * together with its own checks and its own idempotency record. The caller has authorized ASSIGN; `input.code` is normalized.
  */
 export async function placeVmSdk(tx:Tx,images:BusinessCollector,current:ActorScope,input:Omit<SdkSaveInput,'key'>&{code:string|null},info:SdkInfo){
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertSdkPlacementScope(tx,current,input.vmId,input.code,input.from);
     const scope=current,code=input.code;
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);
     if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     if(vm.revision!==input.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW',where(vm)+' vừa được thay đổi; tải lại để kiểm tra (nội dung đang nhập được giữ)');
-    const planned=await planPlacement(tx,scope.projectId,vm,code,input.from??null);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
+    const planned=await planPlacement(tx,scope.projectId,vm,code,input.from??null,current);if('error' in planned)throw new ProxyDomainError(planned.code,planned.error);
     const {plan}=planned;
     const stale=staleSdk(plan,input.expectedSdkRevision);if(stale)throw new ProxyDomainError('STALE_PREVIEW',stale);
     const r=await applyPlacement(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:input.from?'Chuyển SDK':'Ô SDK'},vm,plan,info);
@@ -181,13 +188,16 @@ export async function placeVmSdk(tx:Tx,images:BusinessCollector,current:ActorSco
 /** "Đã nối EarnApp": the current SDK of the VM was linked to the current EarnApp account of the VM, in the current round. */
 export async function linkVmSdk(scope:ActorScope,input:{key:string;vmId:string;sdkId:string;expectedSdkRevision:number;earnAppId:string;expectedCycle:number},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_LINK',module:'INFRASTRUCTURE',reversible:false,skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedSdkIds(tx,current,[input.sdkId]);
     return linkVmSdkIn(tx,images,current,input);
   },db);
 }
 /** The body of linkVmSdk for a caller that already runs inside its own command / transaction (AI "used" command, 23/10/2026): same
- *  checks and writes, no second command. `current` is the authorised scope of that command (rights are the caller's business). */
+ *  checks and writes, no second command. Membership and resource scope are reloaded here too. */
 export async function linkVmSdkIn(tx:Tx,images:BusinessCollector,current:ActorScope,input:{vmId:string;sdkId:string;expectedSdkRevision:number;earnAppId:string;expectedCycle:number}){
+  current=await authorizeVM(current,'ASSIGN',tx);
+  await assertScopedVmIds(tx,current,[input.vmId]);await assertScopedSdkIds(tx,current,[input.sdkId]);
   const scope=current;
   {
     const vm=await loadVM(tx,scope.projectId,input.vmId),cycle=cycleOf(vm);
@@ -209,7 +219,8 @@ export async function linkVmSdkIn(tx:Tx,images:BusinessCollector,current:ActorSc
 /** Old data ("Chưa xác nhận"): a person states whether the code was ever linked. Linked is final (undo never takes it back). */
 export async function confirmLegacySdk(scope:ActorScope,input:{key:string;sdkId:string;expectedRevision:number;decision:'UNLINKED'|'LINKED'},db:PrismaClient=prisma){
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_CONFIRM',module:'INFRASTRUCTURE',reversible:input.decision==='UNLINKED',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedSdkIds(tx,current,[input.sdkId]);
     const sdk=await tx.sdkRecord.findFirst({where:{id:input.sdkId,projectId:scope.projectId}});if(!sdk)throw new ProxyDomainError('NOT_FOUND');
     if(sdk.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','SDK '+sdk.code+' vừa thay đổi; tải lại');
     if(sdk.linkState!=='UNCONFIRMED')return {changed:false,message:'SDK '+sdk.code+' đã được xác nhận trước đó'};
@@ -252,7 +263,8 @@ export function parseStoreLines(text:string):StoreLine[]{
 }
 export interface StoreRow {line:number;code:string;outcome:'NEW'|'UPDATE'|'SAME'|'ERROR';message:string;sdkId:string|null;expectedRevision:number|null;amount:string|null|undefined;note:string|null|undefined;before:{amount:string|null;note:string|null}|null;/** the stored amount is not sent without the money read right (before.amount is then null, never 0) */moneyHidden:boolean;location:string|null;state:string|null}
 export async function previewSdkStore(scope:ActorScope,input:{text:string},db:PrismaClient=prisma){
-  await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
+  await assertUnrestrictedServers(db,scope);
+  scope=await authorizeVM(scope,'ASSIGN',db);if(input.text.length>300000)throw new ProxyDomainError('INVALID_INPUT','Dán tối đa 1000 dòng mỗi đợt');
   const lines=parseStoreLines(input.text);if(!lines.length||lines.length>1000)throw new ProxyDomainError('INVALID_INPUT','Dán từ 1 đến 1000 dòng mỗi đợt');
   const money=await sdkMoneyRights(scope,db);
   const codes=Array.from(new Set(lines.map(l=>l.code))),records=(await db.sdkRecord.findMany({where:{projectId:scope.projectId,code:{in:codes}},include:{vm:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}},holder:{select:{code:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}}}})).map(r=>({...r,vm:r.holder||r.vm}));
@@ -273,8 +285,9 @@ export async function previewSdkStore(scope:ActorScope,input:{text:string},db:Pr
 export async function applySdkStore(scope:ActorScope,input:{key:string;rows:{line:number;code:string;expectedRevision:number|null;amount?:string|null;note?:string|null}[]},db:PrismaClient=prisma){
   if(!input.rows.length||input.rows.length>1000||new Set(input.rows.map(r=>r.code)).size!==input.rows.length)throw new ProxyDomainError('INVALID_INPUT','Mỗi mã một dòng, tối đa 1000 dòng');
   for(const r of input.rows){if(normalizeSdk(r.code)!==r.code)throw new ProxyDomainError('INVALID_INPUT','Mã SDK không hợp lệ ở dòng '+r.line);checkInfo(r);}
-  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_STORE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney(input.rows))await assertSdkMoneyWrite(current,tx);
+  return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_STORE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true,authorize:async tx=>{const current=await authorizeBusiness(scope,'INFRASTRUCTURE',true,tx);await assertUnrestrictedServers(tx,current);return current;}},async(tx,images,current)=>{
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertUnrestrictedServers(tx,current);if(carriesMoney(input.rows))await assertSdkMoneyWrite(current,tx);
     const now=new Date(),ctx:WriteCtx={projectId:scope.projectId,actorId:current.userId,images,now,via:'Kho SDK'};
     const out:{line:number;code:string;outcome:'SAVED'|'SAME'|'ERROR';message:string}[]=[];
     for(const r of [...input.rows].sort((a,b)=>a.line-b.line)){
@@ -300,7 +313,8 @@ export async function applySdkStore(scope:ActorScope,input:{key:string;rows:{lin
 export async function updateSdkInfo(scope:ActorScope,input:{key:string;sdkId:string;expectedRevision:number;amount?:string|null;note?:string|null},db:PrismaClient=prisma){
   const info=checkInfo(input);
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'SDK_STORE',module:'INFRASTRUCTURE',skipJournalWhenUnchanged:true},async(tx,images,current)=>{
-    await authorizeVM(current,'ASSIGN',tx);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
+    current=await authorizeVM(current,'ASSIGN',tx);
+    await assertScopedSdkIds(tx,current,[input.sdkId]);if(carriesMoney([info]))await assertSdkMoneyWrite(current,tx);
     const rec=await tx.sdkRecord.findFirst({where:{id:input.sdkId,projectId:scope.projectId}});if(!rec)throw new ProxyDomainError('NOT_FOUND');
     if(rec.revision!==input.expectedRevision)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa thay đổi; tải lại (nội dung đang nhập được giữ)');
     const changed=await applyInfo(tx,{projectId:scope.projectId,actorId:current.userId,images,now:new Date(),via:'Kho SDK'},rec,info);
@@ -309,16 +323,18 @@ export async function updateSdkInfo(scope:ActorScope,input:{key:string;sdkId:str
 }
 // ---- Reads -------------------------------------------------------------------------------------------------------------------------
 export async function readSdkStore(scope:ActorScope,db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
+  scope=await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
   const vmPick={select:{id:true,code:true,serverId:true,revision:true,archivedAt:true,server:{select:{code:true,archivedAt:true}}}} as const;
-  const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
+  const rows=await db.sdkRecord.findMany({where:{projectId:scope.projectId,...sdkWhere(scope)},include:{vm:vmPick,holder:vmPick,linkedEarnApp:{select:{login:{select:{email:true}}}}},orderBy:{code:'asc'}});
+  const visible=await sdkVisibleVmIds(db,scope,rows.flatMap(r=>[r.amountVmId,r.amountFailedVmId,r.linkedVmId,r.vmId]));
   // `vm` = the VM whose SDK list holds the code (the same record as the VM cell); `current` = it is that VM's current code.
   // Without the money read right the amount, its times and source are not sent at all (never 0, never "chưa ghi"): `moneyHidden`.
-  return rows.map(r=>{const at=r.holder||r.vm;return {id:r.id,code:r.code,revision:r.revision,amount:money?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:money?r.amountAt?.toISOString()??null:null,observedAt:money?r.amountObservedAt?.toISOString()??null:null,failedAt:money?r.amountFailedAt?.toISOString()??null:null,amountSource:money?r.amountSource:null,moneyHidden:!money,observedCycle:money?r.amountCycle:null,observedVmId:money?r.amountVmId:null,note:r.note,state:r.linkState,
-    vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId,linkedLogin:r.linkedEarnApp?.login.email??null,linkedAt:r.linkedAt?.toISOString()??null,updatedAt:r.updatedAt.toISOString()};});
+  return rows.map(r=>{const at=r.holder||r.vm,amount=money&&sdkBindingVisible(visible,r.amountVmId),linked=sdkBindingVisible(visible,r.linkedVmId);return {id:r.id,code:r.code,revision:r.revision,amount:amount?canonicalAmount(r.amount?.toString()??null):null,currency:r.currency,amountAt:amount?r.amountAt?.toISOString()??null:null,observedAt:amount?r.amountObservedAt?.toISOString()??null:null,failedAt:money&&sdkBindingVisible(visible,r.amountFailedVmId)?r.amountFailedAt?.toISOString()??null:null,amountSource:amount?r.amountSource:null,moneyHidden:!money,observedCycle:amount?r.amountCycle:null,observedVmId:amount?r.amountVmId:null,note:r.note,state:r.linkState,
+    vm:at?{id:at.id,code:at.code,serverId:at.serverId,revision:at.revision,server:at.server.code,deleted:!!(at.archivedAt||at.server.archivedAt)}:null,current:!!r.vmId&&sdkBindingVisible(visible,r.vmId),linkedLogin:linked?r.linkedEarnApp?.login.email??null:null,linkedAt:linked?r.linkedAt?.toISOString()??null:null,updatedAt:r.updatedAt.toISOString()};});
 }
 export async function readSdkDetail(scope:ActorScope,sdkId:string,db:PrismaClient=prisma){
-  await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
+  scope=await authorizeVM(scope,'READ',db);const money=(await sdkMoneyRights(scope,db)).read;
+  await assertScopedSdkIds(db,scope,[sdkId]);denyScopedSdkHistory(scope);
   const rec=await db.sdkRecord.findFirst({where:{id:sdkId,projectId:scope.projectId},include:{events:{orderBy:[{createdAt:'desc'},{id:'desc'}],take:300},linkedEarnApp:{select:{login:{select:{email:true}}}}}});if(!rec)throw new ProxyDomainError('NOT_FOUND');
   const ids=Array.from(new Set([...rec.events.map(e=>e.actorId),rec.amountById,rec.noteById,rec.linkedById].filter((s):s is string=>!!s))),users=await db.user.findMany({where:{id:{in:ids}},select:{id:true,name:true,username:true}});
   const who=(id:string|null)=>{if(!id)return null;if(id==='migration')return 'Chuyển dữ liệu';const u=users.find(x=>x.id===id);return u?u.name||u.username||'Tài khoản cũ':'Tài khoản cũ';};

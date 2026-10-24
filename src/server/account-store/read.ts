@@ -4,6 +4,7 @@ import {CashDecimal,readPaypalCostRates} from '../business-management/usdt-money
 import {dayText} from '../business-management/money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
+import {vmWhere,assertUnrestrictedServers} from '../permissions/server-scope';
 import {assertBusinessArea} from '../business-management/scope';
 import {canSeeMoney} from './inventory';
 // Stock state is computed from the current links, never stored:
@@ -17,7 +18,7 @@ const place=(vm:{id:string;code:string;server:{id:string;code:string}}|null)=>vm
 const vmSelect={select:{id:true,code:true,archivedAt:true,server:{select:{id:true,code:true}}}} as const;
 /** options.deleted: the rows deleted from the stock (archivedAt set; Khôi phục), instead of the live stock. Batches are the same. */
 export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,options:{deleted?:boolean}={}){
-  const archived=options.deleted?{not:null}:null;
+  await assertUnrestrictedServers(db,scope);const archived=options.deleted?{not:null}:null;
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),logins=can(current,'INFRASTRUCTURE'),paypals=can(current,'PAYPALS');
   if(current.businessMode!=='PROXY_VM'||!logins&&!paypals)throw new ProxyDomainError('FORBIDDEN');
   const money=canSeeMoney(current),projectId=scope.projectId;
@@ -99,6 +100,6 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
 // Server/VM grid: the EarnApp account of each VM (login, type, PayPal) plus the legacy Gmail link when no account was recorded yet.
 export async function readVmAccounts(scope:ActorScope,db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);if(!can(current,'INFRASTRUCTURE'))throw new ProxyDomainError('FORBIDDEN');
-  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,gmail:{select:{email:true}},earnApp:{select:{id:true,revision:true,registeredAt:true,login:{select:{id:true,email:true,loginType:true,status:true}},paypal:{select:{id:true,code:true,primaryEmail:true,status:true}},paypalEmail:{select:{id:true,email:true}}}}}});
+  const vms=await db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true},...vmWhere(current)},select:{id:true,gmail:{select:{email:true}},earnApp:{select:{id:true,revision:true,registeredAt:true,login:{select:{id:true,email:true,loginType:true,status:true}},paypal:{select:{id:true,code:true,primaryEmail:true,status:true}},paypalEmail:{select:{id:true,email:true}}}}}});
   return vms.filter(v=>v.earnApp||v.gmail).map(v=>({vmId:v.id,earnApp:v.earnApp?{id:v.earnApp.id,revision:v.earnApp.revision,registeredAt:v.earnApp.registeredAt?.toISOString()??null,login:{id:v.earnApp.login.id,email:v.earnApp.login.email,type:v.earnApp.login.loginType,status:v.earnApp.login.status},paypal:v.earnApp.paypal?{id:v.earnApp.paypal.id,code:v.earnApp.paypal.code,emailId:v.earnApp.paypalEmail?.id??null,email:v.earnApp.paypalEmail?.email??null,status:v.earnApp.paypal.status}:null}:null,legacyGmail:!v.earnApp&&v.gmail?v.gmail.email:null}));
 }
