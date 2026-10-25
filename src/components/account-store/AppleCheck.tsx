@@ -96,7 +96,7 @@ export function AppleCheckBulk({accounts,disabled=false}:{accounts:CheckAccount[
   const unavailable=!checks.data.worker?.enabled||checks.data.worker.state==='CLEANUP_FAILED'||checks.error||accounts.some(a=>checks.jobs.some(j=>j.accountId===a.id&&active(j)));
   return <div className="flex flex-wrap items-center gap-2 p-3 text-xs">
     <button type="button" className="pm-button pm-button-primary" aria-label="Check Apple ID đã chọn" disabled={!accounts.length||busy||unavailable} onClick={()=>{if(!invalid)void checks.requestBatch(accounts);}}>{busy?'Đang gửi…':retry?'Gửi lại yêu cầu':`Check Apple ID (${accounts.length})`}</button>
-    <span className="pm-muted">Chọn Apple ID · tối đa 5 mỗi đợt, lần lượt</span>
+    <span className="pm-muted">Chọn Apple ID · tối đa 5 mỗi đợt · tối đa 5 trình duyệt song song, tùy tài nguyên và proxy</span>
     {invalid&&<p role="alert" className="pm-error w-full">{invalid}</p>}
   </div>;
 }

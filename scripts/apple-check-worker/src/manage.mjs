@@ -4,7 +4,7 @@ import {noLinks,atomicJson} from './store.mjs';
 import {inside,validateConfig,secureDirectory} from './platform.mjs';
 const VERSION=/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/;
 async function maybe(file){await noLinks(file);try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
-async function stopped(root){if(await maybe(path.join(root,'state','worker.lock'))||await maybe(path.join(root,'state','launcher.json')))throw new Error('STOP_WORKER_FIRST');}
+async function stopped(root){if((await status(root)).locked||await maybe(path.join(root,'state','launcher.json')))throw new Error('STOP_WORKER_FIRST');}
 async function collect(source,relative=''){
   const files=[];await noLinks(path.join(source,relative));
   for(const name of await fs.readdir(path.join(source,relative))){
@@ -52,12 +52,34 @@ export async function status(root){
   const active=await maybe(path.join(root,'active.json')),lock=await maybe(path.join(root,'state','worker.lock'));
   const last=await maybe(path.join(root,'state','status.json')),pending=await maybe(path.join(root,'state','pending.json'));
   const claim=await maybe(path.join(root,'state','claim-inflight.json')),q=await maybe(path.join(root,'state','quarantine.json'));
-  return {version:active?.version??null,previousVersion:active?.previousVersion??null,locked:!!lock,pid:Number.isInteger(lock?.pid)?lock.pid:null,
-    state:q?'CLEANUP_FAILED':pending?'PENDING':claim?'PENDING_CLAIM':last?.state??'STOPPED',lastSeenAt:last?.at??null};
+  const slots=[];
+  for(let slot=1;slot<=5;slot++){
+    const directory=path.join(root,'state','slots',`slot${slot}`),held=await maybe(path.join(directory,'worker.lock'));
+    const p=await maybe(path.join(directory,'pending.json')),c=await maybe(path.join(directory,'claim-inflight.json')),quarantine=await maybe(path.join(directory,'quarantine.json')),s=await maybe(path.join(directory,'status.json'));
+    slots.push({slot,locked:!!held,state:quarantine||p?.report?.cleanup==='FAILED'?'CLEANUP_FAILED':held?'BUSY':p?'PENDING':c?'PENDING_CLAIM':s?.state??'IDLE'});
+  }
+  const activeCount=Math.max(slots.filter(s=>s.locked).length,lock&&Number.isInteger(last?.activeCount)?Math.min(5,Math.max(0,last.activeCount)):0);
+  const legacyState=q||pending?.report?.cleanup==='FAILED'?'CLEANUP_FAILED':pending?'PENDING':claim?'PENDING_CLAIM':'IDLE';
+  const state=legacyState==='CLEANUP_FAILED'||slots.some(s=>s.state==='CLEANUP_FAILED')?'CLEANUP_FAILED':activeCount?'BUSY':legacyState!=='IDLE'?legacyState:
+    ['PENDING','PENDING_CLAIM'].find(s=>slots.some(x=>x.state===s))??last?.state??'STOPPED';
+  return {version:active?.version??null,previousVersion:active?.previousVersion??null,locked:!!lock||slots.some(s=>s.locked),pid:Number.isInteger(lock?.pid)?lock.pid:null,
+    state,activeCount,slots,legacyState,lastSeenAt:last?.at??null};
+}
+export async function recoverLocks(root,{isAlive=async pid=>{try{process.kill(pid,0);return true;}catch(e){if(e.code==='ESRCH')return false;throw e;}},verifyNoBrowser}={}){
+  const stateRoot=path.join(root,'state');const files=Array.from({length:5},(_,i)=>path.join(stateRoot,'slots',`slot${i+1}`,'worker.lock'));files.push(path.join(stateRoot,'worker.lock'));
+  const locks=[];
+  for(const file of files){const lock=await maybe(file);if(!lock)continue;if(!Number.isInteger(lock.pid)||lock.pid<1)throw new Error('LOCK_IDENTITY_INVALID');if(await isAlive(lock.pid))throw new Error('WORKER_STILL_RUNNING');locks.push({file,lock});}
+  if(!verifyNoBrowser||!await verifyNoBrowser(stateRoot))throw new Error('OWNED_BROWSER_UNRESOLVED');
+  for(const {file,lock} of locks){if(JSON.stringify(await maybe(file))!==JSON.stringify(lock))throw new Error('LOCK_IDENTITY_CHANGED');await noLinks(file);await fs.unlink(file);}
+  return {lockRecovered:true};
 }
 export async function requestStop(root){await atomicJson(path.join(root,'state','stop.json'),{requested:true});return {stopRequested:true};}
 export async function rollback(root){
   await stopped(root);const active=await maybe(path.join(root,'active.json'));
+  for(let slot=1;slot<=5;slot++)for(const name of ['pending.json','claim-inflight.json','quarantine.json']){
+    const file=path.join(root,'state','slots',`slot${slot}`,name);await noLinks(file);
+    try{await fs.lstat(file);throw new Error('ROLLBACK_UNRESOLVED_SLOT_STATE');}catch(e){if(e.code!=='ENOENT')throw e;}
+  }
   if(!active?.previousVersion)throw new Error('ROLLBACK_UNAVAILABLE');await verifyRelease(root,active.previousVersion);
   await atomicJson(path.join(root,'active.json'),{version:active.previousVersion,previousVersion:active.version});return {version:active.previousVersion};
 }

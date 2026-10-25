@@ -35,10 +35,17 @@ if($desk -ne [IntPtr]::Zero){try {$unlocked=[AppleDesktop]::GetUserObjectInforma
 `);
   return output==='True';
 }
-export async function resourceGate({platform=process.platform,freeMemory=os.freemem,desktopProbe=desktopAvailable,minFreeMemoryMb=2048}={}){
+export function cachedDesktopProbe(probe=desktopAvailable,{ttlMs=1000,now=Date.now}={}){
+  let pending,at=0;
+  return ()=>{
+    if(!pending||now()-at>=ttlMs){at=now();pending=Promise.resolve().then(probe).catch(()=>false);}
+    return pending;
+  };
+}
+export async function resourceGate({platform=process.platform,freeMemory=os.freemem,desktopProbe=desktopAvailable,minFreeMemoryMb=2048,checkMemory=true}={}){
   if(platform!=='win32')return 'WAITING_DESKTOP';
   try{if(!await desktopProbe())return 'WAITING_DESKTOP';}catch{return 'WAITING_DESKTOP';}
-  return freeMemory()<minFreeMemoryMb*1024*1024?'WAITING_RESOURCES':'IDLE';
+  return checkMemory&&freeMemory()<minFreeMemoryMb*1024*1024?'WAITING_RESOURCES':'IDLE';
 }
 export function privateAcl(value,{requireProtected=true,directory=true}={}){
   return (!requireProtected||value?.protected===true)&&Array.isArray(value?.rules)&&value.rules.some(r=>r.sid===value.userSid&&r.type==='Allow'&&(r.rights&2032127)===2032127)&&value.rules.every(r=>r.type==='Allow'&&[value.userSid,'S-1-5-18'].includes(r.sid)&&(!directory||(r.inheritance===3&&r.propagation===0)));
@@ -80,14 +87,15 @@ foreach($file in @(${[tokenFile,configFile].filter(Boolean).map(psLiteral).join(
 }
 export function inside(root,file){const rel=path.relative(path.resolve(root),path.resolve(file));return rel!==''&&!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel);}
 export function validateConfig(input,root){
-  const allowed=['baseUrl','tokenFile','executablePath','modulePath','minFreeMemoryMb','heartbeatMs','pollMs','jobTimeoutMs'];
+  const allowed=['baseUrl','tokenFile','executablePath','modulePath','minFreeMemoryMb','heartbeatMs','pollMs','jobTimeoutMs','maxSlots'];
   if(!input||typeof input!=='object'||Object.keys(input).some(k=>!allowed.includes(k)))throw new Error('CONFIG_KEYS');
   try{new ApiClient({baseUrl:input.baseUrl,token:'validation-only'});}catch{throw new Error('CONFIG_ORIGIN');}
   for(const k of ['tokenFile','executablePath','modulePath'])if(typeof input[k]!=='string'||!path.isAbsolute(input[k]))throw new Error('CONFIG_PATH');
   if(path.win32.basename(input.executablePath).toLowerCase()!=='chrome.exe')throw new Error('CONFIG_BROWSER_NAME');
   if(!inside(path.join(root,'private'),input.tokenFile))throw new Error('CONFIG_PRIVATE_TOKEN');
-  const c={minFreeMemoryMb:2048,heartbeatMs:10000,pollMs:15000,jobTimeoutMs:180000,...input};
+  const c={minFreeMemoryMb:2048,heartbeatMs:10000,pollMs:15000,jobTimeoutMs:180000,maxSlots:5,...input};
   for(const [k,min,max] of [['minFreeMemoryMb',512,262144],['heartbeatMs',1000,20000],['pollMs',1000,60000],['jobTimeoutMs',1000,180000]])if(!Number.isInteger(c[k])||c[k]<min||c[k]>max)throw new Error('CONFIG_RANGE');
+  if(!Number.isInteger(c.maxSlots)||c.maxSlots<1||c.maxSlots>5)throw new Error('CONFIG_RANGE');
   return c;
 }
 export async function loadConfig(file,root){

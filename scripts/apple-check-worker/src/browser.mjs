@@ -34,7 +34,7 @@ async function bounded(promise,ms,code){
   let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(code)),ms);})]);}finally{clearTimeout(timer);}
 }
 export class CloakAdapter {
-  constructor({executablePath,modulePath='playwright-core',loadModule:loader=loadModule,timeoutMs=20000,resultWaitMs=15000}){
+  constructor({executablePath,modulePath='playwright-core',loadModule:loader=loadModule,timeoutMs=20000,resultWaitMs=45000}){
     Object.assign(this,{executablePath,modulePath,loader,timeoutMs,resultWaitMs});
   }
   create(){return new CloakSession(this);}
@@ -106,7 +106,8 @@ class CloakSession {
       if(await anyVisible('input[autocomplete="one-time-code"], input.form-security-code-input, input[id^="char"]'))state.twoFactor=true;
       if(await anyVisible('iframe[title*="CAPTCHA" i]')||await anyVisible('[data-testid="captcha"]'))state.captcha=true;
       state.challenge=state.twoFactor||state.captcha;
-      const alerts=frame.locator('[role="alert"]');for(let i=0;i<await alerts.count();i++)if(await alerts.nth(i).isVisible())state.alerts.push((await alerts.nth(i).innerText()).trim());
+      // The current Apple widget uses #errMsg and #alertInfo, without role=alert.
+      const alerts=frame.locator('[role="alert"], #errMsg, #alertInfo');for(let i=0;i<await alerts.count();i++)if(await alerts.nth(i).isVisible())state.alerts.push((await alerts.nth(i).innerText()).trim().replace(/\s+/g,' '));
       if(new URL(frame.url()).origin==='https://account.apple.com'){
         const signout=frame.locator('a.ac-localnav-action, button.ac-localnav-action');
         for(let i=0;i<await signout.count();i++){
@@ -137,16 +138,22 @@ class CloakSession {
     const account=await this.find('#account_name_text_field');if(!account)return {result:'UNKNOWN',reasonCode:'EMAIL_FORM_MISSING'};
     signal?.throwIfAborted();await account.fill(email);
     let pw=await this.find('#password_text_field');
-    if(!pw){const next=await this.find('#sign-in');if(!next)return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
+    let button=await this.find('#sign-in');if(!button)return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
+    const label=async control=>typeof control.innerText==='function'?(await control.innerText()).trim().replace(/\s+/g,' ').toLowerCase():null;
+    const passwordPhase=async control=>['sign in','sign in with password'].includes(await label(control));
+    // Apple's current page renders a visible password textbox BEFORE the email
+    // Continue step. Visibility alone is not evidence of the password phase.
+    if(!pw||await label(button)==='continue'){const next=button;
       signal?.throwIfAborted();await next.click({noWaitAfter:true});
       // Wait for the next phase without clicking again or fetching any challenge link.
       const until=Date.now()+this.config.timeoutMs;
       while(Date.now()<until){signal?.throwIfAborted();evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;
-        pw=await this.find('#password_text_field');if(pw)break;await delay(200,undefined,signal?{signal}:{});}
+        pw=await this.find('#password_text_field');button=await this.find('#sign-in');
+        if(pw&&button&&await passwordPhase(button))break;await delay(200,undefined,signal?{signal}:{});}
     }
     if(!pw)return {result:'UNKNOWN',reasonCode:'PASSWORD_FORM_MISSING'};
     evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;
-    const button=await this.find('#sign-in');if(!button)return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
+    button=await this.find('#sign-in');if(!button||!await passwordPhase(button))return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
     operation='PASSWORD_SUBMIT_FAILED';
     signal?.throwIfAborted();await pw.fill(password);signal?.throwIfAborted();
     // Exactly one password-bearing submit, never a retry on navigation or network error.

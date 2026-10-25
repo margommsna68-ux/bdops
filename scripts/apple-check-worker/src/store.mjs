@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 
 export async function noLinks(target){
   const full=path.resolve(target),parsed=path.parse(full);let current=parsed.root;
@@ -15,7 +16,13 @@ export async function atomicJson(file,value){
   await noLinks(file);const temp=`${file}.${randomUUID()}.tmp`;
   const h=await fs.open(temp,'wx',0o600);
   try{await h.writeFile(JSON.stringify(value));await h.sync();}finally{await h.close();}
-  await noLinks(file);await fs.rename(temp,file);
+  // Windows readers/scanners can briefly hold a destination without delete
+  // sharing. Keep the old journal intact and retry only this atomic replace.
+  for(let attempt=0;;attempt++){
+    await noLinks(file);
+    try{await fs.rename(temp,file);break;}
+    catch(error){if(process.platform!=='win32'||!['EPERM','EACCES','EBUSY'].includes(error.code)||attempt>=20)throw error;await delay(50);}
+  }
   // Flush the containing directory where supported; Windows refuses directory handles.
   try{const d=await fs.open(path.dirname(file),'r');try{await d.sync();}finally{await d.close();}}catch(e){if(!['EISDIR','EPERM','EINVAL','EACCES'].includes(e.code))throw e;}
 }
@@ -58,6 +65,17 @@ export class Store {
   async remove(name){await noLinks(path.join(this.root,name));await fs.unlink(path.join(this.root,name)).catch(e=>{if(e.code!=='ENOENT')throw e;});}
   async load(){try{return cleanRecord(await this.read('pending.json'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
   async save(p){await this.write('pending.json',cleanRecord(p));}
+  async slot(slot){
+    if(!Number.isInteger(slot)||slot<1||slot>5)throw new Error('SLOT_INVALID');
+    const root=path.join(this.root,'slots',`slot${slot}`);await noLinks(root);return Store.open(root);
+  }
+  async recoveryState(){
+    const pending=await this.load();
+    let claim,quarantine;
+    try{claim=await this.read('claim-inflight.json');}catch(e){if(e.code!=='ENOENT')throw e;}
+    try{quarantine=await this.read('quarantine.json');}catch(e){if(e.code!=='ENOENT')throw e;}
+    return quarantine||pending?.report?.cleanup==='FAILED'?'CLEANUP_FAILED':pending?'PENDING':claim?'PENDING_CLAIM':'IDLE';
+  }
   profilePath(id){if(!PROFILE.test(id))throw new Error('PROFILE_ID');return path.join(this.root,'profiles',id);}
   async createProfile(){
     const id=randomUUID(),target=this.profilePath(id);await noLinks(target);await fs.mkdir(target,{mode:0o700});

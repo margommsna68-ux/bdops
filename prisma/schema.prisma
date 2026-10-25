@@ -644,6 +644,7 @@ model AppleCheckJob {
   activeWorkerId String? @unique
   workerId String?
   claimKey String?
+  claimSlot Int @default(1)
   proxyId String?
   proxyRevision Int?
   leaseHash String?

@@ -141,8 +141,21 @@ Browser requests en-US; explicit security-locked messages are allowlisted using 
 Implementation/review record: `scripts/apple-check-worker/WORK-LOG.md`. No subagent dispatch tool was available; the requested skill's inline fallback was used. Independent parent review, Central browser compatibility, authenticated selector validation and real canary results are separate from these local test results.
 
 
-## 1.1.0 — 25 October follow-up
+## 1.1.0 â€” 25 October follow-up
 
 The stock table now has a dedicated check-result column and a selected-account check action (maximum five per atomic request). The single Central worker processes its queue sequentially. LIVE_2FA means only that an official visible OTP field appeared after the password-submit step, according to the owner's operational definition; it does not mean a fully authenticated Apple or EarnApp session. No OTP is retrieved or entered. CAPTCHA is never Live, and explicit locked/invalid-credential alerts take precedence over a remaining OTP field. LIVE_2FA never resets an existing locked account's health.
 
 UNKNOWN now carries only bounded diagnostic codes for email/password form or submit controls missing, credential delivery failure, email entry failure, password submit failure, response read failure, unrecognized response or interruption. No raw DOM, exception text, email, password or link is persisted. Releases remain immutable; install 1.1.0 after a graceful stop and keep 1.0.0 for rollback. Token/configuration stay unchanged.
+
+
+## 1.2.0 - concurrent slots and current Apple Continue flow
+
+Owner chose up to five concurrent browser sessions. One global supervisor owns the Windows task; five bounded slot stores under state/slots/slot1..5 have independent journals, claim keys, profile UUIDs and browser cleanup. The API binds each claim to slot1..5 (old omitted slots mean1), and every simultaneous check has an exclusive randomly selected eligible proxy. New additive claimSlot column preserves replay slot identity after cleanup. Existing worker token/configuration stay unchanged; maxSlots defaults to5.
+
+Before new admissions, recover root legacy and all five slot journals. Unacknowledged results keep admissions blocked, no repeated login. A quarantined slot blocks fresh work while peers still recover. Stop drains all sessions; restart recovers exact reports. Rollback to an older release refuses unresolved slot journals. Admission reserves memory conservatively; low free RAM prevents more launches, and desktop/session loss stops active sessions. Idle polling is bounded to15seconds.
+
+Apple currently renders a visible password input while its button still says Continue. Submit must explicitly advance Continue and wait for Sign In before filling/submitting password once. The official widget's #errMsg and #alertInfo are read in addition to role=alert. Loading/unknown labels do not count as password phase.
+
+Every completed check closes its browser, verifies no owned browser remains, and removes its UUID profile before reporting. This applies equally to Live, Locked, invalid credentials and UNKNOWN. A result pending acknowledgement retains only the minimal command journal, not the profile/cache. Cleanup failure retains ownership proof/quarantine until explicit safe cleanup recovery; never delete an unverified or unrelated browser profile.
+
+Native Central proof used five isolated about:blank Cloak sessions with an unreachable proxy, no account credential reads and no external site. All five browser fingerprint samples differed (canvas/GPU/CPU sample hash); all five profiles were cleaned. They still run on one physical Central, not five physical hosts. The bundled Cloak engine generated those identities with existing defaults; no global browser or AE/GEN2 fingerprint configuration was changed.

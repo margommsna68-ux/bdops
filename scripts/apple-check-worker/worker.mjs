@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as fs from 'node:fs/promises';import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {ApiClient} from './src/api.mjs';import {Store,noLinks} from './src/store.mjs';
-import {Worker} from './src/worker.mjs';import {CloakAdapter} from './src/browser.mjs';
-import {desktopPath,loadConfig,resourceGate,noOwnedBrowser,secureDirectory} from './src/platform.mjs';
-import {installRelease,rollback,status,requestStop,start} from './src/manage.mjs';
+import {WorkerPool} from './src/worker.mjs';import {CloakAdapter} from './src/browser.mjs';
+import {desktopPath,loadConfig,resourceGate,noOwnedBrowser,secureDirectory,cachedDesktopProbe} from './src/platform.mjs';
+import {installRelease,rollback,status,requestStop,start,recoverLocks} from './src/manage.mjs';
 
 async function main(){
   const [command,...args]=process.argv.slice(2),options={};
@@ -26,27 +26,25 @@ async function main(){
   if(command==='rollback')return rollback(root);
   const store=await Store.open(path.join(root,'state'));
   if(command==='recover-lock'){
-    const lock=await store.read('worker.lock');
-    if(!Number.isInteger(lock.pid)||lock.pid<1)throw new Error('LOCK_IDENTITY_INVALID');
-    try{process.kill(lock.pid,0);throw new Error('WORKER_STILL_RUNNING');}catch(e){if(e.code!=='ESRCH')throw e;}
-    if(!await noOwnedBrowser(path.join(root,'state','profiles')))throw new Error('OWNED_BROWSER_UNRESOLVED');
-    await store.remove('worker.lock');return {lockRecovered:true};
+    return recoverLocks(root,{verifyNoBrowser:noOwnedBrowser});
   }
   // Prevent debug namespaces from printing Playwright options, browser URLs or credentials.
   process.env.DEBUG='';process.env.PWDEBUG='';
   const {config,token}=await loadConfig(options['--config']??path.join(root,'config.json'),root);
   const api=new ApiClient({baseUrl:config.baseUrl,token});
   const adapter=new CloakAdapter({executablePath:config.executablePath,modulePath:config.modulePath});
-  const worker=new Worker({store,api,adapter,gate:()=>resourceGate({minFreeMemoryMb:config.minFreeMemoryMb}),heartbeatMs:config.heartbeatMs,jobTimeoutMs:config.jobTimeoutMs});
-  if(command==='cleanup-recovered')return {state:await worker.recoverCleanup({verifyNoBrowser:noOwnedBrowser})};
+  const desktopProbe=cachedDesktopProbe();
+  const worker=new WorkerPool({store,api,adapter,maxSlots:config.maxSlots,
+    gate:({activeSlots=0}={})=>resourceGate({desktopProbe,minFreeMemoryMb:config.minFreeMemoryMb+activeSlots*512}),
+    activeGate:()=>resourceGate({desktopProbe,checkMemory:false}),heartbeatMs:config.heartbeatMs,jobTimeoutMs:config.jobTimeoutMs});
+  if(command==='cleanup-recovered')return {state:await worker.recoverCleanup()};
   const controller=new AbortController();const abort=()=>controller.abort();
   process.once('SIGINT',abort);process.once('SIGTERM',abort);
   const stopWatch=setInterval(()=>{void store.read('stop.json').then(s=>{if(s.requested)abort();}).catch(e=>{if(e.code!=='ENOENT')abort();});},500);
   stopWatch.unref();
-  const onState=state=>store.write('status.json',{state,at:new Date().toISOString()});
   try{
-    const state=command==='once'?await worker.once({signal:controller.signal}):await worker.loop({signal:controller.signal,pollMs:config.pollMs,onState});
-    await onState(state);return {state};
+    const state=command==='once'?await worker.once({signal:controller.signal}):await worker.loop({signal:controller.signal,pollMs:config.pollMs});
+    return {state};
   }finally{clearInterval(stopWatch);process.removeListener('SIGINT',abort);process.removeListener('SIGTERM',abort);}
 }
 try{console.log(JSON.stringify(await main()));}catch{console.error(JSON.stringify({error:'WORKER_COMMAND_FAILED',hint:'Inspect private state with status; see apple-check-worker runbook.'}));process.exitCode=1;}

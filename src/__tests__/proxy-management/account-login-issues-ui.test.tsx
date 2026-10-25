@@ -52,7 +52,7 @@ it('places check metadata in its own account-status column and the bulk action a
   expect(apple.children[column].querySelector('[aria-label="Check Apple ID"]')).not.toBeNull();expect(apple.children[1].textContent).not.toContain('Chưa kiểm tra');
   expect(host.querySelector('tr[data-account-id="normal"]')!.children[column].textContent).toBe('—');
   expect(batchButton()).not.toBeNull();expect(batchButton().closest('table')).toBeNull();expect(batchButton().compareDocumentPosition(host.querySelector('table')!)&dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(host.textContent).toContain('tối đa 5 mỗi đợt, lần lượt');expect(batchButton().disabled).toBe(true);
+  expect(host.textContent).toContain('tối đa 5 mỗi đợt · tối đa 5 trình duyệt song song, tùy tài nguyên và proxy');expect(batchButton().disabled).toBe(true);
 });
 it('submits exactly five selected accounts with revisions in one batch and suppresses rapid double clicks',async()=>{
   mock.data.logins=Array.from({length:6},(_,i)=>row('a'+i,'ACTIVE','APPLE_ID',{revision:i+10}));await render();

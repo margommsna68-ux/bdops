@@ -103,6 +103,7 @@ test('two-stage sign-in clicks password submit once and never follows a challeng
       frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({
         count:async()=>['#account_name_text_field','#password_text_field','#sign-in','input[autocomplete="one-time-code"], input.form-security-code-input, input[id^="char"]'].includes(selector)?1:0,
         nth:()=>({isVisible:async()=>phase==='CHALLENGE'}),
+        innerText:async()=>phase==='EMAIL'?'Continue':'Sign In',
         isVisible:async()=>selector==='#password_text_field'?phase==='PASSWORD':selector==='input[autocomplete="one-time-code"]'?phase==='CHALLENGE':true,
         fill:async value=>fills.push({selector,value}),click:async()=>{if(phase==='EMAIL'){emailClicks++;phase='PASSWORD';}else{passwordClicks++;phase='CHALLENGE';}},
       })}],
@@ -113,4 +114,96 @@ test('two-stage sign-in clicks password submit once and never follows a challeng
   assert.deepEqual(await b.submit({email:'one@example.test',password:'secret'},{}),{result:'LIVE_2FA',explicit:true});
   await assert.rejects(b.submit({email:'one@example.test',password:'secret'},{}),/SUBMIT_ONCE/);
   assert.equal(emailClicks,1);assert.equal(passwordClicks,1);assert.deepEqual(fills,[{selector:'#account_name_text_field',value:'one@example.test'},{selector:'#password_text_field',value:'secret'}]);await b.close();
+});
+
+test('visible password field does not skip the Continue email phase',async()=>{
+  let phase='EMAIL',emailClicks=0,passwordClicks=0;const fills=[];
+  const runtime=fakeRuntime(),launch=runtime.chromium.launchPersistentContext;
+  runtime.chromium.launchPersistentContext=async(...args)=>{const context=await launch(...args);context.newPage=async()=>({
+    goto:async()=>({ok:()=>true}),url:()=>'https://account.apple.com/sign-in',
+    frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({
+      count:async()=>['#account_name_text_field','#password_text_field','#sign-in'].includes(selector)?1:selector==='[role="alert"], #errMsg, #alertInfo'&&phase==='RESULT'?1:0,
+      nth:()=>({isVisible:async()=>true,innerText:async()=>"Your Apple Account or password was incorrect."}),
+      isVisible:async()=>true,innerText:async()=>phase==='EMAIL'?'Continue':'Sign In',
+      fill:async value=>{fills.push({selector,value,phase});},click:async()=>{if(phase==='EMAIL'){emailClicks++;phase='PASSWORD';}else{passwordClicks++;phase='RESULT';}},
+    })}],
+  });return context;};
+  const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime,resultWaitMs:1}).create();
+  await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});await b.probe({});
+  const outcome=await b.submit({email:'me@example.test',password:'secret'},{});
+  assert.equal(outcome.result,'INVALID_CREDENTIALS');
+  assert.equal(emailClicks,1);assert.equal(passwordClicks,1);
+  assert.equal(fills.find(x=>x.selector==='#password_text_field').phase,'PASSWORD');
+  await b.close();
+});
+
+// Both textboxes stay visible in every phase, matching the anonymous Apple DOM.
+async function continueFixture(t,{loadingLabel='',stuck=false,challenge=false,throwPassword=false,passwordLabel='Sign In'}={}){
+  let phase='EMAIL',emailClicks=0,passwordClicks=0,transition;
+  const fills=[],runtime=fakeRuntime(),launch=runtime.chromium.launchPersistentContext;
+  const otp='input[autocomplete="one-time-code"], input.form-security-code-input, input[id^="char"]';
+  runtime.chromium.launchPersistentContext=async(...args)=>{
+    const context=await launch(...args);
+    context.newPage=async()=>({
+      goto:async()=>({ok:()=>true}),url:()=>'https://account.apple.com/sign-in',
+      frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({
+        count:async()=>['#account_name_text_field','#password_text_field','#sign-in',otp].includes(selector)?1:0,
+        isVisible:async()=>true,
+        nth:()=>({isVisible:async()=>phase==='CHALLENGE'||phase==='RESULT'}),
+        innerText:async()=>phase==='EMAIL'?'Continue':phase==='LOADING'?loadingLabel:passwordLabel,
+        fill:async value=>{fills.push({selector,value,phase});},
+        click:async()=>{
+          if(phase==='EMAIL'){
+            emailClicks++;
+            if(challenge)phase='CHALLENGE';
+            else if(!stuck){phase='LOADING';transition=setTimeout(()=>{phase='PASSWORD';},10);}
+          }else{
+            passwordClicks++;
+            if(throwPassword)throw new Error('synthetic click failure');
+            phase='RESULT';
+          }
+        },
+      })}],
+    });return context;
+  };
+  const browser=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime,timeoutMs:50,resultWaitMs:50}).create();
+  t.after(async()=>{clearTimeout(transition);await browser.close();});
+  await browser.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});
+  await browser.probe({});
+  return {browser,fills,get emailClicks(){return emailClicks;},get passwordClicks(){return passwordClicks;}};
+}
+
+for(const [loadingLabel,passwordLabel] of [['','Sign In'],['Loading…','Sign in with password']]){
+  test(`Continue waits through ${loadingLabel||'an empty label'} before filling or submitting the password`,async t=>{
+    const f=await continueFixture(t,{loadingLabel,passwordLabel});
+    assert.deepEqual(await f.browser.submit({email:'me@example.test',password:'secret'},{}),{result:'LIVE_2FA',explicit:true});
+    assert.equal(f.emailClicks,1);assert.equal(f.passwordClicks,1);
+    assert.deepEqual(f.fills,[
+      {selector:'#account_name_text_field',value:'me@example.test',phase:'EMAIL'},
+      {selector:'#password_text_field',value:'secret',phase:'PASSWORD'},
+    ]);
+  });
+}
+
+test('Continue that never transitions does not fill or submit a password',async t=>{
+  const f=await continueFixture(t,{stuck:true});
+  const result=await f.browser.submit({email:'me@example.test',password:'secret'},{});
+  assert.equal(result.result,'UNKNOWN');
+  assert.equal(f.emailClicks,1);assert.equal(f.passwordClicks,0);
+  assert.deepEqual(f.fills,[{selector:'#account_name_text_field',value:'me@example.test',phase:'EMAIL'}]);
+});
+
+test('challenge after Continue stops before password fill or submit',async t=>{
+  const f=await continueFixture(t,{challenge:true});
+  assert.deepEqual(await f.browser.submit({email:'me@example.test',password:'secret'},{}),{result:'CHALLENGE_REQUIRED',explicit:true});
+  assert.equal(f.emailClicks,1);assert.equal(f.passwordClicks,0);
+  assert.deepEqual(f.fills,[{selector:'#account_name_text_field',value:'me@example.test',phase:'EMAIL'}]);
+});
+
+test('throwing password click is attempted once and a second submit is refused',async t=>{
+  const f=await continueFixture(t,{throwPassword:true});
+  assert.deepEqual(await f.browser.submit({email:'me@example.test',password:'secret'},{}),{result:'UNKNOWN',reasonCode:'PASSWORD_SUBMIT_FAILED'});
+  await assert.rejects(f.browser.submit({email:'me@example.test',password:'secret'},{}),/SUBMIT_ONCE/);
+  assert.equal(f.emailClicks,1);assert.equal(f.passwordClicks,1);
+  assert.equal(f.fills.filter(item=>item.selector==='#password_text_field').length,1);
 });

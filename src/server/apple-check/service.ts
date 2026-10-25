@@ -1,5 +1,5 @@
 import {createHash,createHmac,randomBytes} from 'node:crypto';
-import type {Prisma,PrismaClient,AppleCheckJob} from '@prisma/client';
+import {Prisma,type PrismaClient,type AppleCheckJob} from '@prisma/client';
 import {z} from 'zod';
 import {prisma} from '@/lib/prisma';
 import {decrypt} from '@/lib/encryption';
@@ -18,6 +18,7 @@ const conflict=(s:string)=>new ProxyDomainError('STALE_PREVIEW',s,'REVISION_CONF
 const denied=()=>new ProxyDomainError('FORBIDDEN','Không có quyền kiểm tra Apple ID');
 const now=()=>new Date();
 const LEASE=90_000,HARD=180_000,COOLDOWN=15*60_000;
+const workerSlot=(workerId:string,slot:number)=>slot===1?workerId:workerId+':slot:'+slot;
 export const CHECK_RESULTS=['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'] as const;
 export const UNKNOWN_REASON_CODES=['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED'] as const;
 const unknownReasons=new Set<string>(UNKNOWN_REASON_CODES);
@@ -127,25 +128,45 @@ async function accountForJob(tx:Prisma.TransactionClient,j:AppleCheckJob){
  const c=await loadInfrastructureScope(tx,j.requestedById,j.projectId);assertStockWrite(c,'LOGIN');if(hasServerScope(c))throw denied();return a;
 }
 
-export async function workerAction(token:string,action:string,body:unknown,db:PrismaClient=prisma):Promise<unknown>{return withProxyTransaction(async tx=>{
+async function updateWorkerState(tx:Prisma.TransactionClient,workerId:string,idleState='IDLE',recoverCleanup=false){
+ const current=await tx.appleCheckWorker.findUniqueOrThrow({where:{id:workerId}});
+ const active=await tx.appleCheckJob.findMany({where:{workerId,activeWorkerId:{not:null}},select:{cleanup:true}});
+ const failed=idleState==='CLEANUP_FAILED'||active.some(j=>j.cleanup==='FAILED')||(!recoverCleanup&&current.state==='CLEANUP_FAILED');
+ await tx.appleCheckWorker.update({where:{id:workerId},data:{state:failed?'CLEANUP_FAILED':active.length?'BUSY':idleState,lastSeenAt:now()}});
+}
+async function withWorkerTransaction<T>(fn:(tx:Prisma.TransactionClient)=>Promise<T>,db:PrismaClient){
+ // Five callers may have read the same snapshot before serialising on the worker row.
+ // Raw FOR UPDATE conflicts arrive as P2010/40001, which the shared wrapper does not retry.
+ for(let attempt=0;;attempt++){
+  try{return await withProxyTransaction(fn,db);}
+  catch(error){
+   const retryable=error instanceof Prisma.PrismaClientKnownRequestError&&(error.code==='P2034'||error.code==='P2010'&&String(error.meta?.code)==='40001');
+   if(!retryable||attempt>=7)throw error;
+  }
+ }
+}
+
+export async function workerAction(token:string,action:string,body:unknown,db:PrismaClient=prisma):Promise<unknown>{return withWorkerTransaction(async tx=>{
  const cleanupOnly=action==='result'||action==='heartbeat-job'||action==='cleanup-recovered'||action==='claim';
  const {w,permitted}=await auth(tx,token,cleanupOnly);
  if(action==='heartbeat'){
   const b=z.object({state:z.enum(['IDLE','BUSY','WAITING_DESKTOP','WAITING_RESOURCES','CLEANUP_FAILED'])}).strict().parse(body);
-  await tx.appleCheckWorker.update({where:{id:w.id},data:{lastSeenAt:now(),state:w.state==='CLEANUP_FAILED'?'CLEANUP_FAILED':b.state}});
+  await updateWorkerState(tx,w.id,b.state);
   return {workerId:w.id,enabled:w.enabled};
  }
  if(action==='claim'){
-  const {key}=z.object({key:z.string().min(8).max(100)}).strict().parse(body);
+  const {key,slot}=z.object({key:z.string().min(8).max(100),slot:z.number().int().min(1).max(5).default(1)}).strict().parse(body);
+  const activeWorkerId=workerSlot(w.id,slot);
   const previous=await tx.appleCheckJob.findUnique({where:{workerId_claimKey:{workerId:w.id,claimKey:key}}});
   const leaseFor=(id:string)=>createHmac('sha256',token).update('apple-claim:'+id+':'+key).digest('base64url');
   if(previous){
+   if(previous.claimSlot!==slot)throw conflict('Khoá nhận việc đã dùng cho vị trí khác');
    if(previous.phase==='DONE'&&previous.cleanup==='OK')return {job:null,completed:true};
    return {job:{id:previous.id,leaseToken:leaseFor(previous.id),accountId:previous.accountId,accountRevision:previous.accountRevision,expiresAt:previous.expiresAt!.toISOString(),recoveryOnly:!permitted||previous.phase!=='CLAIMED'||previous.cancelRequested||previous.expiresAt!.getTime()<=Date.now()||!previous.hardDeadline||previous.hardDeadline.getTime()<=Date.now()}};
   }
   if(!permitted)throw denied(); // revoked credentials may recover an existing lease only, never claim fresh work.
   if(w.state==='CLEANUP_FAILED')throw conflict('Dọn phiên lỗi; cần khôi phục cleanup trước khi nhận việc mới');
-  const held=await tx.appleCheckJob.findUnique({where:{activeWorkerId:w.id}});
+  const held=await tx.appleCheckJob.findUnique({where:{activeWorkerId}});
   if(held){
    if(held.expiresAt&&held.expiresAt.getTime()<Date.now()&&held.phase!=='DONE')await tx.appleCheckJob.update({where:{id:held.id},data:{phase:'UNKNOWN',result:'UNKNOWN',reasonCode:'UNKNOWN'}});
    return {job:null}; // Never hand an old submission to another process.
@@ -160,7 +181,7 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
   await tx.$queryRaw`SELECT "id" FROM "ProxyIP" WHERE "id"=${p.id} FOR UPDATE`;
   const leased=await tx.proxyIP.updateMany({where:{id:p.id,appleCheckLeaseJobId:null,revision:p.revision},data:{appleCheckLeaseJobId:j.id}});if(leased.count!==1)return {job:null};
   const leaseToken=leaseFor(j.id),expiresAt=new Date(Date.now()+LEASE),hardDeadline=new Date(Date.now()+HARD);
-  await tx.appleCheckJob.update({where:{id:j.id},data:{workerId:w.id,claimKey:key,activeWorkerId:w.id,proxyId:p.id,proxyRevision:p.revision,leaseHash:hash(leaseToken),expiresAt,hardDeadline,phase:'CLAIMED'}});
+  await tx.appleCheckJob.update({where:{id:j.id},data:{workerId:w.id,claimKey:key,claimSlot:slot,activeWorkerId,proxyId:p.id,proxyRevision:p.revision,leaseHash:hash(leaseToken),expiresAt,hardDeadline,phase:'CLAIMED'}});
   await tx.appleCheckWorker.update({where:{id:w.id},data:{lastSeenAt:now(),state:'BUSY'}});
   return {job:{id:j.id,leaseToken,accountId:j.accountId,accountRevision:j.accountRevision,expiresAt:expiresAt.toISOString()}};
  }
@@ -198,7 +219,7 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
   if(j.cleanup==='OK')return jobView(tx,j);
   const x=await tx.appleCheckJob.update({where:{id:j.id},data:{cleanup:'OK',activeAccountId:null,activeWorkerId:null}});
   await tx.proxyIP.updateMany({where:{id:j.proxyId??'',appleCheckLeaseJobId:j.id},data:{appleCheckLeaseJobId:null}});
-  await tx.appleCheckWorker.update({where:{id:w.id},data:{state:'IDLE',lastSeenAt:now()}});
+  await updateWorkerState(tx,w.id,'IDLE',true);
   await audit(tx,j.projectId,w.createdById,'APPLE_CHECK_CLEANUP_RECOVERED',j.id,{});return jobView(tx,x);
  }
  throw bad('Lệnh worker không được hỗ trợ');
@@ -221,9 +242,9 @@ async function saveResult(tx:Prisma.TransactionClient,workerId:string,actorId:st
  // Cleanup after revoke may release owned resources, but may not publish an account health assertion.
  const actual=allowed?b.result:'UNKNOWN';
  const actualReason=allowed||b.result==='UNKNOWN'?b.reasonCode:actual;
- const x=await tx.appleCheckJob.update({where:{id:j.id},data:{phase:'DONE',result:actual,reasonCode:actualReason,cleanup:b.cleanup,observedAt:at,resultHash:fingerprint,appliedRevision,activeAccountId:b.cleanup==='OK'?null:j.accountId,activeWorkerId:b.cleanup==='OK'?null:workerId}});
+ const x=await tx.appleCheckJob.update({where:{id:j.id},data:{phase:'DONE',result:actual,reasonCode:actualReason,cleanup:b.cleanup,observedAt:at,resultHash:fingerprint,appliedRevision,activeAccountId:b.cleanup==='OK'?null:j.accountId,activeWorkerId:b.cleanup==='OK'?null:workerSlot(workerId,j.claimSlot)}});
  if(b.cleanup==='OK')await tx.proxyIP.updateMany({where:{id:j.proxyId??'',appleCheckLeaseJobId:j.id},data:{appleCheckLeaseJobId:null}});
- await tx.appleCheckWorker.update({where:{id:workerId},data:{state:b.cleanup==='FAILED'?'CLEANUP_FAILED':'IDLE',lastSeenAt:now()}});
+ await updateWorkerState(tx,workerId);
  await audit(tx,j.projectId,actorId,'APPLE_CHECK_RESULT',j.id,{accountId:j.accountId,result:actual,cleanup:b.cleanup,stale:!!a&&a.revision!==j.accountRevision,applied:appliedRevision!==null});
  return jobView(tx,x);
 }
