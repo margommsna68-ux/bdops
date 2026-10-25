@@ -16,3 +16,5 @@ Final-build visual check: four themes selected via Settings and verified on the 
 
 Backup before release: moneytohome-20261025-135201.dump; moon-01 encrypted and decryption verified, SHA256 2a4ee39d39e9a385ff9b5c9147d424e03519530a0990becd845c7c5cbeeb283e. Final production build chzpasdz1rCbuVAtoLJDH.
 Final regression: 197 files / 1058 tests pass. Typecheck clean; lint no new warning/error; build passes. Browser 11 functional + 4 final-build theme checks; 8 DB readback assertions.
+
+Production: f2bea5b deployed 25/10/2026 13:54:28 Bangkok, build chzpasdz1rCbuVAtoLJDH. Services running, public build manifest and health HTTP 200. Before/after identical: 0 requests / 678 VM / 149 login / 1465 proxy / 4 batch / 4 cost / 0 fund; snapshot hash 83e003e379d4e079335d178e46b61e0d1fc1b4e72b3b8098667432e462a3df8c. No migration, no production sample writes. Rollback D:/MoneyToHome/app-before-payout-selection-20261025.
