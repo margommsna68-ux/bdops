@@ -429,3 +429,8 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - Hai tỷ giá được lưu trong CostRecord.fxNote dạng JSON {version:1,kind:PAYPAL_VND,paypalVndRate,vndUsdtRate,reason}, cùng ảnh COST/lịch sử/hoàn tác hiện có; usdtRate là tỷ giá hiệu dụng để tương thích báo cáo cũ. Không cần migration. Nhập lại/đổi chế độ đơn giá-tổng/nháp không mất tỷ giá.
 - Quote của PPUSD là quote VND, token kiểm cùng user/project/rate và hạn10 phút. Sửa tỷ giá PayPal giữ quote VND; sửa tỷ giá VND/USDT bỏ quote; đổi đồng tiền bỏ cả hai. Không tự lấy tỷ giá mới lúc lưu, không đánh đồng USD PayPal=USDT.
 - Chi phí đã trừ trước khi team nhận vẫn giữ cả hai tỷ giá nếu nhập; không trừ hai lần. Lỗi/thiếu tỷ giá chặn lưu rõ tại form/backend.
+
+## Kho tài khoản — nguồn mua và tình trạng (25/10/2026)
+- Cột Nguồn mua thay PayPal của EarnApp trên bảng Gmail/Apple ID; lấy source của lô gắn tài khoản, thiếu hiện Chưa ghi nguồn. Không sửa liên kết PayPal hay dữ liệu lô.
+- Loại tài khoản hiển thị bằng icon G/Apple trước email (tooltip + tên hỗ trợ đọc màn hình), bỏ cột Loại riêng.
+- Check Apple ID: nhãn kết quả có màu theo nghĩa, giờ ở dòng phụ; Check/Lịch sử là thao tác nhỏ. Kết quả cũ không nhận màu Live; các quy tắc cấp tài khoản và worker giữ nguyên.

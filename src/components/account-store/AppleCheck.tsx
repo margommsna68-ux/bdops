@@ -108,14 +108,15 @@ export function AppleCheck({accountId,revision,disabled=false}:{accountId:string
   const notice=!worker?.enabled?'Worker chưa bật':worker.state==='CLEANUP_FAILED'?WORKER_STATE.CLEANUP_FAILED:!worker.online?WORKER_STATE.OFFLINE:['WAITING_DESKTOP','WAITING_RESOURCES'].includes(worker.state)?WORKER_STATE[worker.state]:null;
   const busy=checks.pending.has(accountId),retry=checks.retry.has(accountId);
   if(!checks.data)return <span className="pm-muted text-xs">{checks.error?'Không tải được Check Apple ID':'Đang tải Check Apple ID…'}</span>;
-  return <div className="mt-2 max-w-sm whitespace-normal space-y-1 text-xs" aria-label="Check Apple ID">
-    {checks.data.canCheck&&!disabled&&<button type="button" className="pm-button pm-button-quiet" disabled={busy||!!current||!!unavailable||checks.error} onClick={()=>void checks.request(accountId,revision)}>{busy?'Đang gửi…':retry?'Gửi lại yêu cầu':'Check Apple ID'}</button>}
-    {notice&&checks.data.canCheck&&<p className="pm-muted">{notice}</p>}
+  const tone=latest&&!latest.stale?(active(latest)?'ASSIGNED':['LOGIN_SUCCESS','LIVE_2FA'].includes(latest.result??'')?'NEW':['APPLE_LOCKED','INVALID_CREDENTIALS'].includes(latest.result??'')?'BLOCKED':'USED'):'USED';
+  return <div className="acc-check-cell" aria-label="Check Apple ID">
     {checks.error&&<p role="alert" className="pm-error">Không tải được trạng thái check mới nhất.</p>}
-    {!latest&&<p className="pm-muted">Chưa kiểm tra</p>}
-    {latest&&<div role="status"><span className={!latest.stale&&['LOGIN_SUCCESS','LIVE_2FA'].includes(latest.result??'')?'inline-flex rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800':undefined}>{latest.stale?'Cần kiểm tra lại · kết quả phiên bản cũ':latest.cancelRequested&&active(latest)?'Đang chờ huỷ':jobStatus(latest,worker??null)}</span>{' · '}<time className="pm-muted" dateTime={latest.observedAt??latest.createdAt}>{when(latest.observedAt??latest.createdAt)}</time></div>}
+    {!latest&&<span className="acc-state USED">Chưa kiểm tra</span>}
+    {latest&&<div role="status"><span className={'acc-state acc-check-result '+tone}>{latest.stale?'Cần kiểm tra lại · kết quả phiên bản cũ':latest.cancelRequested&&active(latest)?'Đang chờ huỷ':jobStatus(latest,worker??null)}</span><time className="pm-muted acc-check-time" dateTime={latest.observedAt??latest.createdAt}>{when(latest.observedAt??latest.createdAt)}</time></div>}
     {checks.errors[accountId]&&<p role="alert" className="pm-error">{checks.errors[accountId]}</p>}
-    {!!jobs.length&&<button type="button" className="pm-link" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'Ẩn lịch sử check':`Lịch sử check (${jobs.length})`}</button>}
+    <div className="acc-check-actions">{checks.data.canCheck&&!disabled&&<button type="button" className="pm-link" title={notice??'Kiểm tra đăng nhập Apple ID'} disabled={busy||!!current||!!unavailable||checks.error} onClick={()=>void checks.request(accountId,revision)}>{busy?'Đang gửi…':retry?'Gửi lại yêu cầu':'Check Apple ID'}</button>}
+    {!!jobs.length&&<button type="button" className="pm-link" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'Ẩn lịch sử check':`Lịch sử check (${jobs.length})`}</button>}</div>
+    {notice&&checks.data.canCheck&&<p className="pm-muted">{notice}</p>}
     {expanded&&<ol className="space-y-2 border-l pl-2">{jobs.map(job=><li key={job.id} className="break-words space-y-1">
       <div>{jobStatus(job,worker??null)}{job.stale?' · Phiên bản cũ (chỉ lịch sử)':''}</div>
       <time className="pm-muted" dateTime={job.observedAt??job.createdAt}>{when(job.observedAt??job.createdAt)}</time>

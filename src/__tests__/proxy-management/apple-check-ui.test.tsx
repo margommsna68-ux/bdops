@@ -72,13 +72,13 @@ it.each([
 ])('displays the distinct %s outcome in the cell and history',async(result,label)=>{
   data.jobs=[{...job,phase:'DONE',result,reasonCode:result,cleanup:'OK'}];await render();
   expect(host.querySelector('[role="status"] > span')?.textContent).toBe(label);
-  if(['LIVE_2FA','LOGIN_SUCCESS'].includes(result))expect(host.querySelector('[role="status"] > span')?.className).toMatch(/green/);
+  if(['LIVE_2FA','LOGIN_SUCCESS'].includes(result))expect(host.querySelector('[role="status"] > span')?.className).toMatch(/\bNEW\b/);
   else expect(host.querySelector('[role="status"]')?.textContent).not.toContain('Live');
   await click(button('Lịch sử check (1)'));expect(host.querySelector('ol')?.textContent).toContain(label);
 });
 it.each(['LOGIN_SUCCESS','LIVE_2FA'])('keeps stale %s out of the current Live status and green pill',async(result)=>{
   data.jobs=[{...job,phase:'DONE',result,reasonCode:result,cleanup:'OK',stale:true}];await render();
-  const status=host.querySelector('[role="status"]')!;expect(status.querySelector('span')?.textContent).toBe('Cần kiểm tra lại · kết quả phiên bản cũ');expect(status.textContent).not.toContain('Live');expect(status.querySelector('[class*="green"]')).toBeNull();
+  const status=host.querySelector('[role="status"]')!;expect(status.querySelector('span')?.textContent).toBe('Cần kiểm tra lại · kết quả phiên bản cũ');expect(status.textContent).not.toContain('Live');expect(status.querySelector('.acc-state.NEW')).toBeNull();
   await click(button('Lịch sử check (1)'));expect(host.querySelector('ol')?.textContent).toContain('Phiên bản cũ (chỉ lịch sử)');
 });
 it.each([
