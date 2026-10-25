@@ -7,10 +7,16 @@ export function officialUrl(value){
   try{const u=new URL(value);return ORIGINS.has(u.origin)&&!u.username&&!u.password&&!/(?:otp|captcha|verify|recovery|iforgot)(?:[/?#]|$)/i.test(u.pathname);}catch{return false;}
 }
 export function interpretEvidence(e,email){
-  if(e.challenge)return {result:'CHALLENGE_REQUIRED',explicit:true};
+  if(e.captcha)return {result:'CHALLENGE_REQUIRED',explicit:true};
+  if(Array.isArray(e.alerts))for(const alert of e.alerts){
+    const checked=interpretEvidence({...e,alerts:undefined,alert,twoFactor:false,challenge:false},email);
+    if(['APPLE_LOCKED','INVALID_CREDENTIALS'].includes(checked.result))return checked;
+  }
   const alert=typeof e.alert==='string'?e.alert.trim().replaceAll('’',"'").replace(/\.$/,''):'';
   if(["Your Apple Account has been locked for security reasons","This Apple Account has been locked for security reasons","This Apple ID has been locked for security reasons","This Apple Account has been disabled for security reasons","You can't sign in because your account was disabled for security reasons","This Apple Account is locked and can't be used","This Apple Account is not active","Your Apple Account is not active"].includes(alert))return {result:'APPLE_LOCKED',explicit:true};
   if(['Your Apple Account or password was incorrect.','Your Apple ID or password was incorrect.'].includes(e.alert))return {result:'INVALID_CREDENTIALS',explicit:true};
+  if(e.twoFactor&&e.passwordSubmitted&&officialUrl(e.url))return {result:'LIVE_2FA',explicit:true};
+  if(e.challenge)return {result:'CHALLENGE_REQUIRED',explicit:true};
   let url;try{url=new URL(e.url);}catch{}
   const matches=value=>typeof value==='string'&&value.trim().toLowerCase()===email.trim().toLowerCase();
   if(url?.origin==='https://account.apple.com'&&/^\/account\/manage(?:\/|$)/.test(url.pathname)&&e.signedOutControl===true&&matches(e.identity)&&matches(e.apiIdentity))return {result:'LOGIN_SUCCESS',authenticated:true,identity:e.identity};
@@ -92,13 +98,15 @@ class CloakSession {
     throw new Error('ROUTE_FORM_NOT_READY');
   }
   async evidence(email){
-    const state={url:this.page.url(),alert:'',challenge:false,apiIdentity:this.authenticatedIdentity,signedOutControl:false,identity:null};
+    const state={url:this.page.url(),alerts:[],challenge:false,twoFactor:false,captcha:false,passwordSubmitted:this.passwordSubmitted===true,apiIdentity:this.authenticatedIdentity,signedOutControl:false,identity:null};
     if(!officialUrl(state.url))return {result:'UNKNOWN'};
     for(const frame of this.page.frames()){
       if(!officialUrl(frame.url()))continue;
-      const visible=async selector=>{const l=frame.locator(selector);return await l.count()===1&&await l.isVisible();};
-      if(await visible('input[autocomplete="one-time-code"]')||await visible('iframe[title*="CAPTCHA" i]')||await visible('[data-testid="captcha"]'))state.challenge=true;
-      if(await visible('[role="alert"]'))state.alert=(await frame.locator('[role="alert"]').innerText()).trim();
+        const anyVisible=async selector=>{const list=frame.locator(selector);for(let i=0;i<await list.count();i++)if(await list.nth(i).isVisible())return true;return false;};
+      if(await anyVisible('input[autocomplete="one-time-code"], input.form-security-code-input, input[id^="char"]'))state.twoFactor=true;
+      if(await anyVisible('iframe[title*="CAPTCHA" i]')||await anyVisible('[data-testid="captcha"]'))state.captcha=true;
+      state.challenge=state.twoFactor||state.captcha;
+      const alerts=frame.locator('[role="alert"]');for(let i=0;i<await alerts.count();i++)if(await alerts.nth(i).isVisible())state.alerts.push((await alerts.nth(i).innerText()).trim());
       if(new URL(frame.url()).origin==='https://account.apple.com'){
         const signout=frame.locator('a.ac-localnav-action, button.ac-localnav-action');
         for(let i=0;i<await signout.count();i++){
@@ -123,26 +131,32 @@ class CloakSession {
   }
   async submit({email,password},{signal}){
     if(!this.probed||this.submitted)throw new Error('SUBMIT_ONCE');this.submitted=true;signal?.throwIfAborted();
+    let operation='EMAIL_ENTRY_FAILED';
+    try {
     let evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;
-    const account=await this.find('#account_name_text_field');if(!account)return {result:'UNKNOWN'};
+    const account=await this.find('#account_name_text_field');if(!account)return {result:'UNKNOWN',reasonCode:'EMAIL_FORM_MISSING'};
     signal?.throwIfAborted();await account.fill(email);
     let pw=await this.find('#password_text_field');
-    if(!pw){const next=await this.find('#sign-in');if(!next)return {result:'UNKNOWN'};
+    if(!pw){const next=await this.find('#sign-in');if(!next)return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
       signal?.throwIfAborted();await next.click({noWaitAfter:true});
       // Wait for the next phase without clicking again or fetching any challenge link.
       const until=Date.now()+this.config.timeoutMs;
       while(Date.now()<until){signal?.throwIfAborted();evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;
         pw=await this.find('#password_text_field');if(pw)break;await delay(200,undefined,signal?{signal}:{});}
     }
-    if(!pw)return {result:'UNKNOWN'};
+    if(!pw)return {result:'UNKNOWN',reasonCode:'PASSWORD_FORM_MISSING'};
     evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;
-    const button=await this.find('#sign-in');if(!button)return {result:'UNKNOWN'};
+    const button=await this.find('#sign-in');if(!button)return {result:'UNKNOWN',reasonCode:'SUBMIT_BUTTON_MISSING'};
+    operation='PASSWORD_SUBMIT_FAILED';
     signal?.throwIfAborted();await pw.fill(password);signal?.throwIfAborted();
     // Exactly one password-bearing submit, never a retry on navigation or network error.
+    this.passwordSubmitted=true;
     await button.click({noWaitAfter:true});
+    operation='RESPONSE_READ_FAILED';
     const until=Date.now()+this.config.resultWaitMs;
     while(Date.now()<until){signal?.throwIfAborted();evidence=await this.evidence(email);if(evidence.result!=='UNKNOWN')return evidence;await delay(250,undefined,signal?{signal}:{});}
-    return {result:'UNKNOWN'};
+    return {result:'UNKNOWN',reasonCode:'RESPONSE_UNRECOGNIZED'};
+    }catch(error){signal?.throwIfAborted();return {result:'UNKNOWN',reasonCode:operation};}
   }
   async close(){
     this.closing=true;this.signal?.removeEventListener('abort',this.onAbort);

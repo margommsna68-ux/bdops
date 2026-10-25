@@ -2,12 +2,12 @@ import React,{act} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn(),importPanel:vi.fn(),draftOpen:false,appleOverview:vi.fn(),appleRequest:vi.fn(),storeQuery:vi.fn()}));
+const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn(),importPanel:vi.fn(),draftOpen:false,appleOverview:vi.fn(),appleRequest:vi.fn(),appleBatch:vi.fn(),storeQuery:vi.fn()}));
 vi.mock('next/navigation',()=>({usePathname:()=>'/gmails',useSearchParams:()=>new URLSearchParams(mock.query),useRouter:()=>({push:mock.push,replace:mock.replace})}));
 vi.mock('next/link',()=>({default:({children,href,...props}:any)=><a href={href} {...props}>{children}</a>}));
 vi.mock('@/lib/trpc',()=>{const mutation=()=>({useMutation:()=>({isLoading:false,mutateAsync:mock.status})});return {trpc:{
   useUtils:()=>({accountStore:{invalidate:vi.fn()},businessManagement:{invalidate:vi.fn()},appleCheck:{overview:{invalidate:vi.fn()}}}),
-  appleCheck:{overview:{useQuery:mock.appleOverview},request:{useMutation:()=>({mutateAsync:mock.appleRequest})},cancel:mutation()},
+  appleCheck:{overview:{useQuery:mock.appleOverview},request:{useMutation:()=>({mutateAsync:mock.appleRequest})},requestBatch:{useMutation:()=>({mutateAsync:mock.appleBatch})},cancel:mutation()},
   user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},
   accountStore:{store:{useQuery:()=>{mock.storeQuery();return {data:mock.data,isLoading:false};}},setStatus:mutation(),deleteStock:mutation(),restoreStock:mutation(),setNote:mutation(),updateLogin:mutation(),batchCost:mutation()},
   proxyManagement:{undo:mutation()},businessManagement:{copyAccount:mutation()},
@@ -28,6 +28,7 @@ beforeEach(async()=>{
   host=document.createElement('div');document.body.appendChild(host);const {createRoot}=await import('react-dom/client');root=createRoot(host);
   mock.query='';mock.push.mockReset();mock.replace.mockReset();mock.status.mockReset();mock.status.mockResolvedValue({rows:[],applied:1});mock.draftOpen=false;mock.importPanel.mockReset();mock.importPanel.mockReturnValue(null);
   mock.storeQuery.mockReset();mock.appleOverview.mockReset();mock.appleOverview.mockReturnValue({data:{canManage:false,canCheck:true,groups:[],worker:{id:'w',name:'Central',enabled:true,online:true,state:'IDLE',proxyGroupId:'g',lastSeenAt:null},jobs:[]}});mock.appleRequest.mockReset();mock.appleRequest.mockResolvedValue({id:'j',accountId:'apple',accountRevision:3,phase:'QUEUED',result:null,createdAt:'2026-10-25T02:00:00Z',observedAt:null,stale:false,cancelRequested:false,cleanup:null,reasonCode:null});
+  mock.appleBatch.mockReset();mock.appleBatch.mockImplementation(async({accounts}:any)=>({jobs:accounts.map((a:any)=>({id:'j-'+a.accountId,accountId:a.accountId,accountRevision:a.expectedRevision,phase:'QUEUED',result:null,createdAt:'2026-10-25T02:00:00Z',observedAt:null,stale:false,cancelRequested:false,cleanup:null,reasonCode:null}))}));
   const navigate=(href:string)=>{mock.query=href.split('?')[1]||'';window.history.pushState({},'',href);};mock.push.mockImplementation(navigate);mock.replace.mockImplementation(navigate);
   mock.data={rights:{logins:true,paypals:true,writeLogins:true,writePaypals:false,admin:false,copy:false,money:false,writeCosts:false},logins:[row('normal'),row('apple','APPLE_LOCKED','APPLE_ID',{loginIssueNote:'Apple account locked on sign in',loginIssueAt:'2026-10-24T03:00:00Z'}),row('verify','GOOGLE_VERIFY','GMAIL',{loginIssueNote:'Verification requested',loginIssueAt:'2026-10-24T06:00:00Z'}),row('disabled','GOOGLE_DISABLED')],paypals:[{id:'pp',code:'PP-TEST',state:'NEW',batch:null,notes:null,emails:[]}],batches:[],review:[]};
 });
@@ -42,6 +43,66 @@ it('offers a check only in Apple rows through one shared overview and keeps Lock
   const checks=host.querySelectorAll('button');const check=Array.from(checks).filter(b=>b.textContent==='Check Apple ID');expect(check).toHaveLength(1);expect(check[0].closest('tr')?.getAttribute('data-account-id')).toBe('apple');
   await click(check[0]);expect(mock.appleRequest.mock.calls[0][0]).toMatchObject({projectId:'local-issue-project',accountId:'apple',expectedRevision:3});expect(mock.status).not.toHaveBeenCalled();
   await change(select('Lọc tình trạng đăng nhập'),'APPLE_LOCKED');expect(ids()).toEqual(['apple']);
+});
+const batchButton=()=>host.querySelector<HTMLButtonElement>('button[aria-label="Check Apple ID đã chọn"]')!;
+const choose=async(id:string)=>click(host.querySelector<HTMLInputElement>(`input[aria-label="Chọn ${id}@example.invalid"]`)!);
+it('places check metadata in its own account-status column and the bulk action above the table',async()=>{
+  await render();const headers=Array.from(host.querySelectorAll('thead th')).map(th=>th.textContent),column=headers.indexOf('Tình trạng acc');
+  expect(column).toBeGreaterThan(-1);const apple=host.querySelector('tr[data-account-id="apple"]')!;
+  expect(apple.children[column].querySelector('[aria-label="Check Apple ID"]')).not.toBeNull();expect(apple.children[1].textContent).not.toContain('Chưa kiểm tra');
+  expect(host.querySelector('tr[data-account-id="normal"]')!.children[column].textContent).toBe('—');
+  expect(batchButton()).not.toBeNull();expect(batchButton().closest('table')).toBeNull();expect(batchButton().compareDocumentPosition(host.querySelector('table')!)&dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(host.textContent).toContain('tối đa 5 mỗi đợt, lần lượt');expect(batchButton().disabled).toBe(true);
+});
+it('submits exactly five selected accounts with revisions in one batch and suppresses rapid double clicks',async()=>{
+  mock.data.logins=Array.from({length:6},(_,i)=>row('a'+i,'ACTIVE','APPLE_ID',{revision:i+10}));await render();
+  for(let i=0;i<5;i++)await choose('a'+i);
+  const b=batchButton();await act(async()=>{b.click();b.click();});
+  expect(mock.appleBatch).toHaveBeenCalledTimes(1);expect(mock.appleRequest).not.toHaveBeenCalled();
+  expect(mock.appleBatch.mock.calls[0][0]).toEqual({projectId:'local-issue-project',accounts:Array.from({length:5},(_,i)=>({accountId:'a'+i,expectedRevision:i+10,key:expect.any(String)}))});
+  expect(host.querySelector('tr[data-account-id="a5"]')?.textContent).toContain('Chưa kiểm tra');expect(batchButton().disabled).toBe(true);
+});
+it('rejects six selected accounts explicitly without truncating or sending requests',async()=>{
+  mock.data.logins=Array.from({length:6},(_,i)=>row('a'+i,'ACTIVE','APPLE_ID'));await render();for(let i=0;i<6;i++)await choose('a'+i);
+  await click(batchButton());expect(host.querySelector('[role="alert"]')?.textContent).toContain('Tối đa 5 Apple ID mỗi đợt');expect(mock.appleBatch).not.toHaveBeenCalled();expect(mock.appleRequest).not.toHaveBeenCalled();
+});
+it('rejects a mixed selection rather than silently dropping Gmail rows',async()=>{
+  await render();await choose('apple');await choose('normal');await click(batchButton());
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Chỉ chọn tài khoản Apple ID');expect(mock.appleBatch).not.toHaveBeenCalled();
+});
+it('retries an uncertain batch only on click using the exact same payload and keys',async()=>{
+  mock.appleBatch.mockRejectedValueOnce(Error('Lost response'));await render();await choose('apple');await click(batchButton());
+  expect(mock.appleBatch).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('Chưa rõ yêu cầu');await click(batchButton());
+  expect(mock.appleBatch).toHaveBeenCalledTimes(2);expect(mock.appleBatch.mock.calls[1][0]).toEqual(mock.appleBatch.mock.calls[0][0]);
+});
+it('does not offer a bulk check for deleted stock, PayPal, or users without check rights',async()=>{
+  mock.query='state=DELETED';await render();expect(batchButton()).toBeNull();
+  mock.query='tab=paypal';await render();expect(batchButton()).toBeNull();
+  mock.query='';mock.appleOverview.mockReturnValue({data:{canManage:false,canCheck:false,groups:[],worker:null,jobs:[]}});await render();expect(batchButton()).toBeNull();
+});
+it.each([
+  {enabled:false,online:false,state:'OFFLINE',disabled:true},
+  {enabled:true,online:true,state:'CLEANUP_FAILED',disabled:true},
+  {enabled:true,online:false,state:'OFFLINE',disabled:false},
+  {enabled:true,online:true,state:'WAITING_DESKTOP',disabled:false},
+])('respects bulk worker availability: $state enabled=$enabled',async({disabled,...worker})=>{
+  Object.assign(mock.appleOverview.getMockImplementation()!().data.worker,worker);await render();await choose('apple');expect(batchButton().disabled).toBe(disabled);
+  await click(batchButton());expect(mock.appleBatch).toHaveBeenCalledTimes(disabled?0:1);
+});
+it('fails closed for bulk checks when the overview errors',async()=>{
+  const overview=mock.appleOverview.getMockImplementation()!();mock.appleOverview.mockReturnValue({...overview,error:Error('Offline')});
+  await render();await choose('apple');expect(batchButton().disabled).toBe(true);await click(batchButton());expect(mock.appleBatch).not.toHaveBeenCalled();
+});
+it('uses selections across pages and rejects a sixth account on another page',async()=>{
+  mock.data.logins=Array.from({length:101},(_,i)=>row('a'+i,'ACTIVE','APPLE_ID'));await render();for(let i=0;i<5;i++)await choose('a'+i);
+  await click(host.querySelector('[aria-label="Trang sau"]')!);await choose('a100');await click(batchButton());
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Tối đa 5 Apple ID mỗi đợt');expect(mock.appleBatch).not.toHaveBeenCalled();
+  await choose('a100');await click(batchButton());expect(mock.appleBatch.mock.calls[0][0].accounts.map((a:any)=>a.accountId)).toEqual(['a0','a1','a2','a3','a4']);
+});
+it('keeps uncertain batch revisions stable and creates new keys after a definite rejection',async()=>{
+  mock.appleBatch.mockRejectedValueOnce(Error('Lost response')).mockRejectedValueOnce({data:{code:'CONFLICT'}});await render();await choose('apple');await click(batchButton());const first=mock.appleBatch.mock.calls[0][0];
+  mock.data.logins.find((l:any)=>l.id==='apple').revision=9;await render();await click(batchButton());expect(mock.appleBatch.mock.calls[1][0]).toEqual(first);
+  expect(host.textContent).toContain('Yêu cầu bị từ chối');await click(batchButton());expect(mock.appleBatch.mock.calls[2][0].accounts[0]).toMatchObject({accountId:'apple',expectedRevision:9});expect(mock.appleBatch.mock.calls[2][0].accounts[0].key).not.toBe(first.accounts[0].key);
 });
 it('renders coloured issue labels, compact reason/time, and only type-valid issue choices per individual account',async()=>{
   await render();

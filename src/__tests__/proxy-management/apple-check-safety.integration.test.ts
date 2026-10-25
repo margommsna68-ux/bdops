@@ -4,7 +4,8 @@ import {businessDB as db, businessFixture} from './business-fixture';
 import {freeTestNet} from './db-fixture';
 import {encrypt} from '@/lib/encryption';
 import {appleWorkerHttp} from '@/server/apple-check/http';
-import {configureWorker, disableWorker, readChecks, requestCheck, workerAction} from '@/server/apple-check/service';
+import {configureWorker, disableWorker, readChecks, requestCheck, requestCheckBatch, workerAction} from '@/server/apple-check/service';
+import {appleCheckRouter} from '@/server/routers/appleCheck';
 import {planAutoLinks} from '@/server/account-store/links';
 import {listAiAccounts} from '@/server/ops-api/ai-accounts';
 
@@ -77,6 +78,95 @@ async function setup() {
 }
 
 describe('Apple check backend and HTTP safety',()=>{
+  it.each(['ACTIVE','APPLE_LOCKED'] as const)('records submitted LIVE_2FA without changing account health %s or VM data',async(status)=>{
+    const f=await setup();Object.assign(f.account,await db.gmailAccount.update({where:{id:f.account.id},data:{status}}));
+    const account=await db.gmailAccount.findUniqueOrThrow({where:{id:f.account.id}}),vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});
+    const b=await f.lease();await f.call('route',b);await f.call('submit',b);
+    const body={...b,result:'LIVE_2FA',reasonCode:'LIVE_2FA',cleanup:'OK',observedAt:new Date().toISOString()};
+    const result=await f.http('result',body);expect(result.status).toBe(200);expect(result.json.data).toMatchObject({result:'LIVE_2FA',reasonCode:'LIVE_2FA',stale:false});f.noSecrets(result.json);
+    expect((await f.http('result',body)).json).toEqual(result.json);
+    expect(await db.gmailAccount.findUniqueOrThrow({where:{id:f.account.id}})).toEqual(account);
+    expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).toEqual(vm);
+  });
+
+  it('refuses LIVE_2FA before submittedAt even after route secret delivery',async()=>{
+    const f=await setup(),b=await f.lease();
+    const body={...b,result:'LIVE_2FA',reasonCode:'LIVE_2FA',cleanup:'OK',observedAt:new Date().toISOString()};
+    expect((await f.http('result',body)).status).toBe(422);await f.call('route',b);
+    expect((await f.http('result',body)).status).toBe(422);
+    expect(await db.appleCheckJob.findUniqueOrThrow({where:{id:b.jobId}})).toMatchObject({phase:'CLAIMED',submittedAt:null,resultHash:null});
+    await f.call('submit',b);expect((await f.http('result',body)).status).toBe(200);
+  });
+
+  it.each(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED'])('preserves UNKNOWN diagnostic %s and exact terminal replay',async(reasonCode)=>{
+    const f=await setup(),b=await f.lease();await f.call('route',b);await f.call('submit',b);
+    const body={...b,result:'UNKNOWN',reasonCode,cleanup:'OK',observedAt:new Date().toISOString()};
+    const result=await f.http('result',body);expect(result.status).toBe(200);expect(result.json.data).toMatchObject({result:'UNKNOWN',reasonCode});f.noSecrets(result.json);
+    await db.gmailAccount.update({where:{id:f.account.id},data:{revision:{increment:1}}});await disableWorker(f.scope,db);
+    expect((await f.http('result',body)).json.data).toMatchObject({id:b.jobId,result:'UNKNOWN',reasonCode,stale:true});
+    expect((await f.http('result',{...body,reasonCode:'UNKNOWN'})).status).toBe(409);
+  });
+
+  it('refuses diagnostic codes for every non-UNKNOWN outcome and rejects arbitrary reason text',async()=>{
+    const f=await setup(),b=await f.lease();await f.call('route',b);await f.call('submit',b);
+    for(const result of ['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','CANCELLED']){
+      for(const reasonCode of ['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED'])
+        expect((await f.http('result',{...b,result,reasonCode,cleanup:'OK',observedAt:new Date().toISOString()})).status).toBe(422);
+    }
+    const invalid=await f.http('result',{...b,result:'UNKNOWN',reasonCode:'free text '+accountPassword,cleanup:'OK',observedAt:new Date().toISOString()});
+    expect(invalid.status).toBe(422);f.noSecrets(invalid.json);
+    expect((await db.appleCheckJob.findUniqueOrThrow({where:{id:b.jobId}})).resultHash).toBeNull();
+  });
+
+  it('queues five accounts in input order and replays per-account keys without duplicate effects',async()=>{
+    const f=await setup();const accounts=[f.account];
+    for(let i=1;i<5;i++)accounts.push(await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',loginType:'APPLE_ID',password:encrypt(accountPassword)}}));
+    const input={accounts:accounts.map(a=>({accountId:a.id,expectedRevision:a.revision,key:randomUUID()}))};
+    const first=await requestCheckBatch(f.scope,input,db);
+    expect(first.jobs.map(j=>j.accountId)).toEqual(accounts.map(a=>a.id));expect(first.jobs).toHaveLength(5);
+    expect(await requestCheckBatch(f.scope,input,db)).toEqual(first);
+    expect((await requestCheckBatch(f.scope,{accounts:input.accounts.map(a=>({...a,key:randomUUID()}))},db)).jobs.map(j=>j.id)).toEqual(first.jobs.map(j=>j.id));
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId}})).toBe(5);
+    expect(await db.appleCheckRequest.count({where:{projectId:f.scope.projectId}})).toBe(10);
+    expect(await db.auditLog.count({where:{projectId:f.scope.projectId,action:'APPLE_CHECK_REQUEST'}})).toBe(5);
+    f.noSecrets(first);
+  });
+
+  it('enforces 1–5 input items at service and protected router before any request effects',async()=>{
+    const f=await setup(),item={accountId:f.account.id,expectedRevision:f.account.revision,key:randomUUID()};
+    const caller=appleCheckRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'} as any});
+    for(const accounts of [[],Array.from({length:6},()=>({...item}))]){
+      await expect(requestCheckBatch(f.scope,{accounts},db)).rejects.toThrow();
+      await expect(caller.requestBatch({projectId:f.scope.projectId,accounts})).rejects.toMatchObject({code:'BAD_REQUEST'});
+    }
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId}})).toBe(0);
+    const result=await caller.requestBatch({projectId:f.scope.projectId,accounts:[item,item]});
+    expect(result.jobs).toHaveLength(2);expect(result.jobs[0].id).toBe(result.jobs[1].id);
+    expect(await db.appleCheckRequest.count({where:{projectId:f.scope.projectId}})).toBe(1);
+  });
+
+  it('rolls the whole batch back on a stale revision or cross-account key conflict',async()=>{
+    const f=await setup();const other=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',loginType:'APPLE_ID',password:encrypt(accountPassword)}});
+    for(const conflict of ['revision','key']){
+      const key=randomUUID();const accounts=[{accountId:f.account.id,expectedRevision:f.account.revision,key},{accountId:other.id,expectedRevision:other.revision+(conflict==='revision'?1:0),key:conflict==='key'?key:randomUUID()}];
+      await expect(requestCheckBatch(f.scope,{accounts},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId}})).toBe(0);
+      expect(await db.appleCheckRequest.count({where:{projectId:f.scope.projectId}})).toBe(0);
+      expect(await db.auditLog.count({where:{projectId:f.scope.projectId,action:'APPLE_CHECK_REQUEST'}})).toBe(0);
+    }
+  });
+
+  it('keeps batch permission, project, disabled-worker and cooldown rules identical to single requests',async()=>{
+    const f=await setup(),input={accounts:[{accountId:f.account.id,expectedRevision:f.account.revision,key:randomUUID()}]};
+    await expect(requestCheckBatch(f.worker,input,db)).rejects.toMatchObject({code:'FORBIDDEN'});
+    await expect(requestCheckBatch(f.scope,{accounts:[input.accounts[0],{accountId:randomUUID(),expectedRevision:0,key:randomUUID()}]},db)).rejects.toMatchObject({code:'NOT_FOUND'});
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId}})).toBe(0);
+    await disableWorker(f.scope,db);await expect(requestCheckBatch(f.scope,input,db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    await db.appleCheckWorker.update({where:{id:f.cfg.workerId},data:{enabled:true}});
+    const b=await f.lease();await f.call('route',b);await f.call('submit',b);await f.result(b,'UNKNOWN');
+    await expect(requestCheckBatch(f.scope,input,db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+  });
+
   it('removes a Locked login from both auto-link stock and AI candidates without mutating VM bindings',async()=>{
     const f = await setup();
     const input = {vmIds:[f.vm.id],loginType:'APPLE_ID' as const,withPaypal:false};

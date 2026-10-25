@@ -41,6 +41,21 @@ test('probe failure never reveals account secrets',async()=>{
   const f=await fixture({probeFail:true});await f.worker.once();assert.equal(f.secretCalls,0);assert.equal(f.submissions,0);
   assert.equal(f.calls.find(x=>x.action==='result').body.result,'PROXY_ERROR');
 });
+
+test('secret-delivery transport failure is distinct from browser failure and never repeated',async()=>{
+ const f=await fixture({api:async(action)=>{
+  if(action==='heartbeat')return {enabled:true};if(action==='claim')return {job:{id:'j1',leaseToken:'lease-secret',accountId:'a1',accountRevision:1}};
+  if(action==='heartbeat-job')return {};if(action==='route')return {proxy:{}};if(action==='submit')throw Error('private failure');if(action==='result')return {};
+ }});await f.worker.once();assert.equal(f.calls.find(x=>x.action==='result').body.reasonCode,'CREDENTIAL_DELIVERY_FAILED');assert.equal(f.calls.filter(x=>x.action==='submit').length,1);
+});
+
+test('post-password 2FA is reported Live and UNKNOWN preserves only safe diagnostic codes',async()=>{
+  for(const outcome of [{result:'LIVE_2FA',explicit:true},{result:'UNKNOWN',reasonCode:'PASSWORD_FORM_MISSING'},{result:'UNKNOWN',reasonCode:'password-secret'}]){
+    const f=await fixture({outcome});await f.worker.once();const report=f.calls.find(x=>x.action==='result').body;
+    assert.equal(report.result,outcome.result);
+    assert.equal(report.reasonCode,outcome.result==='LIVE_2FA'?'LIVE_2FA':outcome.reasonCode==='PASSWORD_FORM_MISSING'?'PASSWORD_FORM_MISSING':'UNKNOWN');
+  }
+});
 test('success without authenticated matching identity is UNKNOWN',async()=>{
   for(const outcome of [{result:'LOGIN_SUCCESS',authenticated:true,identity:'other@example.test'},{result:'LOGIN_SUCCESS',identity:'one@example.test'},{}]){
     const f=await fixture({outcome});await f.worker.once();assert.equal(f.calls.find(x=>x.action==='result').body.result,'UNKNOWN');

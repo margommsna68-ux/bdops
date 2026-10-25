@@ -2,8 +2,8 @@ import React,{act} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-const mock=vi.hoisted(()=>({overview:vi.fn(),request:vi.fn(),cancel:vi.fn(),configure:vi.fn(),disable:vi.fn(),invalidate:vi.fn(),reset:vi.fn(),unlocked:true}));
-vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({appleCheck:{overview:{invalidate:mock.invalidate}},accountStore:{invalidate:mock.invalidate}}),user:{securityStatus:{useQuery:()=>({data:{unlocked:mock.unlocked,totpEnabled:true}})}},appleCheck:{overview:{useQuery:mock.overview},request:{useMutation:()=>({mutateAsync:mock.request,isLoading:false})},cancel:{useMutation:()=>({mutateAsync:mock.cancel,isLoading:false})},configure:{useMutation:()=>({mutateAsync:mock.configure,isLoading:false,reset:mock.reset})},disable:{useMutation:()=>({mutateAsync:mock.disable,isLoading:false})}}}}));
+const mock=vi.hoisted(()=>({overview:vi.fn(),request:vi.fn(),batch:vi.fn(),cancel:vi.fn(),configure:vi.fn(),disable:vi.fn(),invalidate:vi.fn(),reset:vi.fn(),unlocked:true}));
+vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({appleCheck:{overview:{invalidate:mock.invalidate}},accountStore:{invalidate:mock.invalidate}}),user:{securityStatus:{useQuery:()=>({data:{unlocked:mock.unlocked,totpEnabled:true}})}},appleCheck:{overview:{useQuery:mock.overview},request:{useMutation:()=>({mutateAsync:mock.request,isLoading:false})},requestBatch:{useMutation:()=>({mutateAsync:mock.batch})},cancel:{useMutation:()=>({mutateAsync:mock.cancel,isLoading:false})},configure:{useMutation:()=>({mutateAsync:mock.configure,isLoading:false,reset:mock.reset})},disable:{useMutation:()=>({mutateAsync:mock.disable,isLoading:false})}}}}));
 vi.mock('react-hot-toast',()=>({default:{success:vi.fn(),error:vi.fn()}}));
 import {AppleCheckProvider,AppleCheck,AppleCheckConfiguration} from '@/components/account-store/AppleCheck';
 const job={id:'job-1',accountId:'apple',accountRevision:3,phase:'QUEUED',result:null as string|null,reasonCode:null as string|null,cleanup:null as string|null,createdAt:'2026-10-25T02:00:00Z',observedAt:null as string|null,stale:false,cancelRequested:false};
@@ -63,6 +63,40 @@ it('marks the latest stale outcome as needing another check',async()=>{
   data.jobs=[{...job,phase:'DONE',result:'LOGIN_SUCCESS',cleanup:'OK',stale:true}];await render();
   expect(host.querySelector('[role="status"]')?.textContent).toContain('Cần kiểm tra lại · kết quả phiên bản cũ');
 });
+it.each([
+  ['LOGIN_SUCCESS','Live đăng nhập'],
+  ['LIVE_2FA','Live · yêu cầu 2FA'],
+  ['APPLE_LOCKED','Locked'],
+  ['INVALID_CREDENTIALS','Sai mật khẩu'],
+  ['CHALLENGE_REQUIRED','Cần xác minh · đã dừng'],
+])('displays the distinct %s outcome in the cell and history',async(result,label)=>{
+  data.jobs=[{...job,phase:'DONE',result,reasonCode:result,cleanup:'OK'}];await render();
+  expect(host.querySelector('[role="status"] > span')?.textContent).toBe(label);
+  if(['LIVE_2FA','LOGIN_SUCCESS'].includes(result))expect(host.querySelector('[role="status"] > span')?.className).toMatch(/green/);
+  else expect(host.querySelector('[role="status"]')?.textContent).not.toContain('Live');
+  await click(button('Lịch sử check (1)'));expect(host.querySelector('ol')?.textContent).toContain(label);
+});
+it.each(['LOGIN_SUCCESS','LIVE_2FA'])('keeps stale %s out of the current Live status and green pill',async(result)=>{
+  data.jobs=[{...job,phase:'DONE',result,reasonCode:result,cleanup:'OK',stale:true}];await render();
+  const status=host.querySelector('[role="status"]')!;expect(status.querySelector('span')?.textContent).toBe('Cần kiểm tra lại · kết quả phiên bản cũ');expect(status.textContent).not.toContain('Live');expect(status.querySelector('[class*="green"]')).toBeNull();
+  await click(button('Lịch sử check (1)'));expect(host.querySelector('ol')?.textContent).toContain('Phiên bản cũ (chỉ lịch sử)');
+});
+it.each([
+  ['EMAIL_FORM_MISSING','Không tìm thấy ô email'],
+  ['PASSWORD_FORM_MISSING','Không tìm thấy ô mật khẩu'],
+  ['SUBMIT_BUTTON_MISSING','Không tìm thấy nút đăng nhập'],
+  ['RESPONSE_UNRECOGNIZED','Không nhận diện được phản hồi'],
+  ['BROWSER_INTERRUPTED','Trình duyệt bị gián đoạn'],
+  ['CREDENTIAL_DELIVERY_FAILED','Không nhận được thông tin đăng nhập'],
+  ['EMAIL_ENTRY_FAILED','Không hoàn tất bước nhập email'],
+  ['PASSWORD_SUBMIT_FAILED','Không gửi được bước mật khẩu'],
+  ['RESPONSE_READ_FAILED','Không đọc được phản hồi Apple'],
+])('explains UNKNOWN %s without implying a live account',async(reasonCode,label)=>{
+  data.jobs=[{...job,phase:'DONE',result:'UNKNOWN',reasonCode,cleanup:'OK'}];await render();
+  const status=host.querySelector('[role="status"]')!;
+  expect(status.textContent).toContain('Chưa rõ kết quả');expect(status.textContent).toContain(label);expect(status.textContent).not.toContain('Live');
+  await click(button('Lịch sử check (1)'));expect(host.querySelector('ol')?.textContent).toContain(label);
+});
 it('clears accepted jobs and request keys when the provider project prop changes',async()=>{
   await render();await click(button('Check Apple ID'));expect(host.textContent).toContain('Lịch sử check (1)');const firstKey=mock.request.mock.calls[0][0].key;
   await render('next');expect(host.textContent).not.toContain('Lịch sử check');expect(button('Check Apple ID').disabled).toBe(false);
@@ -77,7 +111,7 @@ it('drops an old project response and permits a new project request while it is 
 });
 it('keeps a completed login with failed cleanup unavailable for another submission',async()=>{
   data.jobs=[{...job,phase:'DONE',result:'LOGIN_SUCCESS',cleanup:'FAILED'}];await render();expect(button('Check Apple ID').disabled).toBe(true);
-  await click(button('Lịch sử check (1)'));expect(host.textContent).toContain('Đăng nhập Apple thành công');expect(host.textContent).toContain('Thất bại');expect(host.textContent).toContain('Tiến trình: Đã kết thúc');
+  await click(button('Lịch sử check (1)'));expect(host.textContent).toContain('Live đăng nhập');expect(host.textContent).toContain('Thất bại');expect(host.textContent).toContain('Tiến trình: Đã kết thúc');
 });
 it('uses the cancel response immediately when the queued job is already cancelled',async()=>{
   data.jobs=[{...job}];mock.cancel.mockResolvedValue({...job,phase:'DONE',result:'CANCELLED',cleanup:'OK',cancelRequested:true});await render();await click(button('Lịch sử check (1)'));await click(button('Huỷ check'));
@@ -112,7 +146,7 @@ it('drops a late configuration token after the configuration panel has closed',a
 });
 it('fails closed on overview errors while retaining non-secret history',async()=>{
   data.jobs=[{...job,phase:'DONE',result:'APPLE_LOCKED',cleanup:'OK'}];mock.overview.mockImplementation(()=>({data,error:Error('Network unavailable')}));await render();
-  expect(button('Check Apple ID').disabled).toBe(true);expect(host.textContent).toContain('Apple Locked');expect(host.textContent).toContain('Không tải được trạng thái');
+  expect(button('Check Apple ID').disabled).toBe(true);expect(host.textContent).toContain('Locked');expect(host.textContent).toContain('Không tải được trạng thái');
   expect(button('Lưu cấu hình / tạo token').disabled).toBe(true);
 });
 function localStorageAvailable(){return window.localStorage.length>0||window.sessionStorage.length>0;}

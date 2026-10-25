@@ -2,11 +2,12 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
 import {noOwnedBrowser} from './platform.mjs';
 
-export const REASONS=Object.freeze(Object.fromEntries(['LOGIN_SUCCESS','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'].map(s=>[s,s])));
+export const REASONS=Object.freeze(Object.fromEntries(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'].map(s=>[s,s])));
+const DIAGNOSTICS=new Set(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED']);
 export function classify(outcome,email){
   if(!outcome||!Object.hasOwn(REASONS,outcome.result))return 'UNKNOWN';
   if(outcome.result==='LOGIN_SUCCESS'&&!(outcome.authenticated===true&&typeof outcome.identity==='string'&&outcome.identity.trim().toLowerCase()===email.trim().toLowerCase()))return 'UNKNOWN';
-  if(['APPLE_LOCKED','INVALID_CREDENTIALS','CHALLENGE_REQUIRED'].includes(outcome.result)&&outcome.explicit!==true)return 'UNKNOWN';
+  if(['LIVE_2FA','APPLE_LOCKED','INVALID_CREDENTIALS','CHALLENGE_REQUIRED'].includes(outcome.result)&&outcome.explicit!==true)return 'UNKNOWN';
   return outcome.result;
 }
 export class Worker {
@@ -98,7 +99,7 @@ export class Worker {
     const control=new AbortController();const deadline=AbortSignal.timeout(Math.max(1,Math.min(this.jobTimeoutMs,180000)-(Date.now()-claimStarted)));
     const active=AbortSignal.any([control.signal,deadline,...(signal?[signal]:[])]);
     const identity={jobId:job.id,leaseToken:job.leaseToken};
-    let monitorStop=false,monitorWake=new AbortController(),browser,result='UNKNOWN',stage='LEASE';
+    let monitorStop=false,monitorWake=new AbortController(),browser,result='UNKNOWN',reasonCode='UNKNOWN',stage='LEASE';
     const check=async()=>{
       active.throwIfAborted();const lease=await this.api.call('heartbeat-job',identity,{signal:active});
       if(lease.cancelRequested){control.abort(new Error('CANCELLED'));active.throwIfAborted();}
@@ -119,11 +120,12 @@ export class Worker {
       stage='SUBMIT';pendingRecord={...pendingRecord,phase:'SUBMITTING'};await this.store.save(pendingRecord);active.throwIfAborted();
       // This endpoint is intentionally NEVER retried: delivery itself checkpoints the account.
       let credentials=await this.api.call('submit',identity,{signal:active});
-      try{active.throwIfAborted();result=classify(await browser.submit(credentials,{signal:active}),credentials.email);active.throwIfAborted();}
+      try{active.throwIfAborted();const outcome=await browser.submit(credentials,{signal:active});result=classify(outcome,credentials.email);reasonCode=result==='UNKNOWN'&&DIAGNOSTICS.has(outcome?.reasonCode)?outcome.reasonCode:REASONS[result];active.throwIfAborted();}
       finally{credentials=null;}
       }
     }catch{
       result=deadline.aborted?'TIMEOUT':signal?.aborted||control.signal.reason?.message==='CANCELLED'?'CANCELLED':active.aborted?'UNKNOWN':stage==='ROUTE'?'PROXY_ERROR':'UNKNOWN';
+      reasonCode=result==='UNKNOWN'?(stage==='SUBMIT'?'CREDENTIAL_DELIVERY_FAILED':'BROWSER_INTERRUPTED'):REASONS[result];
     }finally{
       monitorStop=true;monitorWake.abort();await monitor;
     }
@@ -131,7 +133,7 @@ export class Worker {
     try{if(browser)await browser.close();if(!await this.verifyNoBrowser(profile.path))throw new Error('OWNED_BROWSER_ALIVE');await this.store.cleanup(profile.id);}catch{
       cleanup='FAILED';await this.store.write('quarantine.json',{jobId:job.id,leaseToken:job.leaseToken,profileId:profile.id,reason:'CLEANUP_FAILED'});
     }
-    pendingRecord={...pendingRecord,phase:'REPORTING',report:{result,reasonCode:REASONS[result],cleanup,observedAt:new Date().toISOString()}};
+    pendingRecord={...pendingRecord,phase:'REPORTING',report:{result,reasonCode:result==='UNKNOWN'?reasonCode:REASONS[result],cleanup,observedAt:new Date().toISOString()}};
     await this.store.save(pendingRecord);return this.report(pendingRecord,job.leaseToken);
   }
   async loop({signal,pollMs=15000,onState=()=>{}}={}){

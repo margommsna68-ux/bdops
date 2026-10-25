@@ -18,10 +18,13 @@ const conflict=(s:string)=>new ProxyDomainError('STALE_PREVIEW',s,'REVISION_CONF
 const denied=()=>new ProxyDomainError('FORBIDDEN','Không có quyền kiểm tra Apple ID');
 const now=()=>new Date();
 const LEASE=90_000,HARD=180_000,COOLDOWN=15*60_000;
-export const CHECK_RESULTS=['LOGIN_SUCCESS','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'] as const;
-const reason=z.enum(CHECK_RESULTS);
+export const CHECK_RESULTS=['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'] as const;
+export const UNKNOWN_REASON_CODES=['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED'] as const;
+const unknownReasons=new Set<string>(UNKNOWN_REASON_CODES);
+const reason=z.enum([...CHECK_RESULTS,...UNKNOWN_REASON_CODES]);
 const binding=z.object({jobId:z.string().min(1).max(100),leaseToken:z.string().min(20).max(100)}).strict();
-const resultBody=binding.extend({result:reason,reasonCode:reason,cleanup:z.enum(['OK','FAILED']),observedAt:z.iso.datetime()}).strict();
+const resultBody=binding.extend({result:z.enum(CHECK_RESULTS),reasonCode:reason,cleanup:z.enum(['OK','FAILED']),observedAt:z.iso.datetime()}).strict();
+export const checkBatchAccounts=z.array(z.object({accountId:z.string().min(1),expectedRevision:z.number().int().nonnegative(),key:z.string().min(8).max(100)}).strict()).min(1).max(5);
 type Body=z.infer<typeof resultBody>;
 
 async function rights(db:DB,s:ActorScope,write=false){
@@ -66,7 +69,8 @@ export async function disableWorker(s:ActorScope,db:PrismaClient=prisma){return 
  await tx.appleCheckJob.updateMany({where:{projectId:s.projectId,activeAccountId:{not:null}},data:{cancelRequested:true}});
  await audit(tx,s.projectId,s.userId,'APPLE_CHECK_DISABLE',w.id,{});
 },db);}
-export async function requestCheck(s:ActorScope,input:{accountId:string;expectedRevision:number;key:string},db:PrismaClient=prisma){return withProxyTransaction(async tx=>{
+type CheckRequest={accountId:string;expectedRevision:number;key:string};
+async function requestCheckInTransaction(s:ActorScope,input:CheckRequest,tx:Prisma.TransactionClient){
  await rights(tx,s,true);
  z.string().min(8).max(100).parse(input.key);
  await tx.$queryRaw`SELECT "id" FROM "GmailAccount" WHERE "id"=${input.accountId} FOR UPDATE`;
@@ -83,7 +87,16 @@ export async function requestCheck(s:ActorScope,input:{accountId:string;expected
  const j=await tx.appleCheckJob.create({data:{projectId:s.projectId,accountId:a.id,accountRevision:a.revision,requestedById:s.userId,requestKey:input.key,activeAccountId:a.id}});
  await tx.appleCheckRequest.create({data:{projectId:s.projectId,key:input.key,accountId:a.id,accountRevision:input.expectedRevision,jobId:j.id}});
  await audit(tx,s.projectId,s.userId,'APPLE_CHECK_REQUEST',j.id,{accountId:a.id,revision:a.revision});return view(j,a.revision);
-},db);}
+}
+export async function requestCheck(s:ActorScope,input:CheckRequest,db:PrismaClient=prisma){return withProxyTransaction(tx=>requestCheckInTransaction(s,input,tx),db);}
+export async function requestCheckBatch(s:ActorScope,input:{accounts:CheckRequest[]},db:PrismaClient=prisma){
+ const accounts=checkBatchAccounts.parse(input.accounts);
+ return withProxyTransaction(async tx=>{
+  const jobs:Awaited<ReturnType<typeof requestCheckInTransaction>>[]=[];
+  for(const account of accounts)jobs.push(await requestCheckInTransaction(s,account,tx));
+  return {jobs};
+ },db);
+}
 export async function cancelCheck(s:ActorScope,id:string,db:PrismaClient=prisma){return withProxyTransaction(async tx=>{
  await rights(tx,s,true);const j=await tx.appleCheckJob.findFirst({where:{id,projectId:s.projectId}});if(!j)throw new ProxyDomainError('NOT_FOUND');
  if(j.phase==='QUEUED'){const x=await tx.appleCheckJob.update({where:{id},data:{phase:'DONE',result:'CANCELLED',reasonCode:'CANCELLED',cleanup:'OK',cancelRequested:true,activeAccountId:null}});return jobView(tx,x);}
@@ -192,11 +205,11 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
 },db);}
 
 async function saveResult(tx:Prisma.TransactionClient,workerId:string,actorId:string,b:Body,permitted:boolean){
- if(b.result!==b.reasonCode)throw bad('Mã lý do không hợp lệ');
+ if(b.result!==b.reasonCode&&!(b.result==='UNKNOWN'&&unknownReasons.has(b.reasonCode)))throw bad('Mã lý do không hợp lệ');
  const j=await own(tx,workerId,b,false),fingerprint=hash(JSON.stringify({result:b.result,reasonCode:b.reasonCode,cleanup:b.cleanup,observedAt:b.observedAt}));
  if(j.resultHash){if(j.resultHash!==fingerprint)throw conflict('Kết quả đã ghi; không ghi đè');return jobView(tx,j);}
  const at=new Date(b.observedAt);if(at.getTime()>Date.now()+30_000||at.getTime()<j.createdAt.getTime()-30_000)throw bad('Thời gian kết quả không hợp lệ');
- if(['LOGIN_SUCCESS','APPLE_LOCKED','INVALID_CREDENTIALS'].includes(b.result)&&!j.submittedAt)throw bad('Chưa gửi thông tin đăng nhập; không ghi kết luận tài khoản');
+ if(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','INVALID_CREDENTIALS'].includes(b.result)&&!j.submittedAt)throw bad('Chưa gửi thông tin đăng nhập; không ghi kết luận tài khoản');
  if(b.result==='CHALLENGE_REQUIRED'&&!j.routeReadAt)throw bad('Chưa kiểm tra đường kết nối; không ghi kết luận xác minh');
  await tx.$queryRaw`SELECT "id" FROM "GmailAccount" WHERE "id"=${j.accountId} FOR UPDATE`;
  const a=await tx.gmailAccount.findUnique({where:{id:j.accountId}});
@@ -207,7 +220,8 @@ async function saveResult(tx:Prisma.TransactionClient,workerId:string,actorId:st
  }
  // Cleanup after revoke may release owned resources, but may not publish an account health assertion.
  const actual=allowed?b.result:'UNKNOWN';
- const x=await tx.appleCheckJob.update({where:{id:j.id},data:{phase:'DONE',result:actual,reasonCode:actual,cleanup:b.cleanup,observedAt:at,resultHash:fingerprint,appliedRevision,activeAccountId:b.cleanup==='OK'?null:j.accountId,activeWorkerId:b.cleanup==='OK'?null:workerId}});
+ const actualReason=allowed||b.result==='UNKNOWN'?b.reasonCode:actual;
+ const x=await tx.appleCheckJob.update({where:{id:j.id},data:{phase:'DONE',result:actual,reasonCode:actualReason,cleanup:b.cleanup,observedAt:at,resultHash:fingerprint,appliedRevision,activeAccountId:b.cleanup==='OK'?null:j.accountId,activeWorkerId:b.cleanup==='OK'?null:workerId}});
  if(b.cleanup==='OK')await tx.proxyIP.updateMany({where:{id:j.proxyId??'',appleCheckLeaseJobId:j.id},data:{appleCheckLeaseJobId:null}});
  await tx.appleCheckWorker.update({where:{id:workerId},data:{state:b.cleanup==='FAILED'?'CLEANUP_FAILED':'IDLE',lastSeenAt:now()}});
  await audit(tx,j.projectId,actorId,'APPLE_CHECK_RESULT',j.id,{accountId:j.accountId,result:actual,cleanup:b.cleanup,stale:!!a&&a.revision!==j.accountRevision,applied:appliedRevision!==null});

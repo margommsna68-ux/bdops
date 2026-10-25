@@ -21,7 +21,8 @@ export async function atomicJson(file,value){
 }
 const PROFILE=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const phases=new Set(['CLAIMED','SUBMITTING','REPORTING']);
-const results=new Set(['LOGIN_SUCCESS','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED']);
+const results=new Set(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED']);
+const diagnostics=new Set(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED']);
 function cleanRecord(p){
   if(typeof p.jobId!=='string'||!p.jobId||!PROFILE.test(p.profileId)||!phases.has(p.phase))throw new Error('JOURNAL_INVALID');
   const value={jobId:p.jobId,profileId:p.profileId,phase:p.phase};
@@ -29,7 +30,7 @@ function cleanRecord(p){
   if(p.claim){const c=p.claim;value.claim={id:c.id,leaseToken:c.leaseToken,accountId:c.accountId,accountRevision:c.accountRevision,expiresAt:c.expiresAt};}
   if(p.report){
     const r=p.report;
-    if(!results.has(r.result)||r.reasonCode!==r.result||!['OK','FAILED'].includes(r.cleanup)||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(r.observedAt)||!Number.isFinite(Date.parse(r.observedAt)))throw new Error('JOURNAL_INVALID');
+    if(!results.has(r.result)||!(r.reasonCode===r.result||r.result==='UNKNOWN'&&diagnostics.has(r.reasonCode))||!['OK','FAILED'].includes(r.cleanup)||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(r.observedAt)||!Number.isFinite(Date.parse(r.observedAt)))throw new Error('JOURNAL_INVALID');
     value.report={result:r.result,reasonCode:r.reasonCode,cleanup:r.cleanup,observedAt:r.observedAt};
   }
   return value;

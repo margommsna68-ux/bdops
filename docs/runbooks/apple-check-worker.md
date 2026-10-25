@@ -139,3 +139,10 @@ No extra manage request is issued. Only the extracted identity string stays in m
 Browser requests en-US; explicit security-locked messages are allowlisted using [Apple's guidance](https://support.apple.com/en-us/102640). Other languages or unknown messages remain UNKNOWN. Media & Purchases disablement alone does not mark the Apple account locked. CAPTCHA/OTP stops; no OTP links are retrieved and no challenge bypass is attempted.
 
 Implementation/review record: `scripts/apple-check-worker/WORK-LOG.md`. No subagent dispatch tool was available; the requested skill's inline fallback was used. Independent parent review, Central browser compatibility, authenticated selector validation and real canary results are separate from these local test results.
+
+
+## 1.1.0 — 25 October follow-up
+
+The stock table now has a dedicated check-result column and a selected-account check action (maximum five per atomic request). The single Central worker processes its queue sequentially. LIVE_2FA means only that an official visible OTP field appeared after the password-submit step, according to the owner's operational definition; it does not mean a fully authenticated Apple or EarnApp session. No OTP is retrieved or entered. CAPTCHA is never Live, and explicit locked/invalid-credential alerts take precedence over a remaining OTP field. LIVE_2FA never resets an existing locked account's health.
+
+UNKNOWN now carries only bounded diagnostic codes for email/password form or submit controls missing, credential delivery failure, email entry failure, password submit failure, response read failure, unrecognized response or interruption. No raw DOM, exception text, email, password or link is persisted. Releases remain immutable; install 1.1.0 after a graceful stop and keep 1.0.0 for rollback. Token/configuration stay unchanged.

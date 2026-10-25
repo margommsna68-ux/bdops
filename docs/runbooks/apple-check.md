@@ -1,12 +1,13 @@
 # Check Apple ID trên MoneyToHome
 
 ## Người dùng
-Mở Kho tài khoản → Apple ID. Mỗi dòng có nút **Check Apple ID**, kết quả gần nhất và thời gian. Bấm một tài khoản một lần; đang chạy không tạo thêm lần đăng nhập. Worker ngoại tuyến hoặc thiếu desktop thì việc chờ trên web. Có thể mở lịch sử và huỷ việc.
+Mở Kho tài khoản → Apple ID. Cột **Tình trạng acc** hiện kết quả kiểm tra và thời gian. Có thể bấm check từng dòng hoặc chọn tối đa **5 account** rồi bấm **Check Apple ID** ở thanh thao tác. Worker xử lý lần lượt, không mở 5 trình duyệt đồng thời. Chọn quá 5 phải giảm lựa chọn, không âm thầm bỏ bớt dòng. Đang chạy không tạo thêm lần đăng nhập. Worker ngoại tuyến hoặc thiếu desktop thì việc chờ trên web. Có thể mở lịch sử và huỷ việc.
 
 - **Apple Locked:** web ngừng cấp mới tài khoản qua cả UI và AI. Tài khoản/EarnApp/VM đã liên kết giữ nguyên, không tự thay. Chủ xử lý đổi với nhà cung cấp hoặc xoá theo luồng kho.
-- **Cần xác minh:** đã dừng ở OTP/CAPTCHA. Không kết luận khoá hay đăng nhập thành công, không tự lấy mã từ các link SMS/2FA.
+- **Live · yêu cầu 2FA:** sau khi gửi mật khẩu, trang Apple hiện ô nhập mã xác thực. Theo quy ước của chủ, đây là Live; worker dừng tại đó, không lấy/nhập mã. Không đồng nghĩa hoàn tất đăng nhập hay dùng được EarnApp. Kết quả này không tự mở lại account Locked.
+- **Cần xác minh:** CAPTCHA hoặc yêu cầu xác minh trước bước gửi mật khẩu. Không tính Live, không tự lấy mã từ các link SMS/2FA.
 - **Đăng nhập Apple thành công:** chỉ khi worker xác nhận phiên Apple đúng email; không chứng minh dùng được trên EarnApp.
-- **Sai thông tin đăng nhập:** kiểm lại thông tin kho; không thử mật khẩu liên tục.
+- **Sai mật khẩu:** Apple từ chối thông tin đăng nhập; kiểm lại email/mật khẩu trong kho, không thử liên tục.
 - **Không kiểm tra được / Chưa rõ kết quả:** lỗi kỹ thuật không đổi tình trạng tài khoản thành Locked.
 - **Cần kiểm tra lại:** tài khoản đã thay phiên bản; kết quả cũ chỉ là lịch sử. Sửa thông tin không tự mở lại tài khoản Locked.
 

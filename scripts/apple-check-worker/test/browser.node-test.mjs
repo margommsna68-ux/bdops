@@ -1,7 +1,18 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {CloakAdapter,interpretEvidence,officialUrl} from '../src/browser.mjs';
 
+test('only a post-password Apple two-factor prompt means Live; CAPTCHA and pre-login OTP do not',()=>{
+  const base={url:'https://idmsa.apple.com/appleauth/auth/authorize/signin',twoFactor:true};
+  assert.equal(interpretEvidence({...base,passwordSubmitted:true},'me@test').result,'LIVE_2FA');
+  assert.notEqual(interpretEvidence(base,'me@test').result,'LIVE_2FA');
+  assert.equal(interpretEvidence({...base,passwordSubmitted:true,captcha:true},'me@test').result,'CHALLENGE_REQUIRED');
+  assert.equal(interpretEvidence({...base,url:'https://evil.test',passwordSubmitted:true},'me@test').result,'UNKNOWN');
+  assert.equal(interpretEvidence({...base,passwordSubmitted:true,alerts:['Your Apple Account has been locked for security reasons.']},'me@test').result,'APPLE_LOCKED');
+  assert.equal(interpretEvidence({...base,passwordSubmitted:true,alerts:['Your Apple ID or password was incorrect.']},'me@test').result,'INVALID_CREDENTIALS');
+});
+
 test('only explicit outcomes count; success needs official authenticated matching identity',()=>{
+  assert.equal(interpretEvidence({url:'https://account.apple.com/account/manage',signedOutControl:true,identity:'me@example.test',apiIdentity:'me@example.test',alerts:['An unrelated notice']},'me@example.test').result,'LOGIN_SUCCESS');
   assert.equal(interpretEvidence({url:'https://account.apple.com/account/manage',signedOutControl:true,identity:'me@example.test'},'me@example.test').result,'UNKNOWN');
   assert.equal(interpretEvidence({url:'https://account.apple.com/account/manage/section/sign-in-security',signedOutControl:true,identity:'me@example.test',apiIdentity:'me@example.test'},'me@example.test').result,'LOGIN_SUCCESS');
   assert.equal(interpretEvidence({url:'https://account.apple.com/account/manage',signedOutControl:true,identity:'me@example.test',apiIdentity:'other@example.test'},'me@example.test').result,'UNKNOWN');
@@ -90,7 +101,8 @@ test('two-stage sign-in clicks password submit once and never follows a challeng
     context.newPage=async()=>({
       goto:async()=>({ok:()=>true}),url:()=>'https://account.apple.com/sign-in',
       frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({
-        count:async()=>['#account_name_text_field','#password_text_field','#sign-in','input[autocomplete="one-time-code"]'].includes(selector)?1:0,
+        count:async()=>['#account_name_text_field','#password_text_field','#sign-in','input[autocomplete="one-time-code"], input.form-security-code-input, input[id^="char"]'].includes(selector)?1:0,
+        nth:()=>({isVisible:async()=>phase==='CHALLENGE'}),
         isVisible:async()=>selector==='#password_text_field'?phase==='PASSWORD':selector==='input[autocomplete="one-time-code"]'?phase==='CHALLENGE':true,
         fill:async value=>fills.push({selector,value}),click:async()=>{if(phase==='EMAIL'){emailClicks++;phase='PASSWORD';}else{passwordClicks++;phase='CHALLENGE';}},
       })}],
@@ -98,7 +110,7 @@ test('two-stage sign-in clicks password submit once and never follows a challeng
   };
   const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime,resultWaitMs:1000}).create();
   await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});await b.probe({});
-  assert.deepEqual(await b.submit({email:'one@example.test',password:'secret'},{}),{result:'CHALLENGE_REQUIRED',explicit:true});
+  assert.deepEqual(await b.submit({email:'one@example.test',password:'secret'},{}),{result:'LIVE_2FA',explicit:true});
   await assert.rejects(b.submit({email:'one@example.test',password:'secret'},{}),/SUBMIT_ONCE/);
   assert.equal(emailClicks,1);assert.equal(passwordClicks,1);assert.deepEqual(fills,[{selector:'#account_name_text_field',value:'one@example.test'},{selector:'#password_text_field',value:'secret'}]);await b.close();
 });

@@ -8,11 +8,12 @@ import toast from 'react-hot-toast';
 type Overview=inferRouterOutputs<AppRouter>['appleCheck']['overview'];
 type Job=Overview['jobs'][number];
 type Intent={projectId:string;accountId:string;expectedRevision:number;key:string};
-const RESULT:Record<string,string>={LOGIN_SUCCESS:'Đăng nhập Apple thành công',APPLE_LOCKED:'Apple Locked',CHALLENGE_REQUIRED:'Cần xác minh · đã dừng',INVALID_CREDENTIALS:'Sai thông tin đăng nhập',PROXY_ERROR:'Lỗi proxy',NETWORK_ERROR:'Lỗi mạng',TIMEOUT:'Hết thời gian',UNKNOWN:'Chưa rõ kết quả',CANCELLED:'Đã huỷ'};
+const RESULT:Record<string,string>={LOGIN_SUCCESS:'Live đăng nhập',LIVE_2FA:'Live · yêu cầu 2FA',APPLE_LOCKED:'Locked',CHALLENGE_REQUIRED:'Cần xác minh · đã dừng',INVALID_CREDENTIALS:'Sai mật khẩu',PROXY_ERROR:'Lỗi proxy',NETWORK_ERROR:'Lỗi mạng',TIMEOUT:'Hết thời gian',UNKNOWN:'Chưa rõ kết quả',CANCELLED:'Đã huỷ'};
+const UNKNOWN_REASON:Record<string,string>={EMAIL_FORM_MISSING:'Không tìm thấy ô email',PASSWORD_FORM_MISSING:'Không tìm thấy ô mật khẩu',SUBMIT_BUTTON_MISSING:'Không tìm thấy nút đăng nhập',RESPONSE_UNRECOGNIZED:'Không nhận diện được phản hồi',BROWSER_INTERRUPTED:'Trình duyệt bị gián đoạn',CREDENTIAL_DELIVERY_FAILED:'Không nhận được thông tin đăng nhập',EMAIL_ENTRY_FAILED:'Không hoàn tất bước nhập email',PASSWORD_SUBMIT_FAILED:'Không gửi được bước mật khẩu',RESPONSE_READ_FAILED:'Không đọc được phản hồi Apple'};
 const PHASE:Record<string,string>={QUEUED:'Đang chờ',WAITING_PROXY:'Chờ proxy phù hợp',WAITING_RESOURCES:'Chờ tài nguyên',LEASED:'Đang chuẩn bị',CLAIMED:'Đang chuẩn bị',ROUTE_READY:'Đã kiểm tra đường truyền',SUBMITTING:'Đang đăng nhập',RUNNING:'Đang kiểm tra',CLEANING:'Đang dọn trình duyệt',DONE:'Đã kết thúc',FINISHED:'Đã kết thúc',COMPLETED:'Đã kết thúc',CANCELLED:'Đã huỷ',UNKNOWN:'Chưa rõ kết quả'};
 const WORKER_STATE:Record<string,string>={OFFLINE:'Worker ngoại tuyến · yêu cầu chờ máy',IDLE:'Sẵn sàng',BUSY:'Đang kiểm tra',WAITING_DESKTOP:'Worker chờ desktop · yêu cầu chờ máy',WAITING_RESOURCES:'Worker chờ tài nguyên',CLEANUP_FAILED:'Worker cần xử lý lỗi dọn trình duyệt'};
 function jobStatus(job:Job,worker:Overview['worker']){
-  if(job.result)return RESULT[job.result]??'Chưa rõ kết quả';
+  if(job.result)return (RESULT[job.result]??'Chưa rõ kết quả')+(job.result==='UNKNOWN'&&job.reasonCode&&UNKNOWN_REASON[job.reasonCode]?` · ${UNKNOWN_REASON[job.reasonCode]}`:'');
   if(job.phase==='QUEUED'){
     if(!worker?.online||worker.state==='WAITING_DESKTOP')return 'Đang chờ máy';
     if(worker.state==='WAITING_RESOURCES')return 'Đang chờ tài nguyên';
@@ -26,7 +27,8 @@ function refused(error:unknown){
   if(!error||typeof error!=='object'||!('data' in error)||!error.data||typeof error.data!=='object'||!('code' in error.data))return false;
   return ['BAD_REQUEST','CONFLICT','FORBIDDEN','NOT_FOUND','UNAUTHORIZED','PRECONDITION_FAILED','TOO_MANY_REQUESTS'].includes(String(error.data.code));
 }
-type Shared={projectId:string;data:Overview|undefined;error:boolean;jobs:Job[];pending:Set<string>;errors:Record<string,string>;retry:Set<string>;request:(id:string,revision:number)=>Promise<void>;cancel:(job:Job)=>Promise<void>};
+type CheckAccount={id:string;revision:number;type:string|null};
+type Shared={projectId:string;data:Overview|undefined;error:boolean;jobs:Job[];pending:Set<string>;errors:Record<string,string>;retry:Set<string>;request:(id:string,revision:number)=>Promise<void>;requestBatch:(accounts:CheckAccount[])=>Promise<void>;cancel:(job:Job)=>Promise<void>};
 const Context=createContext<Shared|null>(null);
 function useChecks(){const value=useContext(Context);if(!value)throw Error('AppleCheck requires AppleCheckProvider');return value;}
 
@@ -37,6 +39,7 @@ export function AppleCheckProvider({projectId,children}:{projectId:string;childr
 function ProjectAppleCheckProvider({projectId,children}:{projectId:string;children:ReactNode}){
   const overview=trpc.appleCheck.overview.useQuery({projectId},{refetchInterval:5000,refetchIntervalInBackground:false});
   const requestJob=trpc.appleCheck.request.useMutation({retry:false}),cancelJob=trpc.appleCheck.cancel.useMutation({retry:false}),utils=trpc.useUtils();
+  const batchJob=trpc.appleCheck.requestBatch.useMutation({retry:false});
   const [accepted,setAccepted]=useState<Job[]>([]),[pending,setPending]=useState<Set<string>>(new Set()),[errors,setErrors]=useState<Record<string,string>>({});
   const running=useRef(new Set<string>()),intents=useRef(new Map<string,Intent>()),live=useRef(true);
   useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
@@ -67,7 +70,35 @@ function ProjectAppleCheckProvider({projectId,children}:{projectId:string;childr
     try{const result=await cancelJob.mutateAsync({projectId,jobId:job.id});if(live.current)setAccepted(old=>[...old.filter(j=>j.id!==job.id),result]);void utils.appleCheck.overview.invalidate({projectId});}
     catch{if(live.current)setErrors(e=>({...e,[job.accountId]:'Chưa xác nhận huỷ. Có thể gửi lại yêu cầu huỷ.'}));}finally{finish(job.accountId);}
   }
-  return <Context.Provider value={{projectId,data:overview.data,error:!!overview.error,jobs,pending,errors,retry:new Set(intents.current.keys()),request,cancel}}>{children}</Context.Provider>;
+  async function requestBatch(accounts:CheckAccount[]){
+    if(!overview.data?.canCheck||overview.error||!overview.data.worker?.enabled||overview.data.worker.state==='CLEANUP_FAILED'||!accounts.length||accounts.length>5||accounts.some(a=>a.type!=='APPLE_ID'||running.current.has(a.id)||jobs.some(j=>j.accountId===a.id&&active(j))))return;
+    const inputs=accounts.map(a=>intents.current.get(a.id)??{projectId,accountId:a.id,expectedRevision:a.revision,key:crypto.randomUUID()});
+    for(const input of inputs){intents.current.set(input.accountId,input);start(input.accountId);}
+    try{
+      const result=await batchJob.mutateAsync({projectId,accounts:inputs.map(({accountId,expectedRevision,key})=>({accountId,expectedRevision,key}))});
+      if(!live.current)return;
+      for(const input of inputs)intents.current.delete(input.accountId);
+      setAccepted(old=>[...old.filter(j=>!result.jobs.some(next=>next.id===j.id)),...result.jobs]);void utils.appleCheck.overview.invalidate({projectId});
+    }catch(error){
+      const rejected=refused(error);
+      if(rejected){for(const input of inputs)intents.current.delete(input.accountId);void utils.accountStore.invalidate();void utils.appleCheck.overview.invalidate({projectId});}
+      if(live.current)setErrors(old=>({...old,...Object.fromEntries(inputs.map(input=>[input.accountId,rejected?'Yêu cầu bị từ chối. Kiểm tra phiên bản tài khoản, quyền và thời gian chờ 15 phút trước khi thử lại.':'Chưa rõ yêu cầu đã được nhận. Gửi lại dùng cùng mã yêu cầu; không tự đăng nhập lại.']))}));
+    }finally{for(const input of inputs)finish(input.accountId);}
+  }
+  return <Context.Provider value={{projectId,data:overview.data,error:!!overview.error,jobs,pending,errors,retry:new Set(intents.current.keys()),request,requestBatch,cancel}}>{children}</Context.Provider>;
+}
+
+export function AppleCheckBulk({accounts,disabled=false}:{accounts:CheckAccount[];disabled?:boolean}){
+  const checks=useChecks();
+  if(disabled||!checks.data?.canCheck)return null;
+  const invalid=accounts.length>5?'Tối đa 5 Apple ID mỗi đợt. Bỏ chọn bớt tài khoản trước khi kiểm tra.':accounts.some(a=>a.type!=='APPLE_ID')?'Chỉ chọn tài khoản Apple ID để kiểm tra.':null;
+  const busy=accounts.some(a=>checks.pending.has(a.id)),retry=accounts.some(a=>checks.retry.has(a.id));
+  const unavailable=!checks.data.worker?.enabled||checks.data.worker.state==='CLEANUP_FAILED'||checks.error||accounts.some(a=>checks.jobs.some(j=>j.accountId===a.id&&active(j)));
+  return <div className="flex flex-wrap items-center gap-2 p-3 text-xs">
+    <button type="button" className="pm-button pm-button-primary" aria-label="Check Apple ID đã chọn" disabled={!accounts.length||busy||unavailable} onClick={()=>{if(!invalid)void checks.requestBatch(accounts);}}>{busy?'Đang gửi…':retry?'Gửi lại yêu cầu':`Check Apple ID (${accounts.length})`}</button>
+    <span className="pm-muted">Chọn Apple ID · tối đa 5 mỗi đợt, lần lượt</span>
+    {invalid&&<p role="alert" className="pm-error w-full">{invalid}</p>}
+  </div>;
 }
 
 export function AppleCheck({accountId,revision,disabled=false}:{accountId:string;revision:number;disabled?:boolean}){
@@ -82,7 +113,7 @@ export function AppleCheck({accountId,revision,disabled=false}:{accountId:string
     {notice&&checks.data.canCheck&&<p className="pm-muted">{notice}</p>}
     {checks.error&&<p role="alert" className="pm-error">Không tải được trạng thái check mới nhất.</p>}
     {!latest&&<p className="pm-muted">Chưa kiểm tra</p>}
-    {latest&&<div role="status"><span>{latest.cancelRequested&&active(latest)?'Đang chờ huỷ':jobStatus(latest,worker??null)}</span>{' · '}<time className="pm-muted" dateTime={latest.observedAt??latest.createdAt}>{when(latest.observedAt??latest.createdAt)}</time>{latest.stale&&<span className="pm-muted"> · Cần kiểm tra lại · kết quả phiên bản cũ</span>}</div>}
+    {latest&&<div role="status"><span className={!latest.stale&&['LOGIN_SUCCESS','LIVE_2FA'].includes(latest.result??'')?'inline-flex rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800':undefined}>{latest.stale?'Cần kiểm tra lại · kết quả phiên bản cũ':latest.cancelRequested&&active(latest)?'Đang chờ huỷ':jobStatus(latest,worker??null)}</span>{' · '}<time className="pm-muted" dateTime={latest.observedAt??latest.createdAt}>{when(latest.observedAt??latest.createdAt)}</time></div>}
     {checks.errors[accountId]&&<p role="alert" className="pm-error">{checks.errors[accountId]}</p>}
     {!!jobs.length&&<button type="button" className="pm-link" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'Ẩn lịch sử check':`Lịch sử check (${jobs.length})`}</button>}
     {expanded&&<ol className="space-y-2 border-l pl-2">{jobs.map(job=><li key={job.id} className="break-words space-y-1">
