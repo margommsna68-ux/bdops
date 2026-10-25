@@ -159,3 +159,12 @@ Apple currently renders a visible password input while its button still says Con
 Every completed check closes its browser, verifies no owned browser remains, and removes its UUID profile before reporting. This applies equally to Live, Locked, invalid credentials and UNKNOWN. A result pending acknowledgement retains only the minimal command journal, not the profile/cache. Cleanup failure retains ownership proof/quarantine until explicit safe cleanup recovery; never delete an unverified or unrelated browser profile.
 
 Native Central proof used five isolated about:blank Cloak sessions with an unreachable proxy, no account credential reads and no external site. All five browser fingerprint samples differed (canvas/GPU/CPU sample hash); all five profiles were cleaned. They still run on one physical Central, not five physical hosts. The bundled Cloak engine generated those identities with existing defaults; no global browser or AE/GEN2 fingerprint configuration was changed.
+
+
+## 1.2.2 - failure cleanup and bounded diagnostics
+
+Failed browser launch/close now falls back to terminating only the verified UUID-profile Chrome process tree: owner marker, exact user-data-dir argument, Chrome-only descendants, opened process handle and creation/ancestry revalidation. It never kills unrelated or identity-ambiguous processes. Cleanup remains quarantined if proof/termination fails. The browser gets a60-second startup budget within the existing180-second job limit; page operations remain20seconds. Browser startup failure is UNKNOWN/BROWSER_INTERRUPTED rather than a false proxy diagnosis.
+
+On UNKNOWN, one small last-diagnostic.json per slot stores only bounded enum/boolean/counter metadata (form phase, input kinds, auth HTTP status, blocked request counters). No raw URLs, DOM, response body, email or password. Diagnostic collection is bounded to2seconds and cannot hold cleanup indefinitely. This is independent of the user-visible result.
+
+Actual follow-up: one original selected account remained UNKNOWN; another attempt failed before credential delivery and left an owned Chrome tree. Parent stopped only the verified owned tree, removed its profile, and acknowledged cleanup recovery; zero profiles/quarantines verified. A third original selected account is queued for final diagnostics, but the current interactive-desktop gate reports WAITING_DESKTOP; no secret delivered for that queued job. Do not claim real login/Locked/2FA recognition verified.

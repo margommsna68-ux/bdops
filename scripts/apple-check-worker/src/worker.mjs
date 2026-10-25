@@ -1,6 +1,7 @@
 import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
 import {noOwnedBrowser} from './platform.mjs';
+import {safeDiagnostics} from './browser.mjs';
 
 export const REASONS=Object.freeze(Object.fromEntries(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'].map(s=>[s,s])));
 const DIAGNOSTICS=new Set(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED']);
@@ -120,8 +121,8 @@ export class Worker {
     })();
     try{
       await check();stage='ROUTE';const {proxy}=await this.api.call('route',identity,{signal:active});active.throwIfAborted();
-      browser=this.adapter.create();await browser.open({profilePath:profile.path,proxy,signal:active});
-      const preflight=await browser.probe({signal:active});await check();
+      stage='BROWSER';browser=this.adapter.create();await browser.open({profilePath:profile.path,proxy,signal:active});
+      stage='ROUTE';const preflight=await browser.probe({signal:active});await check();
       if(preflight?.result==='CHALLENGE_REQUIRED'&&preflight.explicit===true){result='CHALLENGE_REQUIRED';}
       else {
       stage='SUBMIT';pendingRecord={...pendingRecord,phase:'SUBMITTING'};await this.store.save(pendingRecord);active.throwIfAborted();
@@ -135,6 +136,11 @@ export class Worker {
       reasonCode=result==='UNKNOWN'?(stage==='SUBMIT'?'CREDENTIAL_DELIVERY_FAILED':'BROWSER_INTERRUPTED'):REASONS[result];
     }finally{
       monitorStop=true;monitorWake.abort();await monitor;
+    }
+    if(result==='UNKNOWN'&&typeof browser?.diagnostics==='function'){
+      let timer;
+      try{const snapshot=await Promise.race([browser.diagnostics(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('DIAGNOSTIC_TIMEOUT')),2000);})]);await this.store.write('last-diagnostic.json',{jobId:job.id,at:new Date().toISOString(),...safeDiagnostics(snapshot)});}catch{}
+      finally{clearTimeout(timer);}
     }
     let cleanup='OK';
     try{if(browser)await browser.close();if(!await this.verifyNoBrowser(profile.path))throw new Error('OWNED_BROWSER_ALIVE');await this.store.cleanup(profile.id);}catch{

@@ -1,0 +1,36 @@
+[
+  [
+    {
+      "id": "account_name_text_field",
+      "tag": "INPUT",
+      "type": "text",
+      "text": null,
+      "visible": true,
+      "disabled": false,
+      "autocomplete": "username webauthn",
+      "classes": "force-ltr form-textbox-input ",
+      "ariaLabel": null
+    },
+    {
+      "id": "password_text_field",
+      "tag": "INPUT",
+      "type": "password",
+      "text": null,
+      "visible": true,
+      "disabled": false,
+      "autocomplete": "current-password",
+      "classes": "form-textbox-input ",
+      "ariaLabel": null
+    },
+    {
+      "id": "sign-in",
+      "tag": "BUTTON",
+      "type": "submit",
+      "text": "Continue",
+      "visible": true,
+      "disabled": true,
+      "classes": " tk-subbody button button-rounded-rectangle signin-v2__buttons-wrapper__button-wrapper__button",
+      "ariaLabel": null
+    }
+  ]
+]

@@ -4,10 +4,10 @@ import {readFile,lstat,readdir} from 'node:fs/promises';
 import {noLinks} from './store.mjs';
 import {ApiClient} from './api.mjs';
 const exec=promisify(execFile);
-export async function powershell(script){
+export async function powershell(script,{timeoutMs=15000}={}){
   if(process.platform!=='win32')throw new Error('WINDOWS_REQUIRED');
   const systemRuntime=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0');
-  try{const {stdout}=await exec(path.join(systemRuntime,'powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(`$ErrorActionPreference='Stop';${script}`,'utf16le').toString('base64')],{windowsHide:true,timeout:15000,maxBuffer:1024*1024,env:{...process.env,PSModulePath:path.join(systemRuntime,'Modules')}});return stdout.trim();}
+  try{const {stdout}=await exec(path.join(systemRuntime,'powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(`$ErrorActionPreference='Stop';${script}`,'utf16le').toString('base64')],{windowsHide:true,timeout:timeoutMs,maxBuffer:1024*1024,env:{...process.env,PSModulePath:path.join(systemRuntime,'Modules')}});return stdout.trim();}
   catch{throw new Error('WINDOWS_PROBE_FAILED');}
 }
 const psLiteral=value=>"'"+value.replaceAll("'","''")+"'";
@@ -109,11 +109,125 @@ export async function noOwnedBrowser(profilePath,{inspect}={}){
   // Inspection only. Never terminate unrelated/shared browser processes.
   const processes=inspect?await inspect():JSON.parse(await powershell(`$items=@(Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | ForEach-Object {@{name=$_.Name;commandLine=$_.CommandLine}});ConvertTo-Json -InputObject $items -Compress`));
   if(!Array.isArray(processes))return false;
-  const target=path.resolve(profilePath).replaceAll('/','\\').toLowerCase();
+  const target=canonicalBrowserPath(profilePath);
   return processes.every(p=>{
     if(typeof p?.name!=='string')return false;
     if(p.name.toLowerCase()!=='chrome.exe')return true;
     if(typeof p.commandLine!=='string'||!p.commandLine.trim())return false;
-    return !p.commandLine.replaceAll('/','\\').toLowerCase().includes(target);
+    const args=browserArguments(p.commandLine),profile=args&&browserProfile(args);
+    return !!args&&profile!==undefined&&(profile===null||profile!==target);
   });
+}
+
+const canonicalBrowserPath=value=>path.win32.normalize(value.replaceAll('/','\\')).replace(/\\+$/,'').toLowerCase();
+// Windows quoting rules: a profile path is an argument, never a command-line substring.
+function browserArguments(line){
+ if(typeof line!=='string'||!line.trim()||line.length>32768||line.includes('\0'))return null;
+ const args=[];let word='',quoted=false,started=false;
+ for(let i=0;i<line.length;i++){
+  const c=line[i];
+  if(c==='\\'){
+   let n=1;while(line[i+1]==='\\'){n++;i++;}
+   if(line[i+1]==='"'){word+='\\'.repeat(Math.floor(n/2));i++;if(n%2)word+='"';else quoted=!quoted;}
+   else word+='\\'.repeat(n);
+   started=true;
+  }else if(c==='"'){quoted=!quoted;started=true;}
+  else if(/\s/.test(c)&&!quoted){if(started){args.push(word);word='';started=false;}}
+  else{word+=c;started=true;}
+ }
+ if(quoted)return null;if(started)args.push(word);return args;
+}
+function browserProfile(args){
+ const found=[];
+ for(let i=1;i<args.length;i++){
+  if(args[i]==='--user-data-dir')found.push(args[++i]);
+  else if(args[i].startsWith('--user-data-dir='))found.push(args[i].slice(16));
+ }
+ if(!found.length)return null;
+ if(found.length!==1||!found[0]||!path.win32.isAbsolute(found[0]))return undefined;
+ return canonicalBrowserPath(found[0]);
+}
+const chrome=p=>p?.name?.toLowerCase()==='chrome.exe';
+const identity=p=>Number.isSafeInteger(p?.pid)&&p.pid>0&&Number.isSafeInteger(p.parentPid)&&p.parentPid>=0&&typeof p.creationTime==='string'&&/^\d+$/.test(p.creationTime);
+const sameProcess=(a,b)=>identity(a)&&identity(b)&&a.pid===b.pid&&a.parentPid===b.parentPid&&a.creationTime===b.creationTime&&a.name===b.name&&a.commandLine===b.commandLine;
+export function selectOwnedBrowserProcesses(profilePath,processes){
+ if(!Array.isArray(processes)||processes.length>512)throw new Error('BROWSER_INSPECTION_INVALID');
+ const target=canonicalBrowserPath(profilePath),selected=[],byId=new Map();
+ for(const p of processes){if(byId.has(p?.pid))throw new Error('BROWSER_INSPECTION_INVALID');byId.set(p?.pid,p);}
+ for(const p of processes){
+  if(!chrome(p)||!identity(p))continue;
+  const args=browserArguments(p.commandLine);
+  if(args&&browserProfile(args)===target&&!args.some(a=>a==='--type'||a.startsWith('--type=')))selected.push(p);
+ }
+ const owned=new Set(selected.map(p=>p.pid));
+ for(let i=0;i<selected.length;i++)for(const p of processes){
+  if(owned.has(p.pid)||p.parentPid!==selected[i].pid||!chrome(p)||!identity(p)||BigInt(p.creationTime)<BigInt(selected[i].creationTime))continue;
+  const args=browserArguments(p.commandLine),profile=args&&browserProfile(args);
+  if(!args||profile===undefined||profile!==null&&profile!==target)continue;
+  owned.add(p.pid);selected.push(p);
+ }
+ return selected;
+}
+async function ownedProfile(profilePath){
+ if(typeof profilePath!=='string'||!path.isAbsolute(profilePath))throw new Error('PROFILE_OWNER');
+ const full=await noLinks(profilePath),id=path.basename(full);
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)||!(await lstat(full)).isDirectory())throw new Error('PROFILE_OWNER');
+ const marker=path.join(full,'.owner');await noLinks(marker);
+ if(!(await lstat(marker)).isFile()||await readFile(marker,'utf8')!==id)throw new Error('PROFILE_OWNER');
+ return full;
+}
+async function inspectChrome(timeoutMs){
+ return JSON.parse(await powershell(`$items=@(Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | ForEach-Object {
+ $stamp=$null;try{$handle=Get-Process -Id $_.ProcessId;[void]$handle.Handle;$stamp=$handle.StartTime.ToUniversalTime().Ticks.ToString()}catch{}
+ @{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;creationTime=$stamp;name=$_.Name;commandLine=$_.CommandLine}
+ });ConvertTo-Json -InputObject $items -Compress`,{timeoutMs}));
+}
+async function stopOwnedChrome(p,{ancestors,timeoutMs}){
+ // Open the process handle BEFORE rechecking CIM/creation identity. Stop only this handle,
+ // never taskkill /T or a later lookup by PID, which could select a reused foreign PID.
+ const expected=JSON.stringify([p,...ancestors]);
+ const result=await powershell(`$expected=ConvertFrom-Json ${psLiteral(expected)};$targetHandle=$null;
+ foreach($item in $expected){
+  $native=Get-Process -Id $item.pid -ErrorAction SilentlyContinue;
+  if(!$native){if($item.pid -eq ${p.pid}){Write-Output 'GONE';exit};throw 'IDENTITY'}
+  [void]$native.Handle;
+  $row=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$item.pid);
+  if(!$row -or $row.Name -ine 'chrome.exe' -or $row.CommandLine -cne $item.commandLine -or [int]$row.ParentProcessId -ne [int]$item.parentPid -or $native.StartTime.ToUniversalTime().Ticks.ToString() -cne $item.creationTime){throw 'IDENTITY'}
+  if($item.pid -eq ${p.pid}){$targetHandle=$native}
+ }
+ if(!$targetHandle){throw 'IDENTITY'}
+ if(!$targetHandle.HasExited){Stop-Process -InputObject $targetHandle -Force}
+ Write-Output 'STOPPED'`,{timeoutMs});
+ if(!['GONE','STOPPED'].includes(result))throw new Error('OWNED_BROWSER_CLEANUP_FAILED');
+}
+export async function terminateOwnedBrowser(profilePath,{inspect,terminate}={}){
+ const full=await ownedProfile(profilePath),deadline=Date.now()+18000;
+ // Injection is all-or-nothing so a test can never accidentally stop a real process.
+ if(!!inspect!==!!terminate)throw new Error('BROWSER_OPERATIONS_REQUIRED');
+ const remaining=()=>{const ms=Math.min(4000,deadline-Date.now());if(ms<=0)throw new Error('OWNED_BROWSER_CLEANUP_FAILED');return ms;};
+ const inspectNow=()=>inspect?inspect():inspectChrome(remaining());
+ const original=selectOwnedBrowserProcesses(full,await inspectNow()),originalById=new Map(original.map(p=>[p.pid,p]));
+ for(const p of [...original].reverse()){
+  remaining();await ownedProfile(full);
+  const rows=await inspectNow(),current=rows.find(r=>r.pid===p.pid);
+  if(!current)continue;
+  if(!sameProcess(p,current))throw new Error('BROWSER_IDENTITY_CHANGED');
+  const selected=selectOwnedBrowserProcesses(full,rows);
+  if(!selected.some(r=>sameProcess(r,p)))throw new Error('BROWSER_IDENTITY_CHANGED');
+  const ancestors=[];let parent=originalById.get(p.parentPid);
+  while(parent){
+   if(!rows.some(r=>sameProcess(r,parent)))throw new Error('BROWSER_IDENTITY_CHANGED');
+   ancestors.push(parent);parent=originalById.get(parent.parentPid);
+   if(ancestors.length>original.length)throw new Error('BROWSER_IDENTITY_CHANGED');
+  }
+  try{await (terminate??stopOwnedChrome)(p,{ancestors,profilePath:full,timeoutMs:remaining()});}
+  catch{throw new Error('OWNED_BROWSER_CLEANUP_FAILED');}
+ }
+ remaining();await ownedProfile(full);
+ const after=await inspectNow();
+ // Retain departed parents as verification-only anchors: a newly spawned Chrome
+ // child may outlive its root without carrying --user-data-dir of its own.
+ const lineage=selectOwnedBrowserProcesses(full,[...after,...original.filter(p=>!after.some(current=>current.pid===p.pid))]);
+ if(after.some(p=>lineage.some(old=>sameProcess(p,old)))||!await noOwnedBrowser(full,{inspect:async()=>after}))throw new Error('OWNED_BROWSER_UNRESOLVED');
+ return true;
 }

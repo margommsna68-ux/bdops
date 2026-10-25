@@ -1,0 +1,36 @@
+{
+  "state": {
+    "state": "WAITING_DESKTOP",
+    "activeCount": 0,
+    "slots": [
+      {
+        "slot": 1,
+        "state": "WAITING_DESKTOP"
+      },
+      {
+        "slot": 2,
+        "state": "WAITING_DESKTOP"
+      },
+      {
+        "slot": 3,
+        "state": "WAITING_DESKTOP"
+      },
+      {
+        "slot": 4,
+        "state": "WAITING_DESKTOP"
+      },
+      {
+        "slot": 5,
+        "state": "WAITING_DESKTOP"
+      }
+    ],
+    "at": "2026-10-25T11:18:47.398Z"
+  },
+  "task": "Running",
+  "ownedChromeRoots": 0,
+  "ownedRootMemoryMb": 0,
+  "profiles": 0,
+  "pending": 0,
+  "quarantines": 0,
+  "freeMb": 16176
+}

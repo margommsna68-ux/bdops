@@ -1,8 +1,16 @@
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {terminateOwnedBrowser} from './platform.mjs';
 
 const ORIGINS=new Set(['https://account.apple.com','https://idmsa.apple.com','https://appleid.apple.com','https://appleid.cdn-apple.com','https://www.apple.com']);
+export function safeDiagnostics(value){
+  const number=x=>Number.isInteger(x)&&x>=0?Math.min(9999,x):0,n=value?.network??{};
+  return {passwordSubmitClicked:value?.passwordSubmitClicked===true,network:Object.fromEntries(['authPosts','lastAuthStatus','blockedChallenge','blockedRedirects','failedRequests'].map(k=>[k,number(n[k])])),frames:(Array.isArray(value?.frames)?value.frames:[]).slice(0,10).map(f=>({
+    kind:['SIGNIN','VERIFY','ACCOUNT','OTHER_OFFICIAL'].includes(f.kind)?f.kind:'OTHER',buttonPhase:['CONTINUE','SIGN_IN'].includes(f.buttonPhase)?f.buttonPhase:'OTHER',
+    inputKinds:[...new Set((Array.isArray(f.inputKinds)?f.inputKinds:[]).filter(k=>['EMAIL','PASSWORD','OTP','TEXT','TEL','OTHER'].includes(k)))],errorVisible:f.errorVisible===true,twoFactorText:f.twoFactorText===true,connectionErrorText:f.connectionErrorText===true,
+  }))};
+}
 export function officialUrl(value){
   try{const u=new URL(value);return ORIGINS.has(u.origin)&&!u.username&&!u.password&&!/(?:otp|captcha|verify|recovery|iforgot)(?:[/?#]|$)/i.test(u.pathname);}catch{return false;}
 }
@@ -34,20 +42,21 @@ async function bounded(promise,ms,code){
   let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(code)),ms);})]);}finally{clearTimeout(timer);}
 }
 export class CloakAdapter {
-  constructor({executablePath,modulePath='playwright-core',loadModule:loader=loadModule,timeoutMs=20000,resultWaitMs=45000}){
-    Object.assign(this,{executablePath,modulePath,loader,timeoutMs,resultWaitMs});
+  constructor({executablePath,modulePath='playwright-core',loadModule:loader=loadModule,timeoutMs=20000,resultWaitMs=45000,launchTimeoutMs=60000,terminateBrowser=terminateOwnedBrowser}){
+    Object.assign(this,{executablePath,modulePath,loader,timeoutMs,resultWaitMs,launchTimeoutMs,terminateBrowser});
   }
   create(){return new CloakSession(this);}
 }
 class CloakSession {
-  constructor(config){this.config=config;this.submitted=false;this.closing=false;this.context=null;}
+  constructor(config){this.config=config;this.submitted=false;this.closing=false;this.context=null;this.network={authPosts:0,lastAuthStatus:0,blockedChallenge:0,blockedRedirects:0,failedRequests:0};}
   async open({profilePath,proxy,signal}){
+    this.profilePath=profilePath;
     const validated=validateProxy(proxy);signal?.throwIfAborted();
     const {chromium}=await this.config.loader(this.config.modulePath);signal?.throwIfAborted();
     if(!chromium?.launchPersistentContext)throw new Error('PLAYWRIGHT_RUNTIME');
     this.launch=chromium.launchPersistentContext(profilePath,{
       executablePath:this.config.executablePath,headless:false,proxy:validated,
-      serviceWorkers:'block',acceptDownloads:false,locale:'en-US',timeout:this.config.timeoutMs,
+      serviceWorkers:'block',acceptDownloads:false,locale:'en-US',timeout:this.config.launchTimeoutMs,
       args:['--disable-quic','--force-webrtc-ip-handling-policy=disable_non_proxied_udp'],
     });
     this.context=await this.launch;
@@ -56,13 +65,16 @@ class CloakSession {
     this.context.setDefaultNavigationTimeout?.(this.config.timeoutMs);
     if(typeof this.context.routeWebSocket!=='function')throw new Error('PLAYWRIGHT_WEBSOCKET_GUARD_REQUIRED');
     await this.context.route('**/*',async route=>{
-      if(!officialUrl(route.request().url()))return route.abort('blockedbyclient');
+      const request=route.request(),url=new URL(request.url()),authPost=url.origin==='https://idmsa.apple.com'&&request.method?.()==='POST'&&/\/signin(?:\/|$)/.test(url.pathname);
+      if(!officialUrl(request.url())){if(ORIGINS.has(url.origin)&&/verify|otp|captcha/i.test(url.pathname))this.network.blockedChallenge++;return route.abort('blockedbyclient');}
+      if(authPost)this.network.authPosts++;
       try{
         // continue() follows 307/308 outside interception: never use it for credentials.
         const response=await route.fetch({maxRedirects:0,maxRetries:0,timeout:this.config.timeoutMs});
-        if(response.status()>=300&&response.status()<400)return route.abort('blockedbyclient');
+        if(authPost)this.network.lastAuthStatus=response.status();
+        if(response.status()>=300&&response.status()<400){this.network.blockedRedirects++;return route.abort('blockedbyclient');}
         return await route.fulfill({response});
-      }catch{return route.abort('failed').catch(()=>{});}
+      }catch{this.network.failedRequests++;return route.abort('failed').catch(()=>{});}
     });
     await this.context.routeWebSocket('**/*',socket=>socket.close());
     this.context.on('page',page=>{if(this.page&&page!==this.page)void page.close().catch(()=>{});});
@@ -130,6 +142,19 @@ class CloakSession {
     }
     return matches.length===1?matches[0]:null;
   }
+  async diagnostics(){
+    const frames=[];
+    for(const frame of (this.page?.frames()??[]).slice(0,10)){
+      let u;try{u=new URL(frame.url());}catch{continue;}if(!ORIGINS.has(u.origin))continue;
+      const kind=/verify|otp|captcha/i.test(u.pathname)?'VERIFY':/signin/i.test(u.pathname)?'SIGNIN':/account\/manage/.test(u.pathname)?'ACCOUNT':'OTHER_OFFICIAL';
+      const metadata=await frame.evaluate(()=>{
+        const visible=e=>!!e.getClientRects().length,inputs=[...document.querySelectorAll('input')].filter(visible).slice(0,30),button=document.querySelector('#sign-in'),label=button?.innerText?.trim().toLowerCase();
+        const body=document.body?.innerText??'';
+        return {buttonPhase:label==='continue'?'CONTINUE':label==='sign in'?'SIGN_IN':'OTHER',inputKinds:inputs.map(e=>e.autocomplete==='one-time-code'||/^char\d+$/.test(e.id)?'OTP':e.id==='account_name_text_field'?'EMAIL':e.type==='password'?'PASSWORD':['text','tel'].includes(e.type)?e.type.toUpperCase():'OTHER'),errorVisible:[...document.querySelectorAll('#errMsg,#alertInfo,[role="alert"]')].some(visible),twoFactorText:/two.factor authentication|verification code|six.digit code/i.test(body),connectionErrorText:/unable to connect|could not connect|connection.*error|service.*unavailable/i.test(body)};
+      }).catch(()=>({}));frames.push({kind,...metadata});
+    }
+    return safeDiagnostics({passwordSubmitClicked:this.passwordSubmitted,network:this.network,frames});
+  }
   async submit({email,password},{signal}){
     if(!this.probed||this.submitted)throw new Error('SUBMIT_ONCE');this.submitted=true;signal?.throwIfAborted();
     let operation='EMAIL_ENTRY_FAILED';
@@ -168,7 +193,10 @@ class CloakSession {
   async close(){
     this.closing=true;this.signal?.removeEventListener('abort',this.onAbort);
     if(this.closePromise)return this.closePromise;
-    this.closePromise=bounded((async()=>{const context=this.context??(this.launch?await this.launch:null);if(context)await context.close();})(),this.config.timeoutMs,'CLEANUP_TIMEOUT');
+    this.closePromise=bounded((async()=>{
+      try{await bounded((async()=>{const context=this.context??(this.launch?await this.launch:null);if(context)await context.close();})(),this.config.timeoutMs,'CLEANUP_TIMEOUT');}
+      catch(error){if(!this.profilePath)throw error;await this.config.terminateBrowser(this.profilePath);}
+    })(),45000,'CLEANUP_TIMEOUT');
     return this.closePromise;
   }
 }

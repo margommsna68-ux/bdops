@@ -1,0 +1,37 @@
+{
+  "version": "1.2.0",
+  "previousVersion": "1.1.0",
+  "locked": true,
+  "pid": 13940,
+  "state": "BUSY",
+  "activeCount": 4,
+  "slots": [
+    {
+      "slot": 1,
+      "locked": true,
+      "state": "BUSY"
+    },
+    {
+      "slot": 2,
+      "locked": true,
+      "state": "BUSY"
+    },
+    {
+      "slot": 3,
+      "locked": true,
+      "state": "BUSY"
+    },
+    {
+      "slot": 4,
+      "locked": false,
+      "state": "IDLE"
+    },
+    {
+      "slot": 5,
+      "locked": true,
+      "state": "BUSY"
+    }
+  ],
+  "legacyState": "IDLE",
+  "lastSeenAt": "2026-10-25T11:04:24.794Z"
+}

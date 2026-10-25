@@ -1,5 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {CloakAdapter,interpretEvidence,officialUrl} from '../src/browser.mjs';
+import * as Browser from '../src/browser.mjs';
+
+test('diagnostics retain only bounded phases/counts and never raw DOM/URLs/secrets',()=>{
+ const safeDiagnostics=Browser.safeDiagnostics;assert.equal(typeof safeDiagnostics,'function');
+ const d=safeDiagnostics({passwordSubmitClicked:true,network:{authPosts:1,lastAuthStatus:409,blockedChallenge:2,raw:'password-secret'},frames:[{kind:'VERIFY',buttonPhase:'OTHER',inputKinds:['PASSWORD','OTP','email-secret@example.test'],errorVisible:true,twoFactorText:true,body:'password-secret',url:'https://secret.test/token'}],raw:'password-secret'});
+ assert.equal(d.network.lastAuthStatus,409);assert.deepEqual(d.frames[0].inputKinds,['PASSWORD','OTP']);assert.equal(JSON.stringify(d).includes('secret'),false);
+});
 
 test('only a post-password Apple two-factor prompt means Live; CAPTCHA and pre-login OTP do not',()=>{
   const base={url:'https://idmsa.apple.com/appleauth/auth/authorize/signin',twoFactor:true};
@@ -87,6 +94,13 @@ test('abort during launch still closes the late owned context',async()=>{
   const opening=b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''},signal:controller.signal});
   while(!complete)await new Promise(resolve=>setImmediate(resolve));controller.abort();await complete();
   await assert.rejects(opening);await b.close();assert.equal(runtime.closed,1);
+});
+
+test('failed launch cleans only its owned profile browser through the verified fallback',async()=>{
+ const cleaned=[];let launches=0;
+ const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>({chromium:{launchPersistentContext:async()=>{launches++;throw Error('LAUNCH_TIMEOUT')}}}),terminateBrowser:async profile=>{cleaned.push(profile)}}).create();
+ await assert.rejects(b.open({profilePath:'C:/owned/profiles/one',proxy:{server:'http://proxy.test:80',username:'',password:''}}),/LAUNCH_TIMEOUT/);
+ await b.close();await b.close();assert.equal(launches,1);assert.deepEqual(cleaned,['C:/owned/profiles/one']);
 });
 test('route probe waits for delayed official Apple iframe controls before revealing credentials',async()=>{
   const runtime=fakeRuntime({delayed:2});const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime}).create();
