@@ -1,0 +1,38 @@
+{
+  "version": "1.3.10",
+  "hashOk": true,
+  "headless": true,
+  "maxSlots": null,
+  "task": "Running",
+  "logon": "Password",
+  "runLevel": "Limited",
+  "priority": 4,
+  "state": {
+    "state": "IDLE",
+    "activeCount": 0,
+    "slots": [
+      {
+        "slot": 1,
+        "state": "BUSY"
+      },
+      {
+        "slot": 2,
+        "state": "BUSY"
+      },
+      {
+        "slot": 3,
+        "state": "BUSY"
+      },
+      {
+        "slot": 4,
+        "state": "BUSY"
+      },
+      {
+        "slot": 5,
+        "state": "BUSY"
+      }
+    ],
+    "at": "2026-10-25T16:08:43.095Z"
+  },
+  "quarantines": 0
+}

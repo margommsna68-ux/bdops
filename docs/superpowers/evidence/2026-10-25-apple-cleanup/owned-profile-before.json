@@ -1,0 +1,71 @@
+[
+  {
+    "slot": "slot5",
+    "jobId": "cmvo0gqrn002umbfknthddtyr",
+    "profileId": "6183d9bd-4fb9-451d-9124-eede27fccc2c",
+    "reason": "CLEANUP_FAILED",
+    "exists": true,
+    "ownerOk": true,
+    "entryCount": 230,
+    "reparseCount": 0,
+    "processes": [],
+    "topEntries": [
+      {
+        "Name": "component_crx_cache",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "Default",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "extensions_crx_cache",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "GPUPersistentCache",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "GrShaderCache",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "segmentation_platform",
+        "Mode": "d-----"
+      },
+      {
+        "Name": "ShaderCache",
+        "Mode": "d-----"
+      },
+      {
+        "Name": ".owner",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "first_party_sets.db",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "first_party_sets.db-journal",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "Last Browser",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "Last Version",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "Local State",
+        "Mode": "-a----"
+      },
+      {
+        "Name": "Variations",
+        "Mode": "-a----"
+      }
+    ]
+  }
+]
