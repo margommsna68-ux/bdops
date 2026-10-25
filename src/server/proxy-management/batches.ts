@@ -1,3 +1,8 @@
+import {authorizeTeamCash} from '../business-management/team-cash-scope';
+import {lockCashProject} from '../business-management/cash-lock';
+import {assertPeriodOpen} from '../business-management/period-lock';
+import {dayDate} from '../business-management/money';
+import {prepareProxyPurchase,proxyPurchaseFx} from './purchase';
 import {hasServerScope} from '@/server/permissions/server-scope';
 import {createHash,randomBytes} from 'node:crypto';
 import {Prisma,type PrismaClient} from '@prisma/client';
@@ -17,7 +22,7 @@ import {assignProxyToVm,currentProxyOf,loadChangeVM,markUsersBlocked} from '../v
 import {captureAccount,captureEndpoint,endpointInclude,readImage,type ResourceImage} from '../operation-history/snapshot';
 import {DUPLICATE_CODES,HISTORICAL_STATES,ProxyDomainError,type ActorScope,type BatchInput,type BatchPreview,type CatalogAccount,type CommitResult,type InventoryState,type IssueCode,type Owner,type ParsedProxy,type PreviewRow,type ProxyContext,type ReconciliationPlan,type SheetSnapshot,type SourceSnapshotRef,type Subgroup} from './types';
 export interface ResolvedItem {row:number;oldEndpointId?:string;next?:ParsedProxy;owner:Owner;subgroup:Subgroup;groupId?:string|null;packageCode:string|null;state:InventoryState;sourceRef?:string;sourceSnapshotId?:string}
-interface Planned {rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
+interface Planned {purchase?:import('./types').ProxyPurchasePreview;rows:PreviewRow[];items:ResolvedItem[];reconciliation?:ReconciliationPlan}
 export function parseReceivedDate(value?:string|null):Date|null{
   if(!value) return null;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ProxyDomainError('INVALID_INPUT','Ngày nhận dùng YYYY-MM-DD');
@@ -28,6 +33,7 @@ function candidates(ctx:ProxyContext,p:ParsedProxy,projectId?:string){return ctx
 // Every pasted line gets its own preview row: malformed lines, repeats inside the paste and pairs with a missing side are
 // reported in place (never dropped, never re-ordered), so the operator sees exactly which IPs the provider handed back.
 export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccount[],projectId?:string,sheet?:SheetSnapshot,group?:{id:string|null;name:string}|null):Planned{
+  if(input.purchase&&input.kind!=='NEW')throw new ProxyDomainError('INVALID_INPUT','Chỉ nhập proxy mới mới ghi tiền mua');
   parseReceivedDate(input.receivedDate);
   const rows:PreviewRow[]=[],items:ResolvedItem[]=[];
   let reconciliation:ReconciliationPlan|undefined;
@@ -118,7 +124,8 @@ export function planBatch(input:BatchInput,ctx:ProxyContext,catalog:CatalogAccou
       items.push({row:result.row,next:p,owner:result.owner!,subgroup:result.subgroup||null,packageCode,state:packageCode?'LIVE':'QUARANTINED',sourceRef:source.sourceRef,sourceSnapshotId:source.snapshotId});
     }
   }
-  return {rows,items,...(reconciliation?{reconciliation}:{})};
+  const purchase=prepareProxyPurchase(input,items.length);
+  return {rows,items,...(purchase?{purchase}:{}),...(reconciliation?{reconciliation}:{})};
 }
 function canonical(value:unknown):string{
   if(Array.isArray(value)) return '['+value.map(canonical).join(',')+']';
@@ -129,16 +136,22 @@ const hash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest
 const action=(kind:string):InfrastructureAction=>kind==='BLOCKED'?'BLOCK':kind==='REPLACE'?'REPLACE':'IMPORT';
 function revisionFacts(ctx:ProxyContext,catalog:CatalogAccount[]){return {identities:ctx.identities.map(i=>[i.id,i.revision]).sort(),endpoints:ctx.endpoints.map(e=>[e.id,e.revision]).sort(),catalog:hash(catalog)};}
 function dto(batch:{token:string;kind:string;previewRows:Prisma.JsonValue;expiresAt:Date}):BatchPreview{
-  const rows=batch.previewRows as unknown as PreviewRow[];
-  return {token:batch.token,kind:batch.kind as BatchInput['kind'],rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,duplicates:rows.filter(r=>r.outcome==='ERROR'&&!!r.code&&DUPLICATE_CODES.includes(r.code)).length,expiresAt:batch.expiresAt.toISOString()};
+  const stored=batch.previewRows as unknown as PreviewRow[]|{rows:PreviewRow[];purchase:import('./types').ProxyPurchasePreview};
+  const rows=Array.isArray(stored)?stored:stored.rows,purchase=Array.isArray(stored)?undefined:stored.purchase;
+  return {...(purchase?{purchase}:{}),token:batch.token,kind:batch.kind as BatchInput['kind'],rows,ready:rows.filter(r=>r.outcome==='READY').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length,duplicates:rows.filter(r=>r.outcome==='ERROR'&&!!r.code&&DUPLICATE_CODES.includes(r.code)).length,expiresAt:batch.expiresAt.toISOString()};
 }
-export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSource?:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>;afterEvent?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
+export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSource?:(projectId:string,db:PrismaClient)=>Promise<SourceSnapshotRef>;afterEvent?:(tx:Prisma.TransactionClient)=>void|Promise<void>;afterPurchase?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
   const refresh=deps.refreshSource||refreshGenjy;
   const scoped=async(scope:ActorScope,operation:InfrastructureAction,reader:PrismaClient|Prisma.TransactionClient=db)=>{
     const current=await loadInfrastructureScope(reader,scope.userId,scope.projectId);assertInfrastructureAction(current,operation);
     if(hasServerScope(current))throw new ProxyDomainError('FORBIDDEN','Đợt proxy toàn dự án cần quyền toàn bộ máy chủ');
     if(current.businessMode!=='PROXY_VM') throw new ProxyDomainError('FORBIDDEN','Dự án chưa bật quản lý proxy/VM');return current;
   };
+  async function purchaseRights(scope:ActorScope,input:BatchInput,reader:PrismaClient|Prisma.TransactionClient=db){
+    if(!input.purchase)return;
+    if(input.kind!=='NEW')throw new ProxyDomainError('INVALID_INPUT','Chỉ nhập proxy mới mới ghi tiền mua');
+    await authorizeTeamCash(scope,'COSTS',true,reader);
+  }
   async function loadSheet(scope:ActorScope,input:BatchInput,reader:PrismaClient|Prisma.TransactionClient=db):Promise<SheetSnapshot|undefined>{
     if(input.kind!=='SHEET') return;
     if(!input.snapshotIds?.length||new Set(input.snapshotIds).size!==input.snapshotIds.length) throw new ProxyDomainError('INVALID_INPUT');
@@ -157,13 +170,15 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
   }
   async function preview(scope:ActorScope,input:BatchInput):Promise<BatchPreview>{
     const current=await scoped(scope,action(input.kind)),payloadHash=hash(input);
+    await purchaseRights(current,input);
     const prior=await db.proxyBatch.findUnique({where:{projectId_idempotencyKey:{projectId:scope.projectId,idempotencyKey:input.idempotencyKey}}});
     if(prior){if(prior.actorId!==scope.userId) throw new ProxyDomainError('FORBIDDEN');if(prior.payloadHash!==payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');if(prior.status==='APPLIED') return dto(prior);}
     if(input.kind!=='BLOCKED') await refresh(scope.projectId,db);
     const sheet=await loadSheet(current,input);
     const [ctx,catalog]=await Promise.all([loadProxyContext(current,input,db,sheet),loadCatalog(scope.projectId,db)]);
     const planned=planBatch(input,ctx,catalog,scope.projectId,sheet,await resolveGroup(current,input,db,false));
-    const data={actorId:scope.userId,kind:input.kind,payloadHash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,sheet,...planned})),sourceHash:ctx.source.hash,revisionFacts:revisionFacts(ctx,catalog) as Prisma.InputJsonValue,previewRows:planned.rows as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
+    if(planned.purchase){proxyPurchaseFx(current,input,planned.purchase);await assertPeriodOpen(db,scope.projectId,dayDate(planned.purchase.purchasedAt),planned.purchase.currency);}
+    const data={actorId:scope.userId,kind:input.kind,payloadHash,token:randomBytes(32).toString('base64url'),encryptedPlan:encrypt(JSON.stringify({input,sheet,...planned})),sourceHash:ctx.source.hash,revisionFacts:revisionFacts(ctx,catalog) as Prisma.InputJsonValue,previewRows:(planned.purchase?{rows:planned.rows,purchase:planned.purchase}:planned.rows) as unknown as Prisma.InputJsonValue,expiresAt:new Date(Date.now()+600000)};
     const batch=prior?await db.proxyBatch.update({where:{id:prior.id},data}):await db.proxyBatch.create({data:{...data,projectId:scope.projectId,idempotencyKey:input.idempotencyKey}});
     return dto(batch);
   }
@@ -172,26 +187,32 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
     const vmBatch=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId,kind:{in:['VM_ALLOCATION','PROXY_EDIT']}},select:{id:true}});
     if(vmBatch)throw new ProxyDomainError('INVALID_INPUT','Đợt gán VM phải lưu qua luồng Server/VM');
     const original=await db.proxyBatch.findFirst({where:{token,projectId:scope.projectId,actorId:scope.userId}});if(!original) throw new ProxyDomainError('NOT_FOUND');
-    await scoped(scope,action(original.kind));
+    const authorized=await scoped(scope,action(original.kind));
+    const originalPlan=JSON.parse(decrypt(original.encryptedPlan)) as Planned&{input:BatchInput;sheet?:SheetSnapshot};
+    await purchaseRights(authorized,originalPlan.input);
     if(original.idempotencyKey!==idempotencyKey) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
     async function replayResult(reader:PrismaClient|Prisma.TransactionClient,batch:NonNullable<typeof original>){const journal=await reader.operationJournal.findUnique({where:{batchId:batch.id}});const undo=journal?await reader.operationJournal.findUnique({where:{undoOfId:journal.id}}):null;return {...batch.result as unknown as CommitResult,replay:true,undone:!!undo};}
     if(original.status==='APPLIED') return replayResult(db,original);
     if(original.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW','Bản kiểm tra đã hết hạn; kiểm tra lại');
     if(original.kind!=='BLOCKED') {const source=await refresh(scope.projectId,db);if(!source.scanSucceeded) throw new ProxyDomainError('SOURCE_UNAVAILABLE');}
     return withProxyTransaction(async tx=>{
+      if(originalPlan.input.purchase)await lockCashProject(tx,scope.projectId);
       const batch=await tx.proxyBatch.findFirstOrThrow({where:{id:original.id,token,projectId:scope.projectId,actorId:scope.userId}});
       const current=await scoped(scope,action(batch.kind),tx);
+      const saved=JSON.parse(decrypt(batch.encryptedPlan)) as Planned&{input:BatchInput;sheet?:SheetSnapshot};
+      await purchaseRights(current,saved.input,tx);
       if(batch.status==='APPLIED') return replayResult(tx,batch);
       if(batch.expiresAt.getTime()<=Date.now()) throw new ProxyDomainError('STALE_PREVIEW');
-      const saved=JSON.parse(decrypt(batch.encryptedPlan)) as Planned&{input:BatchInput;sheet?:SheetSnapshot};
       if(hash(saved.input)!==batch.payloadHash) throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH');
       const currentSheet=await loadSheet(current,saved.input,tx);
       if(batch.kind==='SHEET'&&hash(currentSheet)!==hash(saved.sheet)) throw new ProxyDomainError('STALE_PREVIEW','Snapshot đối chiếu đã đổi; kiểm tra lại');
       const [ctx,catalog]=await Promise.all([loadProxyContext(current,saved.input,tx,currentSheet),loadCatalog(scope.projectId,tx)]);
       if(hash(revisionFacts(ctx,catalog))!==hash(batch.revisionFacts)||(batch.kind!=='BLOCKED'&&ctx.source.hash!==batch.sourceHash)) throw new ProxyDomainError('STALE_PREVIEW','Dữ liệu đã thay đổi; kiểm tra lại');
       const group=await resolveGroup(current,saved.input,tx,true),planned=planBatch(saved.input,ctx,catalog,scope.projectId,saved.sheet,group);
-      if(hash(planned)!==hash({rows:saved.rows,items:saved.items,reconciliation:saved.reconciliation})) throw new ProxyDomainError('STALE_PREVIEW');
+      if(hash(planned)!==hash({rows:saved.rows,items:saved.items,purchase:saved.purchase,reconciliation:saved.reconciliation})) throw new ProxyDomainError('STALE_PREVIEW');
       const groupId=group&&planned.items.length?group.id||(await tx.proxyGroup.create({data:{projectId:scope.projectId,name:group.name,normalizedName:group.name.toLocaleLowerCase('vi'),createdById:scope.userId}})).id:null;
+      const purchaseFx=planned.purchase?proxyPurchaseFx(current,saved.input,planned.purchase):null;
+      if(planned.purchase)await assertPeriodOpen(tx,scope.projectId,dayDate(planned.purchase.purchasedAt),planned.purchase.currency);
       const now=new Date(),receivedDate=parseReceivedDate(saved.input.receivedDate);
       const beforeImages=new Map<string,ReturnType<typeof captureEndpoint>|null>(),vmImages=new Map<string,{resource:ResourceImage['resource'];id:string;before:unknown}>();
       const images={remember:async(resource:ResourceImage['resource'],id:string,created=false)=>{
@@ -246,10 +267,23 @@ export function createProxyBatchService(db:PrismaClient=prisma,deps:{refreshSour
           const account=await tx.proxyProviderAccount.create({data:{projectId:scope.projectId,code,label:code,site:saved.input.newPackage.site?.trim()||null,credentialCipher:encrypt(JSON.stringify({username:creds.username,password:creds.password}))}});
           resources.push({resource:'ACCOUNT',id:account.id,before:null,after:captureAccount(account)});
         }
+        if(planned.purchase){
+          const purchase=planned.purchase,p=saved.input.purchase!,code='CP-PROXY-'+batch.id;
+          if(await tx.costRecord.findFirst({where:{projectId:scope.projectId,code},select:{id:true}}))throw new ProxyDomainError('STALE_PREVIEW','Đợt proxy đã có chi phí; tải lại để đối chiếu');
+          // Link only when every imported row proves the same known package. Never guess or change its renewal dates.
+          const codes=new Set(planned.items.map(i=>i.packageCode)),only=codes.size===1?Array.from(codes)[0]:null;
+          const account=only?await tx.proxyProviderAccount.findFirst({where:{projectId:scope.projectId,code:only},select:{id:true}}):null;
+          const note=['Mua proxy · đợt '+batch.id,purchase.quantity+' proxy thực mua ('+(purchase.quantitySource==='AUTO'?'tự đếm':'đã nhập')+')',planned.items.length+' proxy nhập vào kho',p.source?.trim(),p.notes?.trim()].filter(Boolean).join(' · ');
+          const cost=await tx.costRecord.create({data:{projectId:scope.projectId,code,date:dayDate(purchase.purchasedAt),category:'IP_PROXY',amount:purchase.total,total:purchase.total,currency:purchase.currency,usdtRate:purchase.rate,usdtAmount:purchase.usdt,...purchaseFx!,note,proxyAccountId:account?.id??null,profitTreatment:'CASH_COST',businessManaged:true}});
+          result.costId=cost.id;
+          // Financial history has its own COSTS read gate. The proxy journal below contains no monetary image or summary.
+          await recordOperation(tx,{scope:current,kind:'TEAM_CASH_COST',accessModule:'COSTS',commandKey:'proxy-purchase:'+batch.id,reversible:false,summary:{count:1},snapshot:{version:4,resources:[{resource:'COST',id:cost.id,before:null,after:await readImage(tx,scope.projectId,'COST',cost.id)} as ResourceImage],eventIds:[],replacementIds:[]}});
+          await deps.afterPurchase?.(tx);
+        }
         for(const [id,before] of Array.from(beforeImages))resources.push({resource:'ENDPOINT',id,before,after:await readImage(tx,scope.projectId,'ENDPOINT',id)} as ResourceImage);
         for(const image of Array.from(vmImages.values()))resources.push({...image,after:await readImage(tx,scope.projectId,image.resource,image.id)} as ResourceImage);
         const [events,replacements]=await Promise.all([tx.proxyStatusEvent.findMany({where:{batchId:batch.id},select:{id:true}}),tx.proxyReplacement.findMany({where:{batchId:batch.id},select:{id:true}})]);
-        await recordOperation(tx,{scope:current,kind:batch.kind,summary:{count:result.applied,skipped:result.skipped,errors:result.errors},batchId:batch.id,snapshot:{version:1,resources,eventIds:events.map(e=>e.id),replacementIds:replacements.map(r=>r.id)}});
+        await recordOperation(tx,{scope:current,kind:batch.kind,summary:{count:result.applied,skipped:result.skipped,errors:result.errors},batchId:batch.id,reversible:!planned.purchase,snapshot:{version:planned.purchase?4:1,resources,eventIds:events.map(e=>e.id),replacementIds:replacements.map(r=>r.id)}});
       }
       await tx.proxyBatch.update({where:{id:batch.id},data:{status:'APPLIED',appliedAt:now,result:result as unknown as Prisma.InputJsonValue}});
       await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_BATCH',entity:'ProxyBatch',entityId:batch.id,changes:{kind:batch.kind,applied:result.applied,skipped:result.skipped,errors:result.errors}}});

@@ -51,6 +51,14 @@ Triển khai 16/10/2026. Bằng chứng: `../superpowers/evidence/2026-10-16-pro
 
 `proxyManagement.editPreview/editCommit` (`items[].manage = {kind:'RETIRE', reason, releasePlans?} | {kind:'RESTORE'}`), `renameGroup`, `archiveGroup`, `groups({activeOnly})`, `saveCatalog` (+ `reminderDays`, `disabled`), `setPackageRenewal`, `catalog` (+ `reminderDays`, `renewalStoppedAt`, `reminder`, `priceHidden`), `notification.alerts` (type `PACKAGE_DUE`), `businessManagement.saveCashCost` (+ `packageDue`). Migration `20261016150000_proxy_retire_reminders` chỉ thêm (`RETIRED`, `ProxyGroup.archivedAt`, `reminderDays`, `renewalStoppedAt`, `renewalStopNote`).
 
+## 25/10/2026 — Ghi bill ngay khi nhập proxy mới
+
+- Kho proxy → Nhập mới → **Ghi chi phí mua proxy** (người có quyền ghi Chi phí). Chọn Tổng tiền thực trả hoặc Giá mỗi proxy; số lượng tự đếm từ danh sách hợp lệ, không trùng, rồi kiểm lại với kho trước khi ghi. Có thể sửa số thực mua theo hoá đơn; số nhập tay không bị danh sách ghi đè.
+- VND, USD PayPal, USDT dùng cùng cách quy đổi với Chi phí. Hiển thị tiền tối đa hai số thập phân; lưu số chính xác. Chỉ ghi một khoản IP_PROXY vào sổ hiện tại, cùng giao dịch nhập proxy; không ghi riêng thêm một khoản ở lúc tạo gói.
+- Nhập còn dòng lỗi: khoản chi của lần mua được ghi một lần với phần đã nhập. Sửa nốt dòng lỗi trong cùng khung không ghi phí lần nữa. Không có proxy mới hợp lệ thì không tạo chi phí. Mất phản hồi: giữ nội dung/token/key, bấm lại gửi đúng yêu cầu cũ.
+- Gói có thể được liên kết khi tất cả proxy thuộc một gói; không tự dời hạn gia hạn. Lần nhập có bill chỉ xem trong Hoàn tác để tránh đảo riêng kho và tiền; điều chỉnh khoản chi tại Chi phí theo cơ chế thu hồi/sửa hiện có. Lần nhập không giá giữ cách hoàn tác cũ.
+- Người chỉ có quyền nhập proxy không được xem/ghi bill qua đường này. Quyền được kiểm lại khi lưu và gửi lại; không có migration.
+
 ## Giới hạn
 
 - Chưa xoá cứng; chưa gộp nhiều đợt thuê khác hạn trong cùng gói (mỗi gói một hạn; nếu thực tế có nhiều đợt, tách gói hoặc chốt cách quản lý trước).

@@ -3,14 +3,17 @@ import {useEffect,useRef,useState} from 'react';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {displayMoney,formatMoney} from '@/lib/money-input';
-import {applyQuote,changeCurrency,editAmount,editRate,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
+import {applyQuote,applySuggestedQuantity,changeCurrency,editAmount,editQuantity,editRate,manualQuantity,resetSuggestedQuantity,quoteLabel,readPurchase,switchMode,QUOTE_TTL_MS,type PurchaseState} from './purchase-money';
 const CURRENCIES=['VND','PPUSD','USDT'];
 // Money of a purchase (Nhập kho, Ghi chi phí of a batch): total paid by default, or price per account × quantity bought. Vietnamese
 // number input ("70.000", "16,27"), every field checked in place; the canonical numbers are built by readPurchase. With VND the
 // Binance P2P BUY reference is fetched through the existing quote endpoint; it may be edited into the rate actually paid (then
 // labelled "Nhập tay"). A failed fetch keeps everything and offers Thử lại; an expired quote blocks the save until refreshed or
 // kept as a manual rate, so the converted amount never changes at the click.
-export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{projectId:string;unitWord:string;value:PurchaseState;onChange:(v:PurchaseState)=>void;locked:boolean}){
+export interface PurchaseMoneyFieldsProps {projectId:string;unitWord:string;value:PurchaseState;onChange:(v:PurchaseState)=>void;locked:boolean;suggestedQuantity?:number|null}
+export function PurchaseMoneyFields({projectId,unitWord,value:storedValue,onChange,locked,suggestedQuantity}:PurchaseMoneyFieldsProps){
+  const value=applySuggestedQuantity(storedValue,suggestedQuantity,{locked});
+  useEffect(()=>{if(value!==storedValue)onChange(value);},[value,storedValue,onChange]);
   const latest=useRef(value);latest.current=value;
   const p2p=trpc.businessManagement.p2pQuote.useQuery({projectId,currency:value.currency==='USDT'||value.currency==='PPUSD'?'VND':value.currency,side:'BUY'},{enabled:false,retry:false});
   const [fetchError,setFetchError]=useState(''),[fetching,setFetching]=useState(false),tried=useRef('');
@@ -34,7 +37,8 @@ export function PurchaseMoneyFields({projectId,unitWord,value,onChange,locked}:{
     <div className="acc-import-grid">
       {unit?<label className="pm-label">Giá mỗi {unitWord}<input className="pm-input" inputMode="decimal" value={value.unit} disabled={locked} placeholder="Ví dụ 70.000" aria-invalid={!!r.errors.unit} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('unit',true)}</label>
         :<label className="pm-label">Tổng tiền thực trả<input className="pm-input" inputMode="decimal" value={value.total} disabled={locked} placeholder="Để trống nếu chưa có giá" aria-invalid={!!r.errors.total} onChange={e=>onChange(editAmount(value,e.target.value))}/>{err('total',true)}</label>}
-      <label className="pm-label">{unit?`Số ${unitWord} thực mua`:`Số ${unitWord} thực mua (không bắt buộc)`}<input className="pm-input" inputMode="numeric" value={value.quantity} disabled={locked} placeholder={unitWord==='PP'?'Đếm mã PP, không đếm email':'Số tài khoản đã trả tiền'} aria-invalid={!!r.errors.quantity} onChange={e=>onChange({...value,quantity:e.target.value})}/>{err('quantity',r.priced||!!value.quantity)}</label>
+      <label className="pm-label">{unit?`Số ${unitWord} thực mua`:`Số ${unitWord} thực mua (không bắt buộc)`}<input className="pm-input" inputMode="numeric" value={value.quantity} disabled={locked} placeholder={unitWord==='PP'?'Đếm mã PP, không đếm email':`Số ${unitWord} đã trả tiền`} aria-invalid={!!r.errors.quantity} onChange={e=>onChange(editQuantity(value,e.target.value))}/>{err('quantity',r.priced||!!value.quantity)}
+        {suggestedQuantity!==undefined&&suggestedQuantity!==null&&<span className="text-xs pm-muted">{manualQuantity(value)?<>Đang dùng số lượng thực mua nhập tay. <button type="button" className="pm-link" disabled={locked} onClick={()=>onChange(resetSuggestedQuantity(value,suggestedQuantity,{locked}))}>Dùng số lượng danh sách</button></>:<>Theo danh sách: {suggestedQuantity.toLocaleString('vi-VN')} {unitWord}. Có thể sửa số thực mua.</>}</span>}</label>
       <label className="pm-label">Đồng tiền<select className="pm-input" value={value.currency} disabled={locked||fetching} onChange={e=>{setFetchError('');onChange(changeCurrency(value,e.target.value));}}>{!CURRENCIES.includes(value.currency)&&<option value={value.currency} disabled>Chọn đồng tiền</option>}{CURRENCIES.map(c=><option key={c} value={c}>{c==='PPUSD'?'USD PayPal':c}</option>)}</select>{err('currency',r.priced)}</label>
       {value.currency==='PPUSD'&&<label className="pm-label">1 USD PayPal = ? VND<input className="pm-input" inputMode="decimal" value={value.paypalVndRate??''} disabled={locked} placeholder="Ví dụ 24.000" aria-invalid={!!r.errors.paypalVndRate&&r.priced} onChange={e=>onChange({...value,paypalVndRate:e.target.value})}/>{err('paypalVndRate',r.priced)}</label>}
       {value.currency!=='USDT'&&<label className="pm-label">{value.currency==='PPUSD'?'1 USDT = ? VND':`Tỷ giá thực trả: 1 USDT = ? ${value.currency}`}<input className="pm-input" inputMode="decimal" value={value.currency==='PPUSD'?value.vndUsdtRate??'':value.rate} disabled={locked||fetching} placeholder={fetching?'Đang lấy giá…':value.currency==='VND'?'Ví dụ 25.820':''} aria-invalid={!!r.errors[value.currency==='PPUSD'?'vndUsdtRate':'rate']&&r.priced} onChange={e=>onChange(editRate(value,e.target.value))}/>{err(value.currency==='PPUSD'?'vndUsdtRate':'rate',r.priced&&!fetching)}</label>}

@@ -92,8 +92,10 @@ creates, merges and deletes nothing.
 - Recorded in the existing cost ledger (USDT team cash, category GMAIL or PAYPAL), once per batch, in the same import command:
   - *Tổng tiền thực trả* (default field; empty = Chưa ghi chi phí) records the total as entered.
   - *Tính theo giá mỗi tài khoản* asks for *Số lượng thực mua* and *Giá / tài khoản* and shows `số lượng × đơn giá = tổng` live.
-    The quantity is typed by the person; it is never the number of pasted or valid lines, because accounts that could not be
-    imported may still have been paid for.
+    As of 25/10/2026, quantity defaults to distinct valid new accounts from the checked input (PP codes, not receiving emails).
+    Existing accounts/email additions are excluded. The person may override the actual purchased quantity, for example paid 50,
+    received 48; that override survives list edits. "Dùng số lượng danh sách" resumes automatic counting. Saved batches default
+    to their recorded paid quantity, or received account count when none was recorded. Existing costs are not changed.
   - Original amount, currency and USDT rate are kept, and the period lock applies.
 - Needs team cash and the right to write costs. Without them the batch is saved as *Chưa ghi chi phí*. A person with that right
   records the payment later in *Lịch sử nhập kho → Ghi chi phí*. This is refused once a cost is recorded; it is allowed again only after

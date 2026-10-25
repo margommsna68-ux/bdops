@@ -12,7 +12,7 @@ import {readAccountStore,readVmAccounts} from '../account-store/read';
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),revision=z.number().int().nonnegative();
 const money=z.string().max(40);
 const quantity=z.number().int().positive().max(100000).nullish();
-const batch=z.object({code:z.string().max(60).nullish(),source:z.string().max(200).nullish(),purchasedAt:z.string().length(10),priceMode:z.enum(['NONE','UNIT','TOTAL']),amount:money.nullish(),currency:z.string().max(8).nullish(),rate:money.nullish(),paypalVndRate:money.optional(),vndUsdtRate:money.optional(),quantity,notes:z.string().max(1000).nullish(),p2pQuoteToken:z.string().max(4000).nullish()});
+const batch=z.object({code:z.string().max(60).nullish(),source:z.string().max(200).nullish(),purchasedAt:z.string().length(10),priceMode:z.enum(['NONE','UNIT','TOTAL']),amount:money.nullish(),currency:z.string().max(8).nullish(),rate:money.nullish(),paypalVndRate:money.optional(),vndUsdtRate:money.optional(),quantity,autoQuantity:z.boolean().optional(),notes:z.string().max(1000).nullish(),p2pQuoteToken:z.string().max(4000).nullish()});
 const stockImport=project.extend({kind:z.enum(['LOGIN','PAYPAL']),loginType:z.enum(['GMAIL','APPLE_ID']).nullish(),loginFormat:z.enum(['STANDARD','APPLE5']).nullish(),text:z.string().max(400000),batch:batch.nullish(),append:z.object({batchId:id}).nullish()});
 // paypalEmail: the receiving email (Mã PP → Email). paypal is accepted only as null (remove); a PayPal id alone is refused.
 const link=z.object({line:z.number().int().positive(),vmId:id,login:id.nullable().optional(),paypalEmail:id.nullable().optional(),paypal:id.nullable().optional()});

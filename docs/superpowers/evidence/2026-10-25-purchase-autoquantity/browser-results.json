@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "checks": 15,
+  "results": [
+    "Synthetic local admin signs in",
+    "Distinct PP codes count once regardless of emails/repeated lines",
+    "Unit price times automatic PP quantity produces a bill",
+    "Actual quantity typed by owner survives list edits",
+    "Reset resumes automatic quantity",
+    "Removing an input PP updates quantity and bill",
+    "Successful PayPal import closes the form",
+    "Apple ID list automatically counts accounts",
+    "Apple ID unit price calculates precise total",
+    "Proxy auto quantity ignores malformed input",
+    "Proxy import displays total bill",
+    "Partial proxy import keeps only rejected line",
+    "Partial proxy import does not offer a second cost",
+    "Finishing refused proxies returns to inventory",
+    "No browser JavaScript errors"
+  ],
+  "errors": []
+}

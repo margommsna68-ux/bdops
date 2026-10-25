@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "checks": 5,
+  "results": [
+    "light proxy bill has shared layout",
+    "dark proxy bill has shared layout",
+    "golden proxy bill has shared layout",
+    "bronze proxy bill has shared layout",
+    "390px page has no overflow"
+  ]
+}

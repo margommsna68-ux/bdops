@@ -20,7 +20,7 @@ export type StockKind='LOGIN'|'PAYPAL';
 export type PriceMode='NONE'|'UNIT'|'TOTAL';
 // A new purchase (batch) or an explicit "Nhập bổ sung" into one existing batch (append). Never both: an append carries no money,
 // source or date, and a new purchase never falls into an old batch because its code matches.
-export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;currency?:string|null;rate?:string|null;paypalVndRate?:string;vndUsdtRate?:string;notes?:string|null;p2pQuoteToken?:string|null}
+export interface BatchInput {code?:string|null;source?:string|null;purchasedAt:string;priceMode:PriceMode;amount?:string|null;quantity?:number|null;/** Explicit AUTO unit pricing only; omitted by legacy/manual purchases. */autoQuantity?:boolean;currency?:string|null;rate?:string|null;paypalVndRate?:string;vndUsdtRate?:string;notes?:string|null;p2pQuoteToken?:string|null}
 export interface ImportInput {kind:StockKind;loginType?:AccountLoginType|null;/** Apple ID lists default to APPLE5 (Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại); STANDARD is the older pattern. Gmail is always STANDARD. */loginFormat?:LoginFormat|null;text:string;batch?:BatchInput|null;append?:{batchId:string}|null}
 export const loginFormatOf=(input:Pick<ImportInput,'loginType'|'loginFormat'>):LoginFormat=>input.loginFormat??(input.loginType==='APPLE_ID'?'APPLE5':'STANDARD');
 // PayPal rows also carry the emails of the line and, for a code already in stock, the emails it would add (outcome ADD: shown with
@@ -141,9 +141,16 @@ function countRows(kind:StockKind,rows:ImportRow[]){
   const firsts=kind==='PAYPAL'?rows.filter(r=>r.head):rows;
   return {rows,ready:firsts.filter(r=>r.outcome==='READY').length,exists:firsts.filter(r=>r.outcome==='EXISTS').length,add:firsts.filter(r=>r.outcome==='ADD').length,emails:kind==='PAYPAL'?rows.filter(r=>r.outcome==='READY').reduce((a,r)=>a+(r.newEmails?.length||0),0):0,errors:rows.filter(r=>r.outcome==='ERROR').length};
 }
+// A classified automatic quantity is a preview assertion, never authority to reprice a purchase at commit.
+// PP READY heads count accounts, excluding repeated code lines, existing stock and email additions.
+function assertAutomaticQuantity(purchase:BatchInput|null,ready:number){
+  if(purchase?.priceMode==='UNIT'&&purchase.autoQuantity===true&&purchase.quantity!==ready)
+    throw new ProxyDomainError('STALE_PREVIEW','Số lượng tự động không còn khớp với '+ready+' tài khoản mới hợp lệ; kiểm tra lại danh sách và tiền mua trước khi lưu','REVISION_CONFLICT',{quantity:purchase.quantity??null,ready});
+}
 export async function previewStockImport(scope:ActorScope,input:ImportInput,db:PrismaClient=prisma){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertStockWrite(current,input.kind);
   const purchase=purchaseOf(input),{rows}=await classify(db,current,input),counts=countRows(input.kind,rows);
+  assertAutomaticQuantity(purchase,counts.ready);
   if(!purchase){
     const batch=await appendTarget(db,current,input);
     return {...counts,batch:{existing:true,id:batch.id,code:batch.code,cost:batch.costRecordId&&!batch.costRecord?.voidedAt?'RECORDED' as const:'NONE' as const,total:null}};
@@ -159,6 +166,7 @@ export async function commitStockImport(scope:ActorScope,input:ImportInput&{key:
   return runBusinessCommand(scope,{key:input.key,payload:hashed,kind:input.kind==='LOGIN'?'ACCOUNT_STOCK_IMPORT':'PAYPAL_STOCK_IMPORT',module:area(input.kind)},async(tx,images,current)=>{
     assertStockWrite(current,input.kind);
     const purchase=purchaseOf(input),{rows,parsed}=await classify(tx,current,input),ready=rows.filter(r=>r.outcome==='READY');
+    assertAutomaticQuantity(purchase,countRows(input.kind,rows).ready);
     let batch:{id:string;code:string;costRecordId:string|null};
     if(!purchase)batch=await appendTarget(tx,current,input);
     else{

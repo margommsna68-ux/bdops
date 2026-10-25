@@ -6,7 +6,7 @@ import {JSDOM} from 'jsdom';
 const mock=vi.hoisted(()=>({copy:vi.fn(),update:vi.fn(),preview:vi.fn(),commit:vi.fn(),clipboard:vi.fn()}));
 vi.mock('@/lib/trpc',()=>({trpc:{
   user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},
-  businessManagement:{copyAccount:{useMutation:()=>({mutateAsync:mock.copy,isLoading:false})}},
+  businessManagement:{copyAccount:{useMutation:()=>({mutateAsync:mock.copy,isLoading:false})},cashAccess:{useQuery:()=>({data:{writeCosts:false}})}},
   accountStore:{updateLogin:{useMutation:()=>({mutateAsync:mock.update,isLoading:false})}},
   proxyManagement:{catalog:{useQuery:()=>({data:[],refetch:()=>{}})},groups:{useQuery:()=>({data:[],refetch:()=>{}})},
     preview:{useMutation:()=>({mutateAsync:mock.preview,isLoading:false})},commit:{useMutation:()=>({mutateAsync:mock.commit,isLoading:false})}},

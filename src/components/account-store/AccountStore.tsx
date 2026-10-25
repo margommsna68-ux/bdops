@@ -2,7 +2,7 @@
 import {displayMoney,formatMoney,roundDecimal} from '@/lib/money-input';
 import {CashDecimal} from '@/server/business-management/usdt-money';
 import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
-import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
+import {applySuggestedQuantity,emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
 import {useBusinessKey} from '@/components/business-management/shared';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import Link from 'next/link';
@@ -243,14 +243,16 @@ function BatchMoney({b}:{b:Batch}){
 // Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought), with
 // the same money fields as Nhập kho (Vietnamese numbers, rate source, expiry). One command key per content: a retry after a lost
 // answer replays instead of recording a second cost.
-function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){
+export function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){
   const unitWord=batch.kind==='PAYPAL'?'PP':'tài khoản';
-  const [money,setMoney]=useState<PurchaseState>(()=>({...emptyPurchase(),quantity:batch.paidQuantity?String(batch.paidQuantity):''})),[date,setDate]=useState(batch.purchasedAt),save=trpc.accountStore.batchCost.useMutation(),keyFor=useBusinessKey();
+  const [moneyDraft,setMoney]=useState<PurchaseState>(()=>({...emptyPurchase(),quantity:String(batch.paidQuantity??batch.received),quantityMode:batch.paidQuantity!=null?'MANUAL':'AUTO'})),[date,setDate]=useState(batch.purchasedAt),save=trpc.accountStore.batchCost.useMutation(),keyFor=useBusinessKey();
+  // Only a not-yet-priced batch opens this form. Keep the actual paid quantity if known; received counts PP accounts, not emails.
+  const money=applySuggestedQuantity(moneyDraft,batch.received,{locked:save.isLoading});
   useQuoteExpiry(money.quote);
   const m=readPurchase(money,unitWord);
   return <form className="acc-import m-3" onSubmit={e=>{e.preventDefault();if(!m.payload||save.isLoading)return;const {priceMode,amount,quantity,currency,rate,paypalVndRate,vndUsdtRate,p2pQuoteToken}=m.payload;const input={projectId,batchId:batch.id,expectedRevision:batch.revision,priceMode,amount,quantity,currency,rate,paypalVndRate,vndUsdtRate,p2pQuoteToken,date};save.mutate({...input,key:keyFor(input)},{onSuccess:()=>{toast.success('Đã ghi chi phí lô '+batch.code);onSaved();}});}}>
     <h3 className="text-sm font-semibold">Ghi chi phí lô {batch.code} ({batch.received}{batch.kind==='PAYPAL'?' PP':''} đã nhận)</h3>
-    <PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} locked={save.isLoading} onChange={setMoney}/>
+    <PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} suggestedQuantity={batch.received} locked={save.isLoading} onChange={setMoney}/>
     <div className="acc-import-grid"><label className="pm-label">Ngày chi<input type="date" className="pm-input" value={date} onChange={e=>setDate(e.target.value)}/></label></div>
     {save.error&&<p role="alert" className="pm-error text-sm">{save.error.message}{' '}Nội dung được giữ; bấm lại sẽ gửi đúng yêu cầu này (không ghi hai khoản).</p>}
     <div className="flex gap-2 justify-end"><button type="button" className="pm-button pm-button-quiet" onClick={onClose}>Đóng</button><button className="pm-button pm-button-primary" disabled={save.isLoading||!m.payload}>{save.isLoading?'Đang ghi…':'Ghi chi phí một lần'}</button></div>

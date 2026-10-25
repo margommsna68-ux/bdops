@@ -265,6 +265,7 @@
 [data-theme="bronze"] .bg-red-100.text-red-800,[data-theme="bronze"] .bg-red-100.text-red-700{background-color:#F2D9D1 !important;color:#7A3525 !important}
 [data-theme="bronze"] .bg-yellow-100.text-yellow-800,[data-theme="bronze"] .bg-yellow-100.text-yellow-700{background-color:#F6E5BE !important;color:#7A5012 !important}
 [data-theme="bronze"] ::selection{background-color:rgba(140,90,43,0.15)}
+[data-theme="bronze"] .pm-dialog .pm-field-error{color:#7A3525}
 [data-theme="bronze"] .pm-button-primary{background:#744820;color:#FFFAF2;border-color:#744820}
 [data-theme="bronze"] .pm-button-primary:hover{background:#5E3A19;color:#FFFAF2}
 [data-theme="bronze"] .pm-button:focus-visible,[data-theme="bronze"] .pm-icon-button:focus-visible,[data-theme="bronze"] .pm-ip:focus-visible,[data-theme="bronze"] .pm-tabs button:focus-visible{outline:2px solid #A9713F}

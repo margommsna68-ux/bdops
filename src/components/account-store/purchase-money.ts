@@ -14,8 +14,20 @@ import {displayMoney,formatMoney,parseViNumber,roundDecimal,viInput,viNumber} fr
 //   time, expires visibly (the form blocks Nhập instead of changing the converted amount at the click) and is dropped when the rate
 //   is edited or the currency changes.
 export type Quote={rate:string;token:string;fetchedAt:string;side:'BUY'|'SELL'};
-export interface PurchaseState {mode:'TOTAL'|'UNIT';total:string;unit:string;quantity:string;currency:string;rate:string;paypalVndRate?:string;vndUsdtRate?:string;quote:Quote|null;held?:boolean}
-export const emptyPurchase=():PurchaseState=>({mode:'TOTAL',total:'',unit:'',quantity:'',currency:'USDT',rate:'',paypalVndRate:'',vndUsdtRate:'',quote:null});
+export interface PurchaseState {mode:'TOTAL'|'UNIT';total:string;unit:string;quantity:string;quantityMode?:'AUTO'|'MANUAL';currency:string;rate:string;paypalVndRate?:string;vndUsdtRate?:string;quote:Quote|null;held?:boolean}
+export const emptyPurchase=():PurchaseState=>({mode:'TOTAL',total:'',unit:'',quantity:'',quantityMode:'AUTO',currency:'USDT',rate:'',paypalVndRate:'',vndUsdtRate:'',quote:null});
+/** Old nonempty drafts are manual: never replace a person's actual paid quantity on restore. */
+export const manualQuantity=(s:PurchaseState)=>s.quantityMode==='MANUAL'||s.quantityMode===undefined&&!!s.quantity.trim();
+export function applySuggestedQuantity(s:PurchaseState,suggestedQuantity:number|null|undefined,opts:{locked?:boolean}={}):PurchaseState{
+ if(opts.locked||manualQuantity(s)||suggestedQuantity===undefined||suggestedQuantity===null||!Number.isSafeInteger(suggestedQuantity)||suggestedQuantity<0)return s;
+ const quantity=suggestedQuantity?String(suggestedQuantity):'';
+ return s.quantity===quantity&&s.quantityMode==='AUTO'?s:{...s,quantity,quantityMode:'AUTO'};
+}
+export const editQuantity=(s:PurchaseState,quantity:string):PurchaseState=>({...s,quantity,quantityMode:'MANUAL'});
+export function resetSuggestedQuantity(s:PurchaseState,suggestedQuantity:number|null|undefined,opts:{locked?:boolean}={}):PurchaseState{
+ if(opts.locked||suggestedQuantity===undefined||suggestedQuantity===null)return s;
+ return applySuggestedQuantity({...s,quantityMode:'AUTO'},suggestedQuantity);
+}
 /** The server accepts a quote for 10 minutes; the form treats it as expired a little earlier so a click never races the limit. */
 export const QUOTE_TTL_MS=9.5*60000;
 export const MAX_QUANTITY=100000;

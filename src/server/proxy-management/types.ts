@@ -21,7 +21,15 @@ const FALLBACK:Partial<Record<IssueCode,string>>={STALE_PREVIEW:'Dữ liệu v�
 export function userMessage(e:ProxyDomainError){const text=e.message.replace(/^[A-Z_]+(: )?/,'').trim();return text||FALLBACK[e.code]||'Chưa lưu được; tải lại để kiểm tra';}
 export interface ParsedProxy {ip:string;port:number|null;username:string|null;password:string|null;format:'BARE'|'FULL'}
 export interface ActorScope {userId:string;projectId:string;role:'ADMIN'|'MODERATOR'|'USER'|'VIEWER';capabilities:string[];allowedModules?:string[];businessMode?:string;teamCashEnabled?:boolean;serverIds?:string[]|null}
-export interface BatchInput {kind:BatchKind;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;groupId?:string|null;newGroup?:{name:string}|null;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}
+export interface ProxyPurchaseInput {
+ purchasedAt:string;priceMode:'UNIT'|'TOTAL';amount:string;quantity?:number|null;currency:'VND'|'PPUSD'|'USDT';
+ rate?:string|null;paypalVndRate?:string;vndUsdtRate?:string;source?:string|null;notes?:string|null;p2pQuoteToken?:string|null;
+}
+export interface ProxyPurchasePreview {
+ purchasedAt:string;priceMode:'UNIT'|'TOTAL';automaticQuantity:number;quantity:number;quantitySource:'AUTO'|'ACTUAL';importableQuantity:number;
+ unitPrice:string|null;total:string;currency:'VND'|'PPUSD'|'USDT';rate:string;usdt:string;
+}
+export interface BatchInput {kind:BatchKind;purchase?:ProxyPurchaseInput|null;text?:string;removedText?:string;addedText?:string;owner?:Owner;subgroup?:Subgroup;groupId?:string|null;newGroup?:{name:string}|null;receivedDate?:string|null;snapshotIds?:string[];packageCode?:string|null;newPackage?:{code:string;site?:string|null}|null;idempotencyKey:string}
 export interface Decision {outcome:Outcome;code?:IssueCode;message:string}
 // Error codes that mean "this IP already exists somewhere" (paste, stock, VM, Genjy or history), as opposed to input/package/permission problems.
 export const DUPLICATE_CODES:IssueCode[]=['DUPLICATE_INPUT','CURRENT_IP','HISTORICAL_IP','GENJY_RESERVED'];
@@ -29,8 +37,8 @@ export const DUPLICATE_CODES:IssueCode[]=['DUPLICATE_INPUT','CURRENT_IP','HISTOR
 export interface ExistingRef {identityId:string;state:InventoryState|null;owner:Owner;locations:string[];foreign:boolean}
 export interface Conflict {code:IssueCode;message:string;existing?:ExistingRef}
 export interface PreviewRow extends Decision {row:number;oldIp?:string;newIp?:string;identityId?:string;endpointId?:string;owner?:Owner;subgroup?:Subgroup;groupName?:string|null;packageCode?:string|null;sourceRefs:string[];existing?:ExistingRef}
-export interface BatchPreview {token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;duplicates:number;expiresAt:string}
-export interface CommitResult {batchId:string;replay:boolean;undone?:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
+export interface BatchPreview {purchase?:ProxyPurchasePreview;token:string;kind:BatchKind;rows:PreviewRow[];ready:number;skipped:number;errors:number;duplicates:number;expiresAt:string}
+export interface CommitResult {costId?:string;batchId:string;replay:boolean;undone?:boolean;rows:PreviewRow[];applied:number;skipped:number;errors:number}
 export interface CatalogAccount {id:string;code:string;username:string;password:string}
 export interface IdentityFact {id:string;ip:string;owner:Owner;subgroup:Subgroup;revision:number;allocationMode:'SINGLE_IP'|'APPROVED_PORT_STREAM'}
 export interface EndpointFact {id:string;projectId:string;identityId:string;proxy:ParsedProxy;inventoryState:InventoryState;retiredAt?:string|null;revision:number;vmKeys:string[]}

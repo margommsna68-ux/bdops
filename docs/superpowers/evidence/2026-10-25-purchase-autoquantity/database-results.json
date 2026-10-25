@@ -1,0 +1,56 @@
+{
+  "localOnly": true,
+  "checks": {
+    "onePaypalCost": true,
+    "oneAccountCost": true,
+    "oneProxyCost": true,
+    "exactlyThreeCosts": true,
+    "paypalPaidQuantity": true,
+    "accountPaidQuantity": true,
+    "proxyRowsAfterPartial": true
+  },
+  "costs": [
+    {
+      "id": "cmvndf9p700061275suoj7wpd",
+      "code": "CP-02aab206-3e08-41c5-9c1c-6c6fc69e526f",
+      "category": "PAYPAL",
+      "amount": "3.75",
+      "currency": "USDT",
+      "usdtAmount": "3.75",
+      "proxyAccountId": null
+    },
+    {
+      "id": "cmvndfb2n000v1275llu0wpcl",
+      "code": "CP-270da81f-1200-44de-b8c9-bd75b7680f54",
+      "category": "GMAIL",
+      "amount": "1.26",
+      "currency": "USDT",
+      "usdtAmount": "1.26",
+      "proxyAccountId": null
+    },
+    {
+      "id": "cmvndfd2k01qu1275mki9rkip",
+      "code": "CP-PROXY-cmvndfcyt01qb12753f6zssui",
+      "category": "IP_PROXY",
+      "amount": "4.5",
+      "currency": "USDT",
+      "usdtAmount": "4.5",
+      "proxyAccountId": "cmvndex1a0003fnsgtxpryftj"
+    }
+  ],
+  "batches": [
+    {
+      "kind": "LOGIN",
+      "paidQuantity": 3,
+      "totalPaid": "1.26",
+      "costRecordId": "cmvndfb2n000v1275llu0wpcl"
+    },
+    {
+      "kind": "PAYPAL",
+      "paidQuantity": 3,
+      "totalPaid": "3.75",
+      "costRecordId": "cmvndf9p700061275suoj7wpd"
+    }
+  ],
+  "proxies": 4
+}

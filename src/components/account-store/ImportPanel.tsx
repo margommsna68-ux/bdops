@@ -6,9 +6,11 @@ import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
-import {emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
+import {applySuggestedQuantity,emptyPurchase,manualQuantity,readPurchase,type PurchaseState} from './purchase-money';
+import {countAccountPurchaseQuantity} from './purchase-quantity';
 import {displayMoney,formatMoney} from '@/lib/money-input';
 type Preview=inferRouterOutputs<AppRouter>['accountStore']['importPreview'];
+const readyIdentities=(preview:Preview)=>JSON.stringify([...new Set(preview.rows.filter(r=>r.outcome==='READY').map(r=>r.account.toLowerCase()))].sort());
 type Committed=inferRouterOutputs<AppRouter>['accountStore']['importCommit'];
 export type StockKind='LOGIN'|'PAYPAL';
 export type AppendTarget={id:string;code:string;type?:'GMAIL'|'APPLE_ID'|null};
@@ -44,32 +46,62 @@ export function ImportPanel({projectId,kind,canCost,onDone,onFinished,onClose,on
   const d=importDraft(projectId,kind);
   const [target,setTarget]=useDraft<AppendTarget|null>(d,'target',null);
   const [type,setType]=useDraft<'GMAIL'|'APPLE_ID'|''>(d,'type',''),[mode,setMode]=useDraft<'paste'|'one'>(d,'mode','paste'),[text,setText]=useDraft(d,'text',''),[one,setOne]=useDraft(d,'one',{email:'',password:'',twoFa:'',recovery:'',notes:'',code:'',twoFaLink:'',smsLink:'',phone:''}),[format,setFormat]=useDraft<'APPLE5'|'STANDARD'>(d,'format','APPLE5');
-  const [source,setSource]=useDraft(d,'source',''),[date,setDate]=useDraft(d,'date',today()),[money,setMoney]=useDraft<PurchaseState>(d,'money',emptyPurchase()),[notes,setNotes]=useDraft(d,'notes','');
-  const [preview,setPreview]=useDraft<Preview|null>(d,'preview',null),[done,setDone]=useDraft<Committed|null>(d,'done',null),[error,setError]=useDraft(d,'error',''),[key,setKey]=useDraft<string|null>(d,'key',null);
+  const [source,setSource]=useDraft(d,'source',''),[date,setDate]=useDraft(d,'date',today()),[moneyDraft,setMoney]=useDraft<PurchaseState>(d,'money',emptyPurchase()),[notes,setNotes]=useDraft(d,'notes','');
+  const [pricedPreview,setPreview]=useDraft<Preview|null>(d,'preview',null),[done,setDone]=useDraft<Committed|null>(d,'done',null),[error,setError]=useDraft(d,'error',''),[key,setKey]=useDraft<string|null>(d,'key',null);
+  const [classification,setClassification]=useDraft<{sig:string;preview:Preview;quantity:number}|null>(d,'quantityClassification',null),[classificationError,setClassificationError]=useState(''),[classifying,setClassifying]=useState(false);
+  // Cached rows may be displayed on restore, but only success of this mounted refresh may authorize AUTO pricing.
+  const [classificationSuccess,setClassificationSuccess]=useState<string|null>(null);
   const [checkedSig,setCheckedSig]=useDraft(d,'checkedSig',''),[keySig,setKeySig]=useDraft(d,'keySig',''),[uncertain,setUncertain]=useDraft(d,'uncertain',false),[recheck,setRecheck]=useState(0),[checkError,setCheckError]=useState('');
-  const check=trpc.accountStore.importPreview.useMutation(),commit=trpc.accountStore.importCommit.useMutation(),addEmails=trpc.accountStore.addEmails.useMutation(),busy=commit.isLoading,locked=commit.isLoading||uncertain;
+  const check=trpc.accountStore.importPreview.useMutation(),classify=trpc.accountStore.importPreview.useMutation(),commit=trpc.accountStore.importCommit.useMutation(),addEmails=trpc.accountStore.addEmails.useMutation(),busy=commit.isLoading,locked=commit.isLoading||uncertain;
   // Apple ID (20/10/2026): the list as bought, Email | Mật khẩu | Link lấy 2FA | Link SMS | Số điện thoại; the older pattern stays as a
   // secondary option. Gmail keeps its pattern. The type is chosen by the person, never read from the email domain.
   const apple5=kind==='LOGIN'&&type==='APPLE_ID'&&format==='APPLE5';
   const lineText=()=>mode==='paste'?text:kind==='PAYPAL'?`${one.code.trim()}\t${one.email.trim()}`:(apple5?[one.email,one.password,one.twoFaLink||'',one.smsLink||'',one.phone||'']:[one.email,one.password,one.twoFa,one.recovery,one.notes]).map(s=>s.replace(/\t/g,' ')).join('\t').replace(/\t+$/,'');
+  const inputText=lineText(),empty=!inputText.trim()||kind==='LOGIN'&&!type;
+  const identity={projectId,kind,loginType:kind==='LOGIN'?(type||null):null,loginFormat:kind==='LOGIN'&&type==='APPLE_ID'?format:null,text:inputText};
+  // Money-free classification breaks the price→quantity→preview cycle. Only exact input/type/format matches may set quantity.
+  const classificationSig=JSON.stringify(identity),matching=classification?.sig===classificationSig?classification:null;
+  const classificationRequest=JSON.stringify([classificationSig,recheck]);
+  useEffect(()=>{
+    if(locked||target||done||empty)return;
+    setClassificationSuccess(null);setClassificationError('');setClassifying(true);let cancelled=false;const timer=setTimeout(async()=>{
+      try{const result=await classify.mutateAsync({...JSON.parse(classificationSig),batch:{purchasedAt:today(),priceMode:'NONE',amount:null,quantity:null,currency:null,rate:null,p2pQuoteToken:null}});if(cancelled)return;
+        const quantity=new Set(result.rows.filter(r=>r.outcome==='READY').map(r=>r.account.toLowerCase())).size;setClassification({sig:classificationSig,preview:result,quantity});setClassificationSuccess(classificationRequest);setClassifying(false);}
+      catch(e){if(!cancelled){setClassificationError(errorMessage(e));setClassifying(false);}}
+    },400);
+    return ()=>{clearTimeout(timer);cancelled=true;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[classificationSig,locked,!!target,!!done,empty,recheck]);
+  const suggestedQuantity=matching?.quantity??countAccountPurchaseQuantity(inputText,kind,apple5?'APPLE5':'STANDARD');
+  const quantityFrozen=locked||!!target||!!done,money=applySuggestedQuantity(moneyDraft,suggestedQuantity,{locked:quantityFrozen});
+  useEffect(()=>{if(money!==moneyDraft)setMoney(money);},[money,moneyDraft,setMoney]);
+  const quantityPending=!manualQuantity(money)&&!quantityFrozen&&!empty&&(classifying||!matching||classificationSuccess!==classificationRequest);
   // Money: canonical numbers only (the typed Vietnamese text is parsed once in readPurchase); a money field with an error blocks the
   // check and Nhập instead of sending something the server could read differently.
-  useQuoteExpiry(money.quote);
-  const unitWord=kind==='PAYPAL'?'PP':'tài khoản',m=readPurchase(money,unitWord),priced=canCost&&m.priced,moneyBlocked=priced&&!m.payload;
+  // A partial purchase keeps its original money draft, but appending remaining rows never prices the batch again.
+  useQuoteExpiry(target?null:money.quote);
+  const unitWord=kind==='PAYPAL'?'PP':'tài khoản',m=readPurchase(money,unitWord),priced=!target&&canCost&&m.priced,moneyBlocked=priced&&!m.payload;
   const input=()=>({projectId,kind,loginType:kind==='LOGIN'?(type||null):null,loginFormat:kind==='LOGIN'&&type==='APPLE_ID'?format:null,text:lineText(),
-    ...(target?{append:{batchId:target.id}}:{batch:{source:source||null,purchasedAt:date,...(priced&&m.payload?m.payload:{priceMode:'NONE' as const,amount:null,quantity:canCost?m.payload?.quantity??null:null,currency:null,rate:null,p2pQuoteToken:null}),notes:notes||null}})});
+    ...(target?{append:{batchId:target.id}}:{batch:{source:source||null,purchasedAt:date,...(priced&&m.payload?m.payload:{priceMode:'NONE' as const,amount:null,quantity:canCost?m.payload?.quantity??null:null,currency:null,rate:null,p2pQuoteToken:null}),...(priced&&money.mode==='UNIT'&&!manualQuantity(money)?{autoQuantity:true}:{}),notes:notes||null}})});
   // What would be sent now. The check result and the request key belong to exactly this content.
-  const sig=JSON.stringify(input()),empty=!lineText().trim()||kind==='LOGIN'&&!type,fresh=!!preview&&checkedSig===sig&&!moneyBlocked,seq=useRef(0);
+  const autoPriced=priced&&!manualQuantity(money);
+  const sig=JSON.stringify(input()),fresh=!!pricedPreview&&checkedSig===sig&&!moneyBlocked&&!quantityPending&&(!autoPriced||!!matching&&readyIdentities(pricedPreview)===readyIdentities(matching.preview)),seq=useRef(0);
   useEffect(()=>{
     if(uncertain)return;setCheckError('');
-    if(empty||moneyBlocked){if(preview)setPreview(null);seq.current++;return;}
+    if(empty||moneyBlocked||quantityPending){if(pricedPreview)setPreview(null);seq.current++;return;}
     const n=++seq.current,timer=setTimeout(async()=>{
-      try{const r=await check.mutateAsync(JSON.parse(sig));if(n!==seq.current)return;setPreview(r);setCheckedSig(sig);if(keySig!==sig){setKey(crypto.randomUUID());setKeySig(sig);}}
-      catch(e){if(n===seq.current){setPreview(null);setCheckError(errorMessage(e));}}
+      try{const r=await check.mutateAsync(JSON.parse(sig));if(n!==seq.current)return;
+        // Stock can change between the money-free check and this priced check, including equal-count identity swaps.
+        if(autoPriced&&(!matching||readyIdentities(r)!==readyIdentities(matching.preview))){setPreview(null);setClassificationSuccess(null);setRecheck(v=>v+1);return;}
+        setPreview(r);setCheckedSig(sig);if(keySig!==sig){setKey(crypto.randomUUID());setKeySig(sig);}}
+      catch(e){if(n===seq.current){setPreview(null);
+        // The backend may detect the stock race before returning rows. Refresh AUTO quantity without touching commit retries.
+        if(autoPriced&&(e as {data?:{code?:string}}|null)?.data?.code==='CONFLICT'){setClassificationSuccess(null);setRecheck(v=>v+1);return;}
+        setCheckError(errorMessage(e));}}
     },400);
     return ()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[sig,recheck,uncertain,moneyBlocked]);
+  },[sig,recheck,uncertain,moneyBlocked,quantityPending]);
   const reset=()=>{setDone(null);setError('');};
   async function runCommit(){
     // A retry after a lost answer sends exactly the content of the first attempt with its key (never re-read from the fields).
@@ -80,9 +112,10 @@ export function ImportPanel({projectId,kind,canCost,onDone,onFinished,onClose,on
       // The editor keeps only what is not saved: lines to fix, and codes that wait for "Bổ sung email".
       const keep=new Set(r.rows.filter(x=>x.outcome==='ERROR'||x.outcome==='ADD').map(x=>x.line));
       if(mode==='paste')setText(text.replace(/\r/g,'').split('\n').filter((_,i)=>keep.has(i+1)).join('\n'));else if(!keep.size)setOne({email:'',password:'',twoFa:'',recovery:'',notes:'',code:'',twoFaLink:'',smsLink:'',phone:''});
-      // Error lines left: the purchase is recorded, fixing them continues this batch (no money fields, no second cost).
-      if(r.errors&&!target)setTarget({id:r.batch.id,code:r.batch.code,type:type||null});
-      setMoney(emptyPurchase());
+      // Any leftover error or email-add row continues this recorded purchase, even when the server reports zero errors.
+      if(r.rows.some(x=>x.outcome==='ERROR'||x.outcome==='ADD')&&!target)setTarget({id:r.batch.id,code:r.batch.code,type:type||null});
+      // A partial result has already priced this purchase; never replace its original paid quantity with the remaining lines.
+      if(!r.rows.some(x=>x.outcome==='ERROR'||x.outcome==='ADD'))setMoney(emptyPurchase());
     }catch(e){setUncertain(true);setError(errorMessage(e)+' · Chưa rõ đã lưu hay chưa. Bấm "Thử lại" (cùng yêu cầu, không nhập hay ghi chi phí hai lần) hoặc "Kiểm tra lại" để xem kho trước.');}
   }
   async function addTo(row:{existingId:string|null;account:string;newEmails?:string[]}){
@@ -90,7 +123,7 @@ export function ImportPanel({projectId,kind,canCost,onDone,onFinished,onClose,on
     try{const r=await addEmails.mutateAsync({projectId,paypalId:row.existingId,emails:row.newEmails,key:crypto.randomUUID()});toast.success(`Đã bổ sung ${r.applied} email vào ${r.code}`+(r.errors?` · ${r.errors} email bị chặn`:''));onDone();setRecheck(n=>n+1);}
     catch(e){toast.error(errorMessage(e));}
   }
-  const ready=preview?.ready||0;
+  const ready=pricedPreview?.ready||0,preview=fresh?pricedPreview:matching?.preview??null;
   const field=(set:(v:string)=>void)=>(e:{target:{value:string}})=>{set(e.target.value);reset();};
   const counts=preview as (Preview&{add?:number;emails?:number})|null;
   return <section className="acc-import" aria-label={kind==='PAYPAL'?'Nhập PayPal':'Nhập Gmail / Apple ID'} data-kind={kind}>
@@ -109,12 +142,14 @@ export function ImportPanel({projectId,kind,canCost,onDone,onFinished,onClose,on
       <label className="pm-label">Ngày mua<input type="date" className="pm-input" value={date} disabled={locked} onChange={field(setDate)}/></label>
       <label className="pm-label">Ghi chú lô<input className="pm-input" value={notes} maxLength={1000} disabled={locked} onChange={field(setNotes)}/></label>
     </div>}
-    {!target&&canCost&&<PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} locked={locked} onChange={v=>{setMoney(v);reset();}}/>}
+    {!target&&canCost&&<PurchaseMoneyFields projectId={projectId} unitWord={unitWord} value={money} suggestedQuantity={quantityFrozen?undefined:suggestedQuantity} locked={locked} onChange={v=>{setMoney(v);reset();}}/>}
     {!target&&canCost&&!m.priced&&<p className="text-xs pm-muted">Không nhập tiền: lô ghi Chưa ghi chi phí (ghi sau ở Lịch sử nhập kho, một lần).</p>}
     {!target&&!canCost&&<p className="pm-muted text-xs">Lô nhập ghi Chưa ghi chi phí. Người có quyền Chi phí ghi tiền thực trả sau ở tab Lô nhập (một lần).</p>}
     {!empty&&!fresh&&!uncertain&&!moneyBlocked&&<p className="text-sm pm-muted" role="status">Đang kiểm tra…{checkError?'':' (chưa nhập gì)'}</p>}
     {checkError&&<p role="alert" className="pm-error text-sm">{checkError}</p>}
-    {preview&&fresh&&<>
+    {classificationError&&<p role="alert" className="pm-error text-sm">Chưa đối chiếu số lượng với kho: {classificationError} <button type="button" className="pm-link" disabled={locked} onClick={()=>setRecheck(n=>n+1)}>Thử kiểm tra danh sách</button></p>}
+    {preview&&!empty&&<>
+      {!fresh&&priced&&<p className="text-xs pm-muted">Đã kiểm tra danh sách; sửa tiền mua / chờ đối chiếu trước khi lưu. Hàng đã có và bổ sung email không tính vào số mua mới.</p>}
       <p className="text-sm" role="status">{kind==='PAYPAL'?<><strong>{preview.ready}</strong> PP mới ({counts?.emails??0} email) · {preview.exists} đã có{counts?.add?<> · <strong>{counts.add}</strong> mã đã có kèm email mới</>:null}</>:<><strong>{preview.ready}</strong> hợp lệ · {preview.exists} đã có</>} · <span className={preview.errors?'text-red-600':''}>{preview.errors} dòng cần sửa</span> · {preview.batch.existing?<>Vào lô <strong>{preview.batch.code}</strong>, {preview.batch.cost==='RECORDED'?'chi phí đã ghi, không ghi thêm':'chưa ghi chi phí (ghi ở tab Lô nhập)'}.</>:<>Lô mới <strong>{preview.batch.code}</strong>{preview.batch.total?<> · chi phí ghi một lần: <strong>{displayMoney(preview.batch.total.amount,preview.batch.total.currency)}</strong>{preview.batch.total.currency!=='USDT'?<> ≈ <span title={'Lưu chính xác: '+formatMoney(preview.batch.total.usdt,'USDT',{exact:true})}>{displayMoney(preview.batch.total.usdt,'USDT')}</span></>:null}{preview.batch.total.unit&&preview.batch.total.quantity?` (${preview.batch.total.quantity} ${unitWord} × ${displayMoney(preview.batch.total.unit,preview.batch.total.currency)})`:''}.</>:preview.batch.cost==='WILL_RECORD'?' · chi phí ghi một lần.':' · Chưa ghi chi phí.'}</>}</p>
       <div className="vm-bulk-table"><table className="pm-table"><thead><tr><th>Dòng</th><th>{kind==='PAYPAL'?'Mã PP · Email':'Tài khoản'}</th>{kind==='LOGIN'&&<th>Có</th>}<th>Kết quả</th></tr></thead><tbody>{preview.rows.map(r=><tr key={r.line} className={r.outcome==='ERROR'?'pm-row-blocked':''}><td className="pm-muted">{r.line}</td><td className="whitespace-nowrap">{r.account}{kind==='PAYPAL'&&<span className="pm-muted"> · {r.email}</span>}</td>
         {kind==='LOGIN'&&<td className="text-xs pm-muted whitespace-nowrap">{[r.hasPassword&&'mật khẩu',r.has2fa&&'2FA',r.hasRecovery&&'khôi phục',r.has2faLink&&'link 2FA',r.hasSmsLink&&'link SMS',r.hasPhone&&'SĐT'].filter(Boolean).join(', ')||'—'}</td>}
