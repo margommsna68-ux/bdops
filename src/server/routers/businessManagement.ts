@@ -1,3 +1,4 @@
+import {verifyBusinessWebSession} from '../business-management/pin';
 import {z} from 'zod';
 import {TRPCError} from '@trpc/server';
 import {Prisma} from '@prisma/client';
@@ -62,7 +63,11 @@ export const businessManagementRouter=router({
  saveAccount:protectedProcedure.input(project.extend({kind:z.enum(['GMAIL','PAYPAL']),id:id.optional(),expectedRevision:revision.optional(),key,email:z.string().max(320),code:z.string().max(80).optional(),holder:z.string().max(200).optional(),password:z.string().max(20000).optional(),twoFa:z.string().max(20000).optional(),token:z.string().max(20000).optional(),recoveryEmail:z.string().max(320).optional(),paypalId:id.nullable().optional(),status:z.string().max(40),notes:z.string().max(1000).optional()})).mutation(({ctx,input})=>domain(async()=>saveOperatingAccount(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  archiveAccount:protectedProcedure.input(project.extend({kind:z.enum(['GMAIL','PAYPAL']),id,expectedRevision:revision,key})).mutation(({ctx,input})=>domain(async()=>archiveOperatingAccount(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  bindAccount:protectedProcedure.input(project.extend({vmId:id,gmailId:id.nullable(),expectedRevision:revision,key})).mutation(({ctx,input})=>domain(async()=>bindVMAccount(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
- copyAccount:protectedProcedure.input(project.extend({kind:z.enum(['GMAIL','PAYPAL']),id,pin:z.string().min(1).max(80)})).mutation(({ctx,input})=>domain(async()=>copyOperatingCredentials(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+ copyAccount:protectedProcedure.input(project.extend({kind:z.enum(['GMAIL','PAYPAL']),id,pin:z.string().min(1).max(80).optional()})).mutation(({ctx,input})=>domain(async()=>{
+  const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);
+  const proof=ctx.web&&'sessionId' in ctx.web?await verifyBusinessWebSession(ctx.prisma,ctx.user.id,ctx.web.sessionId):undefined;
+  return copyOperatingCredentials(scope,input,ctx.prisma,proof);
+ })),
  work:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readWorkWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
  saveWork:protectedProcedure.input(project.extend({id:id.optional(),expectedRevision:revision.optional(),key,title:z.string().trim().min(1).max(200),notes:z.string().max(2000).optional(),vmId:id.nullable().optional(),serverId:id.nullable().optional(),assigneeId:id.nullable().optional(),status:z.enum(['PENDING','IN_PROGRESS','COMPLETED','CANCELLED']),dueDate:z.string().length(10).nullable().optional(),kind:z.enum(['TASK','SHEET_REVIEW']).optional()})).mutation(({ctx,input})=>domain(async()=>saveWork(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  finance:protectedProcedure.input(range).query(({ctx,input})=>domain(async()=>readFinanceWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),

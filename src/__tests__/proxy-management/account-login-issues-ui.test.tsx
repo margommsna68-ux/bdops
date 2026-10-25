@@ -2,11 +2,12 @@ import React,{act} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn()}));
+const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn(),importPanel:vi.fn(),draftOpen:false}));
 vi.mock('next/navigation',()=>({usePathname:()=>'/gmails',useSearchParams:()=>new URLSearchParams(mock.query),useRouter:()=>({push:mock.push,replace:mock.replace})}));
 vi.mock('next/link',()=>({default:({children,href,...props}:any)=><a href={href} {...props}>{children}</a>}));
 vi.mock('@/lib/trpc',()=>{const mutation=()=>({useMutation:()=>({isLoading:false,mutateAsync:mock.status})});return {trpc:{
   useUtils:()=>({accountStore:{invalidate:vi.fn()},businessManagement:{invalidate:vi.fn()}}),
+  user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},
   accountStore:{store:{useQuery:()=>({data:mock.data,isLoading:false})},setStatus:mutation(),deleteStock:mutation(),restoreStock:mutation(),setNote:mutation(),updateLogin:mutation(),batchCost:mutation()},
   proxyManagement:{undo:mutation()},businessManagement:{copyAccount:mutation()},
 }};});
@@ -15,7 +16,7 @@ vi.mock('@/components/business-management/shared',()=>({useBusinessKey:()=>()=> 
 vi.mock('@/components/vm-management/shared',()=>({errorMessage:(e:Error)=>e.message}));
 vi.mock('@/components/business-management/AccountsWorkspace',()=>({AccountCopy:()=>null}));
 vi.mock('@/components/account-store/NoteCell',()=>({useNoteWidth:()=>[280,vi.fn()],NoteHeader:()=> <th>Ghi chú</th>,NoteCell:()=> <td/>}));
-vi.mock('@/components/account-store/ImportPanel',()=>({ImportPanel:()=>null,importDraft:()=>({open:false,nonce:0}),appendToBatch:vi.fn(),discardDraft:vi.fn(),finishDraft:vi.fn()}));
+vi.mock('@/components/account-store/ImportPanel',()=>({ImportPanel:mock.importPanel,importDraft:()=>({open:mock.draftOpen,nonce:0}),appendToBatch:vi.fn(),discardDraft:vi.fn(),finishDraft:vi.fn()}));
 vi.mock('@/components/account-store/PaypalStock',()=>({PaypalStock:({rows}:any)=><div data-testid="paypal-list">{rows.map((r:any)=>r.code).join(',')}</div>}));
 import {AccountStore} from '@/components/account-store/AccountStore';
 const row=(id:string,status='ACTIVE',type='GMAIL',extra:object={})=>({id,email:id+'@example.invalid',type,status,state:'NEW',deletedAt:null,revision:3,notes:null,recoveryEmail:null,createdAt:'2026-10-24T01:00:00Z',batch:null,batchId:null,price:null,priceState:'NONE',credentialsAvailable:true,phone:null,links:{twoFa:false,sms:false},has:{password:true,twoFa:false,token:false},earnApp:null,place:null,legacyVmCount:0,loginIssueNote:null,loginIssueAt:null,...extra});
@@ -24,7 +25,7 @@ beforeEach(async()=>{
   dom=new JSDOM('<html><body></body></html>',{url:'http://localhost/gmails'});
   for(const [key,value] of Object.entries({React,window:dom.window,document:dom.window.document,navigator:dom.window.navigator,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true}))vi.stubGlobal(key,value);
   host=document.createElement('div');document.body.appendChild(host);const {createRoot}=await import('react-dom/client');root=createRoot(host);
-  mock.query='';mock.push.mockReset();mock.replace.mockReset();mock.status.mockReset();mock.status.mockResolvedValue({rows:[],applied:1});
+  mock.query='';mock.push.mockReset();mock.replace.mockReset();mock.status.mockReset();mock.status.mockResolvedValue({rows:[],applied:1});mock.draftOpen=false;mock.importPanel.mockReset();mock.importPanel.mockReturnValue(null);
   const navigate=(href:string)=>{mock.query=href.split('?')[1]||'';window.history.pushState({},'',href);};mock.push.mockImplementation(navigate);mock.replace.mockImplementation(navigate);
   mock.data={rights:{logins:true,paypals:true,writeLogins:true,writePaypals:false,admin:false,copy:false,money:false,writeCosts:false},logins:[row('normal'),row('apple','APPLE_LOCKED','APPLE_ID',{loginIssueNote:'Apple account locked on sign in',loginIssueAt:'2026-10-24T03:00:00Z'}),row('verify','GOOGLE_VERIFY','GMAIL',{loginIssueNote:'Verification requested',loginIssueAt:'2026-10-24T06:00:00Z'}),row('disabled','GOOGLE_DISABLED')],paypals:[{id:'pp',code:'PP-TEST',state:'NEW',batch:null,notes:null,emails:[]}],batches:[],review:[]};
 });
@@ -74,4 +75,13 @@ it('shows issue metadata in the expanded detail without fetching or revealing se
   await render();await click(host.querySelector('[aria-label="Mở chi tiết apple@example.invalid"]')!);
   const detail=host.querySelector('[aria-label="Chi tiết apple@example.invalid"]')!;expect(detail.textContent).toContain('Apple Locked');expect(detail.textContent).toContain('Apple account locked on sign in');expect(detail.querySelector('time')?.dateTime).toBe('2026-10-24T03:00:00Z');
   expect(detail.textContent).toContain('••••••••');expect(mock.status).not.toHaveBeenCalled();
+});
+it('scoped read-only login view never mounts retained import drafts or offers PayPal/history/review/write controls',async()=>{
+  mock.draftOpen=true;mock.data.rights={logins:true,paypals:false,writeLogins:false,writePaypals:false,copy:true,money:false,writeCosts:false,admin:false};
+  mock.query='tab=paypal&view=history&import=1';await render();await render();
+  expect(mock.importPanel).not.toHaveBeenCalled();
+  expect(Array.from(host.querySelectorAll('[role="tab"]')).map(t=>t.textContent)).toEqual(['Gmail / Apple ID (4)']);
+  expect(host.textContent).not.toContain('Lịch sử nhập kho');expect(host.textContent).not.toContain('Cần đối chiếu');expect(host.textContent).not.toContain('Nhập Gmail / Apple ID');
+  expect(host.querySelector('select[aria-label="Tình trạng normal@example.invalid"]')).toBeNull();expect(host.querySelector('[aria-label^="Xoá khỏi kho"]')).toBeNull();
+  expect(ids()).toEqual(['normal','apple','verify','disabled']);expect(mock.query).not.toMatch(/tab=paypal|view=history|import=1/);
 });

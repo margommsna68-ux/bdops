@@ -1,0 +1,29 @@
+# Human stock secret access — 25 October 2026
+
+Scope: people use their own PIN or Google Authenticator to reveal/copy account/proxy information, subject to current project capability and assigned servers. AI token authentication is unchanged.
+
+## Reproduction and causes
+
+- Real headless Chrome, synthetic local trial data: an ADMIN signed in with TOTP, opened an account and entered the same still-current code at the second prompt. Sign-in succeeded, reveal failed. The second check tried to consume the login's TOTP step again. This must not be fixed by allowing TOTP replay.
+- The selected-server policy categorically denied account stock and account-copy routes; an assigned login could not be viewed by its authorized moderator.
+- Legacy factor dialogs used `hasPin`, even though enabling TOTP retires the PIN. Partial TOTP input was also submitted using the old four-character threshold.
+
+## Resulting behavior
+
+- Trusted HTTP context supplies a validated session proof; request bodies cannot provide proof/session flags. The proof is checked again under locks in the reveal transaction, alongside live membership and target scope. Direct service calls still need the person's factor. No change to the global TOTP replay or failure-lock rules.
+- Scoped moderators see only current live bound Gmail/Apple ID logins. Legacy null-type accounts are included if their binding is valid. Common unassigned stock, other servers/projects, shared PayPal secrets, batches and financial data stay excluded. No scoped stock write rights added.
+- Copy permission remains required for moderators. ADMIN access is within their project; system-owner identity is not used to authorize stock copying.
+- Clipboard failure retains a local manual-copy result without resending a consumed code. Screenshots contain synthetic rows and masked secrets only.
+
+## Verification notes
+
+- `browser-results.json`: real Chrome on local trial, four synthetic users, 26 checks; own TOTP ADMIN/moderator, own PIN scoped moderator, no-copy moderator, copy, hide, direct API denial for hidden/unassigned accounts, scoped tabs and 390px.
+- First full-suite run: 974 passed / 2 failed because an old `.runtime` component harness did not mock the newly required `user.securityStatus`. Added only the mock; assertions unchanged; that harness then passed 3/3.
+- Independent source review identified and corrected the legacy-null-type exclusion. A further review requires discarding cached and in-flight secrets on lock/security errors; final checks recorded with release below.
+- The local PostgreSQL instance was down from a prior process failure. Started only its existing `D:/CodexRuntime/bdops-proxy-trial/data` cluster on port 55432; production PostgreSQL on 5432 was not restarted.
+
+No production sample accounts, grants, secrets, tokens or VM operations are changed for testing. No video.
+
+Final local verification: 188 files / 983 tests passed; typecheck clean; lint no errors (existing warnings only); production build Yxc4VnkQI4bxStXYlN1IO passed. Real Chrome on the built application passed 26/26 again after the final cache/in-flight guards. Seven new UI regressions were red before that final fix and green after; no review assertions relaxed.
+
+Backup before deployment: moneytohome-20261025-114832.dump; encrypted moon-01 copy verified by decryption, SHA-256 adebcd338d817265a93712cdf94527d34e27eaf5667f36e787f4c997a42ced3c. No migration.

@@ -1,5 +1,5 @@
 import type {ScopeDB} from './server-scope';
-import {assertScopedTargets,hasServerScope} from './server-scope';
+import {assertScopedTargets,assertScopedLoginIds,hasServerScope} from './server-scope';
 import {loadInfrastructureScope} from './infrastructure';
 import {ProxyDomainError} from '../proxy-management/types';
 // Explicit surfaces: a new project-wide procedure is closed until its server ownership is defined.
@@ -22,6 +22,14 @@ export async function assertServerWebRequest(db:ScopeDB,userId:string,path:strin
  // Preserve existing endpoint rules for non-members (e.g. an ADMIN removing an orphan project).
  if(!member||member.serverScope==='ALL')return;
  const current=await loadInfrastructureScope(db,userId,input.projectId);if(!hasServerScope(current))return;
+ if(path==='accountStore.store'||path==='businessManagement.copyAccount'){
+  if(!['ADMIN','MODERATOR'].includes(current.role)||!current.allowedModules?.includes('INFRASTRUCTURE'))throw new ProxyDomainError('FORBIDDEN');
+  if(path==='businessManagement.copyAccount'){
+   if(input.kind!=='GMAIL'||typeof input.id!=='string')throw new ProxyDomainError('FORBIDDEN','Chỉ thông tin Gmail / Apple ID đang gán trong phạm vi server');
+   await assertScopedLoginIds(db,current,[input.id]);
+  }
+  return;
+ }
  const [area,action]=path.split('.');
  if(!PROJECT_READ.has(path)&&!(area==='vmManagement'&&VM.has(action))&&!(area==='vmOps'&&OPS.has(action))&&!(area==='proxyManagement'&&PROXY.has(action)))throw new ProxyDomainError('FORBIDDEN','Thao tác kho chung hoặc toàn dự án không thuộc phạm vi server được giao');
  if(area==='vmManagement'&&['bulkPreview','bulkApply'].includes(action)&&!['SDK','NOTE'].includes(String(input.kind)))throw new ProxyDomainError('FORBIDDEN','Kho chung do ADMIN cấp vào server trước');

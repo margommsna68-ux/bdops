@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "checks": 26,
+  "results": [
+    "admin signed in using own credentials",
+    "admin sees correct account rows",
+    "admin reveals without consuming own factor twice",
+    "admin copies stored secret",
+    "admin hides secret again",
+    "admin copies proxy in own scope",
+    "moderator signed in using own credentials",
+    "moderator sees correct account rows",
+    "moderator reveals without consuming own factor twice",
+    "moderator copies stored secret",
+    "moderator hides secret again",
+    "moderator copies proxy in own scope",
+    "scoped signed in using own credentials",
+    "scoped sees correct account rows",
+    "scoped reveals without consuming own factor twice",
+    "scoped copies stored secret",
+    "scoped hides secret again",
+    "Direct account reveal denied for hidden",
+    "Direct account reveal denied for stock",
+    "Scoped user has no PayPal stock tab",
+    "Mobile secret view does not overflow page",
+    "scoped copies proxy in own scope",
+    "nocopy signed in using own credentials",
+    "nocopy sees correct account rows",
+    "Moderator without copy permission has no reveal button",
+    "No browser JavaScript errors"
+  ],
+  "errors": []
+}

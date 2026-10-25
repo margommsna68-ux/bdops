@@ -1,4 +1,6 @@
-import type {PrismaClient} from '@prisma/client';
+import {assertBusinessPinProof,type BusinessPinProof} from '../business-management/pin';
+import {withProxyTransaction} from './transaction';
+import type {Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {assertInfrastructureAction,loadInfrastructureScope} from '@/server/permissions/infrastructure';
 import {hasServerScope,endpointWhere,assertScopedEndpointIds} from '@/server/permissions/server-scope';
@@ -7,6 +9,7 @@ import {fullProxy} from './parse';
 import {normalizeProxySearch,proxySearchEndpoint} from '@/lib/proxy-search';
 import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-terms';
 import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,isShared,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
+type ReadDB=PrismaClient|Prisma.TransactionClient;
 type VMRef={id:string;code:string;serverId:string;server:{code:string}};
 // Every valid position of an endpoint: active holds (with their role) plus the VM link recorded from the Sheet (role null) when it is not already held.
 function locationsOf(e:{vm:VMRef|null;allocations:{vmId:string;role:string;vm:VMRef}[];vmConfigurations?:{desiredBy:VMRef|null;installedBy:VMRef|null}[]}):RegistryLocation[]{
@@ -22,7 +25,7 @@ const MAIN_STATES=['NEW','LIVE','BLOCKED'];
 export const registryGroupKey=(r:Pick<RegistryRow,'owner'|'subgroup'|'groupId'>)=>r.owner==='SELF'?GROUP_TUT:isShared(r.owner,r.subgroup)?GROUP_SHARED:r.owner==='GENJY'?GROUP_GENJY:r.owner==='UNKNOWN'?GROUP_UNKNOWN:r.groupId||GROUP_UNKNOWN;
 export function stateMatches(state:string,filter:string){return filter==='OTHER'?!MAIN_STATES.includes(state):state===filter;}
 // Whole registry of the project, filtered and sorted; callers paginate or copy from it.
-export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:PrismaClient){
+export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:ReadDB){
   scope=await authorize(scope,false,db);
   const restricted=hasServerScope(scope);
   const [endpoints,reserved,groups]=await Promise.all([
@@ -61,7 +64,7 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Pri
   sortRegistryRows(filtered,filter.sort);
   return {rows:filtered,counts,servers,groups:restricted?groups.filter(g=>rows.some(r=>r.groupId===g.id)):groups,groupCounts,stateCounts,packageCounts};
 }
-async function authorize(scope:ActorScope,copy:boolean,db:PrismaClient){
+async function authorize(scope:ActorScope,copy:boolean,db:ReadDB){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
 }
 export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:PrismaClient=prisma):Promise<RegistryPage>{
@@ -91,15 +94,18 @@ export async function getProxyTimeline(scope:ActorScope,identityId:string,db:Pri
   const occupied=new Set(holds.map(h=>h.vmId));
   return {identity:{id:identity.id,ip:identity.ip,owner:identity.owner,subgroup:identity.subgroup,revision:identity.revision,allocationMode:identity.allocationMode},events:events.map(e=>({kind:e.kind,occurredAt:e.occurredAt?.toISOString()||null,recordedAt:e.recordedAt.toISOString(),reversedAt:e.reversedAt?.toISOString()||null,actor:e.actorId,sourceRef:e.sourceRef})),replacements:replacements.filter(r=>r.oldEndpoint.identityId&&connected.has(r.oldEndpoint.identityId)).map(r=>({oldIp:r.oldEndpoint.identity!.ip,newIp:r.newEndpoint.identity!.ip,receivedDate:r.receivedDate?.toISOString().slice(0,10)||null,recordedAt:r.recordedAt.toISOString(),status:r.status as 'APPLIED'|'VOID'})),vmRefs:[...holds.map(h=>h.vm.server.code+'/'+h.vm.code+' · '+(h.role==='DESIRED'?'Chờ cài':h.role==='INSTALLED'?'Đã cài':'Giữ để kiểm tra')),...vms.filter(v=>!occupied.has(v.id)).map(v=>v.server.code+'/'+v.code)]};
 }
-export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma){
-  scope=await authorize(scope,true,db);
-  const rows=await db.proxyIP.findMany({where:{projectId:scope.projectId,inventoryState:'BLOCKED',retiredAt:null,...endpointWhere(scope)},orderBy:[{packageCode:'asc'},{host:'asc'}]});
+export async function exportBlocked(scope:ActorScope,db:PrismaClient=prisma,proof?:BusinessPinProof){
+ return withProxyTransaction(async tx=>{
+  scope=await authorize(scope,true,tx);
+  if(proof)await assertBusinessPinProof(tx,scope.userId,proof);
+  const rows=await tx.proxyIP.findMany({where:{projectId:scope.projectId,inventoryState:'BLOCKED',retiredAt:null,...endpointWhere(scope)},orderBy:[{packageCode:'asc'},{host:'asc'}]});
   const result=rows.flatMap(r=>{const p=decodeEndpoint(r);return p?.format==='FULL'?[{packageCode:r.packageCode||'Chưa rõ gói',proxy:fullProxy(p),status:'BLOCKED' as const}]:[];});
-  await db.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'blocked-export',changes:{count:result.length}}});
+  await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'COPY_PROXY_CREDENTIALS',entity:'ProxyIP',entityId:'blocked-export',changes:{count:result.length}}});
   return result;
+ },db);
 }
-export async function copyProxyEndpoint(scope:ActorScope,endpointId:string,db:PrismaClient=prisma){
-  const result=await copyProxyRows(scope,{endpointIds:[endpointId]},db);
+export async function copyProxyEndpoint(scope:ActorScope,endpointId:string,db:PrismaClient=prisma,proof?:BusinessPinProof){
+  const result=await copyProxyRows(scope,{endpointIds:[endpointId]},db,{proof});
   if(!result.proxies.length) throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ thông tin');
   return {proxy:result.proxies[0]};
 }
@@ -109,8 +115,12 @@ export const MAX_COPY_ROWS=2000;
 // allocation or install state; it only logs how many credentials left the server, never the credentials themselves.
 // onlyBlocked ("Copy proxy Blocked", 19/10/2026): only rows whose proxy is current and BLOCKED (structured state, never a note), each
 // endpoint once, in display order; the full IP:port:user:pass only, nothing else in the line.
-export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma,options:{onlyBlocked?:boolean}={}):Promise<CopyResult>{
+export async function copyProxyRows(scope:ActorScope,selection:CopySelection,db:PrismaClient=prisma,options:{onlyBlocked?:boolean;proof?:BusinessPinProof}={}):Promise<CopyResult>{
+  return withProxyTransaction(tx=>copyProxyRowsInTransaction(scope,selection,tx,options),db);
+}
+async function copyProxyRowsInTransaction(scope:ActorScope,selection:CopySelection,db:Prisma.TransactionClient,options:{onlyBlocked?:boolean;proof?:BusinessPinProof}):Promise<CopyResult>{
   scope=await authorize(scope,true,db);
+  if(options.proof)await assertBusinessPinProof(db,scope.userId,options.proof);
   let ordered:{endpointId:string|null}[];
   if('endpointIds' in selection){
     const ids=Array.from(new Set(selection.endpointIds));if(!ids.length||ids.length>MAX_COPY_ROWS) throw new ProxyDomainError('INVALID_INPUT');

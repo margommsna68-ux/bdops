@@ -4,7 +4,7 @@ import {CashDecimal,readPaypalCostRates} from '../business-management/usdt-money
 import {dayText} from '../business-management/money';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
-import {vmWhere,assertUnrestrictedServers} from '../permissions/server-scope';
+import {vmWhere,hasServerScope,scopedLoginWhere} from '../permissions/server-scope';
 import {assertBusinessArea} from '../business-management/scope';
 import {canSeeMoney} from './inventory';
 // Stock state is computed from the current links, never stored:
@@ -18,8 +18,9 @@ const place=(vm:{id:string;code:string;server:{id:string;code:string}}|null)=>vm
 const vmSelect={select:{id:true,code:true,archivedAt:true,server:{select:{id:true,code:true}}}} as const;
 /** options.deleted: the rows deleted from the stock (archivedAt set; Khôi phục), instead of the live stock. Batches are the same. */
 export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,options:{deleted?:boolean}={}){
-  await assertUnrestrictedServers(db,scope);const archived=options.deleted?{not:null}:null;
-  const current=await loadInfrastructureScope(db,scope.userId,scope.projectId),logins=can(current,'INFRASTRUCTURE'),paypals=can(current,'PAYPALS');
+  const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);
+  if(hasServerScope(current))return readScopedLoginStore(current,db,options);
+  const archived=options.deleted?{not:null}:null,logins=can(current,'INFRASTRUCTURE'),paypals=can(current,'PAYPALS');
   if(current.businessMode!=='PROXY_VM'||!logins&&!paypals)throw new ProxyDomainError('FORBIDDEN');
   const money=canSeeMoney(current),projectId=scope.projectId;
   const [gm,pp,batches,legacyVms]=await Promise.all([
@@ -96,6 +97,20 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
   for(const g of loginRows)if(!g.type)add({kind:'LOGIN_TYPE_MISSING',group:'LOGIN',subject:g.email,reason:'Chưa chọn loại Gmail / Apple ID (dữ liệu cũ); web không tự đoán từ đuôi email.',place:null,open:{type:'account',q:g.email}});
   return {logins:logins?loginRows:[],paypals:paypalRows,batches:batchRows,review,
     rights:{logins,paypals,admin:current.role==='ADMIN',writeLogins:can(current,'INFRASTRUCTURE',true)&&['ADMIN','MODERATOR'].includes(current.role),writePaypals:can(current,'PAYPALS',true)&&['ADMIN','MODERATOR'].includes(current.role),money,writeCosts:!!current.teamCashEnabled&&(current.role==='ADMIN'||current.role==='MODERATOR'&&!!current.allowedModules?.includes('COSTS')),copy:current.role!=='VIEWER'&&(current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS'))}};
+}
+// Keep the existing grid DTO, but query no PayPal, batch, cost or global-review data at all.
+async function readScopedLoginStore(current:ActorScope,db:PrismaClient,options:{deleted?:boolean}){
+ if(current.businessMode!=='PROXY_VM'||!can(current,'INFRASTRUCTURE')||!['ADMIN','MODERATOR'].includes(current.role))throw new ProxyDomainError('FORBIDDEN');
+ const liveVM={managed:true,archivedAt:null,server:{projectId:current.projectId,managed:true,archivedAt:null},...vmWhere(current)};
+ const rows=options.deleted?[]:await db.gmailAccount.findMany({where:scopedLoginWhere(current),select:{id:true,email:true,loginType:true,status:true,loginIssueNote:true,loginIssueAt:true,notes:true,recoveryEmail:true,phone:true,revision:true,createdAt:true,password:true,twoFaCurrent:true,token:true,twoFaLink:true,smsLink:true,
+  earnApp:{select:{id:true,revision:true,registeredAt:true,vm:vmSelect}},
+  vms:{where:{...liveVM,earnApp:{is:null}},select:vmSelect.select}},orderBy:[{createdAt:'desc'},{email:'asc'}]});
+ const logins=rows.map(g=>{const vm=g.earnApp?.vm??g.vms[0]??null,state:StockState=g.status!=='ACTIVE'?'BLOCKED':'ASSIGNED';return {
+  id:g.id,email:g.email,type:g.loginType,status:g.status,loginIssueNote:g.loginIssueNote,loginIssueAt:g.loginIssueAt?.toISOString()??null,state,deletedAt:null,revision:g.revision,notes:g.notes,recoveryEmail:g.recoveryEmail,createdAt:g.createdAt.toISOString(),batch:null,batchId:null,price:null,priceState:'NONE' as const,
+  credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token||g.twoFaLink||g.smsLink),phone:g.phone,links:{twoFa:!!g.twoFaLink,sms:!!g.smsLink},has:{password:!!g.password,twoFa:!!g.twoFaCurrent,token:!!g.token},
+  earnApp:g.earnApp?{id:g.earnApp.id,revision:g.earnApp.revision,registeredAt:g.earnApp.registeredAt?.toISOString()??null,paypal:null}:null,place:place(vm),legacyVmCount:g.vms.length,
+ };});
+ return {logins,paypals:[],batches:[],review:[],rights:{logins:true,paypals:false,admin:false,writeLogins:false,writePaypals:false,money:false,writeCosts:false,copy:current.role==='ADMIN'||current.capabilities.includes('COPY_CREDENTIALS')}};
 }
 // Server/VM grid: the EarnApp account of each VM (login, type, PayPal) plus the legacy Gmail link when no account was recorded yet.
 export async function readVmAccounts(scope:ActorScope,db:PrismaClient=prisma){

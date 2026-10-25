@@ -38,18 +38,59 @@ export async function checkPinVersion(db:Db,userId:string,pin:string):Promise<{r
  }
  return {result:'INVALID',pinVersion:null};
 }
-/** The user's second factor for a sensitive action: the TOTP code when 2FA is on (23/10/2026), else the legacy PIN. */
-export async function verifyBusinessPin(db:PrismaClient,userId:string,pin:string){
- const u=await db.user.findUnique({where:{id:userId},select:{totpEnabledAt:true,totpLockedAt:true}});
- if(u?.totpEnabledAt){
+/** Proofs are server-local objects, never accepted from request bodies or serializable unlock flags. */
+export type BusinessPinProof=Readonly<{userId:string;kind:'PIN'|'TOTP';version:number;authEpoch:number;sessionId:string|null;verifiedAt:number}>;
+const issuedProofs=new WeakSet<BusinessPinProof>();
+const PROOF_MAX_AGE_MS=2*60000;
+const proofError=()=>new ProxyDomainError('FORBIDDEN','Phiên xác thực vừa thay đổi; mở khoá lại bằng PIN / mã 2FA của bạn');
+type ProofUser={password:string|null;pin:string|null;pinVersion:number;pinLockedAt:Date|null;totpEnabledAt:Date|null;totpVersion:number;totpLockedAt:Date|null;disabledAt:Date|null;authEpoch:number;totpRequiredAt:Date|null;passwordResetRequiredAt:Date|null};
+function eligible(u:ProofUser|undefined){if(!u||u.disabledAt||u.passwordResetRequiredAt||u.totpRequiredAt&&!u.totpEnabledAt)throw proofError();}
+function issueProof(data:Omit<BusinessPinProof,'verifiedAt'>){const proof=Object.freeze({...data,verifiedAt:Date.now()});issuedProofs.add(proof);return proof;}
+/** Recheck in the reveal transaction, before decrypting/auditing. User and session locks order a reveal against reset/revocation.
+ * This does NOT consume the TOTP again. A checked HTTP session already proved that factor at login/unlock. */
+export async function assertBusinessPinProof(tx:Prisma.TransactionClient,userId:string,proof:BusinessPinProof){
+ if(!proof||!issuedProofs.has(proof)||proof.userId!==userId||Date.now()-proof.verifiedAt>PROOF_MAX_AGE_MS||proof.verifiedAt>Date.now())throw proofError();
+ const [u]=await tx.$queryRaw<ProofUser[]>`SELECT "password","pin","pinVersion","pinLockedAt","totpEnabledAt","totpVersion","totpLockedAt","disabledAt","authEpoch","totpRequiredAt","passwordResetRequiredAt" FROM "User" WHERE "id"=${userId} FOR SHARE`;
+ eligible(u);if(u.authEpoch!==proof.authEpoch)throw proofError();
+ const totp=!!u.totpEnabledAt,lockedAt=totp?u.totpLockedAt:u.pinLockedAt;
+ if((totp?'TOTP':'PIN')!==proof.kind||(totp?u.totpVersion:u.pinVersion)!==proof.version||!totp&&!u.pin)throw proofError();
+ if(lockedAt&&new Date(lockedAt).getTime()+PIN_LOCK_MS>Date.now())throw proofError();
+ if(proof.sessionId){
+  if(!u.password)throw proofError();
+  const [s]=await tx.$queryRaw<{userId:string;epoch:number;revokedAt:Date|null;pinUnlockedAt:Date|null;pinVersion:number|null;totpUnlockedAt:Date|null;totpVersion:number|null}[]>`SELECT "userId","epoch","revokedAt","pinUnlockedAt","pinVersion","totpUnlockedAt","totpVersion" FROM "UserSession" WHERE "id"=${proof.sessionId} FOR SHARE`;
+  if(!s||s.userId!==userId||s.revokedAt||s.epoch!==u.authEpoch)throw proofError();
+  if(totp?(!s.totpUnlockedAt||s.totpVersion!==u.totpVersion):(!s.pinUnlockedAt||s.pinVersion!==u.pinVersion))throw proofError();
+ }
+}
+/** Only HTTP router code supplies sessionId, taken from ctx.web. No input session id, boolean or cached client unlock is a proof. */
+export async function verifyBusinessWebSession(db:PrismaClient,userId:string,sessionId:string):Promise<BusinessPinProof>{
+ const {checkWebSession}=await import('../users/access');
+ const checked=await checkWebSession(db,sessionId,userId);if(!checked.ok||!checked.pinUnlocked)throw proofError();
+ const u=await db.user.findUnique({where:{id:userId},select:{password:true,pin:true,pinVersion:true,pinLockedAt:true,totpEnabledAt:true,totpVersion:true,totpLockedAt:true,disabledAt:true,authEpoch:true,totpRequiredAt:true,passwordResetRequiredAt:true}});
+ eligible(u??undefined);if(!u)throw proofError();
+ const proof=issueProof({userId,kind:u.totpEnabledAt?'TOTP':'PIN',version:u.totpEnabledAt?u.totpVersion:u.pinVersion,authEpoch:u.authEpoch,sessionId});
+ await db.$transaction(tx=>assertBusinessPinProof(tx,userId,proof));return proof;
+}
+/** Direct service callers still prove their own TOTP (or one-use backup) / legacy PIN. Wrong attempts commit independently.
+ * Return the proof so the action can recheck the same factor/version under its own transaction lock. */
+export async function verifyBusinessPin(db:PrismaClient,userId:string,pin:string):Promise<BusinessPinProof>{
+ const u=await db.user.findUnique({where:{id:userId},select:{password:true,pin:true,pinVersion:true,pinLockedAt:true,totpEnabledAt:true,totpVersion:true,totpLockedAt:true,disabledAt:true,authEpoch:true,totpRequiredAt:true,passwordResetRequiredAt:true}});
+ eligible(u??undefined);if(!u)throw proofError();
+ let kind:BusinessPinProof['kind'],version:number|null;
+ if(u.totpEnabledAt){
   const {checkTotp,totpMessage}=await import('../users/totp');
   const t=await checkTotp(db,userId,pin);
   if(t.result!=='OK')throw new ProxyDomainError('FORBIDDEN',totpMessage(t.result,u.totpLockedAt));
-  return;
+  kind='TOTP';version=t.totpVersion;
+ }else{
+  const checked=await checkPinVersion(db,userId,pin),r=checked.result;
+  if(r==='NOT_SET')throw new ProxyDomainError('FORBIDDEN','Cần đặt PIN trước khi copy thông tin đăng nhập');
+  if(r==='LOCKED')throw new ProxyDomainError('FORBIDDEN','PIN đang bị khóa. Liên hệ quản lý hoặc chờ hết 30 phút.');
+  if(r==='LOCKED_NOW')throw new ProxyDomainError('FORBIDDEN','Sai PIN 3 lần; khóa 30 phút');
+  if(r==='INVALID')throw new ProxyDomainError('FORBIDDEN','PIN chưa đúng');
+  kind='PIN';version=checked.pinVersion;
  }
- const r=await checkPin(db,userId,pin);
- if(r==='NOT_SET')throw new ProxyDomainError('FORBIDDEN','Cần đặt PIN trước khi copy thông tin đăng nhập');
- if(r==='LOCKED')throw new ProxyDomainError('FORBIDDEN','PIN đang bị khóa. Liên hệ quản lý hoặc chờ hết 30 phút.');
- if(r==='LOCKED_NOW')throw new ProxyDomainError('FORBIDDEN','Sai PIN 3 lần; khóa 30 phút');
- if(r==='INVALID')throw new ProxyDomainError('FORBIDDEN','PIN chưa đúng');
+ if(version===null)throw proofError();
+ const proof=issueProof({userId,kind,version,authEpoch:u.authEpoch,sessionId:null});
+ await db.$transaction(tx=>assertBusinessPinProof(tx,userId,proof));return proof;
 }

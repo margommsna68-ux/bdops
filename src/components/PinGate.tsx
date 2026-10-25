@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TotpSetup } from "@/components/TotpSetup";
+import {normalizeSecondFactor,validSecondFactor} from './second-factor';
 
 /**
  * PinGate - Shows full-screen overlay after login.
@@ -60,13 +61,14 @@ export function PinGate({ children }: { children: React.ReactNode }) {
   }
 
   const finishUnlock = async () => {
-    await refetch();
+    const refreshed=await refetch();
+    if(!refreshed?.data?.unlocked){setUnlocked(false);setError('Phiên chưa được mở khoá. Kiểm tra lại hoặc đăng nhập lại.');return;}
     setUnlocked(true);
     void utils.invalidate();
   };
   const handleCode = async () => {
-    const value = code.trim();
-    if (value.length < 6) return;
+    const value = normalizeSecondFactor(code);
+    if (!validSecondFactor(value,true)||verifyPin.isLoading) return;
     setError("");
     try {
       await verifyPin.mutateAsync({ pin: value });
@@ -78,9 +80,10 @@ export function PinGate({ children }: { children: React.ReactNode }) {
     }
   };
   const handleVerify = async () => {
+    if(!validSecondFactor(pin,false)||verifyPin.isLoading)return;
     setError("");
     try {
-      await verifyPin.mutateAsync({ pin });
+      await verifyPin.mutateAsync({ pin:normalizeSecondFactor(pin) });
       setPin("");
       await finishUnlock();
     } catch (e: any) {
@@ -143,19 +146,19 @@ export function PinGate({ children }: { children: React.ReactNode }) {
             </div>
             <Input
               type="text"
-              inputMode="numeric"
+              inputMode="text"
               autoComplete="one-time-code"
-              maxLength={11}
+              maxLength={32}
               aria-label="Mã Google Authenticator"
               placeholder="000000"
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/[^0-9a-zA-Z-]/g, ""))}
+              onChange={(e) => setCode(normalizeSecondFactor(e.target.value))}
               onKeyDown={(e) => e.key === "Enter" && handleCode()}
               className="text-center text-2xl tracking-[0.3em] mb-4"
               autoFocus
             />
             {error && <p role="alert" className="text-sm text-red-600 text-center mb-3">{error}</p>}
-            <Button className="w-full" onClick={handleCode} disabled={code.trim().length < 6 || verifyPin.isLoading}>
+            <Button className="w-full" onClick={handleCode} disabled={!validSecondFactor(code,true) || verifyPin.isLoading}>
               {verifyPin.isLoading ? "Đang kiểm tra…" : "Mở khoá"}
             </Button>
             {status.backupCodesLeft === 0 && <p className="text-xs text-amber-700 text-center mt-3">Bạn không còn mã dự phòng. Mất điện thoại thì nhờ ADMIN đặt lại 2FA.</p>}

@@ -411,6 +411,14 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
   Phát hành: commit 6bc27f9, backup host fa1d5724, deploy c896cc53, không migration; host chỉ đọc trước / sau giống hệt.
   Evidence docs/superpowers/evidence/2026-10-20-stock-detail-state/.
 
+## 25/10/2026 — Xem/copy bằng bảo mật của từng người
+
+- ADMIN trong dự án và MODERATOR có quyền Copy thông tin đăng nhập dùng PIN hoặc Google Authenticator của chính mình. Không dùng mã của chủ dự án.
+- Khi phiên web đã mở khoá bằng mã bảo mật hiện hành, Xem/Copy dùng phiên đó, không yêu cầu nhập lại mã Google vừa dùng. Mỗi lần lấy dữ liệu vẫn kiểm quyền hiện tại, phiên, phiên bản PIN/2FA và phạm vi trong giao dịch. Đổi mã, thu hồi phiên hoặc vô hiệu hoá user thì không lấy được thông tin mới.
+- MODERATOR giới hạn server chỉ mở được Gmail/Apple ID đang gắn với VM hoạt động thuộc server được giao; không thấy tài khoản chưa gán, server khác, PayPal dùng chung, lô mua hoặc chi phí toàn kho. Không mở quyền sửa/gán/xoá kho.
+- Nếu trình duyệt chặn clipboard, khung Copy giữ kết quả để chọn và copy lại; không gửi lại mã Google đã dùng. Đóng khung sẽ bỏ kết quả trong bộ nhớ giao diện.
+- Quy tắc này thay yêu cầu nhập lại PIN cho mỗi khung ở các hướng dẫn cũ. API AI giữ quy tắc token riêng, không đổi.
+
 ## 23/10/2026 — VND, USD PayPal, USDT khi nhập chi phí
 
 - Lần mua mới / Ghi chi phí của lô / Chi phí / giá gói mới chỉ chọn VND, USD PayPal, USDT. Mã nội bộ USD PayPal là PPUSD; không thay đổi USD của sổ tiền PayPal hay các khoản lịch sử. Nguồn collector cũ có USD giữ nguyên USD, không tự chuyển đơn vị.

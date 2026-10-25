@@ -36,6 +36,19 @@ const button=(name:string)=>{const b=Array.from(container.querySelectorAll('butt
 const click=async(name:string)=>act(async()=>button(name).click());
 async function fill(el:HTMLInputElement,value:string){await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});}
 describe('PinGate with 2FA',()=>{
+  it('does not open the app from a successful verification unless the refetched server session is unlocked',async()=>{
+    await gate({totpEnabled:true,hasPin:false});mock.verify.mockResolvedValue({valid:true});mock.status.refetch.mockResolvedValue({data:{...base,totpEnabled:true,hasPin:false,unlocked:false}});
+    await fill(container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement,'123456');await click('Mở khoá');
+    expect(container.querySelector('[data-testid="app"]')).toBeNull();expect(container.textContent).toContain('Phiên chưa được mở khoá');
+    mock.status.refetch.mockResolvedValue({data:{...base,totpEnabled:true,hasPin:false,unlocked:true}});
+    await fill(container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement,'234567');await click('Mở khoá');expect(container.querySelector('[data-testid="app"]')).not.toBeNull();
+  });
+  it('does not send partial TOTP on Enter and accepts formatted backup-code paste without truncation',async()=>{
+    await gate({totpEnabled:true,hasPin:false});const input=container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement;
+    expect(input.maxLength).toBeGreaterThanOrEqual(13);await fill(input,'1234');expect(button('Mở khoá').disabled).toBe(true);
+    await act(async()=>input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));expect(mock.verify).not.toHaveBeenCalled();
+    await fill(input,'abcde - abcde');expect(input.value).toBe('abcde-abcde');expect(button('Mở khoá').disabled).toBe(false);
+  });
   it('after an ADMIN reset the person must choose their own password first (before any PIN / 2FA prompt)',async()=>{
     await gate({passwordResetRequired:true,totpEnabled:true});
     expect(container.querySelector('[data-testid="pin-gate-password"]')).not.toBeNull();
@@ -77,8 +90,8 @@ describe('PinGate with 2FA',()=>{
     expect(mock.verify).toHaveBeenCalledWith({pin:'000000'});
     expect(container.textContent).toContain('Sai mã 3 lần; thử lại sau 30 phút');expect(container.textContent).not.toContain('PIN_LOCKED');
     // A backup code is accepted by the input as well (letters and the dash).
-    await fill(container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement,'abcde-12345');
-    expect((container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement).value).toBe('abcde-12345');
+    await fill(container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement,'abcde-23456');
+    expect((container.querySelector('[aria-label="Mã Google Authenticator"]') as HTMLInputElement).value).toBe('abcde-23456');
     expect(button('Mở khoá').disabled).toBe(false);
   });
   it('keeps the PIN prompt (with the opt-in link) when 2FA is neither on nor required, and lets the app through once unlocked',async()=>{

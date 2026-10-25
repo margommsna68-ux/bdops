@@ -6,9 +6,10 @@ import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {withProxyTransaction} from '../proxy-management/transaction';
 import {runBusinessCommand} from './idempotency';
 import {authorizeBusiness} from './scope';
-import {verifyBusinessPin} from './pin';
+import {verifyBusinessPin,assertBusinessPinProof,type BusinessPinProof} from './pin';
 import {applyLinks} from '../account-store/links';
 import {deleteRefusal} from '../account-store/delete';
+import {assertScopedLoginIds,hasServerScope} from '../permissions/server-scope';
 export interface AccountInput {kind:'GMAIL'|'PAYPAL';id?:string;email:string;code?:string;holder?:string;password?:string;twoFa?:string;token?:string;recoveryEmail?:string;paypalId?:string|null;status?:string;notes?:string;expectedRevision?:number;key:string}
 const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Thông tin tài khoản chưa hợp lệ');};
 const manager=(scope:ActorScope)=>{if(!['ADMIN','MODERATOR'].includes(scope.role))throw new ProxyDomainError('FORBIDDEN','Quản lý mới được thêm/sửa tài khoản');};
@@ -61,10 +62,14 @@ export async function readOperatingWorkspace(scope:ActorScope,db:PrismaClient=pr
  ]);
  return {gmails:gmails.map(g=>({id:g.id,email:g.email,status:g.status,notes:g.notes,paypalId:g.paypalId,recoveryEmail:g.recoveryEmail,revision:g.revision,archivedAt:g.archivedAt?.toISOString()||null,credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),vmRefs:g.vms.map(v=>v.server.code+'/'+v.code)})),paypals:paypals.map(p=>({id:p.id,code:p.code,email:p.primaryEmail,status:p.status,holder:p.holder,notes:p.notes,revision:p.revision,archivedAt:p.archivedAt?.toISOString()||null,credentialsAvailable:!!(p.password||p.emails.some(e=>e.password||e.twoFa||e.hotmailToken))})),vms:vms.map(v=>({...v,serverId:v.server.id,server:v.server.code})),members:members.filter(m=>m.role!=='VIEWER'&&(m.role==='ADMIN'||m.allowedModules.includes('INFRASTRUCTURE'))).map(m=>({id:m.user.id,name:m.user.name||m.user.username||'Nhân viên',role:m.role}))};
 }
-export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;pin:string},db:PrismaClient=prisma){
- const area=input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE',copy=(s:ActorScope)=>{if(s.role==='VIEWER'||s.role!=='ADMIN'&&!s.capabilities.includes('COPY_CREDENTIALS'))throw new ProxyDomainError('FORBIDDEN');};const current=await authorizeBusiness(scope,area,false,db);copy(current);await verifyBusinessPin(db,scope.userId,input.pin);
+export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;pin?:string},db:PrismaClient=prisma,proof?:BusinessPinProof){
+ const area=input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE',copy=(s:ActorScope)=>{if(s.role==='VIEWER'||s.role!=='ADMIN'&&!s.capabilities.includes('COPY_CREDENTIALS'))throw new ProxyDomainError('FORBIDDEN');};
+ const checkTarget=async(reader:Parameters<typeof assertScopedLoginIds>[0],s:ActorScope)=>{if(hasServerScope(s)){if(input.kind!=='GMAIL'||!['ADMIN','MODERATOR'].includes(s.role))throw new ProxyDomainError('FORBIDDEN');await assertScopedLoginIds(reader,s,[input.id]);}};
+ const current=await authorizeBusiness(scope,area,false,db);copy(current);await checkTarget(db,current);
+ if(!proof&&!input.pin)throw new ProxyDomainError('FORBIDDEN','Nhập PIN / mã 2FA của bạn để copy thông tin đăng nhập');
+ const verified=proof??await verifyBusinessPin(db,scope.userId,input.pin!);
  return withProxyTransaction(async tx=>{
-  const fresh=await authorizeBusiness(scope,area,false,tx);copy(fresh);
+  const fresh=await authorizeBusiness(scope,area,false,tx);copy(fresh);await checkTarget(tx,fresh);await assertBusinessPinProof(tx,scope.userId,verified);
   const row=input.kind==='GMAIL'?await tx.gmailAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null}}):await tx.payPalAccount.findFirst({where:{id:input.id,projectId:scope.projectId,archivedAt:null},include:{emails:{where:{isPrimary:true,archivedAt:null}}}});if(!row)throw new ProxyDomainError('NOT_FOUND');
   const gmail=row as {email:string;password:string|null;twoFaCurrent:string|null;token:string|null;twoFaLink:string|null;smsLink:string|null;phone:string|null},paypal=row as {primaryEmail:string;password:string|null;twoFa:string|null;hotmailToken:string|null;emails:{password:string|null;twoFa:string|null;hotmailToken:string|null}[]};
   const values=input.kind==='GMAIL'?{email:gmail.email,password:gmail.password,twoFa:gmail.twoFaCurrent,token:gmail.token}:{email:paypal.primaryEmail,password:paypal.emails[0]?.password||paypal.password,twoFa:paypal.emails[0]?.twoFa||paypal.twoFa,token:paypal.emails[0]?.hotmailToken||paypal.hotmailToken};// Apple ID (20/10/2026): the links to fetch the 2FA code / SMS are credentials too: decrypted only here, behind the right and the PIN.

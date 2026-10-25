@@ -5,6 +5,7 @@ import {JSDOM} from 'jsdom';
 // Component lifecycle only: no browser, database, network or real credentials (synthetic values).
 const mock=vi.hoisted(()=>({copy:vi.fn(),update:vi.fn(),preview:vi.fn(),commit:vi.fn(),clipboard:vi.fn()}));
 vi.mock('@/lib/trpc',()=>({trpc:{
+  user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},
   businessManagement:{copyAccount:{useMutation:()=>({mutateAsync:mock.copy,isLoading:false})}},
   accountStore:{updateLogin:{useMutation:()=>({mutateAsync:mock.update,isLoading:false})}},
   proxyManagement:{catalog:{useQuery:()=>({data:[],refetch:()=>{}})},groups:{useQuery:()=>({data:[],refetch:()=>{}})},

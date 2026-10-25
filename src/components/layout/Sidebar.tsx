@@ -71,7 +71,7 @@ export function Sidebar({ onNavigate, collapsed, onToggleCollapse }: SidebarProp
   // One rule for every mode (src/components/layout/nav.ts): role, modules, optional modules; no project → dashboard/settings/admin.
   const baseVisibleItems=visibleMenu(proxyMode?personalItems(cashMode):cashMode?cashItems:navItems,{role:currentRole||null,modules:currentModules,paypalOnlyProject:isPaypalOnly,canManageUsers});
 
-  const visibleItems=serverScoped?baseVisibleItems.filter(item=>!('type' in item)&&['/infrastructure/servers','/infrastructure/proxies','/settings'].includes(item.href)):baseVisibleItems;
+  const visibleItems=serverScoped?baseVisibleItems.filter(item=>!('type' in item)&&(['/infrastructure/servers','/infrastructure/proxies','/settings'].includes(item.href)||item.href==='/gmails'&&['ADMIN','MODERATOR'].includes(fresh.data?.role||''))):baseVisibleItems;
   const {name:userName,handle:userHandle,initial:userInitial}=sidebarIdentity({name:session?.user?.name,username:(session?.user as {username?:string|null}|undefined)?.username,email:session?.user?.email});
   const projectName=useProjectStore(s=>s.currentProjectName);
 

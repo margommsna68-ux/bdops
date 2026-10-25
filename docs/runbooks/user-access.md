@@ -66,7 +66,7 @@ Phạm vi là giới hạn thêm bên cạnh vai trò, capability và token scop
 - SDK/proxy phải đang thuộc server được giao. Kho chung chưa gắn server không được thấy hoặc lấy; ADMIN cấp vào server trước. Có thể ghi mã SDK mới đọc được cho VM được giao, không lấy mã có sẵn ở server khác.
 - Proxy đang dùng chung với server ngoài quyền có thể xem vị trí thuộc phạm vi, nhưng lệnh làm thay đổi các vị trí ngoài quyền bị chặn. Lịch sử toàn kho và nguồn mua không hiện cho user giới hạn.
 - Lịch sử SDK toàn mã, mã SDK/ghi chú tự do của lượt VM cũ được che khi có thể mang dữ liệu đã chuyển nơi khác. Không xoá lịch sử gốc. Tiền hiện tại vẫn theo quyền đọc tiền riêng.
-- Không mở Kho tài khoản/PayPal, chi phí, số liệu tài chính toàn dự án, lịch sử toàn dự án hoặc AutoType bằng cách gọi đường cũ trực tiếp. Thiết lập cá nhân và bảo mật vẫn dùng được.
+- Kho tài khoản giới hạn server (cập nhật 25/10): MODERATOR được đọc Gmail/Apple ID đang gắn với VM hoạt động thuộc server được giao; Xem/Copy cần quyền COPY_CREDENTIALS và phiên đã mở khoá bằng PIN/Google Authenticator của chính người đó. Không mở kho chưa gán, PayPal, lô mua, chi phí, số liệu tài chính toàn dự án, lịch sử toàn dự án hoặc AutoType bằng đường cũ. Thiết lập cá nhân và bảo mật vẫn dùng được.
 - Khi ADMIN bỏ server khỏi quyền, request kế tiếp và transaction ghi/gửi lại kiểm lại quyền hiện tại. Không hứa dừng lệnh đang chạy bên ngoài web (AE/GEN2).
 - Danh sách server lưu bằng ID, không phụ thuộc tên. Đổi tên không đổi quyền. Không tự coi một tên máy thật là alias của server web.
 

@@ -45,22 +45,28 @@ const vmHref=(p:{serverId:string;vmId:string})=>links.vms({serverId:p.serverId,v
 // The import panel, its preview and the row selection belong to one kind and are never carried to the other (drafts: ImportPanel).
 export function AccountStore({projectId,initialTab}:{projectId:string;initialTab?:Tab}){
   const params=useSearchParams(),router=useRouter(),path=usePathname(),store=trpc.accountStore.store.useQuery({projectId,deleted:params.get('state')==='DELETED'},{keepPreviousData:true}),utils=trpc.useUtils();
-  const initial:AccountKind=initialTab==='paypal'?'paypal':'login',url=readAccountUrl(params,initial);
+  const initial:AccountKind=initialTab==='paypal'?'paypal':'login',requested=readAccountUrl(params,initial);
   // A member with only the PayPal right (no Server / VM module) works on the PayPal tab of the same store; the backend decides.
-  const kind:AccountKind=url.tab==='login'&&store.data&&!store.data.rights.logins?'paypal':url.tab,stock:StockKind=kind==='paypal'?'PAYPAL':'LOGIN';
+  const kind:AccountKind=store.data&&!(requested.tab==='login'?store.data.rights.logins:store.data.rights.paypals)?store.data.rights.logins?'login':'paypal':requested.tab,stock:StockKind=kind==='paypal'?'PAYPAL':'LOGIN';
+  const historyAllowed=!!store.data&&((kind==='login'?store.data.rights.writeLogins:store.data.rights.writePaypals)||store.data.batches.some(b=>b.kind===stock));
+  const reviewAllowed=!!store.data?.review.some(r=>r.group===stock);
+  const url:AccountUrl=kind!==requested.tab?switchKind(requested,kind):{...requested};
+  if(store.data&&!historyAllowed){url.batch='';if(url.view==='history')url.view='';}
+  if(store.data&&!reviewAllowed&&url.view==='review')url.view='';
   const {q,type,state,batch,view,page,status:loginStatus='',sort:loginSort='CREATED'}=url,deletedView=state==='DELETED';
   const go=(next:AccountUrl,mode:'push'|'replace'='push')=>{const href=path+writeAccountUrl(next,initial);if(mode==='push')router.push(href,{scroll:false});else router.replace(href,{scroll:false});};
   // Old links (?tab=batch / ?tab=review / ?import=1) and a login tab a PayPal-only member cannot have: shown as their canonical URL.
   const wantImport=useRef(params.get('import')==='1');
   const search=params.toString();
-  useEffect(()=>{const canonical=writeAccountUrl({...readAccountUrl(new URLSearchParams(search),initial),tab:kind},initial);if(!sameQuery(canonical,search))router.replace(path+canonical,{scroll:false});},[search,kind,initial,path,router]);
+  const canonical=writeAccountUrl(url,initial);
+  useEffect(()=>{if(!sameQuery(canonical,search))router.replace(path+canonical,{scroll:false});},[canonical,search,path,router]);
   // Typing a search replaces the URL (no history entry per key), a moment after the last key.
   const [typed,setTyped]=useState(q);useEffect(()=>{setTyped(q);},[q]);
   useEffect(()=>{if(typed===q)return;const t=setTimeout(()=>go(withFilter({...readAccountUrl(new URLSearchParams(window.location.search),initial),tab:kind},{q:typed}),'replace'),250);return()=>clearTimeout(t);});
   const [open,setOpenState]=useState(()=>({LOGIN:importDraft(projectId,'LOGIN').open,PAYPAL:importDraft(projectId,'PAYPAL').open}));
   const [nonce,setNonce]=useState(0),bump=()=>setNonce(n=>n+1);
   const setOpen=(k:StockKind,v:boolean)=>{importDraft(projectId,k).open=v;setOpenState(o=>({...o,[k]:v}));};
-  useEffect(()=>{if(wantImport.current&&store.data){wantImport.current=false;setOpen(stock,true);}});
+  useEffect(()=>{if(wantImport.current&&store.data){wantImport.current=false;if(stock==='LOGIN'?store.data.rights.writeLogins:store.data.rights.writePaypals)setOpen(stock,true);}});
   const [selected,setSelected]=useState<Set<string>>(new Set()),[copy,setCopy]=useState<{row:Login;field?:CopyField}|null>(null);
   // A new kind, view or filter starts with nothing selected (selection never crosses from PayPal to Gmail or the other way).
   const resultKey=JSON.stringify([kind,view,type,state,batch,q,loginStatus,loginSort]);useEffect(()=>{setSelected(new Set());setRowErrors({});},[resultKey]);
@@ -103,11 +109,11 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   return <div className="proxy-workspace space-y-4">
     <div className="pm-heading"><div><h1>Kho tài khoản</h1><p className="pm-muted">Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng <Link className="underline" href={links.vms()}>Server / VM</Link>; một VM một tài khoản EarnApp; mỗi EarnApp có một email PayPal nhận tiền, nhiều EarnApp có thể dùng cùng mã PP qua các email riêng.</p></div>
       <div className="flex gap-2 flex-wrap">{canWrite&&<button className="pm-button pm-button-primary" onClick={startImport}>{kind==='paypal'?'Nhập PayPal':'Nhập Gmail / Apple ID'}</button>}</div></div>
-    <div className="vm-kind-tabs" role="tablist" aria-label="Loại tài khoản">{([['login','Gmail / Apple ID',data?.logins.length],['paypal','PayPal',data?.paypals.length]] as [AccountKind,string,number|undefined][]).filter(([k])=>k!=='login'||rights?.logins!==false).map(([k,label,n])=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} onClick={()=>{if(k!==kind||view||q||type||state||batch||loginStatus||loginSort!=='CREATED')go(switchKind(url,k));}}>{label}{n!==undefined?` (${n})`:''}</button>)}</div>
+    <div className="vm-kind-tabs" role="tablist" aria-label="Loại tài khoản">{([['login','Gmail / Apple ID',data?.logins.length],['paypal','PayPal',data?.paypals.length]] as [AccountKind,string,number|undefined][]).filter(([k])=>k==='login'?rights?.logins!==false:rights?.paypals!==false).map(([k,label,n])=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} onClick={()=>{if(k!==kind||view||q||type||state||batch||loginStatus||loginSort!=='CREATED')go(switchKind(url,k));}}>{label}{n!==undefined?` (${n})`:''}</button>)}</div>
     <div className="acc-subnav">{view?<button type="button" className="pm-link inline-flex items-center gap-1" onClick={()=>go(openView(url,''))}><ArrowLeft size={14}/> Về danh sách {kindLabel}</button>
-      :<><button type="button" className="pm-button pm-button-quiet" onClick={()=>go(openView(url,'history'))}><History size={14}/> Lịch sử nhập kho{data?` (${batches.length})`:''}</button>
+      :<>{historyAllowed&&<button type="button" className="pm-button pm-button-quiet" onClick={()=>go(openView(url,'history'))}><History size={14}/> Lịch sử nhập kho{data?` (${batches.length})`:''}</button>}
         {review.length>0&&<button type="button" className="acc-review-alert" onClick={()=>go(openView(url,'review'))}><AlertTriangle size={14}/> Cần đối chiếu ({review.length})</button>}</>}</div>
-    {(['LOGIN','PAYPAL'] as StockKind[]).map(k=>open[k]&&<div key={k} hidden={k!==stock||!!view}><ImportPanel key={k+':'+importDraft(projectId,k).nonce+':'+nonce} projectId={projectId} kind={k} canCost={!!rights?.writeCosts} onDone={()=>void refresh()} onFinished={finished(k)} onClose={()=>setOpen(k,false)} onDiscard={()=>{discardDraft(importDraft(projectId,k));bump();}}/></div>)}
+    {canWrite&&!view&&open[stock]&&<div><ImportPanel key={stock+':'+importDraft(projectId,stock).nonce+':'+nonce} projectId={projectId} kind={stock} canCost={!!rights?.writeCosts} onDone={()=>void refresh()} onFinished={finished(stock)} onClose={()=>setOpen(stock,false)} onDiscard={()=>{discardDraft(importDraft(projectId,stock));bump();}}/></div>}
     {!view&&<div className="pm-surface">
       <div className="pm-actions flex-wrap gap-2">
         <label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm tài khoản" placeholder={kind==='paypal'?'Tìm mã PP, email, VM…':'Tìm email, lô, VM, PayPal…'} value={typed} onChange={e=>setTyped(e.target.value)}/></label>
@@ -132,7 +138,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
     {view==='review'&&<div className="pm-surface p-4 space-y-3"><h2 className="font-semibold">Cần đối chiếu · {kindLabel}</h2>
       <p className="text-sm pm-muted">Dữ liệu cũ mâu thuẫn với quy tắc mới (một VM một tài khoản; mỗi EarnApp một email PayPal riêng, một mã PP có nhiều email; tiền mua ghi một lần). Web không tự đoán loại, sửa tiền, ghép hay thay liên kết; người vận hành mở từng mục để xử lý. Tài khoản bị khoá, PayPal limit hoặc ngừng dùng là tình trạng tài khoản, xem ở lọc <button type="button" className="pm-link" onClick={()=>go({...switchKind(url,kind),state:'BLOCKED'})}>{STATE_LABEL.BLOCKED}</button>.</p>
       {review.length?<ul className="acc-review-list">{review.map((r,i)=><li key={i}><div><strong>{r.subject}</strong><p className="text-sm">{r.reason}</p></div><button type="button" className="pm-button pm-button-quiet" onClick={()=>openReview(r)}>{r.open.type==='vm'?`Mở VM ${r.open.place.server} / ${r.open.place.vm}`:r.open.type==='batch'?'Mở đợt nhập':kind==='paypal'?'Mở PayPal':'Mở tài khoản'}</button></li>)}</ul>:<p className="text-sm">{store.isLoading?'Đang tải…':'Không còn mục cần đối chiếu.'}</p>}</div>}
-    {copy&&<AccountCopy projectId={projectId} kind="GMAIL" row={copy.row as never} initialField={copy.field} available={([['secret',copy.row.has.password],['twoFa',copy.row.has.twoFa],['token',copy.row.has.token],['twoFaLink',copy.row.links.twoFa],['smsLink',copy.row.links.sms]] as [CopyField,boolean][]).filter(([,on])=>on).map(([f])=>f)} onClose={()=>setCopy(null)}/>}
+    {copy&&rights?.copy&&<AccountCopy projectId={projectId} kind="GMAIL" row={copy.row as never} initialField={copy.field} available={([['secret',copy.row.has.password],['twoFa',copy.row.has.twoFa],['token',copy.row.has.token],['twoFaLink',copy.row.links.twoFa],['smsLink',copy.row.links.sms]] as [CopyField,boolean][]).filter(([,on])=>on).map(([f])=>f)} onClose={()=>setCopy(null)}/>}
   </div>;
 }
 function StateCell({state,place,extra}:{state:string;place:{serverId:string;vmId:string;server:string;vm:string}|null;extra?:string|null}){

@@ -1,7 +1,7 @@
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {expect,it,vi} from 'vitest';
-vi.mock('@/lib/trpc',()=>{const m=()=>({useMutation:()=>({mutateAsync:async()=>({}),isLoading:false})});return {trpc:{businessManagement:{copyAccount:m()},accountStore:{updateLogin:m()}}};});
+vi.mock('@/lib/trpc',()=>{const m=()=>({useMutation:()=>({mutateAsync:async()=>({}),isLoading:false})});return {trpc:{user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},businessManagement:{copyAccount:m()},accountStore:{updateLogin:m()}}};});
 import {AccountDetail} from '@/components/account-store/AccountDetail';
 // Khung chi tiết (owner brief 20/10/2026): labels, masking, and no empty secret kinds for a five-column Apple ID. Synthetic rows only.
 const base={id:'g1',email:'apple@example.invalid',type:'APPLE_ID',status:'ACTIVE',state:'NEW',deletedAt:null,revision:3,notes:'ghi chú',recoveryEmail:null,createdAt:'',batch:null,batchId:null,price:null,priceState:'NONE',credentialsAvailable:true,phone:'0123456789',links:{twoFa:true,sms:true},has:{password:true,twoFa:false,token:false},earnApp:null,place:null,legacyVmCount:0};

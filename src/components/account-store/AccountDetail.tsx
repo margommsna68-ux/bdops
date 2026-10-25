@@ -7,6 +7,7 @@ import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {errorMessage} from '@/components/vm-management/shared';
 import {isLoginIssueStatus,LOGIN_ISSUE_LABEL,type LoginIssueStatus} from '@/lib/login-issue';
+import {normalizeSecondFactor,validSecondFactor,OWN_FACTOR_LABEL} from '@/components/second-factor';
 type Login=inferRouterOutputs<AppRouter>['accountStore']['store']['logins'][number];
 type Field='email'|'password'|'twoFa'|'token'|'recoveryEmail'|'twoFaLink'|'smsLink'|'phone'|'notes';
 type Secrets={secret:string;twoFa:string|null;token:string|null;twoFaLink:string|null;smsLink:string|null;phone:string|null};
@@ -41,12 +42,17 @@ export function AccountDetail({projectId,login,canEdit,canCopy,onSaved,onClose}:
   const classic=!!(login.has.twoFa||login.has.token||login.recoveryEmail)||login.type!=='APPLE_ID';
   const shown:Field[]=classic?['email','password',...(login.has.twoFa||login.type==='GMAIL'?['twoFa' as Field]:[]),'recoveryEmail',...(login.has.token?['token' as Field]:[]),...(login.links.twoFa?['twoFaLink' as Field]:[]),...(login.links.sms?['smsLink' as Field]:[]),...(login.phone?['phone' as Field]:[]),'notes']:['email','password','twoFaLink','smsLink','phone','notes'];
   const copyAcc=trpc.businessManagement.copyAccount.useMutation(),save=trpc.accountStore.updateLogin.useMutation();
+  const security=trpc.user.securityStatus.useQuery(undefined,{retry:false,enabled:canCopy});
   const tag=projectId+'|'+login.id+'|'+login.revision+'|'+(canCopy?'1':'0'),tagRef=useRef(tag);tagRef.current=tag;
-  const [held,setHeld]=useState<{tag:string;values:Secrets}|null>(null),[pin,setPin]=useState(''),[askPin,setAskPin]=useState(false),[pinError,setPinError]=useState(''),[reveal,setReveal]=useState<Partial<Record<Field,boolean>>>({});
-  const secrets=held&&held.tag===tag?held.values:null; // secrets of another account / version / right are never shown, copied or opened
+  const securityKey=tag+'|'+String(security.data?.unlocked)+'|'+String(security.data?.totpEnabled)+'|'+!!security.error;
+  const generation=useRef({key:securityKey,value:0});
+  // Invalidate during render as well as clearing state below: a late response cannot win between render and effects.
+  if(generation.current.key!==securityKey)generation.current={key:securityKey,value:generation.current.value+1};
+  const [held,setHeld]=useState<{tag:string;generation:number;values:Secrets}|null>(null),[pin,setPin]=useState(''),[askPin,setAskPin]=useState(false),[pinError,setPinError]=useState(''),[reveal,setReveal]=useState<Partial<Record<Field,boolean>>>({});
+  const secrets=!security.error&&canCopy&&held&&held.tag===tag&&held.generation===generation.current.value?held.values:null;
   const pending=useRef<((s:Secrets)=>void)|undefined>(undefined);
-  useEffect(()=>{setHeld(h=>h&&h.tag===tag?h:null);setReveal({});pending.current=undefined;setAskPin(false);setPin('');},[tag]);
-  useEffect(()=>()=>{setHeld(null);},[]);
+  useEffect(()=>{setHeld(null);setReveal({});pending.current=undefined;setAskPin(false);setPin('');setPinError('');},[securityKey]);
+  useEffect(()=>()=>{generation.current.value++;pending.current=undefined;},[]);
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState<Partial<Record<Field,string>>>({}),[clear,setClear]=useState<Partial<Record<Field,boolean>>>({}),[errors,setErrors]=useState<Partial<Record<Field,string>>>({}),[general,setGeneral]=useState(''),keyRef=useRef<{sig:string;key:string}|null>(null);
   const current:Record<Field,string>={email:login.email,password:'',twoFa:'',token:'',recoveryEmail:login.recoveryEmail||'',twoFaLink:'',smsLink:'',phone:login.phone||'',notes:login.notes||''};
   // The version the edit started from; comparisons and the expected revision use it until the person re-bases on purpose.
@@ -56,14 +62,16 @@ export function AccountDetail({projectId,login,canEdit,canCopy,onSaved,onClose}:
   const stopEdit=()=>{setEditing(false);setBase(null);setDraft({});setClear({});setErrors({});setGeneral('');keyRef.current=null;};
   const copyText=(t:string,what:string)=>navigator.clipboard.writeText(t).then(()=>toast.success('Đã copy '+what),()=>toast.error('Trình duyệt chưa cho phép copy'));
   // Secret actions wait for the PIN once; the action runs right after the server answers.
-  function withSecrets(run:(s:Secrets)=>void){if(secrets){run(secrets);return;}pending.current=run;setAskPin(true);setPinError('');}
-  async function unlock(){setPinError('');const at=tag,run=pending.current;
-    try{const r=await copyAcc.mutateAsync({projectId,kind:'GMAIL',id:login.id,pin});
+  function withSecrets(run:(s:Secrets)=>void){if(security.error||!canCopy)return;if(secrets){run(secrets);return;}pending.current=run;setPinError('');if(security.data?.unlocked)void unlock(run);else setAskPin(true);}
+  async function unlock(run=pending.current){
+    if(copyAcc.isLoading||!canCopy||security.error||!security.data||!security.data.unlocked&&!validSecondFactor(pin,security.data.totpEnabled))return;
+    setPinError('');const at=tag,started=generation.current.value;
+    try{const r=await copyAcc.mutateAsync({projectId,kind:'GMAIL',id:login.id,...(!security.data.unlocked?{pin:normalizeSecondFactor(pin)}:{})});
       // The answer belongs to the account / version it was asked for; if that changed meanwhile it is dropped, never shown.
-      if(tagRef.current!==at){setPinError('Tài khoản vừa thay đổi; mở lại để lấy thông tin hiện hành');return;}
-      const s:Secrets={secret:r.secret,twoFa:r.twoFa,token:r.token,twoFaLink:r.twoFaLink,smsLink:r.smsLink,phone:r.phone};setHeld({tag:at,values:s});setPin('');setAskPin(false);
+      if(tagRef.current!==at||generation.current.value!==started)return;
+      const s:Secrets={secret:r.secret,twoFa:r.twoFa,token:r.token,twoFaLink:r.twoFaLink,smsLink:r.smsLink,phone:r.phone};setHeld({tag:at,generation:started,values:s});setPin('');setAskPin(false);
       if(pending.current===run){run?.(s);pending.current=undefined;}}
-    catch(e){if(tagRef.current===at)setPinError(errorMessage(e));}}
+    catch(e){if(tagRef.current===at&&generation.current.value===started){setPinError(errorMessage(e));setAskPin(true);}}}
   const secretOf=(s:Secrets,f:Field)=>f==='password'?s.secret:(s[f as keyof Secrets] as string|null)||'';
   // What would be sent: changed plain fields, typed secrets, explicit clears. Checked here too so Lưu stays muted when invalid.
   const changes=useMemo(()=>{const c:Partial<Record<Field,string|null>>={},bad:Partial<Record<Field,string>>={};
@@ -104,7 +112,8 @@ export function AccountDetail({projectId,login,canEdit,canCopy,onSaved,onClose}:
     <div className="flex justify-between gap-2 items-center"><strong className="text-sm">{login.type==='APPLE_ID'?'Apple ID':'Gmail'} · {login.email}</strong>
       <div className="flex gap-2">{canEdit&&!editing&&<button type="button" className="pm-button pm-button-sm" onClick={startEdit}>Sửa</button>}<button type="button" className="pm-icon-button" aria-label="Đóng chi tiết" onClick={onClose}><X size={16}/></button></div></div>
     <LoginIssueBadge {...login}/>
-    {askPin&&<form className="acc-detail-pin flex gap-2 items-center flex-wrap" onSubmit={e=>{e.preventDefault();void unlock();}}><Lock size={14}/><span className="text-xs">Nhập PIN để xem / copy thông tin bí mật</span><input autoFocus type="password" autoComplete="off" className="pm-input pm-input-sm w-28" aria-label="PIN" value={pin} onChange={e=>setPin(e.target.value)}/><button className="pm-button pm-button-sm" disabled={!pin||copyAcc.isLoading}>{copyAcc.isLoading?<Loader2 size={14} className="animate-spin"/>:null}Mở</button><button type="button" className="pm-button pm-button-sm pm-button-quiet" onClick={()=>{setAskPin(false);pending.current=undefined;}}>Huỷ</button>{pinError&&<span className="vm-cell-error" role="alert">{pinError}</span>}</form>}
+    {!askPin&&security.error&&<p className="vm-cell-error" role="alert">{security.error.message}</p>}
+    {askPin&&<form className="acc-detail-pin flex gap-2 items-center flex-wrap" onSubmit={e=>{e.preventDefault();void unlock();}}><Lock size={14}/><span className="text-xs">{security.data?.unlocked?'Dùng phiên đã mở khoá của bạn':OWN_FACTOR_LABEL}</span>{!security.data?.unlocked&&<input autoFocus type="password" autoComplete="one-time-code" maxLength={32} className="pm-input pm-input-sm w-36" aria-label="PIN" title={OWN_FACTOR_LABEL} value={pin} onChange={e=>setPin(normalizeSecondFactor(e.target.value))}/>}<button className="pm-button pm-button-sm" disabled={!security.data||!security.data.unlocked&&!validSecondFactor(pin,security.data.totpEnabled)||copyAcc.isLoading}>{copyAcc.isLoading?<Loader2 size={14} className="animate-spin"/>:null}Mở</button><button type="button" className="pm-button pm-button-sm pm-button-quiet" onClick={()=>{setAskPin(false);pending.current=undefined;}}>Huỷ</button>{(pinError||security.error)&&<span className="vm-cell-error" role="alert">{pinError||security.error?.message}</span>}</form>}
     {stale&&<div className="pm-review text-sm flex gap-2 items-center flex-wrap" role="status">Tài khoản vừa được cập nhật ở nơi khác. Nội dung bạn đang sửa vẫn giữ; giá trị mới hiện dưới từng ô.
       <button type="button" className="pm-button pm-button-sm" onClick={()=>{setBase({revision:login.revision,values:current});keyRef.current=null;}}>Đối chiếu bản mới</button></div>}
     <div className="acc-detail-grid">{shown.map(field)}</div>

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import {normalizeSecondFactor,validSecondFactor} from './second-factor';
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,12 +26,14 @@ export function PinVerifyDialog({
   onClose,
   onVerified,
   title = "Xác nhận bằng mã 2FA / PIN",
-  description = "Nhập mã Google Authenticator (hoặc PIN nếu chưa bật 2FA) để tiếp tục",
+  description = "Dùng mã Google Authenticator của bạn (hoặc PIN của bạn nếu chưa bật 2FA) để tiếp tục",
   required = false,
 }: PinVerifyDialogProps) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const verifyPin = trpc.user.verifyPin.useMutation();
+  const security=trpc.user.securityStatus.useQuery(undefined,{retry:false,enabled:open});
+  const alreadyUnlocked=!!security.data?.unlocked,valid=!!security.data&&validSecondFactor(pin,security.data.totpEnabled);
 
   // Always reset pin and error when dialog opens
   useEffect(() => {
@@ -38,9 +41,10 @@ export function PinVerifyDialog({
   }, [open]);
 
   const handleVerify = async () => {
+    if(verifyPin.isLoading||!security.data||!alreadyUnlocked&&!valid)return;
     setError("");
     try {
-      await verifyPin.mutateAsync({ pin });
+      if(!alreadyUnlocked)await verifyPin.mutateAsync({ pin:normalizeSecondFactor(pin) });
       setPin("");
       onVerified();
       onClose();
@@ -58,21 +62,22 @@ export function PinVerifyDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
-          <input
+          {alreadyUnlocked?<p className="text-sm">Phiên đăng nhập của bạn đã được mở khoá.</p>:<input
             type="password"
             inputMode="text"
-            maxLength={12}
+            maxLength={32}
             placeholder="Mã 2FA / PIN"
             value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/[^0-9a-zA-Z-]/g, ""))}
-            onKeyDown={(e) => e.key === "Enter" && pin.length >= 4 && handleVerify()}
+            onChange={(e) => setPin(normalizeSecondFactor(e.target.value))}
+            onKeyDown={(e) => e.key === "Enter" && handleVerify()}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center text-2xl tracking-[0.5em]"
             autoComplete="new-password"
             data-lpignore="true"
             data-1p-ignore
             data-form-type="other"
             autoFocus
-          />
+          />}
+          {security.error&&<p role="alert" className="text-sm text-red-600">{security.error.message}</p>}
           {error && <p className="text-sm text-red-600 text-center">{error}</p>}
           <div className="flex gap-2">
             {!required && (
@@ -80,7 +85,7 @@ export function PinVerifyDialog({
                 Cancel
               </Button>
             )}
-            <Button className="flex-1" onClick={handleVerify} disabled={pin.length < 4 || verifyPin.isLoading}>
+            <Button className="flex-1" onClick={handleVerify} disabled={!alreadyUnlocked&&!valid || verifyPin.isLoading}>
               {verifyPin.isLoading ? "..." : "Verify"}
             </Button>
           </div>
@@ -93,21 +98,20 @@ export function PinVerifyDialog({
 /**
  * Hook: usePinAction
  * Wraps an action that requires PIN verification.
- * If user has no PIN, action executes directly.
- * If user has PIN, shows dialog first.
+ * Reuses only a server-confirmed session unlock. A retired PIN never bypasses TOTP.
  */
 export function usePinAction() {
   const [showDialog, setShowDialog] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-  const [dialogTitle, setDialogTitle] = useState("PIN Required");
-  const [dialogDesc, setDialogDesc] = useState("Enter your PIN to continue");
+  const [dialogTitle, setDialogTitle] = useState("Xác nhận bằng mã 2FA / PIN");
+  const [dialogDesc, setDialogDesc] = useState("Nhập mã Google Authenticator hoặc PIN của bạn để tiếp tục");
 
-  const { data: pinStatus } = trpc.user.hasPin.useQuery(undefined, { retry: false });
+  const { data: pinStatus } = trpc.user.securityStatus.useQuery(undefined, { retry: false });
 
   const requirePin = useCallback(
     (action: () => void, title?: string, desc?: string) => {
-      if (!pinStatus?.hasPin) {
-        // No PIN set → execute directly
+      if (pinStatus?.unlocked) {
+        // The server, not the presence of a legacy PIN, decides whether this session is unlocked.
         action();
         return;
       }

@@ -1,9 +1,10 @@
 "use client";
-import {useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import {trpc} from '@/lib/trpc';
 import toast from 'react-hot-toast';
 import {BusinessDialog,SaveBar,ErrorNotice,useBusinessKey,useBusinessRefresh,type BusinessOutputs} from './shared';
+import {normalizeSecondFactor,validSecondFactor,OWN_FACTOR_LABEL} from '@/components/second-factor';
 type Kind='GMAIL'|'PAYPAL';
 type Row=BusinessOutputs['accounts']['gmails'][number]|BusinessOutputs['accounts']['paypals'][number];
 export function AccountsWorkspace({projectId,kind='GMAIL',accountId}:{projectId:string;kind?:Kind;accountId?:string}){
@@ -34,14 +35,35 @@ const LINK_TITLE:Record<string,string>={twoFaLink:'Link lấy mã 2FA',smsLink:'
 // window alone and opened or copied by a click; the table, history and logs never carry them.
 export function AccountCopy({projectId,kind,row,onClose,initialField,available}:{projectId:string;kind:Kind;row:Row;onClose:()=>void;initialField?:CopyField;/** fields this account stores; others are not offered */available?:CopyField[]}){
  const offer=(f:CopyField)=>!available||available.includes(f);
- const [pin,setPin]=useState(''),[field,setField]=useState<CopyField>(initialField||'secret'),[message,setMessage]=useState(''),[link,setLink]=useState<string|null>(null);
- const copy=trpc.businessManagement.copyAccount.useMutation({onSuccess:async result=>{const value=result[field];if(!value){setMessage('Tài khoản chưa có thông tin này.');copy.reset();return;}
-   if(field==='twoFaLink'||field==='smsLink'){setLink(value);copy.reset();return;}
-   try{await navigator.clipboard.writeText(field==='secret'?result.email+'\t'+value:value);toast.success('Đã copy');onClose();}catch{setMessage('Trình duyệt chưa cho phép copy. Cho phép clipboard rồi thử lại.');}finally{copy.reset();}}});
+ const [pin,setPin]=useState(''),[field,setField]=useState<CopyField>(initialField||available?.[0]||'secret'),[message,setMessage]=useState('');
+ const security=trpc.user.securityStatus.useQuery(undefined,{retry:false});
+ const unlocked=!security.error&&!!security.data?.unlocked,valid=!security.error&&!!security.data&&validSecondFactor(pin,security.data.totpEnabled);
+ const copy=trpc.businessManagement.copyAccount.useMutation();
+ const tag=projectId+'|'+kind+'|'+row.id+'|'+row.revision,tagRef=useRef(tag);tagRef.current=tag;
+ const securityKey=tag+'|'+String(security.data?.unlocked)+'|'+String(security.data?.totpEnabled)+'|'+!!security.error;
+ const generation=useRef({key:securityKey,value:0});
+ if(generation.current.key!==securityKey)generation.current={key:securityKey,value:generation.current.value+1};
+ const [held,setHeld]=useState<{tag:string;generation:number;field:CopyField;text:string}|null>(null),result=!security.error&&held?.tag===tag&&held.generation===generation.current.value?held:null;
+ useEffect(()=>{setPin('');setHeld(null);setMessage('');setField(initialField||available?.[0]||'secret');},[tag,initialField]);// eslint-disable-line react-hooks/exhaustive-deps
+ useEffect(()=>{setHeld(null);setPin('');setMessage('');},[securityKey]);
+ useEffect(()=>{tagRef.current=tag;return()=>{tagRef.current='';generation.current.value++;};},[tag]);
+ async function reveal(){
+   if(copy.isLoading||security.error||!security.data||!unlocked&&!valid)return;
+   const at=tag,picked=field,started=generation.current.value;setMessage('');
+   const stillCurrent=()=>tagRef.current===at&&generation.current.value===started;
+   try{const result=await copy.mutateAsync({projectId,kind,id:row.id,...(!unlocked?{pin:normalizeSecondFactor(pin)}:{})});
+     if(!stillCurrent())return;setPin('');const value=result[picked];if(!value){setMessage('Tài khoản chưa có thông tin này.');return;}
+     const text=picked==='secret'?result.email+'\t'+value:value;
+     if(picked==='twoFaLink'||picked==='smsLink'){setHeld({tag:at,generation:started,field:picked,text});return;}
+     try{await navigator.clipboard.writeText(text);if(stillCurrent()){toast.success('Đã copy');onClose();}}
+     catch{if(stillCurrent()){setHeld({tag:at,generation:started,field:picked,text});setMessage('Chọn nội dung và nhấn Ctrl+C, hoặc bấm Copy lại.');}}
+   }catch{/* The mutation error remains visible below; never retry with the same one-time code automatically. */}
+ }
  const copyText=(text:string)=>navigator.clipboard.writeText(text).then(()=>toast.success('Đã copy'),()=>setMessage('Trình duyệt chưa cho phép copy. Cho phép clipboard rồi thử lại.'));
- if(link)return <BusinessDialog title={LINK_TITLE[field]+' · '+row.email} description="Link chỉ hiện trong khung này. Mở trong tab mới để lấy mã, hoặc copy." busy={false} onClose={onClose}><div className="space-y-3"><p className="text-sm break-all"><code data-testid="account-link">{link}</code></p>
-   <div className="flex gap-2 flex-wrap"><a className="pm-button pm-button-primary" href={link} target="_blank" rel="noopener noreferrer">Mở trong tab mới</a><button type="button" className="pm-button" onClick={()=>void copyText(link)}>Copy link</button><button type="button" className="pm-button pm-button-quiet" onClick={onClose}>Đóng</button></div>{message&&<p role="status" className="pm-review">{message}</p>}</div></BusinessDialog>;
- return <BusinessDialog title={(field==='twoFaLink'||field==='smsLink'?LINK_TITLE[field]:'Copy')+' · '+row.email} description="Nhập PIN để lấy. Thao tác được ghi lịch sử, không hiện thông tin đăng nhập trên bảng." busy={copy.isLoading} onClose={onClose}><form className="space-y-4" onSubmit={e=>{e.preventDefault();setMessage('');copy.mutate({projectId,kind,id:row.id,pin});}}><label className="pm-label">Thông tin cần lấy<select className="pm-input" value={field} onChange={e=>setField(e.target.value as CopyField)}>{offer('secret')&&<option value="secret">Email đăng nhập + Mật khẩu</option>}{offer('twoFa')&&<option value="twoFa">Mã 2FA (TOTP)</option>}{offer('token')&&<option value="token">Token</option>}{kind==='GMAIL'&&<>{offer('twoFaLink')&&<option value="twoFaLink">Link lấy mã 2FA</option>}{offer('smsLink')&&<option value="smsLink">Link SMS</option>}</>}</select></label><label className="pm-label">PIN<input autoComplete="off" type="password" required className="pm-input" value={pin} onChange={e=>setPin(e.target.value)}/></label><ErrorNotice error={copy.error}/>{message&&<p role="status" className="pm-review">{message}</p>}<SaveBar busy={copy.isLoading} onClose={onClose} label={field==='twoFaLink'||field==='smsLink'?'Lấy link':'Copy'}/></form></BusinessDialog>;
+ if(result){const isLink=result.field==='twoFaLink'||result.field==='smsLink';return <BusinessDialog title={(isLink?LINK_TITLE[result.field]:'Copy')+' · '+row.email} description={isLink?'Link chỉ hiện trong khung này. Mở trong tab mới để lấy mã, hoặc copy.':'Thông tin chỉ giữ trong khung này; copy lại không gửi thêm yêu cầu lấy mật khẩu.'} busy={false} onClose={onClose}><div className="space-y-3">
+   {isLink?<p className="text-sm break-all"><code data-testid="account-link">{result.text}</code></p>:<textarea readOnly className="pm-input" aria-label="Thông tin đăng nhập để copy" value={result.text} onFocus={e=>e.target.select()}/>}
+   <div className="flex gap-2 flex-wrap">{isLink&&<a className="pm-button pm-button-primary" href={result.text} target="_blank" rel="noopener noreferrer">Mở trong tab mới</a>}<button type="button" className="pm-button" onClick={()=>void copyText(result.text)}>{isLink?'Copy link':'Copy lại'}</button><button type="button" className="pm-button pm-button-quiet" onClick={onClose}>Đóng</button></div>{message&&<p role="status" className="pm-review">{message}</p>}</div></BusinessDialog>;}
+ return <BusinessDialog title={(field==='twoFaLink'||field==='smsLink'?LINK_TITLE[field]:'Copy')+' · '+row.email} description={unlocked?'Dùng phiên đã mở khoá của bạn. Quyền copy vẫn được kiểm tra trong dự án và server được giao.':'Nhập mã Google Authenticator hoặc PIN của bạn để lấy. Thao tác được ghi lịch sử.'} busy={copy.isLoading} onClose={onClose}><form className="space-y-4" onSubmit={e=>{e.preventDefault();void reveal();}}><label className="pm-label">Thông tin cần lấy<select className="pm-input" value={field} disabled={copy.isLoading} onChange={e=>setField(e.target.value as CopyField)}>{offer('secret')&&<option value="secret">Email đăng nhập + Mật khẩu</option>}{offer('twoFa')&&<option value="twoFa">Mã 2FA (TOTP)</option>}{offer('token')&&<option value="token">Token</option>}{kind==='GMAIL'&&<>{offer('twoFaLink')&&<option value="twoFaLink">Link lấy mã 2FA</option>}{offer('smsLink')&&<option value="smsLink">Link SMS</option>}</>}</select></label>{!unlocked&&<label className="pm-label">{OWN_FACTOR_LABEL}<input autoComplete="one-time-code" type="password" maxLength={32} required className="pm-input" value={pin} onChange={e=>setPin(normalizeSecondFactor(e.target.value))}/></label>}<ErrorNotice error={security.error||copy.error}/>{message&&<p role="status" className="pm-review">{message}</p>}<SaveBar busy={copy.isLoading} disabled={!unlocked&&!valid} onClose={onClose} label={field==='twoFaLink'||field==='smsLink'?'Lấy link':'Copy'}/></form></BusinessDialog>;
 }
 export function AccountBindingDialog({projectId,vmId,onClose}:{projectId:string;vmId:string;onClose:()=>void}){
  const data=trpc.businessManagement.accounts.useQuery({projectId}),refresh=useBusinessRefresh(),keyFor=useBusinessKey(),[selection,setSelection]=useState<string|null>(null),vm=data.data?.vms.find(v=>v.id===vmId),value=selection??vm?.gmailId??'';

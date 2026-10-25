@@ -5,6 +5,18 @@ export type ScopeDB=PrismaClient|Prisma.TransactionClient;
 export const hasServerScope=(s:ActorScope)=>Array.isArray(s.serverIds);
 export const serverWhere=(s:ActorScope)=>hasServerScope(s)?{id:{in:s.serverIds!}}:{};
 export const vmWhere=(s:ActorScope)=>hasServerScope(s)?{serverId:{in:s.serverIds!}}:{};
+// Human account reads: only live current bindings, never purchase stock or detached/closed accounts.
+// A legacy gmailId counts only when neither the login nor that VM has an EarnApp account.
+export function scopedLoginWhere(s:ActorScope):Prisma.GmailAccountWhereInput{
+ if(!hasServerScope(s))return {};
+ const liveVM:Prisma.VirtualMachineWhereInput={managed:true,archivedAt:null,server:{projectId:s.projectId,managed:true,archivedAt:null,...serverWhere(s)}};
+ return {projectId:s.projectId,archivedAt:null,
+  OR:[{earnApp:{is:{projectId:s.projectId,closedAt:null,vm:{is:liveVM}}}},
+   {earnApp:{is:null},vms:{some:{...liveVM,earnApp:{is:null}}}}],
+  // A legacy pointer on another current VM is still a cross-server credential binding.
+  vms:{none:{managed:true,archivedAt:null,earnApp:{is:null},server:{managed:true,archivedAt:null},NOT:{server:{projectId:s.projectId,...serverWhere(s)}}}},
+ };
+}
 export const sdkWhere=(s:ActorScope):Prisma.SdkRecordWhereInput=>hasServerScope(s)?{OR:[{holder:{serverId:{in:s.serverIds!}}},{holderVmId:null,vm:{serverId:{in:s.serverIds!}}}]}:{};
 // Only active holds, the legacy VM link, or configurations currently selected by a VM prove a binding.
 // VMConfiguration.vm is history: it must never grant access after both current pointers have moved on.
@@ -15,6 +27,11 @@ export const endpointWhere=(s:ActorScope):Prisma.ProxyIPWhereInput=>hasServerSco
 ]}:{};
 const deny=()=>{throw new ProxyDomainError('NOT_FOUND','Không tìm thấy dữ liệu trong phạm vi server được giao');};
 const unique=(ids:readonly string[])=>[...new Set(ids)];
+export async function assertScopedLoginIds(db:ScopeDB,s:ActorScope,ids:readonly string[]){
+ const scope=await loadInfrastructureScope(db,s.userId,s.projectId);if(!hasServerScope(scope)||!ids.length)return;
+ const all=unique(ids),rows=await db.gmailAccount.findMany({where:{AND:[{id:{in:all}},scopedLoginWhere(scope)]},select:{id:true}});
+ if(rows.length!==all.length)deny();
+}
 export async function assertScopedServerIds(db:ScopeDB,s:ActorScope,ids:readonly string[]){const scope=await loadInfrastructureScope(db,s.userId,s.projectId);if(!hasServerScope(scope)||!ids.length)return;const all=unique(ids),rows=await db.server.findMany({where:{projectId:s.projectId,AND:[{id:{in:all}},serverWhere(scope)]},select:{id:true}});if(rows.length!==all.length)deny();}
 export async function assertScopedVmIds(db:ScopeDB,s:ActorScope,ids:readonly string[]){const scope=await loadInfrastructureScope(db,s.userId,s.projectId);if(!hasServerScope(scope)||!ids.length)return;const all=unique(ids),rows=await db.virtualMachine.findMany({where:{id:{in:all},server:{projectId:s.projectId},...vmWhere(scope)},select:{id:true}});if(rows.length!==all.length)deny();}
 export async function assertScopedSdkIds(db:ScopeDB,s:ActorScope,ids:readonly string[]){const scope=await loadInfrastructureScope(db,s.userId,s.projectId);if(!hasServerScope(scope)||!ids.length)return;const all=unique(ids),rows=await db.sdkRecord.findMany({where:{id:{in:all},projectId:s.projectId,...sdkWhere(scope)},select:{id:true,vmId:true,holderVmId:true}});if(rows.length!==all.length)deny();for(const r of rows)await assertScopedVmIds(db,scope,[r.vmId,r.holderVmId].filter((id):id is string=>!!id));}
