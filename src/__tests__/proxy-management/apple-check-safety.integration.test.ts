@@ -81,6 +81,15 @@ async function setup() {
 }
 
 describe('Apple check backend and HTTP safety',()=>{
+  it('keeps the latest result for every account even beyond the recent 1000 checks',async()=>{
+    const f=await setup();
+    const older=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',loginType:'APPLE_ID'}});
+    const oldJob=await db.appleCheckJob.create({data:{projectId:f.scope.projectId,accountId:older.id,accountRevision:older.revision,requestedById:f.scope.userId,requestKey:randomUUID(),phase:'DONE',result:'LIVE_2FA',cleanup:'OK',createdAt:new Date('2026-01-01')}});
+    await db.appleCheckJob.createMany({data:Array.from({length:1001},()=>({projectId:f.scope.projectId,accountId:f.account.id,accountRevision:f.account.revision,requestedById:f.scope.userId,requestKey:randomUUID(),phase:'DONE',result:'UNKNOWN',cleanup:'OK'}))});
+    const result=await readChecks(f.scope,db);
+    expect(result.jobs.find(j=>j.id===oldJob.id)).toMatchObject({result:'LIVE_2FA',stale:false});
+    expect(new Set(result.jobs.map(j=>j.id)).size).toBe(result.jobs.length);
+  });
   it.each(['legacy','installed'] as const)('checks a LIVE proxy already assigned to a VM via %s without altering its assignment',async(mode)=>{
     const f=await setup();
     await db.proxyIP.update({where:{id:f.proxy.id},data:{inventoryState:'LIVE',status:'IN_USE'}});

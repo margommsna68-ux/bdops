@@ -4,6 +4,7 @@ import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import toast from 'react-hot-toast';
+import {checkIsActive,currentCheck} from './check-status';
 
 type Overview=inferRouterOutputs<AppRouter>['appleCheck']['overview'];
 type Job=Overview['jobs'][number];
@@ -21,7 +22,7 @@ function jobStatus(job:Job,worker:Overview['worker']){
   return PHASE[job.phase]??'Đang xử lý';
 }
 // A reported outcome does not release a job whose browser cleanup is still unresolved.
-const active=(job:Job)=>job.cleanup==='FAILED'||job.result==='UNKNOWN'&&job.cleanup!=='OK'||job.result===null&&!['DONE','FINISHED','COMPLETED','CANCELLED','UNKNOWN'].includes(job.phase);
+const active=checkIsActive;
 const when=(value:string)=>new Date(value).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',hour12:false});
 function refused(error:unknown){
   if(!error||typeof error!=='object'||!('data' in error)||!error.data||typeof error.data!=='object'||!('code' in error.data))return false;
@@ -34,10 +35,10 @@ function useChecks(){const value=useContext(Context);if(!value)throw Error('Appl
 
 // The stock table owns exactly one query. Rows receive public metadata only.
 export function AppleCheckProvider({projectId,children}:{projectId:string;children:ReactNode}){
-  return <ProjectAppleCheckProvider key={projectId} projectId={projectId}>{children}</ProjectAppleCheckProvider>;
-}
-function ProjectAppleCheckProvider({projectId,children}:{projectId:string;children:ReactNode}){
   const overview=trpc.appleCheck.overview.useQuery({projectId},{refetchInterval:5000,refetchIntervalInBackground:false});
+  return <AppleCheckStateProvider key={projectId} projectId={projectId} overview={overview}>{children}</AppleCheckStateProvider>;
+}
+export function AppleCheckStateProvider({projectId,children,overview}:{projectId:string;children:ReactNode;overview:{data:Overview|undefined;error:unknown}}){
   const requestJob=trpc.appleCheck.request.useMutation({retry:false}),cancelJob=trpc.appleCheck.cancel.useMutation({retry:false}),utils=trpc.useUtils();
   const batchJob=trpc.appleCheck.requestBatch.useMutation({retry:false});
   const [accepted,setAccepted]=useState<Job[]>([]),[pending,setPending]=useState<Set<string>>(new Set()),[errors,setErrors]=useState<Record<string,string>>({});
@@ -103,7 +104,7 @@ export function AppleCheckBulk({accounts,disabled=false}:{accounts:CheckAccount[
 
 export function AppleCheck({accountId,revision,disabled=false}:{accountId:string;revision:number;disabled?:boolean}){
   const checks=useChecks(),[expanded,setExpanded]=useState(false);
-  const jobs=checks.jobs.filter(j=>j.accountId===accountId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),current=jobs.find(active),latest=current??jobs[0],worker=checks.data?.worker;
+  const jobs=checks.jobs.filter(j=>j.accountId===accountId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),current=jobs.find(active),latest=currentCheck(jobs),worker=checks.data?.worker;
   const unavailable=!worker?.enabled||worker.state==='CLEANUP_FAILED';
   const notice=!worker?.enabled?'Worker chưa bật':worker.state==='CLEANUP_FAILED'?WORKER_STATE.CLEANUP_FAILED:!worker.online?WORKER_STATE.OFFLINE:['WAITING_DESKTOP','WAITING_RESOURCES'].includes(worker.state)?WORKER_STATE[worker.state]:null;
   const busy=checks.pending.has(accountId),retry=checks.retry.has(accountId);

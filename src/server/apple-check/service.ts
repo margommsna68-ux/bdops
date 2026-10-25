@@ -43,6 +43,9 @@ export async function readChecks(s:ActorScope,db:PrismaClient=prisma){
  if(current.role!=='ADMIN'&&!current.allowedModules?.includes('INFRASTRUCTURE'))throw denied();
  const accountWhere=scopedLoginWhere(current);
  const jobs=await db.appleCheckJob.findMany({where:{projectId:s.projectId,account:accountWhere},orderBy:{createdAt:'desc'},take:1000,include:{account:{select:{revision:true}}}});
+ // Recent history is bounded, but table filters must know the latest check of every permitted account.
+ const latest=await db.appleCheckJob.findMany({where:{projectId:s.projectId,account:accountWhere,accountId:{notIn:[...new Set(jobs.map(j=>j.accountId))]}},distinct:['accountId'],orderBy:{createdAt:'desc'},include:{account:{select:{revision:true}}}});
+ const seen=new Set(jobs.map(j=>j.id));for(const job of latest)if(!seen.has(job.id)){jobs.push(job);seen.add(job.id);}
  const w=canManage||canCheck?await db.appleCheckWorker.findUnique({where:{projectId:s.projectId}}):null;
  const customGroups=canManage?await db.proxyGroup.findMany({where:{projectId:s.projectId,archivedAt:null},select:{id:true,name:true},orderBy:{name:'asc'}}):[];
  const groups=canManage?[{id:'TUT',name:'Kho proxy của anh (TUT) · NEW / đang gán VM'},...customGroups]:[];
