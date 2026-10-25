@@ -1,0 +1,13 @@
+{
+  "results": [
+    "Synthetic sign-in",
+    "Worker result updates status without reload",
+    "Status has no duplicate badge or note",
+    "Explanation and observation time are in Notes",
+    "Manual note editor does not contain worker observation",
+    "Worker observation remains after manual note save",
+    "Correct Apple brand SVG",
+    "No page script errors"
+  ],
+  "errors": []
+}
