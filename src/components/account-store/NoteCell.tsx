@@ -23,11 +23,16 @@ export function NoteHeader({width,onWidth}:{width:number;onWidth:(w:number)=>voi
       onPointerUp={()=>{start.current=null;}}
       onKeyDown={e=>{if(e.key==='ArrowLeft'){e.preventDefault();onWidth(width-20);}if(e.key==='ArrowRight'){e.preventDefault();onWidth(width+20);}}}/></th>;
 }
-export function NoteCell({projectId,id,email,notes,revision,canEdit,width,onSaved}:{projectId:string;id:string;email:string;notes:string|null;revision:number;canEdit:boolean;width:number;onSaved:()=>void}){
+export function NoteCell({projectId,id,email,notes,revision,canEdit,width,onSaved,loginIssueNote,loginIssueAt}:{projectId:string;id:string;email:string;notes:string|null;revision:number;canEdit:boolean;width:number;onSaved:()=>void;loginIssueNote?:string|null;loginIssueAt?:string|null}){
   const save=trpc.accountStore.setNote.useMutation();
   const [text,setText]=useState<string|null>(null),[error,setError]=useState(''),[saved,setSaved]=useState(false),[expanded,setExpanded]=useState(false);
   const pending=useRef<{sig:string;key:string}|null>(null),area=useRef<HTMLTextAreaElement>(null),view=useRef<HTMLDivElement>(null),[clamped,setClamped]=useState(false);
   const editing=text!==null,stored=notes||'';
+  const issueDate=loginIssueAt?new Date(loginIssueAt):null;
+  const issueNote=(loginIssueNote||issueDate)&&<div className="acc-note-observation">
+    {loginIssueNote&&<p className="whitespace-normal break-words">{loginIssueNote}</p>}
+    {issueDate&&Number.isFinite(issueDate.getTime())&&<time className="block pm-muted" dateTime={loginIssueAt!}>Ghi nhận {issueDate.toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</time>}
+  </div>;
   useLayoutEffect(()=>{const a=area.current;if(a){a.style.height='auto';a.style.height=a.scrollHeight+2+'px';}},[text,width]);
   useLayoutEffect(()=>{const v=view.current;setClamped(!!v&&v.scrollHeight>v.clientHeight+1);},[notes,width,expanded,editing]);
   useEffect(()=>{if(!saved)return;const t=setTimeout(()=>setSaved(false),2500);return ()=>clearTimeout(t);},[saved]);
@@ -50,6 +55,7 @@ export function NoteCell({projectId,id,email,notes,revision,canEdit,width,onSave
         if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel();}
         else if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void submit();}}}/>
     <span className="acc-note-help" aria-live="polite">{save.isLoading?'Đang lưu…':error?<span className="pm-field-error" role="alert">{error}</span>:'Enter lưu · Shift+Enter xuống dòng · Esc huỷ'}</span>
+    {issueNote}
   </td>;
   return <td className="acc-note-td" style={style}>
     <div ref={view} role={canEdit?'button':undefined} tabIndex={0} aria-label={canEdit?(stored?'Sửa ghi chú '+email:'Thêm ghi chú cho '+email):undefined}
@@ -59,5 +65,6 @@ export function NoteCell({projectId,id,email,notes,revision,canEdit,width,onSave
     </div>
     {(clamped||expanded)&&!canEdit&&<button type="button" className="pm-link text-xs" onClick={()=>setExpanded(e=>!e)}>{expanded?'Thu gọn':'Xem hết'}</button>}
     {saved&&<span className="acc-note-saved" role="status">Đã lưu</span>}
+    {issueNote}
   </td>;
 }

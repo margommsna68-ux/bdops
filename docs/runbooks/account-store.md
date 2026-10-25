@@ -434,3 +434,6 @@ This section replaces the earlier "one PayPal code for one EarnApp account" rule
 - Cột Nguồn mua thay PayPal của EarnApp trên bảng Gmail/Apple ID; lấy source của lô gắn tài khoản, thiếu hiện Chưa ghi nguồn. Không sửa liên kết PayPal hay dữ liệu lô.
 - Loại tài khoản hiển thị bằng icon G/Apple trước email (tooltip + tên hỗ trợ đọc màn hình), bỏ cột Loại riêng.
 - Check Apple ID: nhãn kết quả có màu theo nghĩa, giờ ở dòng phụ; Check/Lịch sử là thao tác nhỏ. Kết quả cũ không nhận màu Live; các quy tắc cấp tài khoản và worker giữ nguyên.
+
+### Ghi chú kiểm tra và trạng thái gọn — 25/10/2026
+Cột Tình trạng chỉ có ô chọn hoặc một nhãn cho người chỉ xem; bỏ LoginIssueBadge lặp bên dưới. Lý do và giờ ghi nhận lỗi đăng nhập hiển thị trong Ghi chú, tách khỏi nội dung chủ sửa để không bị lưu đè. Giờ hiển thị Asia/Bangkok. Worker Locked đã ghi trạng thái trong giao dịch; polling/invalidating làm ô chọn cập nhật khi trang mở. Kết quả mạng chỉ là kết quả kiểm tra, không tự kết luận account Locked/Live. NETWORK_ERROR đổi nhãn Lỗi kết nối web. Logo Apple dùng mark chính thức từ apple.com thay icon trái táo.
