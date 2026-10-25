@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T16:32:44.560Z",
+  "jobs": 158,
+  "accounts": 143,
+  "byResult": {
+    "LIVE_2FA": 43,
+    "APPLE_LOCKED": 100
+  },
+  "mismatches": [],
+  "transitions": [],
+  "technical": [],
+  "active": []
+}

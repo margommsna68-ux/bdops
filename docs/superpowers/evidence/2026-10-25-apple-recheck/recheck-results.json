@@ -1,0 +1,195 @@
+{
+  "at": "2026-10-25T16:32:37.909Z",
+  "counts": {
+    "APPLE_LOCKED": 11,
+    "LIVE_2FA": 4
+  },
+  "results": [
+    {
+      "id": "cmvo1ljkh001k11119tshutd0",
+      "accountId": "cmvksaud9005r46uy047ws7w6",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:48.037Z",
+      "submittedAt": "2026-10-25T16:31:38.225Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljkk001q1111cwscg77s",
+      "accountId": "cmvksaud2004r46uygnttcugn",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:44.453Z",
+      "submittedAt": "2026-10-25T16:31:37.062Z",
+      "previous": "PROXY_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljkx002e1111sjzt5jrf",
+      "accountId": "cmvksa9xs002o46uy1lxnxrg5",
+      "phase": "DONE",
+      "result": "LIVE_2FA",
+      "reason": "LIVE_2FA",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:32:26.390Z",
+      "submittedAt": "2026-10-25T16:32:14.637Z",
+      "previous": "PROXY_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljka00181111xy089gkc",
+      "accountId": "cmvksaudl007j46uyipl5utns",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:16.294Z",
+      "submittedAt": "2026-10-25T16:31:09.504Z",
+      "previous": "NETWORK_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljjt000e1111rpb14mwr",
+      "accountId": "cmvksaudt008n46uyjfyi9afz",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:30:38.168Z",
+      "submittedAt": "2026-10-25T16:30:29.351Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljjk0002111181l0dweg",
+      "accountId": "cmvncfqy2002dqmhmgmn6hfue",
+      "phase": "DONE",
+      "result": "LIVE_2FA",
+      "reason": "LIVE_2FA",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:30:38.717Z",
+      "submittedAt": "2026-10-25T16:30:25.671Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljjp00081111ahj3z2gy",
+      "accountId": "cmvksaudt008p46uypfa5at1m",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:30:30.065Z",
+      "submittedAt": "2026-10-25T16:30:22.913Z",
+      "previous": "NETWORK_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljjw000k1111phk9fp5f",
+      "accountId": "cmvksaudr008d46uy27zkz9ni",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:06.188Z",
+      "submittedAt": "2026-10-25T16:30:57.187Z",
+      "previous": "CANCELLED",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljk0000q1111ydwa3pvs",
+      "accountId": "cmvksaudp008546uym56wsum5",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:05.060Z",
+      "submittedAt": "2026-10-25T16:30:57.875Z",
+      "previous": "NETWORK_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljk700121111fdelzkv1",
+      "accountId": "cmvksaudp008346uytj5v5n1v",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:13.390Z",
+      "submittedAt": "2026-10-25T16:31:06.172Z",
+      "previous": "PROXY_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljko001w11112xp0dhp1",
+      "accountId": "cmvksaucz004946uyj6mh9vly",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:53.200Z",
+      "submittedAt": "2026-10-25T16:31:44.057Z",
+      "previous": "PROXY_ERROR",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljk3000w1111dn8n814o",
+      "accountId": "cmvksaudq008746uyjms4u160",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:05.247Z",
+      "submittedAt": "2026-10-25T16:30:58.405Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljkr00221111n5t337d5",
+      "accountId": "cmvksa9xv003246uykqfj8b6k",
+      "phase": "DONE",
+      "result": "LIVE_2FA",
+      "reason": "LIVE_2FA",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:56.637Z",
+      "submittedAt": "2026-10-25T16:31:44.933Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljke001e11116x1i49lw",
+      "accountId": "cmvksaude006j46uy6o9ev6i0",
+      "phase": "DONE",
+      "result": "APPLE_LOCKED",
+      "reason": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:31:43.823Z",
+      "submittedAt": "2026-10-25T16:31:35.773Z",
+      "previous": "UNKNOWN",
+      "proxyChanged": true
+    },
+    {
+      "id": "cmvo1ljku00281111yljz877e",
+      "accountId": "cmvksa9xu002w46uyosda1l41",
+      "phase": "DONE",
+      "result": "LIVE_2FA",
+      "reason": "LIVE_2FA",
+      "cleanup": "OK",
+      "observedAt": "2026-10-25T16:32:26.266Z",
+      "submittedAt": "2026-10-25T16:32:14.476Z",
+      "previous": "PROXY_ERROR",
+      "proxyChanged": true
+    }
+  ],
+  "worker": [
+    {
+      "state": "IDLE",
+      "lastSeenAt": "2026-10-25T16:32:33.101Z"
+    }
+  ]
+}

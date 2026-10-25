@@ -1,0 +1,36 @@
+{
+  "state": {
+    "state": "DONE",
+    "activeCount": 0,
+    "slots": [
+      {
+        "slot": 1,
+        "state": "IDLE"
+      },
+      {
+        "slot": 2,
+        "state": "BUSY"
+      },
+      {
+        "slot": 3,
+        "state": "DONE"
+      },
+      {
+        "slot": 4,
+        "state": "IDLE"
+      },
+      {
+        "slot": 5,
+        "state": "DONE"
+      }
+    ],
+    "at": "2026-10-25T16:32:39.450Z"
+  },
+  "task": "Running",
+  "ownedChromeRoots": 0,
+  "ownedRootMemoryMb": 0,
+  "profiles": 0,
+  "pending": 0,
+  "quarantines": 0,
+  "freeMb": 22847
+}
