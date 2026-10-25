@@ -10,6 +10,7 @@ import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {hasServerScope,scopedLoginWhere} from '../permissions/server-scope';
 import {assertStockWrite} from '../account-store/inventory';
 import {checkProxyIds} from './proxies';
+import {APPLE_CHECK_QUEUE_BATCH_SIZE} from '@/lib/apple-check-limits';
 
 type DB=PrismaClient|Prisma.TransactionClient;
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -26,7 +27,7 @@ const unknownReasons=new Set<string>(UNKNOWN_REASON_CODES);
 const reason=z.enum([...CHECK_RESULTS,...UNKNOWN_REASON_CODES]);
 const binding=z.object({jobId:z.string().min(1).max(100),leaseToken:z.string().min(20).max(100)}).strict();
 const resultBody=binding.extend({result:z.enum(CHECK_RESULTS),reasonCode:reason,cleanup:z.enum(['OK','FAILED']),observedAt:z.iso.datetime()}).strict();
-export const checkBatchAccounts=z.array(z.object({accountId:z.string().min(1),expectedRevision:z.number().int().nonnegative(),key:z.string().min(8).max(100)}).strict()).min(1).max(5);
+export const checkBatchAccounts=z.array(z.object({accountId:z.string().min(1),expectedRevision:z.number().int().nonnegative(),key:z.string().min(8).max(100)}).strict()).min(1).max(APPLE_CHECK_QUEUE_BATCH_SIZE);
 type Body=z.infer<typeof resultBody>;
 
 async function rights(db:DB,s:ActorScope,write=false){

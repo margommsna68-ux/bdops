@@ -5,7 +5,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 const mock=vi.hoisted(()=>({overview:vi.fn(),request:vi.fn(),batch:vi.fn(),cancel:vi.fn(),configure:vi.fn(),disable:vi.fn(),invalidate:vi.fn(),reset:vi.fn(),unlocked:true}));
 vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({appleCheck:{overview:{invalidate:mock.invalidate}},accountStore:{invalidate:mock.invalidate}}),user:{securityStatus:{useQuery:()=>({data:{unlocked:mock.unlocked,totpEnabled:true}})}},appleCheck:{overview:{useQuery:mock.overview},request:{useMutation:()=>({mutateAsync:mock.request,isLoading:false})},requestBatch:{useMutation:()=>({mutateAsync:mock.batch})},cancel:{useMutation:()=>({mutateAsync:mock.cancel,isLoading:false})},configure:{useMutation:()=>({mutateAsync:mock.configure,isLoading:false,reset:mock.reset})},disable:{useMutation:()=>({mutateAsync:mock.disable,isLoading:false})}}}}));
 vi.mock('react-hot-toast',()=>({default:{success:vi.fn(),error:vi.fn()}}));
-import {AppleCheckProvider,AppleCheck,AppleCheckConfiguration} from '@/components/account-store/AppleCheck';
+import {AppleCheckProvider,AppleCheck,AppleCheckBulk,AppleCheckConfiguration} from '@/components/account-store/AppleCheck';
 const job={id:'job-1',accountId:'apple',accountRevision:3,phase:'QUEUED',result:null as string|null,reasonCode:null as string|null,cleanup:null as string|null,createdAt:'2026-10-25T02:00:00Z',observedAt:null as string|null,stale:false,cancelRequested:false};
 let data:{canManage:boolean;canCheck:boolean;groups:{id:string;name:string}[];worker:null|{id:string;name:string;enabled:boolean;online:boolean;state:string;proxyGroupId:string;lastSeenAt:string|null};jobs:typeof job[]};
 let dom:JSDOM,root:Root,host:HTMLDivElement;
@@ -22,6 +22,24 @@ afterEach(async()=>{await act(async()=>root.unmount());dom.window.close();vi.uns
 async function render(projectId='p'){await act(async()=>root.render(<AppleCheckProvider projectId={projectId}><AppleCheckConfiguration/><AppleCheck accountId="apple" revision={3}/><AppleCheck accountId="apple-2" revision={4}/></AppleCheckProvider>));}
 const button=(text:string)=>{const b=Array.from(host.querySelectorAll('button')).find(b=>b.textContent===text);if(!b)throw Error('Missing button '+text);return b;};
 async function click(el:HTMLElement){await act(async()=>el.click());}
+it('queues 100 selected Apple IDs while keeping the five-profile execution guidance',async()=>{
+  const accounts=Array.from({length:100},(_,n)=>({id:'bulk-'+n,revision:1,type:'APPLE_ID'}));
+  mock.batch.mockImplementation(async({accounts:items})=>({jobs:items.map((a:any)=>({...job,id:'j-'+a.accountId,accountId:a.accountId}))}));
+  await act(async()=>root.render(<AppleCheckProvider projectId="p"><AppleCheckBulk accounts={accounts}/></AppleCheckProvider>));
+  await click(button('Check Apple ID (100)'));
+  expect(mock.batch).toHaveBeenCalledTimes(1);expect(mock.batch.mock.calls[0][0].accounts).toHaveLength(100);
+  expect(host.textContent).not.toContain('Bỏ chọn bớt');expect(host.textContent).toContain('tối đa 5');
+});
+it('chunks larger selections and retries only the uncertain chunk with its original keys',async()=>{
+  const accounts=Array.from({length:101},(_,n)=>({id:'chunk-'+n,revision:1,type:'APPLE_ID'}));
+  const response=async({accounts:items}:any)=>({jobs:items.map((a:any)=>({...job,id:'j-'+a.accountId,accountId:a.accountId}))});
+  mock.batch.mockImplementationOnce(response).mockRejectedValueOnce(Error('Lost answer')).mockImplementationOnce(response);
+  await act(async()=>root.render(<AppleCheckProvider projectId="p"><AppleCheckBulk accounts={accounts}/></AppleCheckProvider>));
+  await click(button('Check Apple ID (101)'));expect(mock.batch).toHaveBeenCalledTimes(2);
+  expect(mock.batch.mock.calls.map(c=>c[0].accounts.length)).toEqual([100,1]);
+  await click(button('Gửi lại yêu cầu'));expect(mock.batch).toHaveBeenCalledTimes(3);
+  expect(mock.batch.mock.calls[2][0]).toEqual(mock.batch.mock.calls[1][0]);
+});
 it('shows an explicit unchecked state until a job is recorded',async()=>{
   await render();expect(host.querySelector('[aria-label="Check Apple ID"]')?.textContent).toContain('Chưa kiểm tra');
   await click(button('Check Apple ID'));expect(host.querySelector('[aria-label="Check Apple ID"]')?.textContent).not.toContain('Chưa kiểm tra');

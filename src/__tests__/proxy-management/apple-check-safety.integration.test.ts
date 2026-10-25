@@ -23,7 +23,7 @@ afterEach(async()=>{
 });
 afterAll(()=>db.$disconnect());
 
-async function setup() {
+async function setup(proxyCount=1) {
   const f = await businessFixture();
   const identityIds:string[] = [], tokens:string[] = [];
   cleanups.push(async()=>{
@@ -49,6 +49,10 @@ async function setup() {
   const proxy = await db.proxyIP.create({data:{projectId:f.scope.projectId,address:randomUUID(),host:identity.ip,port:18080,
     identityId:identity.id,groupId:group.id,packageCode:'SYNTHETIC-SAFETY',inventoryState:'NEW',inventoryKey:identity.ip,
     credentialCipher:encrypt(JSON.stringify({username:'synthetic-safety-user',password:proxyPassword}))}});
+  for(let n=1;n<proxyCount;n++){
+    const extra=await db.proxyIdentity.create({data:{ip:net+(17+n),owner:'SELF',ownerDecidedAt:new Date()}});identityIds.push(extra.id);
+    await db.proxyIP.create({data:{projectId:f.scope.projectId,address:randomUUID(),host:extra.ip,port:18080,identityId:extra.id,groupId:group.id,packageCode:'SYNTHETIC-SAFETY',inventoryState:'NEW',inventoryKey:extra.ip,credentialCipher:encrypt(JSON.stringify({username:'synthetic-safety-user',password:proxyPassword}))}});
+  }
   const account = await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',
     loginType:'APPLE_ID',password:encrypt(accountPassword)}});
   const cfg = await configureWorker(f.scope,{name:'Synthetic safety worker',proxyGroupId:group.id},db);
@@ -81,6 +85,24 @@ async function setup() {
 }
 
 describe('Apple check backend and HTTP safety',()=>{
+  it('queues 100 accounts while only five worker slots execute and finished slots take the next accounts',async()=>{
+    const f=await setup(5),accounts=[f.account];
+    for(let n=1;n<100;n++)accounts.push(await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',loginType:'APPLE_ID',password:encrypt(accountPassword)}}));
+    const input={accounts:accounts.map(a=>({accountId:a.id,expectedRevision:a.revision,key:randomUUID()}))};
+    const queued=await requestCheckBatch(f.scope,input,db);expect(queued.jobs).toHaveLength(100);
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId,phase:'QUEUED'}})).toBe(100);
+    expect(await requestCheckBatch(f.scope,input,db)).toEqual(queued);
+    const first=[];for(let slot=1;slot<=5;slot++)first.push((await f.call('claim',{key:randomUUID(),slot}) as Claim).job!);
+    expect(first.every(Boolean)).toBe(true);expect(new Set(first.map(j=>j.id)).size).toBe(5);
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId,activeWorkerId:{not:null}}})).toBe(5);
+    await expect(f.call('claim',{key:randomUUID(),slot:6})).rejects.toThrow();
+    for(let slot=1;slot<=5;slot++)expect((await f.call('claim',{key:randomUUID(),slot}) as Claim).job).toBeNull();
+    for(const j of first)await f.result({jobId:j.id,leaseToken:j.leaseToken},'UNKNOWN');
+    const second=[];for(let slot=1;slot<=5;slot++)second.push((await f.call('claim',{key:randomUUID(),slot}) as Claim).job!);
+    expect(second.every(Boolean)).toBe(true);expect(new Set([...first,...second].map(j=>j.id)).size).toBe(10);
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId,phase:'QUEUED'}})).toBe(90);
+    expect(await db.appleCheckJob.count({where:{projectId:f.scope.projectId,activeWorkerId:{not:null}}})).toBe(5);
+  });
   it('keeps the latest result for every account even beyond the recent 1000 checks',async()=>{
     const f=await setup();
     const older=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid',loginType:'APPLE_ID'}});
@@ -179,10 +201,10 @@ describe('Apple check backend and HTTP safety',()=>{
     f.noSecrets(first);
   });
 
-  it('enforces 1–5 input items at service and protected router before any request effects',async()=>{
+  it('enforces 1–100 queued input items at service and protected router before any request effects',async()=>{
     const f=await setup(),item={accountId:f.account.id,expectedRevision:f.account.revision,key:randomUUID()};
     const caller=appleCheckRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'} as any});
-    for(const accounts of [[],Array.from({length:6},()=>({...item}))]){
+    for(const accounts of [[],Array.from({length:101},()=>({...item}))]){
       await expect(requestCheckBatch(f.scope,{accounts},db)).rejects.toThrow();
       await expect(caller.requestBatch({projectId:f.scope.projectId,accounts})).rejects.toMatchObject({code:'BAD_REQUEST'});
     }

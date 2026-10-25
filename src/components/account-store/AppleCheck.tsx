@@ -5,6 +5,7 @@ import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import toast from 'react-hot-toast';
 import {checkIsActive,currentCheck} from './check-status';
+import {APPLE_CHECK_QUEUE_BATCH_SIZE} from '@/lib/apple-check-limits';
 
 type Overview=inferRouterOutputs<AppRouter>['appleCheck']['overview'];
 type Job=Overview['jobs'][number];
@@ -43,6 +44,7 @@ export function AppleCheckStateProvider({projectId,children,overview}:{projectId
   const batchJob=trpc.appleCheck.requestBatch.useMutation({retry:false});
   const [accepted,setAccepted]=useState<Job[]>([]),[pending,setPending]=useState<Set<string>>(new Set()),[errors,setErrors]=useState<Record<string,string>>({});
   const running=useRef(new Set<string>()),intents=useRef(new Map<string,Intent>()),live=useRef(true);
+  const acceptedKeys=useRef(new Set<string>());
   useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   const jobs=[...(overview.data?.jobs??[])];for(const job of accepted){
     const index=jobs.findIndex(j=>j.id===job.id),remote=jobs[index];
@@ -72,18 +74,25 @@ export function AppleCheckStateProvider({projectId,children,overview}:{projectId
     catch{if(live.current)setErrors(e=>({...e,[job.accountId]:'Chưa xác nhận huỷ. Có thể gửi lại yêu cầu huỷ.'}));}finally{finish(job.accountId);}
   }
   async function requestBatch(accounts:CheckAccount[]){
-    if(!overview.data?.canCheck||overview.error||!overview.data.worker?.enabled||overview.data.worker.state==='CLEANUP_FAILED'||!accounts.length||accounts.length>5||accounts.some(a=>a.type!=='APPLE_ID'||running.current.has(a.id)||jobs.some(j=>j.accountId===a.id&&active(j))))return;
+    if(!overview.data?.canCheck||overview.error||!overview.data.worker?.enabled||overview.data.worker.state==='CLEANUP_FAILED'||!accounts.length||accounts.some(a=>a.type!=='APPLE_ID'||running.current.has(a.id)))return;
     const inputs=accounts.map(a=>intents.current.get(a.id)??{projectId,accountId:a.id,expectedRevision:a.revision,key:crypto.randomUUID()});
     for(const input of inputs){intents.current.set(input.accountId,input);start(input.accountId);}
+    const remaining=inputs.filter(i=>!acceptedKeys.current.has(i.key));
+    let current:Intent[]=[];
     try{
-      const result=await batchJob.mutateAsync({projectId,accounts:inputs.map(({accountId,expectedRevision,key})=>({accountId,expectedRevision,key}))});
-      if(!live.current)return;
-      for(const input of inputs)intents.current.delete(input.accountId);
-      setAccepted(old=>[...old.filter(j=>!result.jobs.some(next=>next.id===j.id)),...result.jobs]);void utils.appleCheck.overview.invalidate({projectId});
+      for(let index=0;index<remaining.length;index+=APPLE_CHECK_QUEUE_BATCH_SIZE){
+        current=remaining.slice(index,index+APPLE_CHECK_QUEUE_BATCH_SIZE);
+        const result=await batchJob.mutateAsync({projectId,accounts:current.map(({accountId,expectedRevision,key})=>({accountId,expectedRevision,key}))});
+        if(!live.current)return;
+        for(const input of current)acceptedKeys.current.add(input.key);
+        setAccepted(old=>[...old.filter(j=>!result.jobs.some(next=>next.id===j.id)),...result.jobs]);void utils.appleCheck.overview.invalidate({projectId});
+      }
+      for(const input of inputs){intents.current.delete(input.accountId);acceptedKeys.current.delete(input.key);}
+      toast.success('Đã nhận '+inputs.length+' yêu cầu kiểm tra · tối đa 5 profile cùng lúc');
     }catch(error){
       const rejected=refused(error);
-      if(rejected){for(const input of inputs)intents.current.delete(input.accountId);void utils.accountStore.invalidate();void utils.appleCheck.overview.invalidate({projectId});}
-      if(live.current)setErrors(old=>({...old,...Object.fromEntries(inputs.map(input=>[input.accountId,rejected?'Yêu cầu bị từ chối. Kiểm tra phiên bản tài khoản, quyền và thời gian chờ 15 phút trước khi thử lại.':'Chưa rõ yêu cầu đã được nhận. Gửi lại dùng cùng mã yêu cầu; không tự đăng nhập lại.']))}));
+      if(rejected){for(const input of current)intents.current.delete(input.accountId);void utils.accountStore.invalidate();void utils.appleCheck.overview.invalidate({projectId});}
+      if(live.current)setErrors(old=>({...old,...Object.fromEntries(current.map(input=>[input.accountId,rejected?'Yêu cầu bị từ chối. Kiểm tra phiên bản tài khoản, quyền và thời gian chờ 15 phút trước khi thử lại.':'Chưa rõ yêu cầu đã được nhận. Gửi lại dùng cùng mã yêu cầu; không tự đăng nhập lại.']))}));
     }finally{for(const input of inputs)finish(input.accountId);}
   }
   return <Context.Provider value={{projectId,data:overview.data,error:!!overview.error,jobs,pending,errors,retry:new Set(intents.current.keys()),request,requestBatch,cancel}}>{children}</Context.Provider>;
@@ -92,12 +101,14 @@ export function AppleCheckStateProvider({projectId,children,overview}:{projectId
 export function AppleCheckBulk({accounts,disabled=false}:{accounts:CheckAccount[];disabled?:boolean}){
   const checks=useChecks();
   if(disabled||!checks.data?.canCheck)return null;
-  const invalid=accounts.length>5?'Tối đa 5 Apple ID mỗi đợt. Bỏ chọn bớt tài khoản trước khi kiểm tra.':accounts.some(a=>a.type!=='APPLE_ID')?'Chỉ chọn tài khoản Apple ID để kiểm tra.':null;
+  const invalid=accounts.some(a=>a.type!=='APPLE_ID')?'Chỉ chọn tài khoản Apple ID để kiểm tra.':null;
   const busy=accounts.some(a=>checks.pending.has(a.id)),retry=accounts.some(a=>checks.retry.has(a.id));
-  const unavailable=!checks.data.worker?.enabled||checks.data.worker.state==='CLEANUP_FAILED'||checks.error||accounts.some(a=>checks.jobs.some(j=>j.accountId===a.id&&active(j)));
+  const unavailable=!checks.data.worker?.enabled||checks.data.worker.state==='CLEANUP_FAILED'||checks.error;
+  const activeJobs=checks.jobs.filter(active),queued=activeJobs.filter(j=>j.phase==='QUEUED').length,working=activeJobs.length-queued;
   return <div className="flex flex-wrap items-center gap-2 p-3 text-xs">
     <button type="button" className="pm-button pm-button-primary" aria-label="Check Apple ID đã chọn" disabled={!accounts.length||busy||unavailable} onClick={()=>{if(!invalid)void checks.requestBatch(accounts);}}>{busy?'Đang gửi…':retry?'Gửi lại yêu cầu':`Check Apple ID (${accounts.length})`}</button>
-    <span className="pm-muted">Chọn Apple ID · tối đa 5 mỗi đợt · tối đa 5 trình duyệt song song, tùy tài nguyên và proxy</span>
+    <span className="pm-muted">Chọn nhiều Apple ID vào hàng chờ · chạy tối đa 5 profile cùng lúc · xong tự chuyển account tiếp theo</span>
+    {!!activeJobs.length&&<span role="status" className="pm-muted">Hàng chờ {queued} · Đang kiểm {working}</span>}
     {invalid&&<p role="alert" className="pm-error w-full">{invalid}</p>}
   </div>;
 }
