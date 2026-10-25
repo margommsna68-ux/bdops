@@ -1,0 +1,10 @@
+{
+  "workerPid": 16396,
+  "idleRssMb": 130.4,
+  "idleCpuOneCorePercent": 0,
+  "profiles": 0,
+  "pending": false,
+  "claimInflight": false,
+  "quarantine": false,
+  "workerTask": "Running"
+}

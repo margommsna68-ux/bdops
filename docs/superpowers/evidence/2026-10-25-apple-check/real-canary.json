@@ -1,0 +1,13 @@
+{
+  "phase": "DONE",
+  "result": "UNKNOWN",
+  "cleanup": "OK",
+  "submitted": true,
+  "observedAt": "2026-10-25T10:04:06.183Z",
+  "accountStatus": "ACTIVE",
+  "accountRevision": 0,
+  "vmLinks": 0,
+  "workerState": "IDLE",
+  "workerLastSeen": "2026-10-25T10:05:33.125Z",
+  "proxyLeaseStillHeld": false
+}

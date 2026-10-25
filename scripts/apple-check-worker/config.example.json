@@ -1,8 +1,8 @@
 {
   "baseUrl": "https://wow.lalamail.sbs",
-  "tokenFile": "C:/Users/meo3/Desktop/MoneyToHome/AppleCheckWorker/private/worker-token.txt",
+  "tokenFile": "C:/Users/Administrator/Desktop/MoneyToHome/AppleCheckWorker/private/worker-token.txt",
   "executablePath": "C:/Program Files/AVC/CloakBrowser/.cache/chromium-150.0.7871.114.6-pro/chrome.exe",
-  "modulePath": "C:/Users/meo3/Desktop/MoneyToHome/AppleCheckWorker/dependencies/playwright-core/index.mjs",
+  "modulePath": "C:/Users/Administrator/Desktop/MoneyToHome/AppleCheckWorker/dependencies/playwright-core/index.mjs",
   "minFreeMemoryMb": 2048,
   "heartbeatMs": 10000,
   "pollMs": 15000,

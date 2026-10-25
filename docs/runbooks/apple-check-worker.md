@@ -14,10 +14,10 @@ C:\Program Files\AVC\CloakBrowser\.cache\chromium-150.0.7871.114.6-pro\chrome.ex
 
 Reuse that executable only. Do not use the existing Python Apple/EarnApp flows, mutate the shared runtime, install another browser, run a browser download command, or install global dependencies. Parent may ship its inspected `playwright-core` package (local candidate version 1.64.1) into the dedicated worker dependency directory. Compatibility with this Cloak executable still needs a synthetic local-browser check/canary; an existing executable is not proof of compatibility.
 
-Suggested dedicated installation root (current user's Desktop, not Administrator's):
+Resolve the Desktop through Windows, never infer it from the username. On the verified Central machine the `meo3` account resolves Desktop to the existing shared Administrator Desktop. The deployed dedicated root is:
 
 ```text
-C:\Users\meo3\Desktop\MoneyToHome\apple-check-worker
+C:\Users\Administrator\Desktop\MoneyToHome\AppleCheckWorker
 ```
 
 `config.example.json` contains the complete schema. `baseUrl` must be an HTTPS origin with no path, query, userinfo or fragment. `tokenFile`, `executablePath`, and `modulePath` must be absolute file paths. `modulePath` points to the dedicated `playwright-core/index.mjs`, not its directory. No token/password/email may be passed as CLI arguments or embedded into config. `tokenFile` initially belongs under `<root>\private\`.
@@ -25,9 +25,9 @@ C:\Users\meo3\Desktop\MoneyToHome\apple-check-worker
 ```json
 {
   "baseUrl": "https://wow.lalamail.sbs",
-  "tokenFile": "C:/Users/meo3/Desktop/MoneyToHome/apple-check-worker/private/worker-token.txt",
+  "tokenFile": "C:/Users/Administrator/Desktop/MoneyToHome/AppleCheckWorker/private/worker-token.txt",
   "executablePath": "C:/Program Files/AVC/CloakBrowser/.cache/chromium-150.0.7871.114.6-pro/chrome.exe",
-  "modulePath": "C:/Users/meo3/Desktop/MoneyToHome/apple-check-worker/dependencies/playwright-core/index.mjs",
+  "modulePath": "C:/Users/Administrator/Desktop/MoneyToHome/AppleCheckWorker/dependencies/playwright-core/index.mjs",
   "minFreeMemoryMb": 2048,
   "heartbeatMs": 10000,
   "pollMs": 15000,
