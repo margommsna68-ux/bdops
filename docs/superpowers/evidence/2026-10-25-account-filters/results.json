@@ -1,0 +1,21 @@
+{
+  "results": [
+    "Synthetic sign-in",
+    "Initial page has 100 of 105 rows",
+    "Locked filter spans all pages",
+    "Correct two locked accounts",
+    "Source and check filters intersect",
+    "Both filters stored in URL",
+    "Reload retains filters and result",
+    "Back restores previous source",
+    "Forward restores next source",
+    "Header source sort operates before pagination",
+    "Header toggles descending",
+    "Status header and dropdown stay in sync",
+    "Missing source has its own filter",
+    "Unchecked is separate from Live and Locked",
+    "No page-level horizontal overflow on phone",
+    "No script errors"
+  ],
+  "errors": []
+}
