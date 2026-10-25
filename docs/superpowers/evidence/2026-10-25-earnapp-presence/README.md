@@ -6,3 +6,5 @@ Current email remains in the account cell, with Có tài khoản underneath. Too
 
 Five new tests red before implementation (three filter/URL, two cell rendering), green after. Focused regression 33/33 includes the selected payout panel. Typecheck/build pass, lint existing warnings only. Nine real local production Chrome checks: both chip counts, two linked VMs vs one missing, email/presence label, reload and Back, mobile visibility/no overflow and no JS errors. Synthetic trial data only; no production imports/assignments or video. No schema/migration/API data changes.
 Backup moneytohome-20261025-135858.dump; moon-01 encrypted/decryption verified (SHA256 209825779f22545ac8847f7a4767d6965f735006c1c954a72f6f368408d6ba02). Build f1YDM86NYfEzFoyJ5Cc2H.
+
+Production release 15ec735 deployed SERVER-01 25/10/2026 14:00:05 Bangkok. Services running; public new manifest and health HTTP 200. Host before/after same hash 83e003e379d4e079335d178e46b61e0d1fc1b4e72b3b8098667432e462a3df8c: 0 request, 678 VM, 149 login, 1465 proxy, 4 batch, 4 cost, 0 fund. No production sample writes. Rollback D:/MoneyToHome/app-before-earnapp-presence-20261025.
