@@ -219,3 +219,7 @@ Quy tắc:
 - **Quyền tiền**: chip Chưa kiểm tra / Số cũ / Kiểm tra lỗi chỉ hiện với quyền đọc tiền SDK; không có quyền thì lọc `money=` trả 0 (không suy ra được số tiền).
 - **Đổi server ở bộ chọn** giữ ô tìm và các điều kiện (trước 23/10 xoá ô tìm). Nhãn sắp xếp mặc định ở trang tất cả server: "Theo server → mã VM" (sắp tự nhiên, VM_002 trước VM_010).
 - Kiểm thử: `vm-filter-model.test.ts`; trình duyệt trên bản thử cục bộ `docs/superpowers/evidence/2026-10-23-vm-filter-distribution/` (44/44).
+
+## Có / chưa tài khoản EarnApp — 25/10/2026
+
+Server/VM có hai nút lọc Có EarnApp / Chưa EarnApp kèm số lượng. Nhóm Có dựa trên tài khoản EarnApp hiện đang gán VM; không suy ra từ SDK, tiền hoặc proxy, và không khẳng định đã đăng ký nếu chưa ghi đăng ký. Cột Tài khoản EarnApp hiện email và Có tài khoản; dữ liệu Gmail cũ chưa có liên kết hiện hành vẫn thuộc Chưa EarnApp. Đang tải / lỗi tải không hiện nhầm Chưa có tài khoản. Lọc, số đếm và phân bố theo server dùng cùng mô hình trước phân trang; URL giữ qua reload/Back. Thứ tự/ẩn/độ rộng cột đã lưu giữ nguyên.

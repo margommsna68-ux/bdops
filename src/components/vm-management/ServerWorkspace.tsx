@@ -67,7 +67,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // EarnApp account (login + PayPal) of each VM; the search also finds VMs by login email or PayPal code.
   const accountOfVm=useMemo(()=>new Map<string,VmAccount>((accounts.data||[]).map(a=>[a.vmId,a])),[accounts.data]),accountText=(id:string)=>{const a=accountOfVm.get(id);return a?[a.earnApp?.login.email,a.earnApp?.paypal?.code,a.earnApp?.paypal?.email,a.legacyGmail].filter(Boolean).join(' '):'';};
   // Account gaps overlap: a VM without an EarnApp account has no PayPal either. Counted only once the links are loaded.
-  const accountView=url.view==='ACCOUNT_MISSING'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
+  const accountView=url.view==='ACCOUNT_MISSING'||url.view==='ACCOUNT_PRESENT'||url.view==='PAYPAL_MISSING',accountsReady=!!accounts.data;
   const TODO:(VmOpsStatus|null)[]=['NEW_VM','PROXY_PENDING','PROXY_BLOCKED','EARN_ERROR'];
   // Operating state (recorded by people / AI) and the money milestone of the current round (from the PayPal book).
   const opsOfVm=useMemo(()=>new Map<string,OpsRow>((board.data?.vms||[]).map(o=>[o.vmId,o])),[board.data]);
@@ -249,7 +249,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         </DropdownMenuContent></DropdownMenu></div>
     </div>
     {access.data&&!access.data.sourceConnected&&<p className="pm-source-warning">Cần kết nối nguồn Genjy trước khi giao proxy (Kho proxy → Cập nhật).</p>}
-    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',n({view:''}))}{chip('MISSING','Thiếu proxy',n({view:'MISSING'}))}{chip('ASSIGNED','Có proxy',n({view:'ASSIGNED'}))}{chip('BLOCKED','Proxy Blocked',n({view:'BLOCKED'}))}{chip('APPLY','Chờ áp dụng trên máy',n({view:'APPLY'}))}{chip('TODO','Cần xử lý',n({view:'TODO'}))}{chip('REVIEW','Cần kiểm tra',n({view:'REVIEW'}))}{chip('SDK_MISSING','Chưa SDK',n({view:'SDK_MISSING'}))}{chip('ACCOUNT_MISSING','Chưa tài khoản',n({view:'ACCOUNT_MISSING'}))}{chip('PAYPAL_MISSING','Chưa PayPal',n({view:'PAYPAL_MISSING'}))}{chip('DELETED','Đã xoá',n({view:'DELETED'}))}</div>
+    <div className="vm-chips" role="group" aria-label="Lọc nhanh">{chip('','Tất cả',n({view:''}))}{chip('MISSING','Thiếu proxy',n({view:'MISSING'}))}{chip('ASSIGNED','Có proxy',n({view:'ASSIGNED'}))}{chip('BLOCKED','Proxy Blocked',n({view:'BLOCKED'}))}{chip('APPLY','Chờ áp dụng trên máy',n({view:'APPLY'}))}{chip('TODO','Cần xử lý',n({view:'TODO'}))}{chip('REVIEW','Cần kiểm tra',n({view:'REVIEW'}))}{chip('SDK_MISSING','Chưa SDK',n({view:'SDK_MISSING'}))}{chip('ACCOUNT_PRESENT','Có EarnApp',n({view:'ACCOUNT_PRESENT'}))}{chip('ACCOUNT_MISSING','Chưa EarnApp',n({view:'ACCOUNT_MISSING'}))}{chip('PAYPAL_MISSING','Chưa PayPal',n({view:'PAYPAL_MISSING'}))}{chip('DELETED','Đã xoá',n({view:'DELETED'}))}</div>
     <div className="vm-chips vm-chips-ops" role="group" aria-label="Lọc theo tình trạng vận hành"><span className="pm-muted text-xs">Tình trạng:</span>
       {OPS_FILTERS.map(k=>{const on=url.st.includes(k),c=n({st:[k]});if(c===0&&!on)return null;return <button key={k} type="button" className={'vm-chip vm-chip-ops vm-ops-'+(k==='NONE'?'none':VM_OPS[k].tone)+(on?' active':'')} aria-pressed={on} onClick={()=>go({st:on?url.st.filter(x=>x!==k):[...url.st,k],page:1})}>{k==='NONE'?NO_STATUS_LABEL:VM_OPS[k].label} <strong>{c??'…'}</strong></button>;})}
       <span className="pm-muted text-xs ml-2">Tiền:</span>
@@ -288,7 +288,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         <div hidden={storeOpen}>{pager('top')}</div>
         <div ref={gridHost} hidden={storeOpen}><VmGrid projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
           emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell}
-          opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])}/></div>
+          opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])} accountState={accounts.isError?'ERROR':accounts.data?'READY':'LOADING'}/></div>
         <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>

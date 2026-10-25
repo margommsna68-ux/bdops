@@ -48,7 +48,7 @@ function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCan
 }
 export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;accountOf:(vmId:string)=>VmAccount|undefined;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
   onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;
-  opsOf:(vmId:string)=>OpsRow|undefined;opsRights:OpsRights;onOpsStatus:(vm:ManagedVM,status:VmOpsStatus,cycle:number)=>Promise<void>;onOpsDone:()=>Promise<unknown>|void}){
+  opsOf:(vmId:string)=>OpsRow|undefined;opsRights:OpsRights;onOpsStatus:(vm:ManagedVM,status:VmOpsStatus,cycle:number)=>Promise<void>;onOpsDone:()=>Promise<unknown>|void;accountState?:'READY'|'LOADING'|'ERROR'}){
   const {rows,single,deletedView,prefs,rights,selected}=props,columns=visibleColumns(prefs),drafts=useDrafts(props.projectId);
   // A row whose status action is saving is locked (other cells and ⋯) until the answer comes back.
   const [busyRows,setBusyRows]=useState<Set<string>>(new Set()),markBusy=(id:string,on:boolean)=>setBusyRows(p=>{const n=new Set(p);if(on)n.add(id);else n.delete(id);return n;});
@@ -88,7 +88,7 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
 
     if(key==='proxy') return <ProxyCell projectId={props.projectId} vm={v} rights={{assign:rights.assign&&!deletedView,copy:rights.copy,replace:!!rights.replace&&!deletedView,block:!!rights.block&&!deletedView}} onCopy={x=>props.onCopy(x,x.desired?'DESIRED':'INSTALLED')} onBusy={markBusy}/>;
     if(key==='sdk') return <SdkCell projectId={props.projectId} vm={v} account={props.accountOf(v.id)} canEdit={rights.assign&&!deletedView} money={{read:!!rights.sdkMoneyRead,write:!!rights.sdkMoneyWrite&&!deletedView}} draft={sdkDraft(v.id)} onDraft={d=>d?drafts.set(v.id,'sdk',JSON.stringify(d)):drafts.drop(v.id,'sdk')} onBusy={markBusy}/>;
-    if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={(rights.accountAssign??rights.assign)&&!deletedView} onSaved={()=>undefined} onBusy={markBusy}/>;
+    if(key==='account'||key==='paypal') return <AccountCell projectId={props.projectId} vm={v} link={props.accountOf(v.id)} focus={key==='account'?'login':'paypal'} canAssign={(rights.accountAssign??rights.assign)&&!deletedView} onSaved={()=>undefined} onBusy={markBusy} dataState={props.accountState}/>;
     if(key==='payout') return deletedView?<span className="pm-muted">—</span>:<PayoutCell projectId={props.projectId} vm={v} ops={props.opsOf(v.id)} account={props.accountOf(v.id)} rights={props.opsRights} onDone={props.onOpsDone} onBusy={markBusy}/>;
     if(key==='notes'){const note=displayNote(v.notes);const view=note?<span className="vm-clamp2" title={note}>{note}</span>:<span className="pm-muted">{canEdit('notes')?'—':''}</span>;return deletedView?view:editable(v,'notes','ghi chú '+v.code,view);}
     if(key==='version'){const c=v.desired||v.installed;return c?<span className="text-xs">#{c.version}</span>:<span className="pm-muted">—</span>;}

@@ -61,3 +61,6 @@ describe('Server/VM filter model',()=>{
     expect(vmIdLines([rows[0],rows[3],rows[1],rows[5]])).toBe('moon05 | VM_001\nmoon06 | VM_002\nmoon06 | VM_010\nvt-01 | VM_001');
   });
 });
+
+it('filters VMs with an EarnApp account independently of SDK, money and proxy',()=>{const accounts=[fact({id:'assigned',server:'An-01',code:'VM_001',hasAccount:true,noSdk:true}),fact({id:'empty',server:'moon06',code:'VM_001',hasAccount:false,noSdk:false}),fact({id:'old',server:'An-01',code:'VM_002',hasAccount:true,archived:true})];expect(applyFilters(accounts,F({view:'ACCOUNT_PRESENT'})).map(r=>r.id)).toEqual(['assigned']);expect(applyFilters(accounts,F({view:'ACCOUNT_MISSING'})).map(r=>r.id)).toEqual(['empty']);expect(serverDistribution(accounts,F({view:'ACCOUNT_PRESENT'}))).toMatchObject({total:1,items:[{code:'An-01',count:1}]});});
+it('has-account filter remains unknown until account links are loaded',()=>{const pending=[fact({id:'loading',server:'An-01',code:'VM_001',hasAccount:null})];expect(countWith(pending,F(),{view:'ACCOUNT_PRESENT'})).toBeNull();expect(applyFilters(pending,F({view:'ACCOUNT_PRESENT'}))).toEqual([]);});

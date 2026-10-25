@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "checks": 9,
+  "results": [
+    "Both account chips show counts from current links",
+    "Has-account filter only shows two linked VMs",
+    "Current email and explicit presence label shown",
+    "Has-account filter survives reload",
+    "Missing-account filter shows only empty VM",
+    "Back restores has-account view",
+    "Account filter chips stay accessible on phone",
+    "No document horizontal overflow",
+    "No JS errors"
+  ],
+  "errors": []
+}

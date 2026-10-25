@@ -1,0 +1,8 @@
+ ✓ src/__tests__/proxy-management/vm-filter-model.test.ts (8 tests) 9ms
+ ✓ src/__tests__/proxy-management/vm-grid-model.test.ts (12 tests) 4ms
+
+ Test Files  4 passed (4)
+      Tests  33 passed (33)
+   Start at  13:58:16
+   Duration  1.35s (transform 96ms, setup 39ms, import 705ms, tests 263ms, environment 0ms)
+

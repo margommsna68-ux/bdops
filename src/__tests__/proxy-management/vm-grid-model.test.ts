@@ -72,3 +72,5 @@ describe('Server/VM grid model',()=>{
   });
   it('shortens long SDK codes for display only',()=>{expect(shortCode('sdk-1234567890abcdef1234')).toBe('sdk-1234…cdef1234');expect(shortCode('short-sdk')).toBe('short-sdk');});
 });
+
+it('persists the has-EarnApp view across URL round trips',()=>{const q=readGridUrl(new URLSearchParams('view=ACCOUNT_PRESENT&q=VM_001&sort=BALANCE'));expect(q.view).toBe('ACCOUNT_PRESENT');expect(readGridUrl(new URLSearchParams(writeGridUrl(q))).view).toBe('ACCOUNT_PRESENT');expect(q.q).toBe('VM_001');expect(q.sort).toBe('BALANCE');});

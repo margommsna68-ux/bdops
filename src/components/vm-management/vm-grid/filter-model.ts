@@ -26,6 +26,7 @@ function viewMatch(f:VmFacts,view:GridView):Tri{
     case 'APPLY':return f.applyPending;
     case 'TODO':return f.todo;
     case 'SDK_MISSING':return f.noSdk;
+    case 'ACCOUNT_PRESENT':return f.hasAccount;
     case 'ACCOUNT_MISSING':return f.hasAccount==null?null:!f.hasAccount;
     case 'PAYPAL_MISSING':return f.hasPaypal==null?null:!f.hasPaypal;
     default:return f.view===view;
@@ -79,4 +80,4 @@ export function vmIdLines(rows:{server:string;code:string}[]):string{
   return [...rows].sort((a,b)=>compareCodes(a.server,b.server)||compareCodes(a.code,b.code)).map(r=>r.server+' | '+r.code).join('\n');
 }
 // Labels of the conditions in force, for the "đang lọc" line with one × per condition.
-export const VIEW_LABEL:Record<Exclude<GridView,''>,string>={MISSING:'Thiếu proxy',ASSIGNED:'Có proxy',BLOCKED:'Proxy Blocked',REVIEW:'Cần kiểm tra',SDK_MISSING:'Chưa SDK',ACCOUNT_MISSING:'Chưa tài khoản',PAYPAL_MISSING:'Chưa PayPal',DELETED:'Đã xoá',APPLY:'Chờ áp dụng trên máy',TODO:'Cần xử lý'};
+export const VIEW_LABEL:Record<Exclude<GridView,''>,string>={MISSING:'Thiếu proxy',ASSIGNED:'Có proxy',BLOCKED:'Proxy Blocked',REVIEW:'Cần kiểm tra',SDK_MISSING:'Chưa SDK',ACCOUNT_MISSING:'Chưa EarnApp',ACCOUNT_PRESENT:'Có EarnApp',PAYPAL_MISSING:'Chưa PayPal',DELETED:'Đã xoá',APPLY:'Chờ áp dụng trên máy',TODO:'Cần xử lý'};
