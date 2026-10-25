@@ -201,3 +201,11 @@ During this continuation, twelve jobs (one already queued, eleven new) concerned
 
 25 October 2026 owner update: the configured SELF/TUT pool may borrow LIVE proxies already serving VMs (active legacy binding or DESIRED/INSTALLED allocation) as well as unused NEW proxies. Apple-only reservation is exclusive between Apple jobs and never detaches the VM or changes its proxy state/configuration. Backend-only change; existing worker/token need no replacement.
 
+## 1.3.10 — cleanup diagnosis and browser-exit grace
+
+The worker banner is global. One slot with failed cleanup stops admissions and drains its peers; a peer may therefore show CANCELLED with its own cleanup OK. Authentication results and cleanup results are independent. A Locked result remains Locked after cleanup recovery; do not repeat login to clean a profile.
+
+After a settled browser close, allow up to five seconds for fresh process inspection to prove absence before deleting the owned UUID profile. Every probe receives the remaining time budget. Missing/ambiguous process information still fails closed. Failed cleanup now writes bounded stage/error enums even for Locked, Live or Cancelled results, without raw exception text, paths or secrets.
+
+At 22:59 Bangkok, slot5 job cmvo0gqrn002umbfknthddtyr reported APPLE_LOCKED with cleanup FAILED; peer cmvo0gqrw003cmbfkfo44chqa reported CANCELLED/cleanup OK. Eight of the owner's 100 queued jobs had finished and 92 remained queued. Original cleanup stage/error was not recorded, so its exact Windows cause is unknown. After confirming the worker stopped, zero Chrome processes, the exact profile ownership marker and no links, local Store.cleanup removed only that profile. Then the official cleanup-recovered command acknowledged recovery to the web. A failed profile can contain Chrome capability/deny ACL entries that block the normal private-state configuration loader; never relax token/config ACL checks or clear quarantine merely to bypass that gate. Use verified, ownership-bounded local cleanup before the official acknowledgement.
+

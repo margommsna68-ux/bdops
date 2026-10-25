@@ -15,6 +15,8 @@ const apiDiagnostic=(error,action)=>({
 
 export const REASONS=Object.freeze(Object.fromEntries(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'].map(s=>[s,s])));
 const DIAGNOSTICS=new Set(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED']);
+const CLEANUP_CODES=new Set(['EACCES','EPERM','EBUSY','ENOTEMPTY','ENOENT','CLEANUP_TIMEOUT','OWNED_BROWSER_ALIVE','WINDOWS_PROBE_FAILED','LAUNCH_UNRESOLVED','PROFILE_OWNER','UNSAFE_LINK','UNSAFE_FILE']);
+const cleanupDiagnostic=error=>CLEANUP_CODES.has(error?.code)?error.code:CLEANUP_CODES.has(error?.message)?error.message:'CLEANUP_ERROR';
 export function classify(outcome,email){
   if(!outcome||!Object.hasOwn(REASONS,outcome.result))return 'UNKNOWN';
   if(outcome.result==='LOGIN_SUCCESS'&&!(outcome.authenticated===true&&typeof outcome.identity==='string'&&outcome.identity.trim().toLowerCase()===email.trim().toLowerCase()))return 'UNKNOWN';
@@ -22,9 +24,17 @@ export function classify(outcome,email){
   return outcome.result;
 }
 export class Worker {
-  constructor({store,api,adapter,gate,activeGate,slot,verifyNoBrowser=noOwnedBrowser,heartbeatMs=10000,jobTimeoutMs=180000}){
+  constructor({store,api,adapter,gate,activeGate,slot,verifyNoBrowser=noOwnedBrowser,heartbeatMs=10000,jobTimeoutMs=180000,cleanupWaitMs=5000,cleanupPollMs=200}){
     if(slot!==undefined&&(!Number.isInteger(slot)||slot<1||slot>5))throw new Error('SLOT_INVALID');
-    Object.assign(this,{store,api,adapter,gate,activeGate,slot,verifyNoBrowser,heartbeatMs,jobTimeoutMs});this.running=false;
+    Object.assign(this,{store,api,adapter,gate,activeGate,slot,verifyNoBrowser,heartbeatMs,jobTimeoutMs,cleanupWaitMs,cleanupPollMs});this.running=false;
+  }
+  async waitForBrowserExit(profilePath){
+    const until=Date.now()+this.cleanupWaitMs;
+    for(;;){
+      if(await this.verifyNoBrowser(profilePath,{timeoutMs:Math.max(1,until-Date.now())}))return;
+      if(Date.now()>=until)throw new Error('OWNED_BROWSER_ALIVE');
+      await delay(Math.min(this.cleanupPollMs,until-Date.now()));
+    }
   }
   claimBody(key){return {key,...(this.slot!==undefined?{slot:this.slot}:{})};}
   async once({signal,allowNewWork=true}={}){
@@ -160,12 +170,13 @@ export class Worker {
       try{diagnostic=await Promise.race([browser.diagnostics(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('DIAGNOSTIC_TIMEOUT')),2000);})]);}catch{}
       finally{clearTimeout(timer);}
     }
-    let cleanup='OK',cleanupStage='CLOSE';
-    try{if(browser)await browser.close();cleanupStage='VERIFY';if(!await this.verifyNoBrowser(profile.path))throw new Error('OWNED_BROWSER_ALIVE');cleanupStage='DELETE';await this.store.cleanup(profile.id);cleanupStage='OK';}catch{
+    let cleanup='OK',cleanupStage='CLOSE',cleanupCode='NONE';
+    try{if(browser)await browser.close();cleanupStage='VERIFY';await this.waitForBrowserExit(profile.path);cleanupStage='DELETE';await this.store.cleanup(profile.id);cleanupStage='OK';}catch(error){
+      cleanupCode=cleanupDiagnostic(error);
       cleanup='FAILED';await this.store.write('quarantine.json',{jobId:job.id,leaseToken:job.leaseToken,profileId:profile.id,reason:'CLEANUP_FAILED'});
     }
-    if(needsDiagnostic){
-      try{await this.store.write('last-diagnostic.json',{jobId:job.id,at:new Date().toISOString(),...safeDiagnostics(diagnostic),runtime:{stage,abortSource,api:apiFailure,cleanupStage,elapsedMs:Math.min(300000,Math.round(performance.now()-started))}});}catch{}
+    if(needsDiagnostic||cleanup==='FAILED'){
+      try{await this.store.write('last-diagnostic.json',{jobId:job.id,at:new Date().toISOString(),...safeDiagnostics(diagnostic),runtime:{stage,abortSource,api:apiFailure,cleanupStage,cleanupCode,elapsedMs:Math.min(300000,Math.round(performance.now()-started))}});}catch{}
     }
     pendingRecord={...pendingRecord,phase:'REPORTING',report:{result,reasonCode:result==='UNKNOWN'?reasonCode:REASONS[result],cleanup,observedAt:new Date().toISOString()}};
     await this.store.save(pendingRecord);return this.report(pendingRecord,job.leaseToken);

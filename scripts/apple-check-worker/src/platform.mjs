@@ -106,9 +106,9 @@ export async function loadConfig(file,root){
   const token=(await readFile(c.tokenFile,'utf8')).replace(/^\uFEFF/,'').trim();
   return {config:c,token};
 }
-export async function noOwnedBrowser(profilePath,{inspect}={}){
+export async function noOwnedBrowser(profilePath,{inspect,timeoutMs=15000}={}){
   // Inspection only. Never terminate unrelated/shared browser processes.
-  const processes=inspect?await inspect():JSON.parse(await powershell(`$items=@(Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | ForEach-Object {@{name=$_.Name;commandLine=$_.CommandLine}});ConvertTo-Json -InputObject $items -Compress`));
+  const processes=inspect?await inspect():JSON.parse(await powershell(`$items=@(Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | ForEach-Object {@{name=$_.Name;commandLine=$_.CommandLine}});ConvertTo-Json -InputObject $items -Compress`,{timeoutMs}));
   if(!Array.isArray(processes))return false;
   const target=canonicalBrowserPath(profilePath);
   return processes.every(p=>{

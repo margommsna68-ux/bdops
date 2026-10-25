@@ -28,7 +28,7 @@ async function fixture(options={}){
       return options.outcome??{result:'LOGIN_SUCCESS',authenticated:true,identity:'one@example.test'};
     },close:async()=>{if(options.cleanupFail)throw new Error('failed close');},
   })};
-  const worker=new Worker({store,vault,api,adapter,verifyNoBrowser:async()=>options.browserAlive!==true,gate:async()=>options.gate??'IDLE',heartbeatMs:5,jobTimeoutMs:500});
+  const worker=new Worker({store,vault,api,adapter,verifyNoBrowser:async()=>options.browserAlive!==true,gate:async()=>options.gate??'IDLE',heartbeatMs:5,jobTimeoutMs:500,cleanupWaitMs:0});
   return {store,worker,calls,vault,get submissions(){return submissions;},get secretCalls(){return secretCalls;}};
 }
 
@@ -39,6 +39,28 @@ test('startup and cleanup failures keep separate bounded diagnostics without exc
  const diagnostic=await f.store.read('last-diagnostic.json');
  assert.equal(diagnostic.runtime.stage,'BROWSER');assert.equal(diagnostic.runtime.abortSource,'OPERATION_FAILED');assert.equal(diagnostic.runtime.cleanupStage,'CLOSE');
  assert.equal(diagnostic.frames.length,0);assert.equal(JSON.stringify(diagnostic).includes('secret'),false);assert.equal(f.secretCalls,0);
+});
+
+test('cleanup waits for confirmed browser exit without another login or deleting a live profile',async()=>{
+ const f=await fixture();let checks=0,deletions=0;
+ f.worker.cleanupWaitMs=100;f.worker.cleanupPollMs=1;
+ f.worker.verifyNoBrowser=async()=>++checks>=3;
+ const clean=f.store.cleanup.bind(f.store);f.store.cleanup=async id=>{assert.ok(checks>=3);deletions++;return clean(id);};
+ assert.equal(await f.worker.once(),'DONE');assert.equal(checks,3);assert.equal(deletions,1);assert.equal(f.submissions,1);
+ assert.equal(f.calls.find(c=>c.action==='result').body.cleanup,'OK');
+});
+
+test('Locked and Cancelled cleanup failures retain their result and safe cleanup diagnostic',async()=>{
+ for(const cancel of [false,true]){
+  const f=await fixture({wait:cancel,cleanupFail:true,outcome:{result:'APPLE_LOCKED',explicit:true}});
+  if(cancel){const api=f.worker.api.call;f.worker.api.call=async(a,b,o)=>a==='heartbeat-job'?{cancelRequested:f.submissions>0}:api(a,b,o);}
+  assert.equal(await f.worker.once(),'CLEANUP_FAILED');
+  const report=f.calls.find(c=>c.action==='result').body;
+  assert.equal(report.result,cancel?'CANCELLED':'APPLE_LOCKED');assert.equal(report.cleanup,'FAILED');
+  const d=await f.store.read('last-diagnostic.json');
+  assert.equal(d.runtime.cleanupStage,'CLOSE');assert.equal(d.runtime.cleanupCode,'CLEANUP_ERROR');
+  assert.equal(JSON.stringify(d).includes('lease-secret'),false);assert.equal(JSON.stringify(d).includes('failed close'),false);
+ }
 });
 
 test('a failed presence heartbeat does not abort a job with a freshly renewed lease',async()=>{
