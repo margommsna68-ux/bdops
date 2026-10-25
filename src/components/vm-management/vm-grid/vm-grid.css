@@ -349,3 +349,9 @@ html:not([data-theme]) .vm-chip.vm-ops-severe strong{color:#fff}
 /* Selected VM payout queues: one clear card per immutable VM identity. */
 .vm-payout-bulk-row{padding:12px;border:1px solid var(--ds-border-strong);border-radius:8px;background:var(--ds-card);min-width:0;overflow-wrap:anywhere}
 .vm-payout-bulk-row .pm-input{min-width:0;max-width:100%}
+
+/* Current VM login quick-copy; secrets are never part of the table DTO. */
+.vm-account-pop{max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow-y:auto;margin:0}
+.vm-login-credentials{padding:10px 0;border-top:1px solid var(--ds-border);border-bottom:1px solid var(--ds-border)}
+.vm-login-field{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:7px;align-items:start;font-size:12px}
+.vm-login-value{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;user-select:text}

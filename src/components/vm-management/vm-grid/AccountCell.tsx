@@ -8,18 +8,23 @@ import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
 import {LOGIN_STATUS_LABEL} from '@/lib/login-issue';
 import {errorMessage,type ManagedVM} from '../shared';
+import {VmLoginCredentials} from './VmLoginCredentials';
 export type VmAccount=inferRouterOutputs<AppRouter>['accountStore']['vmAccounts'][number];
 type Store=inferRouterOutputs<AppRouter>['accountStore']['store'];
 export const TYPE_LABEL:Record<string,string>={GMAIL:'Gmail',APPLE_ID:'Apple ID'};
+export function accountPopoverPosition(r:{top:number;bottom:number;left:number},height:number,width:number,viewportHeight:number){
+  const h=Math.max(0,Math.min(height,viewportHeight-16)),w=Math.min(360,width-16),up=r.bottom+h+8>viewportHeight&&r.top>h;
+  return {top:Math.max(8,Math.min(up?r.top-h-6:r.bottom+6,viewportHeight-h-8)),left:Math.max(8,Math.min(r.left,width-w-8))};
+}
 // Tài khoản EarnApp at the cell: login (Gmail / Apple ID) and the receiving PayPal email (Mã PP → Email) of this VM, chosen in a popover next to the cell. One
 // save sends both (the server keeps or refuses the row as a whole). Held accounts are not offered; the server re-checks anyway.
 // face: what the button shows instead of the account (the Tiền / Rút cell of a VM without an account opens the same picker).
-export function AccountCell({projectId,vm,link,focus,canAssign,face,onSaved,onBusy,dataState='READY'}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus:'login'|'paypal';canAssign:boolean;face?:React.ReactNode;onSaved:()=>void;onBusy:(vmId:string,busy:boolean)=>void;dataState?:'READY'|'LOADING'|'ERROR'}){
+export function AccountCell({projectId,vm,link,focus,canAssign,canCopy=false,face,onSaved,onBusy,dataState='READY'}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus:'login'|'paypal';canAssign:boolean;canCopy?:boolean;face?:React.ReactNode;onSaved:()=>void;onBusy:(vmId:string,busy:boolean)=>void;dataState?:'READY'|'LOADING'|'ERROR'}){
   const e=link?.earnApp,[open,setOpen]=useState(false),button=useRef<HTMLButtonElement>(null),pop=useRef<HTMLDivElement>(null),[pos,setPos]=useState<{top:number;left:number}|null>(null);
   const close=()=>{setOpen(false);button.current?.focus({preventScroll:true});};const closeRef=useRef(close);closeRef.current=close;
-  useLayoutEffect(()=>{if(!open)return;const place=()=>{const r=button.current?.getBoundingClientRect();if(!r)return;const h=pop.current?.offsetHeight||360,up=r.bottom+h+8>window.innerHeight&&r.top>h;const next={top:up?r.top-h-6:r.bottom+6,left:Math.max(8,Math.min(r.left,window.innerWidth-372))};setPos(p=>p&&p.top===next.top&&p.left===next.left?p:next);};
-    place();const raf=requestAnimationFrame(place),timer=setTimeout(place,400);window.addEventListener('scroll',place,true);window.addEventListener('resize',place);return ()=>{cancelAnimationFrame(raf);clearTimeout(timer);window.removeEventListener('scroll',place,true);window.removeEventListener('resize',place);};},[open]);
-  useEffect(()=>{if(!open)return;const down=(ev:MouseEvent)=>{if(!pop.current?.contains(ev.target as Node)&&!button.current?.contains(ev.target as Node))setOpen(false);};const key=(ev:KeyboardEvent)=>{if(ev.key==='Escape'){ev.stopPropagation();closeRef.current();}};
+  useLayoutEffect(()=>{if(!open)return;const place=()=>{const r=button.current?.getBoundingClientRect();if(!r)return;const next=accountPopoverPosition(r,pop.current?.offsetHeight||360,window.innerWidth,window.innerHeight);setPos(p=>p&&p.top===next.top&&p.left===next.left?p:next);};
+    place();const raf=requestAnimationFrame(place),timer=setTimeout(place,400),ro=typeof ResizeObserver!=='undefined'?new ResizeObserver(place):null;if(pop.current)ro?.observe(pop.current);window.addEventListener('scroll',place,true);window.addEventListener('resize',place);return ()=>{cancelAnimationFrame(raf);clearTimeout(timer);ro?.disconnect();window.removeEventListener('scroll',place,true);window.removeEventListener('resize',place);};},[open]);
+  useEffect(()=>{if(!open)return;const down=(ev:MouseEvent)=>{if((ev.target as Element)?.closest?.('[role="dialog"][data-state="open"]'))return;if(!pop.current?.contains(ev.target as Node)&&!button.current?.contains(ev.target as Node))setOpen(false);};const key=(ev:KeyboardEvent)=>{if(ev.key==='Escape'){ev.stopPropagation();closeRef.current();}};
     document.addEventListener('mousedown',down);document.addEventListener('keydown',key,true);return ()=>{document.removeEventListener('mousedown',down);document.removeEventListener('keydown',key,true);};},[open]);
   const view=focus==='login'?(e?<span className="vm-account-view"><span className="vm-ellipsis" title={e.login.email}>{e.login.email}</span><span className="pm-badge pm-badge-muted vm-type-badge">{TYPE_LABEL[e.login.type||'']||'?'}</span>{e.login.status!=='ACTIVE'&&<span className={e.login.status==='GOOGLE_VERIFY'?'pm-badge pm-badge-amber':'pm-badge pm-badge-red'} title={[e.login.loginIssueNote,e.login.loginIssueAt].filter(Boolean).join(' · ')}>{LOGIN_STATUS_LABEL[e.login.status as keyof typeof LOGIN_STATUS_LABEL]||e.login.status}</span>}</span>
       :link?.legacyGmail?<span className="flex flex-col min-w-0 gap-1"><span className="pm-muted">Chưa có tài khoản</span><span className="pm-muted vm-ellipsis" title="Gmail cũ trước quy tắc mới; chưa có tài khoản EarnApp">Cũ: {link.legacyGmail}</span></span>:<span className="pm-muted">Chưa có tài khoản</span>)
@@ -29,12 +34,12 @@ export function AccountCell({projectId,vm,link,focus,canAssign,face,onSaved,onBu
   return <div className="vm-status">
     <button ref={button} type="button" className="vm-link-cell vm-account-button" aria-haspopup="dialog" aria-expanded={open} aria-label={(focus==='login'?'Tài khoản EarnApp ':'PayPal nhận tiền ')+vm.code} onClick={()=>setOpen(o=>!o)}>{face??(focus==='login'&&e?<span className="flex flex-col min-w-0 gap-1">{view}<span className="text-xs pm-muted" title={e.registeredAt?'Đã gán và đã ghi đăng ký EarnApp trên web':'Đã gán trên web; chưa xác nhận đăng ký EarnApp'}>Có tài khoản</span></span>:view)}{canAssign&&<ChevronDown size={11} className="shrink-0 pm-muted"/>}</button>
     {open&&typeof document!=='undefined'&&createPortal(<div ref={pop} role="dialog" aria-label={`Tài khoản ${vm.server} / ${vm.code}`} className="vm-status-pop vm-account-pop" style={{top:pos?.top??-9999,left:pos?.left??-9999}}>
-      <AccountPicker projectId={projectId} vm={vm} link={link} focus={focus} canAssign={canAssign} onBusy={onBusy} onDone={()=>{onSaved();setOpen(false);}}/>
+      <AccountPicker projectId={projectId} vm={vm} link={link} focus={focus} canAssign={canAssign} canCopy={canCopy} onBusy={onBusy} onDone={()=>{onSaved();setOpen(false);}}/>
     </div>,document.body)}
   </div>;
 }
 // Shared by the cell popover and the side panel: pick login and PayPal, save both at once, unassign, record registration.
-export function AccountPicker({projectId,vm,link,focus='login',canAssign,onBusy,onDone}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus?:'login'|'paypal';canAssign:boolean;onBusy?:(vmId:string,busy:boolean)=>void;onDone:()=>void}){
+export function AccountPicker({projectId,vm,link,focus='login',canAssign,canCopy=false,onBusy,onDone}:{projectId:string;vm:ManagedVM;link:VmAccount|undefined;focus?:'login'|'paypal';canAssign:boolean;canCopy?:boolean;onBusy?:(vmId:string,busy:boolean)=>void;onDone:()=>void}){
   const e=link?.earnApp,store=trpc.accountStore.store.useQuery({projectId},{enabled:canAssign,staleTime:15000}),apply=trpc.accountStore.linkApply.useMutation(),mark=trpc.accountStore.markRegistered.useMutation(),utils=trpc.useUtils();
   // PayPal is chosen in two steps: Mã PP, then one of its emails that may still be given (the email is what the EarnApp receives on).
   const [login,setLogin]=useState(e?.login.id||''),[pp,setPp]=useState(e?.paypal?.id||''),[paypal,setPaypal]=useState(e?.paypal?.emailId||''),[q,setQ]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),busyRef=useRef(false);
@@ -53,6 +58,7 @@ export function AccountPicker({projectId,vm,link,focus='login',canAssign,onBusy,
     <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · Tài khoản EarnApp</p>
     {e?<p className="text-xs">{e.login.email} <span className="pm-muted">({TYPE_LABEL[e.login.type||'']||'chưa chọn loại'})</span> · PayPal {e.paypal?<strong>{e.paypal.code} · {e.paypal.email||'chưa xác định email'}</strong>:<span className="pm-muted">chưa có</span>} · {e.registeredAt?<span className="text-green-700">đã ghi đăng ký EarnApp</span>:<span className="pm-muted">chưa ghi đăng ký EarnApp</span>}</p>
       :<p className="text-xs pm-muted">{link?.legacyGmail?'Gmail cũ: '+link.legacyGmail+' (trước quy tắc mới). Chọn lại tài khoản nếu đúng.':'VM chưa có tài khoản EarnApp. Có thể để trống và bổ sung sau.'}</p>}
+    {e&&focus==='login'&&<VmLoginCredentials projectId={projectId} vm={vm} account={e} canCopy={canCopy}/>}
     {!canAssign?<p className="text-xs pm-muted">Chỉ xem: tài khoản này chưa có quyền gán.</p>:<>
       <label className="pm-label text-xs">Tài khoản đăng nhập (Gmail / Apple ID)
         <input ref={firstInput} className="pm-input" placeholder="Tìm email…" value={q} disabled={busy} onChange={x=>setQ(x.target.value)}/></label>

@@ -36,7 +36,7 @@ export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose
       {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:<div className="vm-panel-card"><ChangeProxy projectId={projectId} vm={vm} info={proxyCellInfo(vm)} rights={{assign:rights.assign,copy:rights.copy,replace:!!rights.replace,block:!!rights.block}} onBusy={()=>undefined} onDone={onSaved} onCancel={()=>onTab('overview')}/></div>)}
       {tab==='work'&&!moduleOn('WORK')&&<p className="pm-muted text-sm">Giao việc đang tạm ẩn. Dữ liệu việc cũ vẫn được giữ.</p>}
       {tab==='work'&&moduleOn('WORK')&&<WorkTab projectId={projectId} vm={vm}/>}
-      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={(rights.accountAssign??rights.assign)&&!deleted} onSaved={onSaved}/>}
+      {tab==='account'&&<AccountTab projectId={projectId} vm={vm} account={account} canEdit={(rights.accountAssign??rights.assign)&&!deleted} canCopy={rights.copy&&!deleted} onSaved={onSaved}/>}
       {tab==='history'&&<HistoryTab projectId={projectId} vm={vm}/>}
     </div>
   </aside>;
@@ -67,9 +67,9 @@ function WorkTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
     <Link className="pm-button pm-button-quiet" href={links.work({vm:vm.id})}>Thêm / sửa ở trang Công việc</Link></div>;
 }
 // EarnApp account of the VM: same picker as the cell (login + PayPal saved together), plus a link to the stock.
-function AccountTab({projectId,vm,account,canEdit,onSaved}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;onSaved:()=>void}){
+function AccountTab({projectId,vm,account,canEdit,canCopy,onSaved}:{projectId:string;vm:ManagedVM;account:VmAccount|undefined;canEdit:boolean;canCopy:boolean;onSaved:()=>void}){
   if(vm.archivedAt) return <p className="pm-muted text-sm">Máy đã xoá; tài khoản và lịch sử được giữ trong dữ liệu.</p>;
-  return <div className="space-y-3"><AccountPicker projectId={projectId} vm={vm} link={account} canAssign={canEdit} onDone={onSaved}/><Link className="pm-button pm-button-quiet" href={links.accounts()}>Mở Kho tài khoản</Link></div>;
+  return <div className="space-y-3"><AccountPicker projectId={projectId} vm={vm} link={account} canAssign={canEdit} canCopy={canCopy} onDone={onSaved}/><Link className="pm-button pm-button-quiet" href={links.accounts()}>Mở Kho tài khoản</Link></div>;
 }
 function HistoryTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id});

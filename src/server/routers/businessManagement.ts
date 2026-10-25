@@ -68,6 +68,13 @@ export const businessManagementRouter=router({
   const proof=ctx.web&&'sessionId' in ctx.web?await verifyBusinessWebSession(ctx.prisma,ctx.user.id,ctx.web.sessionId):undefined;
   return copyOperatingCredentials(scope,input,ctx.prisma,proof);
  })),
+ copyVmAccount:protectedProcedure.input(project.extend({id,vmBinding:z.object({vmId:id,expectedVmRevision:revision,expectedCycle:z.number().int().positive(),earnAppId:id,expectedLoginRevision:revision})})).mutation(({ctx,input})=>domain(async()=>{
+  const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);
+  // Human-only shortcut reuses the current person's server-confirmed unlock. Never accept a caller-supplied proof.
+  if(!ctx.web||!('sessionId' in ctx.web))throw new ProxyDomainError('FORBIDDEN','Mở khoá bằng mã 2FA / PIN của bạn trước');
+  const proof=await verifyBusinessWebSession(ctx.prisma,ctx.user.id,ctx.web.sessionId);
+  return copyOperatingCredentials(scope,{...input,kind:'GMAIL'},ctx.prisma,proof);
+ })),
  work:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readWorkWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
  saveWork:protectedProcedure.input(project.extend({id:id.optional(),expectedRevision:revision.optional(),key,title:z.string().trim().min(1).max(200),notes:z.string().max(2000).optional(),vmId:id.nullable().optional(),serverId:id.nullable().optional(),assigneeId:id.nullable().optional(),status:z.enum(['PENDING','IN_PROGRESS','COMPLETED','CANCELLED']),dueDate:z.string().length(10).nullable().optional(),kind:z.enum(['TASK','SHEET_REVIEW']).optional()})).mutation(({ctx,input})=>domain(async()=>saveWork(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  finance:protectedProcedure.input(range).query(({ctx,input})=>domain(async()=>readFinanceWorkspace(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),

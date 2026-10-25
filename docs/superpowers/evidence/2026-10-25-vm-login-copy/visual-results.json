@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "checks": 4,
+  "results": [
+    "light fields masked and copy controls present",
+    "dark fields masked and copy controls present",
+    "golden fields masked and copy controls present",
+    "bronze fields masked and copy controls present"
+  ]
+}

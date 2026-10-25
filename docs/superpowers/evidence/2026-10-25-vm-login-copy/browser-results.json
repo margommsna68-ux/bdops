@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "checks": 25,
+  "results": [
+    "admin signs in with own credentials",
+    "admin copies only the assigned public email",
+    "admin initially masks secret fields",
+    "admin reveals via own already-unlocked session",
+    "admin copies Mật khẩu separately",
+    "admin copies 2FA separately",
+    "admin copies Link lấy mã 2FA separately",
+    "admin hides all secrets",
+    "Clipboard refusal exposes only the requested manual-copy field",
+    "scoped signs in with own credentials",
+    "scoped copies only the assigned public email",
+    "scoped initially masks secret fields",
+    "scoped reveals via own already-unlocked session",
+    "scoped copies Mật khẩu separately",
+    "scoped copies 2FA separately",
+    "scoped copies Link lấy mã 2FA separately",
+    "scoped hides all secrets",
+    "Scoped direct reveal denied for hidden",
+    "Scoped direct reveal denied for stock",
+    "Phone account popup remains inside viewport",
+    "Phone page has no horizontal overflow",
+    "nocopy signs in with own credentials",
+    "nocopy copies only the assigned public email",
+    "No-copy moderator has no secret reveal control",
+    "No JavaScript errors"
+  ],
+  "errors": []
+}

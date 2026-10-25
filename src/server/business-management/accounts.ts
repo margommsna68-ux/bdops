@@ -9,7 +9,7 @@ import {authorizeBusiness} from './scope';
 import {verifyBusinessPin,assertBusinessPinProof,type BusinessPinProof} from './pin';
 import {applyLinks} from '../account-store/links';
 import {deleteRefusal} from '../account-store/delete';
-import {assertScopedLoginIds,hasServerScope} from '../permissions/server-scope';
+import {assertScopedLoginIds,assertScopedVmIds,hasServerScope} from '../permissions/server-scope';
 export interface AccountInput {kind:'GMAIL'|'PAYPAL';id?:string;email:string;code?:string;holder?:string;password?:string;twoFa?:string;token?:string;recoveryEmail?:string;paypalId?:string|null;status?:string;notes?:string;expectedRevision?:number;key:string}
 const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Thông tin tài khoản chưa hợp lệ');};
 const manager=(scope:ActorScope)=>{if(!['ADMIN','MODERATOR'].includes(scope.role))throw new ProxyDomainError('FORBIDDEN','Quản lý mới được thêm/sửa tài khoản');};
@@ -62,9 +62,18 @@ export async function readOperatingWorkspace(scope:ActorScope,db:PrismaClient=pr
  ]);
  return {gmails:gmails.map(g=>({id:g.id,email:g.email,status:g.status,notes:g.notes,paypalId:g.paypalId,recoveryEmail:g.recoveryEmail,revision:g.revision,archivedAt:g.archivedAt?.toISOString()||null,credentialsAvailable:!!(g.password||g.twoFaCurrent||g.token),vmRefs:g.vms.map(v=>v.server.code+'/'+v.code)})),paypals:paypals.map(p=>({id:p.id,code:p.code,email:p.primaryEmail,status:p.status,holder:p.holder,notes:p.notes,revision:p.revision,archivedAt:p.archivedAt?.toISOString()||null,credentialsAvailable:!!(p.password||p.emails.some(e=>e.password||e.twoFa||e.hotmailToken))})),vms:vms.map(v=>({...v,serverId:v.server.id,server:v.server.code})),members:members.filter(m=>m.role!=='VIEWER'&&(m.role==='ADMIN'||m.allowedModules.includes('INFRASTRUCTURE'))).map(m=>({id:m.user.id,name:m.user.name||m.user.username||'Nhân viên',role:m.role}))};
 }
-export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;pin?:string},db:PrismaClient=prisma,proof?:BusinessPinProof){
+export interface VmCredentialBinding {vmId:string;expectedVmRevision:number;expectedCycle:number;earnAppId:string;expectedLoginRevision:number}
+export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMAIL'|'PAYPAL';id:string;pin?:string;vmBinding?:VmCredentialBinding},db:PrismaClient=prisma,proof?:BusinessPinProof){
  const area=input.kind==='PAYPAL'?'PAYPALS':'INFRASTRUCTURE',copy=(s:ActorScope)=>{if(s.role==='VIEWER'||s.role!=='ADMIN'&&!s.capabilities.includes('COPY_CREDENTIALS'))throw new ProxyDomainError('FORBIDDEN');};
- const checkTarget=async(reader:Parameters<typeof assertScopedLoginIds>[0],s:ActorScope)=>{if(hasServerScope(s)){if(input.kind!=='GMAIL'||!['ADMIN','MODERATOR'].includes(s.role))throw new ProxyDomainError('FORBIDDEN');await assertScopedLoginIds(reader,s,[input.id]);}};
+ const checkTarget=async(reader:Parameters<typeof assertScopedLoginIds>[0],s:ActorScope)=>{
+  if(hasServerScope(s)){if(input.kind!=='GMAIL'||!['ADMIN','MODERATOR'].includes(s.role))throw new ProxyDomainError('FORBIDDEN');await assertScopedLoginIds(reader,s,[input.id]);}
+  const b=input.vmBinding;if(!b)return;if(input.kind!=='GMAIL')throw new ProxyDomainError('INVALID_INPUT');
+  await assertScopedVmIds(reader,s,[b.vmId]);
+  const vm=await reader.virtualMachine.findFirst({where:{id:b.vmId,managed:true,archivedAt:null,server:{projectId:s.projectId,managed:true,archivedAt:null}},select:{revision:true,operation:{select:{cycle:true}},earnApp:{select:{id:true,loginId:true,closedAt:true,login:{select:{revision:true}}}}}});
+  if(!vm||!vm.earnApp||vm.earnApp.closedAt||vm.earnApp.id!==b.earnAppId||vm.earnApp.loginId!==input.id)throw new ProxyDomainError('STALE_PREVIEW','Tài khoản của VM đã thay đổi; mở lại tài khoản hiện hành','ACCOUNT_CHANGED');
+  if((vm.operation?.cycle??1)!==b.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW','VM đã sang lượt mới; tải lại trước khi xem thông tin','CYCLE_CHANGED');
+  if(vm.revision!==b.expectedVmRevision||vm.earnApp.login.revision!==b.expectedLoginRevision)throw new ProxyDomainError('STALE_PREVIEW','Tài khoản hoặc VM vừa được cập nhật; mở lại để lấy bản mới','REVISION_CONFLICT');
+ };
  const current=await authorizeBusiness(scope,area,false,db);copy(current);await checkTarget(db,current);
  if(!proof&&!input.pin)throw new ProxyDomainError('FORBIDDEN','Nhập PIN / mã 2FA của bạn để copy thông tin đăng nhập');
  const verified=proof??await verifyBusinessPin(db,scope.userId,input.pin!);
@@ -76,6 +85,6 @@ export async function copyOperatingCredentials(scope:ActorScope,input:{kind:'GMA
   const apple=input.kind==='GMAIL'?{twoFaLink:gmail.twoFaLink,smsLink:gmail.smsLink,phone:gmail.phone}:{twoFaLink:null,smsLink:null,phone:null};
   if(!values.password&&!values.twoFa&&!values.token&&!apple.twoFaLink&&!apple.smsLink)throw new ProxyDomainError('INVALID_INPUT','Chưa ghi thông tin đăng nhập');
   let decoded:{email:string;secret:string;twoFa:string|null;token:string|null;twoFaLink:string|null;smsLink:string|null;phone:string|null};try{decoded={email:values.email,secret:values.password?decrypt(values.password):'',twoFa:values.twoFa?decrypt(values.twoFa):null,token:values.token?decrypt(values.token):null,twoFaLink:apple.twoFaLink?decrypt(apple.twoFaLink):null,smsLink:apple.smsLink?decrypt(apple.smsLink):null,phone:apple.phone};}catch{throw new ProxyDomainError('INVALID_INPUT','Thông tin cũ cần kiểm tra và ghi lại trước khi copy');}
-  await tx.auditLog.create({data:{projectId:scope.projectId,userId:scope.userId,action:'COPY_OPERATING_ACCOUNT',entity:input.kind,entityId:input.id,changes:{count:1}}});return decoded;
+  await tx.auditLog.create({data:{projectId:scope.projectId,userId:scope.userId,action:'COPY_OPERATING_ACCOUNT',entity:input.kind,entityId:input.id,changes:{count:1,...(input.vmBinding?{vmId:input.vmBinding.vmId,cycle:input.vmBinding.expectedCycle}: {})}}});return decoded;
  },db);
 }

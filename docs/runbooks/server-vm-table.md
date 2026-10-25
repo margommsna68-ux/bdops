@@ -223,3 +223,11 @@ Quy tắc:
 ## Có / chưa tài khoản EarnApp — 25/10/2026
 
 Server/VM có hai nút lọc Có EarnApp / Chưa EarnApp kèm số lượng. Nhóm Có dựa trên tài khoản EarnApp hiện đang gán VM; không suy ra từ SDK, tiền hoặc proxy, và không khẳng định đã đăng ký nếu chưa ghi đăng ký. Cột Tài khoản EarnApp hiện email và Có tài khoản; dữ liệu Gmail cũ chưa có liên kết hiện hành vẫn thuộc Chưa EarnApp. Đang tải / lỗi tải không hiện nhầm Chưa có tài khoản. Lọc, số đếm và phân bố theo server dùng cùng mô hình trước phân trang; URL giữ qua reload/Back. Thứ tự/ẩn/độ rộng cột đã lưu giữ nguyên.
+
+## Copy nhanh đăng nhập của VM — 25/10/2026
+
+Bấm email trong cột Tài khoản EarnApp (hoặc Chi tiết VM → Tài khoản). Khung có Email / Mật khẩu / 2FA đã lưu; Apple ID có Link lấy mã 2FA và Link SMS khi đã lưu. Mỗi dòng có Copy riêng, bí mật có Xem/Ẩn; Xem thông tin đăng nhập hiện các mục sau xác thực bằng phiên PIN/Google Authenticator của chính user. Không tự lấy mã từ nhà cung cấp, không tự mở link; 2FA hiển thị là dữ liệu đã lưu của tài khoản.
+
+Copy bí mật xác thực lại trên server mỗi lần, đúng tài khoản đang gán VM/lượt/revision. VM hoặc mật khẩu đổi trong lúc mở thì từ chối bản cũ; mở lại/tải lại để lấy bản mới. Đóng khung/đổi định danh/khoá phiên làm mất bản đang hiện. Clipboard bị chặn: ô chỉ đọc để tự chọn và copy đúng mục. Không ghi bí mật vào browser storage, URL, lịch sử hay log.
+
+Quyền xem/copy hiện hành giữ nguyên; moderator giới hạn server chỉ xem tài khoản hiện đang gán trong server đó. Không tự cấp COPY_CREDENTIALS, không mở kho chung và không thay chính sách API AI. Copy/xem không đánh dấu đã đăng ký/đã dùng, không đổi tài khoản hay tình trạng VM.
