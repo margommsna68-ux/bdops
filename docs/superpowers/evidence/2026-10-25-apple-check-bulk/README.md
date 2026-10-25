@@ -1,0 +1,9 @@
+# Apple check bulk / Live 2FA — 25 October 2026
+
+Released code 43a65c2, build HCAvdddYZZKG-79Zj7R7F at 17:40 Bangkok. Worker 1.1.0 on moon-01/Central, previous 1.0.0 retained; Running/IDLE verified. Public manifest HTTP200. No migration needed/applied (generic deployment log's noMigration:false is stale metadata).
+
+Dedicated Tình trạng acc column; selected-account check accepts at most five per atomic request, processed sequentially. Six selected rejects visibly without requests. LIVE_2FA means visible official OTP input after password submit by owner convention, not completed authentication. No code retrieved or entered. CAPTCHA and explicit Locked/invalid alerts override OTP. Locked never replaces/unassigns VM accounts or resets health. Old-revision results remain history. Nine bounded diagnostic codes distinguish missing forms, entry, delivery, submit and response failure without raw error/DOM/secrets.
+
+Verification: 1167/1167 web tests (203 files), 54/54 worker tests; types/build passed, lint existing warnings only. New assertions observed red before changes. Synthetic Chrome 16/16 at 1280 and 390px; no video. Review findings about multiple nodes, OTP precedence, lost operation reasons and recursive email argument fixed. No new real account login was run: prior UNKNOWN results unchanged; real Locked/OTP branches remain unconfirmed.
+
+Backup moneytohome-20261025-174000.dump plus encrypted/decryption-verified moon-01 copy, SHA256 165843c70d96914a53624f7e8d877650c3ffed2e94d4f68cfd4be6aaff7114f8. Rollback D:/MoneyToHome/app-before-apple-check-bulk-20261025. Before/after business fingerprint identical e49e7dda15bcabae655d88d3c4d99a3d95964dc0524665838eded208c58ae2b8: 678 VM,149 logins,1465 proxies,4 batches,4 costs,0 payouts/funds. No VM/AE/GEN2/Sheet operations or existing token/user-right changes.

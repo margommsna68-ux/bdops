@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "checks": [
+    "Synthetic administrator signed in",
+    "Six synthetic rows loaded",
+    "Dedicated account check column",
+    "Synthetic worker token hidden",
+    "Six rows rejected visibly with zero requests",
+    "Sequential five-per-round guidance",
+    "Five rows queued through one real batch",
+    "Batch matches selected synthetic accounts",
+    "Sixth synthetic account remains unchecked",
+    "Current 2FA result has green pill",
+    "Password login Live label",
+    "Unknown diagnostic explained",
+    "Captcha is never Live",
+    "Invalid credentials label",
+    "Phone page contains table scrolling",
+    "No browser JavaScript errors"
+  ],
+  "errors": []
+}
