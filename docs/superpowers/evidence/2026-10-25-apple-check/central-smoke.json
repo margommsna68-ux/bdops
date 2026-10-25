@@ -1,0 +1,19 @@
+{
+  "state": "Ready",
+  "lastResult": 0,
+  "result": {
+    "ok": true,
+    "opened": true,
+    "unreachableProxyRefused": true,
+    "cleanup": true,
+    "before": {
+      "freeMb": 17712,
+      "vms": 0
+    },
+    "after": {
+      "freeMb": 17646,
+      "vms": 0
+    },
+    "freeMb": 17679
+  }
+}

@@ -22,6 +22,7 @@ export async function assertServerWebRequest(db:ScopeDB,userId:string,path:strin
  // Preserve existing endpoint rules for non-members (e.g. an ADMIN removing an orphan project).
  if(!member||member.serverScope==='ALL')return;
  const current=await loadInfrastructureScope(db,userId,input.projectId);if(!hasServerScope(current))return;
+ if(path==='appleCheck.overview')return; // service filters jobs by current assigned account/server; no configuration or common-stock secrets.
  if(path==='accountStore.store'||path==='businessManagement.copyAccount'||path==='businessManagement.copyVmAccount'){
   if(!['ADMIN','MODERATOR'].includes(current.role)||!current.allowedModules?.includes('INFRASTRUCTURE'))throw new ProxyDomainError('FORBIDDEN');
   if(path==='businessManagement.copyAccount'||path==='businessManagement.copyVmAccount'){

@@ -50,6 +50,8 @@ async function event(tx:Tx,ctx:ChangeCtx,endpoint:{id:string;identityId:string|n
  * is marked as still to be applied on the real machine (markProxyPending), whatever the status (owner brief 21/10/2026).
  */
 export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:string,endpointId:string){
+  await tx.$queryRaw`SELECT "id" FROM "ProxyIP" WHERE "id"=${endpointId} FOR UPDATE`;
+  if((await tx.proxyIP.findUnique({where:{id:endpointId},select:{appleCheckLeaseJobId:true}}))?.appleCheckLeaseJobId)throw new ProxyDomainError('STALE_PREVIEW','Proxy đang được giữ cho Check Apple ID; chờ dọn phiên xong');
   const scope=await scopedChange(tx,ctx,'ASSIGN',[vmId],[endpointId]);
   const vm=await loadChangeVM(tx,vmId),cur=currentProxyOf(vm);
   if(hasServerScope(scope))await assertScopedEndpointIds(tx,scope,Array.from(new Set([...cur.candidates,...vm.allocations.map(a=>a.endpointId),...(vm.proxyId?[vm.proxyId]:[])])),{write:true});

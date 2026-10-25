@@ -72,6 +72,7 @@ enum ProjectType {
 }
 
 model Project {
+  appleCheckWorker AppleCheckWorker?
   id                 String                 @id @default(cuid())
   name               String
   code               String                 @unique
@@ -297,6 +298,8 @@ model ProxyIP {
   identityId        String?
   identity          ProxyIdentity?           @relation(fields: [identityId], references: [id], onDelete: Restrict)
   credentialCipher  String?
+  // Temporary Check Apple ID reservation; never a VM assignment. Released only after confirmed cleanup.
+  appleCheckLeaseJobId String? @unique
   packageCode       String?
   groupId           String?
   group             ProxyGroup?              @relation(fields: [groupId], references: [id], onDelete: Restrict)
@@ -564,6 +567,7 @@ model ProxyAssignmentHistory {
 // ═══════════════════════════════════════
 
 model GmailAccount {
+  appleChecks AppleCheckJob[]
   businessManaged Boolean               @default(false)
   revision        Int                   @default(0)
   archivedAt      DateTime?
@@ -608,6 +612,70 @@ enum GmailStatus {
   APPLE_LOCKED
   GOOGLE_VERIFY
   GOOGLE_DISABLED
+}
+
+model AppleCheckWorker {
+  id String @id @default(cuid())
+  projectId String @unique
+  project Project @relation(fields:[projectId], references:[id], onDelete:Restrict, onUpdate:NoAction)
+  createdById String
+  name String
+  proxyGroupId String
+  tokenHash String @unique
+  previousTokenHash String?
+  enabled Boolean @default(true)
+  state String @default("OFFLINE")
+  lastSeenAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppleCheckJob {
+  requests AppleCheckRequest[]
+  id String @id @default(cuid())
+  projectId String
+  accountId String
+  account GmailAccount @relation(fields:[accountId], references:[id], onDelete:Restrict, onUpdate:NoAction)
+  accountRevision Int
+  appliedRevision Int?
+  requestedById String
+  requestKey String
+  activeAccountId String? @unique
+  activeWorkerId String? @unique
+  workerId String?
+  claimKey String?
+  proxyId String?
+  proxyRevision Int?
+  leaseHash String?
+  expiresAt DateTime?
+  hardDeadline DateTime?
+  phase String @default("QUEUED")
+  result String?
+  reasonCode String?
+  cleanup String @default("PENDING")
+  cancelRequested Boolean @default(false)
+  routeReadAt DateTime?
+  submittedAt DateTime?
+  observedAt DateTime?
+  resultHash String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, requestKey])
+  @@unique([workerId, claimKey])
+  @@index([projectId, createdAt])
+  @@index([accountId, createdAt])
+}
+
+model AppleCheckRequest {
+  id String @id @default(cuid())
+  projectId String
+  key String
+  accountId String
+  accountRevision Int
+  jobId String
+  job AppleCheckJob @relation(fields:[jobId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+  @@unique([projectId,key])
 }
 
 model PayPalAccount {

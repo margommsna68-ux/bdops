@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "checks": [
+    "ADMIN synthetic login",
+    "Worker dedicated token issued once",
+    "Token hidden from page",
+    "Single-row Check queues without credentials in frontend",
+    "Locked result reaches table after worker report",
+    "History separates auth result from cleanup",
+    "Result never shows synthetic password",
+    "Phone page no overflow",
+    "Scoped moderator sees no worker administration",
+    "Scoped moderator cannot see common stock account",
+    "No page JavaScript errors"
+  ],
+  "errors": []
+}

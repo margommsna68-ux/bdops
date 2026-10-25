@@ -219,6 +219,8 @@ export const projectRouter = router({
 
       await assertProjectCanBeDestroyed(ctx.prisma,input.projectId);
 
+      if(await ctx.prisma.appleCheckJob.findFirst({where:{projectId:input.projectId,activeWorkerId:{not:null}}}))throw new TRPCError({code:'CONFLICT',message:'Dọn phiên Check Apple ID trước khi xoá dữ liệu dự án'});
+
       // Delete order: children first, then parents (respect FK constraints)
       // 1. VM tasks (depends on VM)
       await ctx.prisma.vMTask.deleteMany({ where: { vm: { server: { projectId: input.projectId } } } });
@@ -242,6 +244,7 @@ export const projectRouter = router({
       await ctx.prisma.virtualMachine.updateMany({ where: { server: { projectId: input.projectId } }, data: { gmailId: null, proxyId: null } });
       await ctx.prisma.virtualMachine.deleteMany({ where: { server: { projectId: input.projectId } } });
       // 11. Gmail accounts (depends on paypal via paypalId)
+      await ctx.prisma.appleCheckJob.deleteMany({where:{projectId:input.projectId}});await ctx.prisma.appleCheckWorker.deleteMany({where:{projectId:input.projectId}});
       await ctx.prisma.gmailAccount.deleteMany({ where: { projectId: input.projectId } });
       // 12. PayPal accounts
       await ctx.prisma.payPalAccount.deleteMany({ where: { projectId: input.projectId } });

@@ -2,13 +2,14 @@ import React,{act} from 'react';
 import type {Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn(),importPanel:vi.fn(),draftOpen:false}));
+const mock=vi.hoisted(()=>({query:'',data:null as any,status:vi.fn(),push:vi.fn(),replace:vi.fn(),importPanel:vi.fn(),draftOpen:false,appleOverview:vi.fn(),appleRequest:vi.fn(),storeQuery:vi.fn()}));
 vi.mock('next/navigation',()=>({usePathname:()=>'/gmails',useSearchParams:()=>new URLSearchParams(mock.query),useRouter:()=>({push:mock.push,replace:mock.replace})}));
 vi.mock('next/link',()=>({default:({children,href,...props}:any)=><a href={href} {...props}>{children}</a>}));
 vi.mock('@/lib/trpc',()=>{const mutation=()=>({useMutation:()=>({isLoading:false,mutateAsync:mock.status})});return {trpc:{
-  useUtils:()=>({accountStore:{invalidate:vi.fn()},businessManagement:{invalidate:vi.fn()}}),
+  useUtils:()=>({accountStore:{invalidate:vi.fn()},businessManagement:{invalidate:vi.fn()},appleCheck:{overview:{invalidate:vi.fn()}}}),
+  appleCheck:{overview:{useQuery:mock.appleOverview},request:{useMutation:()=>({mutateAsync:mock.appleRequest})},cancel:mutation()},
   user:{securityStatus:{useQuery:()=>({data:{unlocked:false,totpEnabled:false}})}},
-  accountStore:{store:{useQuery:()=>({data:mock.data,isLoading:false})},setStatus:mutation(),deleteStock:mutation(),restoreStock:mutation(),setNote:mutation(),updateLogin:mutation(),batchCost:mutation()},
+  accountStore:{store:{useQuery:()=>{mock.storeQuery();return {data:mock.data,isLoading:false};}},setStatus:mutation(),deleteStock:mutation(),restoreStock:mutation(),setNote:mutation(),updateLogin:mutation(),batchCost:mutation()},
   proxyManagement:{undo:mutation()},businessManagement:{copyAccount:mutation()},
 }};});
 vi.mock('react-hot-toast',()=>({default:Object.assign(vi.fn(),{success:vi.fn(),error:vi.fn()})}));
@@ -26,6 +27,7 @@ beforeEach(async()=>{
   for(const [key,value] of Object.entries({React,window:dom.window,document:dom.window.document,navigator:dom.window.navigator,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true}))vi.stubGlobal(key,value);
   host=document.createElement('div');document.body.appendChild(host);const {createRoot}=await import('react-dom/client');root=createRoot(host);
   mock.query='';mock.push.mockReset();mock.replace.mockReset();mock.status.mockReset();mock.status.mockResolvedValue({rows:[],applied:1});mock.draftOpen=false;mock.importPanel.mockReset();mock.importPanel.mockReturnValue(null);
+  mock.storeQuery.mockReset();mock.appleOverview.mockReset();mock.appleOverview.mockReturnValue({data:{canManage:false,canCheck:true,groups:[],worker:{id:'w',name:'Central',enabled:true,online:true,state:'IDLE',proxyGroupId:'g',lastSeenAt:null},jobs:[]}});mock.appleRequest.mockReset();mock.appleRequest.mockResolvedValue({id:'j',accountId:'apple',accountRevision:3,phase:'QUEUED',result:null,createdAt:'2026-10-25T02:00:00Z',observedAt:null,stale:false,cancelRequested:false,cleanup:null,reasonCode:null});
   const navigate=(href:string)=>{mock.query=href.split('?')[1]||'';window.history.pushState({},'',href);};mock.push.mockImplementation(navigate);mock.replace.mockImplementation(navigate);
   mock.data={rights:{logins:true,paypals:true,writeLogins:true,writePaypals:false,admin:false,copy:false,money:false,writeCosts:false},logins:[row('normal'),row('apple','APPLE_LOCKED','APPLE_ID',{loginIssueNote:'Apple account locked on sign in',loginIssueAt:'2026-10-24T03:00:00Z'}),row('verify','GOOGLE_VERIFY','GMAIL',{loginIssueNote:'Verification requested',loginIssueAt:'2026-10-24T06:00:00Z'}),row('disabled','GOOGLE_DISABLED')],paypals:[{id:'pp',code:'PP-TEST',state:'NEW',batch:null,notes:null,emails:[]}],batches:[],review:[]};
 });
@@ -35,6 +37,12 @@ const select=(name:string)=>{const el=host.querySelector(`select[aria-label="${n
 const change=async(el:HTMLSelectElement,value:string)=>{await act(async()=>{el.value=value;el.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});await render();};
 const click=async(el:HTMLElement)=>{await act(async()=>el.click());await render();};
 const ids=()=>Array.from(host.querySelectorAll('tr[data-account-id]')).map(el=>el.getAttribute('data-account-id'));
+it('offers a check only in Apple rows through one shared overview and keeps Locked filtering',async()=>{
+  await render();expect(mock.appleOverview).toHaveBeenCalledTimes(mock.storeQuery.mock.calls.length);
+  const checks=host.querySelectorAll('button');const check=Array.from(checks).filter(b=>b.textContent==='Check Apple ID');expect(check).toHaveLength(1);expect(check[0].closest('tr')?.getAttribute('data-account-id')).toBe('apple');
+  await click(check[0]);expect(mock.appleRequest.mock.calls[0][0]).toMatchObject({projectId:'local-issue-project',accountId:'apple',expectedRevision:3});expect(mock.status).not.toHaveBeenCalled();
+  await change(select('Lọc tình trạng đăng nhập'),'APPLE_LOCKED');expect(ids()).toEqual(['apple']);
+});
 it('renders coloured issue labels, compact reason/time, and only type-valid issue choices per individual account',async()=>{
   await render();
   const apple=host.querySelector('tr[data-account-id="apple"]')!;

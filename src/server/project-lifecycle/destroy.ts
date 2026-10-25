@@ -6,6 +6,8 @@ export async function destroyProject(db:PrismaClient,projectId:string){
   if(!project) throw new Error('PROJECT_NOT_FOUND');
   await db.$transaction(async tx=>{
     const where={projectId},vmWhere={server:{projectId}};
+    if(await tx.appleCheckJob.findFirst({where:{projectId,activeWorkerId:{not:null}}}))throw new Error('APPLE_CHECK_CLEANUP_REQUIRED');
+    await tx.appleCheckJob.deleteMany({where});await tx.appleCheckWorker.deleteMany({where});
     const identityIds=(await tx.proxyIP.findMany({where:{projectId,identityId:{not:null}},select:{identityId:true},distinct:['identityId']})).map(r=>r.identityId!);
     await tx.vMTask.deleteMany({where:{vm:vmWhere}});
     await tx.vMProxyAllocation.deleteMany({where});
