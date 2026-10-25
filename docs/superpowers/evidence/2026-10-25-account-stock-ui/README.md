@@ -1,0 +1,7 @@
+# Account inventory UI — 25 October 2026
+
+Replaced PayPal-of-EarnApp display with source from the existing purchase batch. Missing supplier shows Chưa ghi nguồn. Provider icon (G/Apple) precedes email; removed redundant type column. Apple check results use existing theme-aware state colors, secondary timestamp, compact Check/History links. Stale results remain neutral. No business services, permissions or worker behavior changed.
+
+Verification: 35/35 existing Apple UI tests; two color assertions follow shared semantic classes instead of removed utility class. Typecheck, focused lint and production build passed. Headless Chrome with local synthetic records: 8/8 checks, supplier and empty-source display, both provider icons, removed columns, no JS errors; desktop and 390px screenshots. Trial DB needed the already-deployed claim-slots migration before testing (applied only to local trial). No new migration on host. Other themes not individually screenshot-tested; badges reuse existing theme styles.
+
+Released code 091d8e4, build 4ZZFgwllLMTzb9fKuiAuM. Backup moneytohome-20261025-220521.dump; encrypted moon-01 copy decryption verified. Direct service swap (no UAC); rollback D:/MoneyToHome/app-before-account-stock-20261025. Live database schema already current. Public manifest and account chunk HTTP200, correct provider marker present. Before/after read-only business hash identical: 678 VMs,149 logins,1465 proxies,4 batches,4 costs,0 payout requests/receipts.
