@@ -1,0 +1,17 @@
+{
+  "results": [
+    "Synthetic sign-in",
+    "100 synthetic rows selectable",
+    "No five-account rejection",
+    "One request queues all 100",
+    "Exactly five different jobs claimed",
+    "Occupied slot 1 does not admit a sixth browser",
+    "Occupied slot 2 does not admit a sixth browser",
+    "Occupied slot 3 does not admit a sixth browser",
+    "Occupied slot 4 does not admit a sixth browser",
+    "Occupied slot 5 does not admit a sixth browser",
+    "Freed slots receive the next five accounts",
+    "No script errors"
+  ],
+  "errors": []
+}
