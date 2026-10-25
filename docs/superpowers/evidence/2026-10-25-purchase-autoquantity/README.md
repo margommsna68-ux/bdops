@@ -25,3 +25,9 @@ Owner request: unit price for each PP/account/proxy automatically fills purchase
 The additional owner question is already implemented: Server/VM → TIỀN TRONG VM → Rút về PayPal → Ghi tiền về PP after a SENT request. The form identifies PP code and receiving email. `recordPayoutReceipt` writes the existing FundTransaction book with request/VM/cycle/account/email snapshots. Kho PayPal's expanded email list shows per-email received totals; parent PP totals use the same book. No duplicate receipt feature, synthetic payout on production, or separate ledger was added.
 
 Final verification: 195 files / 1046 tests pass; typecheck and production build RL9foagOjyGj6QrFkgE16 pass; lint has no new warnings/errors. Local Chrome 15 functional + 5 theme/mobile checks, plus 7 DB assertions. Backup moneytohome-20261025-121116.dump; encrypted/decryption-verified moon-01 copy SHA-256 5a605c5f2c5764fda69880b2e4f2d0e2e68da26d217aeda3e6c955ef15a934c0. No migration.
+
+## Production release
+
+Commit d4b84cb deployed on SERVER-01 at 2026-10-25 12:15:38 +07:00, build RL9foagOjyGj6QrFkgE16. No migration. Web and Tunnel services running; public build manifest and ops health both HTTP 200. Backup and rollback: moneytohome-20261025-121116.dump and D:/MoneyToHome/app-before-purchase-auto-20261025.
+
+Read-only snapshots before/after identical: 678 VMs, 149 login accounts, 1465 proxies, 4 batches, 4 costs, 0 fund transactions; hash 1e48b1050b032662c7c13cdd9d2c5f30fadb522baeaa65e885dc7eb74d06e795. No live sample import or receipt recorded.
