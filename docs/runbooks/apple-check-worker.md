@@ -31,7 +31,9 @@ C:\Users\Administrator\Desktop\MoneyToHome\AppleCheckWorker
   "minFreeMemoryMb": 2048,
   "heartbeatMs": 10000,
   "pollMs": 15000,
-  "jobTimeoutMs": 180000
+  "jobTimeoutMs": 180000,
+  "maxSlots": 5,
+  "headless": true
 }
 ```
 
@@ -41,7 +43,7 @@ Ranges: heartbeat 1–20 s (default 10 s), polls 1–60 s (default 15 s), job ti
 
 ## Install and operate
 
-Run these in the **meo3 interactive session** using the parent-selected Node executable and source path. Examples use `node` only as an abbreviation for that verified executable. No command below contains a token.
+Run these under the **meo3 account** using the parent-selected Node executable and source path. Examples use `node` only as an abbreviation for that verified executable. No command below contains a token.
 
 ```powershell
 $workerRoot = 'C:\Users\meo3\Desktop\MoneyToHome\apple-check-worker'
@@ -70,9 +72,9 @@ node $workerEntry status --root $workerRoot
 node $workerEntry stop --root $workerRoot
 ```
 
-`stop` is cooperative: writes `state\stop.json`, observed within roughly 500 ms; in-flight cleanup remains bounded by the browser close timeout. Wait for the lock to disappear and check status before update/rollback. Do not force-kill a shared browser or use taskkill by executable name. A task scheduled by the parent must run only in meo3's interactive session. Starting from SSH may report WAITING_DESKTOP indefinitely; scheduling is the parent's responsibility.
+`stop` is cooperative: writes `state\stop.json`, observed within roughly 500 ms; in-flight cleanup remains bounded by the browser close timeout. Wait for the lock to disappear and check status before update/rollback. Do not force-kill a shared browser or use taskkill by executable name. Central now runs with headless:true as meo3 using native Password batch logon, Limited, Normal priority4 and an AtStartup trigger. Windows Task Scheduler manages the logon credential; it is never placed in worker config, arguments or logs. No autologin is configured. Visible mode remains available with headless:false.
 
-Desktop gating is read-only: Windows current process session must be active (WTS state Active) and the input desktop must be Default; locked, disconnected, session 0 and probe errors wait. Available physical memory must exceed the configured threshold. No VM actions are used to free memory. Gate applies before new claims; pending result/cleanup recovery remains possible without logging in again.
+With headless:false (the compatibility default), desktop gating is read-only: the current Windows session must be active and unlocked; unavailable desktops and probe errors wait. With headless:true, admission and active-job gates skip the desktop probe entirely. Windows-only support and admission RAM limits remain. Available physical memory must exceed the configured threshold. No VM actions are used to free memory. Gate applies before new claims; pending result/cleanup recovery remains possible without logging in again.
 
 ## Protocol, durability and recovery
 
@@ -84,7 +86,7 @@ Actions: `heartbeat`, `claim`, `route`, `submit`, `heartbeat-job`, `result`, `cl
 If a crash leaves both journals, recovery first verifies matching job ID, lease capability and saved account identity/revision, then removes the redundant claim journal **before** reporting the pending result. A mismatch preserves both journals and any existing quarantine, raises `JOURNAL_IDENTITY_MISMATCH`, and performs no API/browser work. This prevents a stale claim from resurrecting an acknowledged terminal job with a different report timestamp.
 3. Get proxy route credentials into memory only. Launch one isolated owned profile; every browser request uses that proxy. No direct fallback, extra anti-detect layer, service workers, WebSockets or downloads. Probe the official `https://account.apple.com/sign-in` in the same context, waiting for its official iframe controls. A visible preflight challenge reports CHALLENGE_REQUIRED without API submit or account-secret delivery (backend must permit this result before submittedAt).
 4. Local durable SUBMITTING precedes the one API `submit` call. The backend atomically checkpoints before delivering email/password. Never retry that endpoint, including lost responses. Only one password-bearing browser submit is allowed. A crash/uncertain delivery yields UNKNOWN; restart does not resume authentication.
-5. Heartbeat-job renews the 90-second lease within the 180-second hard deadline. Heartbeats recheck desktop/RAM and abort browser work on a failed gate. Cancel/revoke/lease failures abort browser work; owned close, verified process exit and cleanup still run. Results remain reportable even while disabled. Result `reasonCode` equals the result enum; `observedAt` is an ISO Zulu timestamp. Preserve exactly the same result payload/time on retries.
+5. Heartbeat-job renews the 90-second lease within the 180-second hard deadline. Heartbeats recheck the desktop only in visible mode. Low RAM prevents new admissions rather than interrupting active checks. Cancel/revoke/lease failures abort browser work; owned close, verified process exit and cleanup still run. Results remain reportable even while disabled. Result `reasonCode` equals the result enum; `observedAt` is an ISO Zulu timestamp. Preserve exactly the same result payload/time on retries.
 6. Authentication result and cleanup are independent. Failed close or owned-tree deletion produces cleanup FAILED, persists `state\quarantine.json`, and blocks claims. A successful authentication result is retained even when cleanup fails.
 
 Interrupted nonterminal local journals produce UNKNOWN. Cleanup is OK only after verified absence of an owned browser and successful owned-marker tree cleanup; uncertain/running processes or deletion failures produce FAILED and quarantine. No foreign browser is closed. `recoveryOnly:true` claim replay likewise never calls route/submit or authenticates. The parent must review recovery metadata for a previously DONE/FAILED job: a new UNKNOWN payload must not overwrite a stored terminal result. If replay is rejected, keep the pending record; never discard it or invent a new login.
@@ -103,7 +105,7 @@ node $workerEntry cleanup-recovered --root $workerRoot
 
 ## Update and rollback
 
-Stop and verify unlock. Install a new package version into the **same root**; private config/state/dependencies remain. Source files are SHA-256 listed in the release manifest and checked before `start`; an installed version with different bytes is refused. Bump the package version to change an installed release.
+Stop and verify unlock **and the scheduled task is no longer Running** before starting the replacement: IgnoreNew otherwise silently leaves the old runner finishing without launching the new worker. Recover outstanding original journals through cleanup-recovered first. Install a new package version into the **same root**; private config/state/dependencies remain. Source files are SHA-256 listed in the release manifest and checked before `start`; an installed version with different bytes is refused. Bump the package version to change an installed release.
 
 ```powershell
 node $workerEntry stop --root $workerRoot
@@ -113,7 +115,7 @@ node $workerEntry rollback --root $workerRoot
 node $workerEntry status --root $workerRoot
 ```
 
-Rollback swaps `active.json` to the previous verified release; it does not undo server account health, repeat a check, delete journals, reset leases, or change the shared runtime. Use `start` through an available entry to run the release selected by active.json. If directly running `once`/`loop`, choose the entry matching the reported active version. Failed cleanup or pending reports must be resolved under the same private state before attempting another login.
+Before rolling 1.3.0 back to 1.2.2, stop/drain and restore the pre-headless config and interactive task from private/before-background-1.3.0/: 1.2.2 rejects the new headless config key and requires a desktop. Rollback swaps `active.json` to the previous verified release; it does not undo server account health, repeat a check, delete journals, reset leases, or change the shared runtime. Use `start` through an available entry to run the release selected by active.json. If directly running `once`/`loop`, choose the entry matching the reported active version. Failed cleanup or pending reports must be resolved under the same private state before attempting another login.
 
 ## Verification and present limits
 
@@ -168,3 +170,31 @@ Failed browser launch/close now falls back to terminating only the verified UUID
 On UNKNOWN, one small last-diagnostic.json per slot stores only bounded enum/boolean/counter metadata (form phase, input kinds, auth HTTP status, blocked request counters). No raw URLs, DOM, response body, email or password. Diagnostic collection is bounded to2seconds and cannot hold cleanup indefinitely. This is independent of the user-visible result.
 
 Actual follow-up: one original selected account remained UNKNOWN; another attempt failed before credential delivery and left an owned Chrome tree. Parent stopped only the verified owned tree, removed its profile, and acknowledged cleanup recovery; zero profiles/quarantines verified. A third original selected account is queued for final diagnostics, but the current interactive-desktop gate reports WAITING_DESKTOP; no secret delivered for that queued job. Do not claim real login/Locked/2FA recognition verified.
+
+## 1.3.0 - background mode (owner choice 25 October)
+
+The headless boolean defaults to false for existing installations. Central explicitly uses true. Browser launch, admission and active gates share that same mode. The worker task is S4U/Limited at startup; five native headless Cloak contexts opened in session 0 with desktopAvailable:false, five unique owned profiles, and all five profiles removed. Public health returned 200 from the same noninteractive task. No browser downloads, Windows autologin or shared AE/GEN2 changes. Native synthetic authenticated-proxy launch and cleanup also passed.
+
+The final already-queued real account check returned UNKNOWN/BROWSER_INTERRUPTED before account-secret delivery. Cleanup was initially FAILED; the verified owned profile was removed after proving no browser remained, then cleanup-recovered was acknowledged. No repeated authentication or extra real account was queued. Real Live/Locked/2FA recognition is still unverified.
+
+## 1.3.5 - Login/report reliability
+
+Five browsers remain concurrent; their short HTTP requests now share one lane to avoid server worker-row transaction contention. Bodies are captured before enqueue; cancellation rejects promptly and is rechecked before later delivery. Queue wait is additional to the per-request timeout, while each job retains its existing hard deadline. A transient idle-slot API error does not abort a peer login. A failed presence update is tolerated only after successful job-lease renewal; failed lease renewal/revocation/cancellation still stops authentication.
+
+Read the official visible modal body `.idms-modal .app-dialog .body`, not merely generic `#alertInfo` headings such as Cannot Sign In. Known error sentences tolerate heading/link/punctuation formatting; no conclusion comes from HTTP 403 alone. Private metadata records only fixed stages, API codes/status, counters and allowlisted error kinds, including technical outcomes. It never stores the raw dialog.
+
+The official widget's basic-auth branch calls POST `https://idmsa.apple.com/appleauth/auth/verify/password`. Only that exact URL/method is allowed once after the password-click flag. Queries, duplicates, pre-click access, GET, other origins and OTP/security-code endpoints remain blocked. No extra request is generated by the worker and no code is read/entered. Source proof: public widget bn.prototype.verifyPassword in the inspected Apple bundle; 103 Node tests and five native synthetic browser scenarios pass. Real account outcomes are separately recorded in the background evidence folder.
+
+## 1.3.7 - launch cleanup boundary
+
+Launch diagnostics retain only fixed phase/failure kind and numeric exit code. After a termination race, cleanup can proceed only when launch has settled and fresh process inspection proves the owned browser absent. Worker inspection and owned-marker/no-link tree deletion still follow. If launch remains pending, even successful empty-process termination cannot authorize profile deletion or lease release. Keep quarantine and recover only after independent proof; never retry authentication as cleanup. 106 Node tests pass, including both successful/failed termination with a still-pending launch.
+
+## Current 1.3.9 live acceptance
+
+The final Central configuration is headless:true, maxSlots:5, Password batch logon (session0), Limited, task priority4/Normal, with UV_THREADPOOL_SIZE=16 set only in private/run-worker.ps1 before Node starts. The initial S4U smoke was successful with blank contexts; the later switch avoids S4U encrypted-profile restrictions. Existing Windows credentials were handed to the native scheduler through encrypted SSH stdin/in-memory registration, never command-line text or a plaintext file. If the Windows account password changes, update the scheduled task credential through Windows administration. API token and app grants are unchanged.
+
+The larger dedicated Node I/O pool reduces filesystem/DNS contention from five private slot stores; no system environment, VM setting, shared browser runtime or sandbox flag changed. Runner/task/config backups remain privately under the worker root. These configuration adjustments are not claimed as proof of the cause of every earlier timeout or engine exit.
+
+Real acceptance 25 October 19:49:28 Bangkok: job cmvntqk330002a74j9yuxzuwk completed APPLE_LOCKED, cleanup OK. The same readChecks service used by the web returns APPLE_LOCKED/nonstale; account health is APPLE_LOCKED/revision1, so it is excluded from new allocation. No automatic VM account replacement. Worker then IDLE/online, zero owned browsers/profiles/pending/quarantines. Real Live/2FA and incorrect-password outcomes are still unobserved; their synthetic native-browser tests pass. Do not claim those branches were exercised with real accounts.
+
+During this continuation, twelve jobs (one already queued, eleven new) concerned only the owner's original three selected accounts; five reached the credential-delivery checkpoint, with cooldown/revision guards. Earlier technical UNKNOWN results remain intact. All twelve now have cleanup OK; see background evidence/live-checks.json. Never sweep more real accounts merely to improve test coverage.

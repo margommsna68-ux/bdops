@@ -1,7 +1,7 @@
 # Check Apple ID trên MoneyToHome
 
 ## Người dùng
-Mở Kho tài khoản → Apple ID. Cột **Tình trạng acc** hiện kết quả kiểm tra và thời gian. Có thể bấm check từng dòng hoặc chọn tối đa **5 account** rồi bấm **Check Apple ID** ở thanh thao tác. Worker mở tối đa 5 trình duyệt cùng lúc, mỗi account có profile và lease proxy riêng. Thiếu tài nguyên hoặc proxy đủ điều kiện thì các lượt còn lại chờ. Chọn quá 5 phải giảm lựa chọn, không âm thầm bỏ bớt dòng. Đang chạy không tạo thêm lần đăng nhập. Worker ngoại tuyến hoặc thiếu desktop thì việc chờ trên web. Có thể mở lịch sử và huỷ việc.
+Mở Kho tài khoản → Apple ID. Cột **Tình trạng acc** hiện kết quả kiểm tra và thời gian. Có thể bấm check từng dòng hoặc chọn tối đa **5 account** rồi bấm **Check Apple ID** ở thanh thao tác. Worker mở tối đa 5 trình duyệt cùng lúc, mỗi account có profile và lease proxy riêng. Thiếu tài nguyên hoặc proxy đủ điều kiện thì các lượt còn lại chờ. Chọn quá 5 phải giảm lựa chọn, không âm thầm bỏ bớt dòng. Đang chạy không tạo thêm lần đăng nhập. Worker ngoại tuyến hoặc thiếu tài nguyên thì việc chờ trên web. Central chạy nền từ bản 1.3.0, không cần mở/giữ desktop Windows. Có thể mở lịch sử và huỷ việc.
 
 - **Apple Locked:** web ngừng cấp mới tài khoản qua cả UI và AI. Tài khoản/EarnApp/VM đã liên kết giữ nguyên, không tự thay. Chủ xử lý đổi với nhà cung cấp hoặc xoá theo luồng kho.
 - **Live · yêu cầu 2FA:** sau khi gửi mật khẩu, trang Apple hiện ô nhập mã xác thực. Theo quy ước của chủ, đây là Live; worker dừng tại đó, không lấy/nhập mã. Không đồng nghĩa hoàn tất đăng nhập hay dùng được EarnApp. Kết quả này không tự mở lại account Locked.

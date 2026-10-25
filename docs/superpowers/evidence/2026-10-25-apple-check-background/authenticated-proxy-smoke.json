@@ -1,0 +1,10 @@
+{
+  "result": 0,
+  "task": "Ready",
+  "smoke": {
+    "opened": true,
+    "closed": true,
+    "profileRemoved": true,
+    "browserAbsent": true
+  }
+}

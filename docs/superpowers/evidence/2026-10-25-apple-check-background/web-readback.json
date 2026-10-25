@@ -1,0 +1,24 @@
+{
+  "job": {
+    "id": "cmvntqk330002a74j9yuxzuwk",
+    "accountId": "cmvksaudv008x46uy5nwo4mjp",
+    "accountRevision": 0,
+    "phase": "DONE",
+    "result": "APPLE_LOCKED",
+    "reasonCode": "APPLE_LOCKED",
+    "cleanup": "OK",
+    "createdAt": "2026-10-25T12:48:52.527Z",
+    "observedAt": "2026-10-25T12:49:28.432Z",
+    "stale": false,
+    "cancelRequested": false
+  },
+  "worker": {
+    "online": true,
+    "enabled": true,
+    "state": "IDLE"
+  },
+  "account": {
+    "status": "APPLE_LOCKED",
+    "revision": 1
+  }
+}

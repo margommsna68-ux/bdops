@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ApiClient } from '../src/api.mjs';
 
+test('parallel browser slots serialize API requests without cancelling a queued peer',async()=>{
+ let active=0,peak=0,release;const entered=[];
+ const api=new ApiClient({baseUrl:'https://worker.example',token:'private-token',transport:async(url,options)=>{
+  active++;peak=Math.max(peak,active);const n=entered.push(JSON.parse(options.body));
+  if(n===1)await new Promise(resolve=>{release=resolve;});active--;
+  return {status:200,json:async()=>({ok:true,error:null,data:{workerId:'worker',enabled:true}})};
+ }});
+ const first=api.call('heartbeat',{state:'IDLE'}),stop=new AbortController();
+ const aborted=api.call('heartbeat',{state:'BUSY'},{signal:stop.signal});const rejection=assert.rejects(aborted,/API_CANCELLED/);
+ const third=api.call('heartbeat',{state:'IDLE'});await new Promise(r=>setTimeout(r,10));stop.abort();
+ try{await new Promise(r=>setTimeout(r,10));assert.equal(entered.length,1);assert.equal(peak,1);}finally{release?.();}
+ await Promise.all([first,rejection,third]);assert.equal(entered.length,2);
+});
+
 test('only dedicated POST actions carry the bearer and redirects are refused', async () => {
   const calls=[];
   const api=new ApiClient({baseUrl:'https://worker.example',token:'private-token',transport:async (url,options)=>{

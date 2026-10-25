@@ -2,6 +2,16 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
 import {noOwnedBrowser} from './platform.mjs';
 import {safeDiagnostics} from './browser.mjs';
+import {ApiError} from './api.mjs';
+
+const transientApiFailure=error=>error instanceof ApiError&&(
+ ['API_NETWORK','API_TIMEOUT','API_PROTOCOL'].includes(error.code)||
+ error.code==='API_REJECTED'&&(error.status===429||error.status>=500&&error.status<=599));
+const apiDiagnostic=(error,action)=>({
+ action:['heartbeat','heartbeat-job','route','submit'].includes(action)?action:'NONE',
+ code:error instanceof ApiError&&['API_NETWORK','API_TIMEOUT','API_PROTOCOL','API_REJECTED','API_CANCELLED','API_REDIRECT','API_ORIGIN'].includes(error.code)?error.code:'NONE',
+ status:error instanceof ApiError&&Number.isInteger(error.status)&&error.status>=100&&error.status<=599?error.status:0,
+});
 
 export const REASONS=Object.freeze(Object.fromEntries(['LOGIN_SUCCESS','LIVE_2FA','APPLE_LOCKED','CHALLENGE_REQUIRED','INVALID_CREDENTIALS','PROXY_ERROR','NETWORK_ERROR','TIMEOUT','UNKNOWN','CANCELLED'].map(s=>[s,s])));
 const DIAGNOSTICS=new Set(['EMAIL_FORM_MISSING','PASSWORD_FORM_MISSING','SUBMIT_BUTTON_MISSING','RESPONSE_UNRECOGNIZED','BROWSER_INTERRUPTED','CREDENTIAL_DELIVERY_FAILED','EMAIL_ENTRY_FAILED','PASSWORD_SUBMIT_FAILED','RESPONSE_READ_FAILED']);
@@ -107,17 +117,22 @@ export class Worker {
     const control=new AbortController();const deadline=AbortSignal.timeout(Math.max(1,Math.min(this.jobTimeoutMs,180000)-(Date.now()-claimStarted)));
     const active=AbortSignal.any([control.signal,deadline,...(signal?[signal]:[])]);
     const identity={jobId:job.id,leaseToken:job.leaseToken};
-    let monitorStop=false,monitorWake=new AbortController(),browser,result='UNKNOWN',reasonCode='UNKNOWN',stage='LEASE';
+    let monitorStop=false,monitorWake=new AbortController(),browser,result='UNKNOWN',reasonCode='UNKNOWN',stage='LEASE',monitorAction='heartbeat-job',abortSource='NONE',apiFailure=apiDiagnostic(null),diagnostic;
+    const started=performance.now();
     const check=async()=>{
       active.throwIfAborted();const lease=await this.api.call('heartbeat-job',identity,{signal:active});
       if(lease.cancelRequested){control.abort(new Error('CANCELLED'));active.throwIfAborted();}
       active.throwIfAborted();
     };
     const monitor=(async()=>{
-      try{while(!monitorStop){await delay(this.heartbeatMs,undefined,{signal:monitorWake.signal});if(monitorStop)break;await check();
-        if(await (this.activeGate??this.gate)()!=='IDLE'){control.abort(new Error('DESKTOP_OR_RESOURCES_LOST'));break;}
-        const h=await this.api.call('heartbeat',{state:'BUSY'},{signal:active});if(!h.enabled)control.abort(new Error('CANCELLED'));
-      }}catch{if(!monitorStop&&!active.aborted)control.abort(new Error('LEASE_LOST'));}
+      try{while(!monitorStop){await delay(this.heartbeatMs,undefined,{signal:monitorWake.signal});if(monitorStop)break;monitorAction='heartbeat-job';await check();
+        monitorAction='ACTIVE_GATE';if(await (this.activeGate??this.gate)()!=='IDLE'){abortSource='ACTIVE_GATE';control.abort(new Error('DESKTOP_OR_RESOURCES_LOST'));break;}
+        monitorAction='heartbeat';
+        // Lease renewal above is authoritative. A transient presence update must
+        // not interrupt authentication after the same round just renewed it.
+        try{const h=await this.api.call('heartbeat',{state:'BUSY'},{signal:active});if(!h.enabled)control.abort(new Error('CANCELLED'));}
+        catch(error){if(!transientApiFailure(error))throw error;}
+      }}catch(error){if(!monitorStop&&!active.aborted){apiFailure=apiDiagnostic(error,monitorAction);abortSource=monitorAction==='ACTIVE_GATE'?'ACTIVE_GATE':monitorAction==='heartbeat'?'WORKER_HEARTBEAT':'JOB_HEARTBEAT';control.abort(new Error('LEASE_LOST'));}}
     })();
     try{
       await check();stage='ROUTE';const {proxy}=await this.api.call('route',identity,{signal:active});active.throwIfAborted();
@@ -128,23 +143,29 @@ export class Worker {
       stage='SUBMIT';pendingRecord={...pendingRecord,phase:'SUBMITTING'};await this.store.save(pendingRecord);active.throwIfAborted();
       // This endpoint is intentionally NEVER retried: delivery itself checkpoints the account.
       let credentials=await this.api.call('submit',identity,{signal:active});
-      try{active.throwIfAborted();const outcome=await browser.submit(credentials,{signal:active});result=classify(outcome,credentials.email);reasonCode=result==='UNKNOWN'&&DIAGNOSTICS.has(outcome?.reasonCode)?outcome.reasonCode:REASONS[result];active.throwIfAborted();}
+      try{active.throwIfAborted();stage='BROWSER_SUBMIT';const outcome=await browser.submit(credentials,{signal:active});result=classify(outcome,credentials.email);reasonCode=result==='UNKNOWN'&&DIAGNOSTICS.has(outcome?.reasonCode)?outcome.reasonCode:REASONS[result];active.throwIfAborted();}
       finally{credentials=null;}
       }
-    }catch{
-      result=deadline.aborted?'TIMEOUT':signal?.aborted||control.signal.reason?.message==='CANCELLED'?'CANCELLED':active.aborted?'UNKNOWN':stage==='ROUTE'?'PROXY_ERROR':'UNKNOWN';
+    }catch(error){
+      if(abortSource==='NONE')abortSource=deadline.aborted?'DEADLINE':signal?.aborted?'EXTERNAL_STOP':control.signal.reason?.message==='CANCELLED'?'SERVER_CANCELLED':'OPERATION_FAILED';
+      if(error instanceof ApiError&&apiFailure.code==='NONE')apiFailure=apiDiagnostic(error,stage==='SUBMIT'?'submit':stage==='ROUTE'?'route':'heartbeat-job');
+      result=deadline.aborted?'TIMEOUT':signal?.aborted||control.signal.reason?.message==='CANCELLED'?'CANCELLED':active.aborted?'UNKNOWN':error instanceof ApiError?'NETWORK_ERROR':stage==='ROUTE'?'PROXY_ERROR':'UNKNOWN';
       reasonCode=result==='UNKNOWN'?(stage==='SUBMIT'?'CREDENTIAL_DELIVERY_FAILED':'BROWSER_INTERRUPTED'):REASONS[result];
     }finally{
       monitorStop=true;monitorWake.abort();await monitor;
     }
-    if(result==='UNKNOWN'&&typeof browser?.diagnostics==='function'){
+    const needsDiagnostic=['UNKNOWN','PROXY_ERROR','NETWORK_ERROR','TIMEOUT'].includes(result);
+    if(needsDiagnostic&&typeof browser?.diagnostics==='function'){
       let timer;
-      try{const snapshot=await Promise.race([browser.diagnostics(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('DIAGNOSTIC_TIMEOUT')),2000);})]);await this.store.write('last-diagnostic.json',{jobId:job.id,at:new Date().toISOString(),...safeDiagnostics(snapshot)});}catch{}
+      try{diagnostic=await Promise.race([browser.diagnostics(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('DIAGNOSTIC_TIMEOUT')),2000);})]);}catch{}
       finally{clearTimeout(timer);}
     }
-    let cleanup='OK';
-    try{if(browser)await browser.close();if(!await this.verifyNoBrowser(profile.path))throw new Error('OWNED_BROWSER_ALIVE');await this.store.cleanup(profile.id);}catch{
+    let cleanup='OK',cleanupStage='CLOSE';
+    try{if(browser)await browser.close();cleanupStage='VERIFY';if(!await this.verifyNoBrowser(profile.path))throw new Error('OWNED_BROWSER_ALIVE');cleanupStage='DELETE';await this.store.cleanup(profile.id);cleanupStage='OK';}catch{
       cleanup='FAILED';await this.store.write('quarantine.json',{jobId:job.id,leaseToken:job.leaseToken,profileId:profile.id,reason:'CLEANUP_FAILED'});
+    }
+    if(needsDiagnostic){
+      try{await this.store.write('last-diagnostic.json',{jobId:job.id,at:new Date().toISOString(),...safeDiagnostics(diagnostic),runtime:{stage,abortSource,api:apiFailure,cleanupStage,elapsedMs:Math.min(300000,Math.round(performance.now()-started))}});}catch{}
     }
     pendingRecord={...pendingRecord,phase:'REPORTING',report:{result,reasonCode:result==='UNKNOWN'?reasonCode:REASONS[result],cleanup,observedAt:new Date().toISOString()}};
     await this.store.save(pendingRecord);return this.report(pendingRecord,job.leaseToken);
@@ -197,7 +218,7 @@ export class WorkerPool {
     let fatal=null,admissionTail=Promise.resolve(),publishTail=Promise.resolve();
     const fail=state=>{if(!fatal||state==='CLEANUP_FAILED')fatal=state;control.abort();};
     const aggregate=()=>fatal??(active.aborted?'STOPPED':reserved.size?'BUSY':
-      ['PENDING','PENDING_CLAIM','WAITING_DESKTOP','WAITING_RESOURCES','DISABLED','DONE'].find(s=>states.some(x=>x.state===s))??'IDLE');
+      ['PENDING','PENDING_CLAIM','WAITING_DESKTOP','WAITING_RESOURCES','DISABLED','ERROR','DONE'].find(s=>states.some(x=>x.state===s))??'IDLE');
     const publish=()=>{
       const next=publishTail.then(async()=>{
         const snapshot={state:aggregate(),activeCount:reserved.size,slots:states.map(x=>({...x})),at:new Date().toISOString()};
@@ -260,7 +281,7 @@ export class WorkerPool {
             states[index].state='BUSY';await publish();
             let state;
             try{state=await worker.once({signal:active,allowNewWork:slot<=this.maxSlots});}
-            catch(error){state=[401,403].includes(error?.status)?'DISABLED':'ERROR';fail(state);}
+            catch(error){state=[401,403].includes(error?.status)?'DISABLED':'ERROR';if(!transientApiFailure(error))fail(state);}
             finally{reserved.delete(slot);occupied.delete(slot);}
             states[index].state=state;
             if(['PENDING','PENDING_CLAIM'].includes(state))blocked.add(slot);else blocked.delete(slot);

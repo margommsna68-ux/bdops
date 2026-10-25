@@ -1,0 +1,5 @@
+{
+  "changed": true,
+  "workerOnly": true,
+  "threadPool": 16
+}

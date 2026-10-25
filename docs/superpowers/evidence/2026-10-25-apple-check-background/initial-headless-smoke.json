@@ -1,0 +1,15 @@
+{
+  "result": 0,
+  "task": "Ready",
+  "smoke": {
+    "ok": true,
+    "version": "1.3.0",
+    "headless": true,
+    "sessionId": 0,
+    "desktopAvailable": false,
+    "simultaneousOpened": 5,
+    "uniqueProfiles": 5,
+    "cleanupCount": 5,
+    "health": 200
+  }
+}

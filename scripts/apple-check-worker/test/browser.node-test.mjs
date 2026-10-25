@@ -31,6 +31,14 @@ test('only explicit outcomes count; success needs official authenticated matchin
   assert.equal(interpretEvidence({alert:'Your Media & Purchases account has been disabled'},'a').result,'UNKNOWN');
   for(const url of ['https://account.apple.com.evil.test/sign-in','http://account.apple.com/sign-in','https://u:p@account.apple.com/sign-in','https://account.apple.com/verify/otp'])assert.equal(officialUrl(url),false);
 });
+
+test('visible Apple errors allow surrounding dialog headings and recovery links without guessing from HTTP status',()=>{
+ for(const alert of ["Verification Failed\nYour Apple Account or password was incorrect. Forgot password?","Your Apple ID or password was incorrect","Your Apple Account or password is incorrect."]){
+  assert.equal(interpretEvidence({alerts:[alert]},'me@example.test').result,'INVALID_CREDENTIALS');
+ }
+ assert.equal(interpretEvidence({alerts:["This Apple Account has been locked for security reasons. You must unlock your account before signing in."]},'me@example.test').result,'APPLE_LOCKED');
+ for(const alert of ['Your Apple Account was not locked.','Your Media & Purchases account has been disabled','Unable to process your request. HTTP 403'])assert.equal(interpretEvidence({alerts:[alert]},'me@example.test').result,'UNKNOWN');
+});
 async function authenticatedFixture({apiEmail='me@example.test',visibleEmail='me@example.test',signout=true,response=true,method='GET',status=200,url='https://account.apple.com/account/manage',iframeOnly=false}={}){
   let responseHandler;const runtime=fakeRuntime();const original=runtime.chromium.launchPersistentContext;
   runtime.chromium.launchPersistentContext=async(...args)=>{
@@ -52,6 +60,29 @@ test('source-verified success needs same-context manage GET, exact identity, vis
     const item=await authenticatedFixture(options);assert.equal((await item.evidence('me@example.test')).result,'UNKNOWN');await item.close();
   }
 });
+
+test('an explicit same-context Apple API error needs post-password state and visible error UI',async()=>{
+ for(const options of [{},{submitted:false},{visible:false},{origin:'https://foreign.test'},{method:'GET'}]){
+  const runtime=fakeRuntime(),launch=runtime.chromium.launchPersistentContext;let responseHandler;
+  runtime.chromium.launchPersistentContext=async(...args)=>{const context=await launch(...args);context.newPage=async()=>({on:(e,h)=>{if(e==='response')responseHandler=h;},url:()=>'https://account.apple.com/sign-in',frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',evaluate:async()=>({}),locator:selector=>({count:async()=>selector==='[role="alert"], #errMsg, #alertInfo'?1:0,nth:()=>({isVisible:async()=>options.visible!==false,innerText:async()=> 'Cannot Sign In'})})}]});return context;};
+  const b=new CloakAdapter({executablePath:'C:/chrome.exe',loadModule:async()=>runtime}).create();await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});b.passwordSubmitted=options.submitted!==false;
+  await responseHandler({url:()=>`${options.origin??'https://idmsa.apple.com'}/appleauth/auth/signin/complete`,request:()=>({method:()=>options.method??'POST'}),status:()=>403,headers:()=>({'content-type':'application/json'}),json:async()=>({serviceErrors:[{code:'-24099',message:'This Apple Account has been locked for security reasons.'}],token:'secret-not-to-retain'})});
+  assert.equal((await b.evidence('me@example.test')).result,Object.keys(options).length?'UNKNOWN':'APPLE_LOCKED');
+  const d=await b.diagnostics();assert.equal(JSON.stringify(d).includes('secret'),false);if(!Object.keys(options).length)assert.deepEqual(d.serviceErrorCodes,[-24099]);await b.close();
+ }
+});
+
+test('current visible errors win; latest conflicting or unknown API errors cannot reuse an older assertion',async()=>{
+ const runtime=fakeRuntime(),launch=runtime.chromium.launchPersistentContext;let responseHandler,text='Cannot Sign In';
+ runtime.chromium.launchPersistentContext=async(...args)=>{const context=await launch(...args);context.newPage=async()=>({on:(e,h)=>{if(e==='response')responseHandler=h;},url:()=>'https://account.apple.com/sign-in',frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',evaluate:async()=>({}),locator:selector=>({count:async()=>selector==='[role="alert"], #errMsg, #alertInfo'?1:0,nth:()=>({isVisible:async()=>true,innerText:async()=>text})})}]});return context;};
+ const b=new CloakAdapter({executablePath:'C:/chrome.exe',loadModule:async()=>runtime}).create();await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});b.passwordSubmitted=true;
+ const send=errors=>responseHandler({url:()=>'https://idmsa.apple.com/appleauth/auth/signin/complete',request:()=>({method:()=> 'POST'}),status:()=>403,headers:()=>({'content-type':'application/json'}),json:async()=>({serviceErrors:errors})});
+ await send([{code:'-1',message:'Your Apple Account or password was incorrect.'}]);text='This Apple Account has been locked for security reasons.';
+ assert.equal((await b.evidence('me@example.test')).result,'APPLE_LOCKED');
+ text='Cannot Sign In';await send([{code:'-2',message:'Your Apple Account or password was incorrect.'},{code:'-3',message:'This Apple Account has been locked for security reasons.'}]);
+ assert.equal((await b.evidence('me@example.test')).result,'UNKNOWN');
+ await send([{code:'-4',message:'Unable to process request.'}]);assert.equal((await b.evidence('me@example.test')).result,'UNKNOWN');assert.deepEqual((await b.diagnostics()).serviceErrorCodes,[-4]);await b.close();
+});
 function fakeRuntime({blocked=false,delayed=0}={}){
   let options,routeHandler,websocketHandler,closed=0,gotos=[],lookups=0;
   const frame={url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({count:async()=>selector==='#account_name_text_field'?1:0,isVisible:async()=>++lookups>delayed})};
@@ -61,6 +92,13 @@ function fakeRuntime({blocked=false,delayed=0}={}){
   const chromium={launchPersistentContext:async(_,o)=>{options=o;return context;}};
   return {chromium,get lookups(){return lookups;},get options(){return options;},get closed(){return closed;},get gotos(){return gotos;},get routeHandler(){return routeHandler;},get websocketHandler(){return websocketHandler;}};
 }
+
+test('reads Apple modal body, not only the generic Cannot Sign In heading',async()=>{
+ const runtime=fakeRuntime(),launch=runtime.chromium.launchPersistentContext;
+ runtime.chromium.launchPersistentContext=async(...args)=>{const context=await launch(...args);context.newPage=async()=>({on:()=>{},url:()=>'https://account.apple.com/sign-in',frames:()=>[{url:()=>'https://idmsa.apple.com/appleauth/auth/authorize/signin',locator:selector=>({count:async()=>selector==='.idms-modal .app-dialog .body'?1:0,nth:()=>({isVisible:async()=>true,innerText:async()=>"This Apple Account has been locked for security reasons. You must unlock it before signing in."})})}]});return context;};
+ const b=new CloakAdapter({executablePath:'C:/chrome.exe',loadModule:async()=>runtime}).create();await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});
+ assert.equal((await b.evidence('me@example.test')).result,'APPLE_LOCKED');await b.close();
+});
 test('same proxied context probes official sign-in before submit; blocks foreign and challenge routes',async()=>{
   const runtime=fakeRuntime();const browser=new CloakAdapter({executablePath:'C:/existing/cloak.exe',modulePath:'playwright-core',loadModule:async()=>runtime}).create();
   await browser.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'u',password:'p'}});await browser.probe({});
@@ -80,6 +118,18 @@ test('credential POST foreign 307 is never automatically followed or fulfilled',
     fetch:async o=>{options=o;return {status:()=>307,headers:()=>({location:'https://foreign.test/steal'})};},
     abort:async()=>aborted++,fulfill:async()=>fulfilled++,continue:async()=>continued++});
   assert.equal(continued,0);assert.equal(options.maxRedirects,0);assert.equal(aborted,1);assert.equal(fulfilled,0);await b.close();
+});
+
+test('Apple basic password verification is allowed only once after the password click; OTP stays blocked',async()=>{
+ const runtime=fakeRuntime(),b=new CloakAdapter({executablePath:'C:/chrome.exe',loadModule:async()=>runtime}).create();
+ await b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});
+ let sent=0,aborted=0;const request=async(url,method='POST')=>runtime.routeHandler({request:()=>({url:()=>url,method:()=>method}),fetch:async()=>{sent++;return {status:()=>200};},fulfill:async()=>{},abort:async()=>{aborted++;}});
+ const target='https://idmsa.apple.com/appleauth/auth/verify/password';
+ await request(target);assert.equal(sent,0);
+ b.passwordSubmitted=true;await request(target);assert.equal(sent,1);
+ await request(target);await request(target,'GET');
+ for(const url of [target+'?extra=1','https://idmsa.apple.com.evil.test/appleauth/auth/verify/password','https://idmsa.apple.com/appleauth/auth/verify/trusteddevice/securitycode','https://idmsa.apple.com/appleauth/auth/verify/phone/securitycode'])await request(url);
+ assert.equal(sent,1);assert.equal(aborted,7);await b.close();
 });
 test('probe redirect off official origin and invalid proxy fail before credentials',async()=>{
   const runtime=fakeRuntime({blocked:true});const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime}).create();
@@ -101,6 +151,26 @@ test('failed launch cleans only its owned profile browser through the verified f
  const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>({chromium:{launchPersistentContext:async()=>{launches++;throw Error('LAUNCH_TIMEOUT')}}}),terminateBrowser:async profile=>{cleaned.push(profile)}}).create();
  await assert.rejects(b.open({profilePath:'C:/owned/profiles/one',proxy:{server:'http://proxy.test:80',username:'',password:''}}),/LAUNCH_TIMEOUT/);
  await b.close();await b.close();assert.equal(launches,1);assert.deepEqual(cleaned,['C:/owned/profiles/one']);
+});
+
+test('a settled failed launch can finish cleanup after fresh proof that its browser has exited',async()=>{
+ let probes=0;const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>({chromium:{launchPersistentContext:async()=>{throw Error('Target browser has been closed; exitCode=21; password-secret');}}}),terminateBrowser:async()=>{throw Error('termination could not inspect departing process');},verifyNoBrowser:async()=>{probes++;return true;}}).create();
+ await assert.rejects(b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}}));
+ await b.close();assert.equal(probes,1);
+ const d=await b.diagnostics();assert.equal(d.launch.failure,'EXITED');assert.equal(d.launch.exitCode,21);assert.equal(JSON.stringify(d).includes('password-secret'),false);
+});
+
+test('a late unresolved browser launch cannot be declared clean by an empty process snapshot',async()=>{
+ let resolve,probes=0;const b=new CloakAdapter({executablePath:'C:/cloak.exe',timeoutMs:5,loadModule:async()=>({chromium:{launchPersistentContext:()=>new Promise(r=>{resolve=r;})}}),terminateBrowser:async()=>{throw Error('not proven');},verifyNoBrowser:async()=>{probes++;return true;}}).create();
+ const opening=b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});const rejected=assert.rejects(opening);
+ while(!resolve)await new Promise(r=>setImmediate(r));
+ await assert.rejects(b.close());assert.equal(probes,0);resolve({close:async()=>{}});await rejected;
+});
+
+test('successful empty-process termination cannot release an unresolved future launch',async()=>{
+ let resolve;const b=new CloakAdapter({executablePath:'C:/cloak.exe',timeoutMs:5,loadModule:async()=>({chromium:{launchPersistentContext:()=>new Promise(r=>{resolve=r;})}}),terminateBrowser:async()=>true,verifyNoBrowser:async()=>true}).create();
+ const opening=b.open({profilePath:'C:/owned/profile',proxy:{server:'http://proxy.test:80',username:'',password:''}});const rejected=assert.rejects(opening);
+ while(!resolve)await new Promise(r=>setImmediate(r));await assert.rejects(b.close());resolve({close:async()=>{}});await rejected;
 });
 test('route probe waits for delayed official Apple iframe controls before revealing credentials',async()=>{
   const runtime=fakeRuntime({delayed:2});const b=new CloakAdapter({executablePath:'C:/cloak.exe',loadModule:async()=>runtime}).create();

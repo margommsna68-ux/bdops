@@ -16,10 +16,21 @@ export class ApiClient {
     let url;try{url=new URL(baseUrl);}catch{throw new ApiError('API_ORIGIN');}
     if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new ApiError('API_ORIGIN');
     if(!text(token)||/[\r\n]/.test(token))throw new ApiError('API_TOKEN');
-    this.origin=url.origin;this.token=token;this.transport=transport;this.timeoutMs=timeoutMs;
+    this.origin=url.origin;this.token=token;this.transport=transport;this.timeoutMs=timeoutMs;this.tail=Promise.resolve();
   }
   async call(action,body,{signal}={}){
     if(!ACTIONS.has(action))throw new ApiError('API_ACTION');
+    let serialized;try{serialized=JSON.stringify(body);}catch{throw new ApiError('API_PROTOCOL');}
+    // Five browsers can run in parallel, while the worker's short HTTP calls
+    // share one lane rather than contending on the same server-side worker row.
+    const queued=this.tail.then(()=>this.request(action,serialized,{signal}));this.tail=queued.catch(()=>{});
+    if(!signal)return queued;
+    if(signal.aborted)throw new ApiError('API_CANCELLED');
+    let listener;const cancelled=new Promise((_,reject)=>{listener=()=>reject(new ApiError('API_CANCELLED'));signal.addEventListener('abort',listener,{once:true});});
+    try{return await Promise.race([queued,cancelled]);}finally{signal.removeEventListener('abort',listener);}
+  }
+  async request(action,serialized,{signal}={}){
+    if(signal?.aborted)throw new ApiError('API_CANCELLED');
     const controller=new AbortController(),deadline=controller.signal;
     const timer=setTimeout(()=>controller.abort(),this.timeoutMs);
     const combined=signal?AbortSignal.any([signal,deadline]):deadline;
@@ -30,7 +41,7 @@ export class ApiClient {
       const target=`${this.origin}/api/apple-check/v1/${action}`;
       const response=await Promise.race([this.transport(target,{
         method:'POST',redirect:'error',headers:{Authorization:`Bearer ${this.token}`,'Content-Type':'application/json',Accept:'application/json'},
-        body:JSON.stringify(body),signal:combined,
+        body:serialized,signal:combined,
       }),interrupted]);
       if(response.url&&response.url!==target)throw new ApiError('API_ORIGIN');
       if(response.redirected||response.status>=300&&response.status<400)throw new ApiError('API_REDIRECT',response.status);

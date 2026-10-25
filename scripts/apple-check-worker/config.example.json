@@ -6,5 +6,7 @@
   "minFreeMemoryMb": 2048,
   "heartbeatMs": 10000,
   "pollMs": 15000,
-  "jobTimeoutMs": 180000
+  "jobTimeoutMs": 180000,
+  "maxSlots": 5,
+  "headless": true
 }

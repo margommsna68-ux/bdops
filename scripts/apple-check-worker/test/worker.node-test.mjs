@@ -4,6 +4,7 @@ import {mkdtemp,readFile} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';
 import {Store} from '../src/store.mjs';
 import {Worker} from '../src/worker.mjs';
+import {ApiError} from '../src/api.mjs';
 
 async function fixture(options={}){
   const store=await Store.open(await mkdtemp(path.join(os.tmpdir(),'apple-flow-')));
@@ -30,6 +31,32 @@ async function fixture(options={}){
   const worker=new Worker({store,vault,api,adapter,verifyNoBrowser:async()=>options.browserAlive!==true,gate:async()=>options.gate??'IDLE',heartbeatMs:5,jobTimeoutMs:500});
   return {store,worker,calls,vault,get submissions(){return submissions;},get secretCalls(){return secretCalls;}};
 }
+
+test('startup and cleanup failures keep separate bounded diagnostics without exception text',async()=>{
+ const f=await fixture();f.worker.heartbeatMs=1000;
+ f.worker.adapter={create:()=>({open:async()=>{throw new Error('password-secret https://secret.invalid');},close:async()=>{throw new Error('cleanup-secret');}})};
+ await f.worker.once();
+ const diagnostic=await f.store.read('last-diagnostic.json');
+ assert.equal(diagnostic.runtime.stage,'BROWSER');assert.equal(diagnostic.runtime.abortSource,'OPERATION_FAILED');assert.equal(diagnostic.runtime.cleanupStage,'CLOSE');
+ assert.equal(diagnostic.frames.length,0);assert.equal(JSON.stringify(diagnostic).includes('secret'),false);assert.equal(f.secretCalls,0);
+});
+
+test('a failed presence heartbeat does not abort a job with a freshly renewed lease',async()=>{
+ const f=await fixture({wait:true}),original=f.worker.api.call;let failed=false;
+ f.worker.api.call=async(a,b,o)=>{if(a==='heartbeat'&&f.submissions&& !failed){failed=true;throw new ApiError('API_REJECTED',500);}return original(a,b,o);};
+ const stop=new AbortController(),running=f.worker.once({signal:stop.signal});
+ try{const until=Date.now()+300;while(!failed&&Date.now()<until)await new Promise(r=>setTimeout(r,5));assert.equal(failed,true);await new Promise(r=>setTimeout(r,25));
+  assert.equal(f.calls.some(c=>c.action==='result'),false);assert.equal(f.secretCalls,1);
+ }finally{stop.abort();await running;}
+});
+
+test('route API failure is a connection error, not evidence that the selected proxy failed',async()=>{
+ const f=await fixture(),original=f.worker.api.call;
+ f.worker.api.call=async(a,b,o)=>{if(a==='route')throw new ApiError('API_REJECTED',500);return original(a,b,o);};
+ await f.worker.once();assert.equal(f.secretCalls,0);
+ assert.equal(f.calls.find(c=>c.action==='result').body.result,'NETWORK_ERROR');
+ const d=await f.store.read('last-diagnostic.json');assert.deepEqual(d.runtime.api,{action:'route',code:'API_REJECTED',status:500});
+});
 test('route probe and durable checkpoint precede the only secret delivery and browser submit',async()=>{
   const f=await fixture();assert.equal(await f.worker.once(),'DONE');assert.equal(f.submissions,1);assert.equal(f.secretCalls,1);
   const report=f.calls.find(x=>x.action==='result').body;

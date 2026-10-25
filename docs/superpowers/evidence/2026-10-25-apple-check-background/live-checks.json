@@ -1,0 +1,116 @@
+{
+  "jobs": 12,
+  "accounts": 3,
+  "credentialDeliveryCheckpoints": 5,
+  "allCleanupOk": true,
+  "results": [
+    {
+      "id": "cmvnqhg140002of56zy27wkw9",
+      "result": "UNKNOWN",
+      "reasonCode": "BROWSER_INTERRUPTED",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T11:43:26.218Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnrrrta000212pjiifc7v2a",
+      "result": "UNKNOWN",
+      "reasonCode": "RESPONSE_UNRECOGNIZED",
+      "cleanup": "OK",
+      "submittedAt": "2026-10-25T11:55:21.667Z",
+      "observedAt": "2026-10-25T11:56:12.116Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnrzs8p0002nmofy1wgvjw3",
+      "result": "PROXY_ERROR",
+      "reasonCode": "PROXY_ERROR",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:00:36.651Z",
+      "account": "selected-2"
+    },
+    {
+      "id": "cmvns59020002zira5a82qqb6",
+      "result": "UNKNOWN",
+      "reasonCode": "RESPONSE_UNRECOGNIZED",
+      "cleanup": "OK",
+      "submittedAt": "2026-10-25T12:05:10.117Z",
+      "observedAt": "2026-10-25T12:06:03.269Z",
+      "account": "selected-3"
+    },
+    {
+      "id": "cmvnsbjw200022mepj6e1qpia",
+      "result": "UNKNOWN",
+      "reasonCode": "RESPONSE_UNRECOGNIZED",
+      "cleanup": "OK",
+      "submittedAt": "2026-10-25T12:09:52.069Z",
+      "observedAt": "2026-10-25T12:10:44.972Z",
+      "account": "selected-2"
+    },
+    {
+      "id": "cmvnsi9d700022vbbwnqgjai7",
+      "result": "UNKNOWN",
+      "reasonCode": "BROWSER_INTERRUPTED",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:15:06.087Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnsrgl00002pdhgwuc3ztpo",
+      "result": "UNKNOWN",
+      "reasonCode": "BROWSER_INTERRUPTED",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:22:24.146Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnsw2u80002lg3bk8eo6jkq",
+      "result": "UNKNOWN",
+      "reasonCode": "UNKNOWN",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:25:28.581Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnt2c1y0002kcrnv4wqch2j",
+      "result": "UNKNOWN",
+      "reasonCode": "BROWSER_INTERRUPTED",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:30:30.936Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvnt91su0002atj1s6ab4kt9",
+      "result": "UNKNOWN",
+      "reasonCode": "RESPONSE_UNRECOGNIZED",
+      "cleanup": "OK",
+      "submittedAt": "2026-10-25T12:35:50.657Z",
+      "observedAt": "2026-10-25T12:36:41.674Z",
+      "account": "selected-1"
+    },
+    {
+      "id": "cmvntk18k0002lckr2o0mcr2u",
+      "result": "UNKNOWN",
+      "reasonCode": "UNKNOWN",
+      "cleanup": "OK",
+      "submittedAt": null,
+      "observedAt": "2026-10-25T12:43:58.625Z",
+      "account": "selected-2"
+    },
+    {
+      "id": "cmvntqk330002a74j9yuxzuwk",
+      "result": "APPLE_LOCKED",
+      "reasonCode": "APPLE_LOCKED",
+      "cleanup": "OK",
+      "submittedAt": "2026-10-25T12:49:11.316Z",
+      "observedAt": "2026-10-25T12:49:28.432Z",
+      "account": "selected-2"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,access,symlink,mkdir} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {Store} from '../src/store.mjs';import {WorkerPool} from '../src/worker.mjs';
+import {ApiError} from '../src/api.mjs';
 const waitUntil=async predicate=>{const end=Date.now()+3000;while(!predicate()){if(Date.now()>end)throw new Error('TEST_WAIT_TIMEOUT');await new Promise(resolve=>setTimeout(resolve,5));}};
 async function fixture({block=false,cleanupFail=false,resultFailSlot=0,gate=async()=> 'IDLE'}={}){
   const store=await Store.open(path.join(await mkdtemp(path.join(os.tmpdir(),'apple-pool-')),'state'));
@@ -48,6 +49,26 @@ test('shared stop aborts and drains all active jobs before releasing global lock
   await waitUntil(()=>f.held.size===5);stop.abort();assert.equal(await running,'STOPPED');assert.equal(f.active,0);
   assert.equal(f.calls.filter(c=>c.action==='result').length,5);await (await f.store.lock())();
   for(let slot=1;slot<=5;slot++)assert.equal(await (await f.store.slot(slot)).load(),null);
+});
+
+for(const failure of [new ApiError('API_TIMEOUT'),new ApiError('API_NETWORK'),new ApiError('API_REJECTED',500),new ApiError('API_REJECTED',429)]){
+ test(`an idle slot ${failure.code}/${failure.status} does not interrupt an admitted login`,async()=>{
+  let f,failed=false;
+  f=await fixture({block:true,gate:async({slot})=>{if(slot>1)await waitUntil(()=>f.held.has(1));return 'IDLE';}});
+  const original=f.api.call;f.api.call=async(a,b,o)=>{if(a==='heartbeat'&&f.held.has(1)&&!failed){failed=true;throw failure;}return original(a,b,o);};
+  const stop=new AbortController(),running=f.pool.once({signal:stop.signal});
+  try{await waitUntil(()=>failed);await new Promise(r=>setTimeout(r,60));assert.ok(f.active>=1);assert.equal(f.calls.some(c=>c.action==='result'&&c.body.jobId==='job-1'),false);
+   for(const release of f.held.values())release();await running;
+   assert.equal(f.calls.find(c=>c.action==='result'&&c.body.jobId==='job-1').body.result,'LOGIN_SUCCESS');
+  }finally{stop.abort();for(const release of f.held.values())release();await running.catch(()=>{});}
+ });
+}
+
+test('a forbidden idle heartbeat still drains all active login work',async()=>{
+ let f,failed=false;f=await fixture({block:true,gate:async({slot})=>{if(slot>1)await waitUntil(()=>f.held.has(1));return 'IDLE';}});
+ const original=f.api.call;f.api.call=async(a,b,o)=>{if(a==='heartbeat'&&f.held.has(1)&&!failed){failed=true;throw new ApiError('API_REJECTED',403);}return original(a,b,o);};
+ const result=await f.pool.once();assert.equal(result,'DISABLED');assert.equal(f.active,0);
+ assert.notEqual(f.calls.find(c=>c.action==='result'&&c.body.jobId==='job-1').body.result,'LOGIN_SUCCESS');
 });
 test('resource admissions reserve independently and never kill already admitted jobs',async()=>{
   const counts=[];const f=await fixture({block:true,gate:async({activeSlots})=>{counts.push(activeSlots);return activeSlots<2?'IDLE':'WAITING_RESOURCES';}});

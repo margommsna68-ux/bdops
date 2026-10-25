@@ -32,11 +32,11 @@ async function main(){
   process.env.DEBUG='';process.env.PWDEBUG='';
   const {config,token}=await loadConfig(options['--config']??path.join(root,'config.json'),root);
   const api=new ApiClient({baseUrl:config.baseUrl,token});
-  const adapter=new CloakAdapter({executablePath:config.executablePath,modulePath:config.modulePath});
+  const adapter=new CloakAdapter({executablePath:config.executablePath,modulePath:config.modulePath,headless:config.headless});
   const desktopProbe=cachedDesktopProbe();
   const worker=new WorkerPool({store,api,adapter,maxSlots:config.maxSlots,
-    gate:({activeSlots=0}={})=>resourceGate({desktopProbe,minFreeMemoryMb:config.minFreeMemoryMb+activeSlots*512}),
-    activeGate:()=>resourceGate({desktopProbe,checkMemory:false}),heartbeatMs:config.heartbeatMs,jobTimeoutMs:config.jobTimeoutMs});
+    gate:({activeSlots=0}={})=>resourceGate({desktopProbe,requireDesktop:!config.headless,minFreeMemoryMb:config.minFreeMemoryMb+activeSlots*512}),
+    activeGate:()=>resourceGate({desktopProbe,requireDesktop:!config.headless,checkMemory:false}),heartbeatMs:config.heartbeatMs,jobTimeoutMs:config.jobTimeoutMs});
   if(command==='cleanup-recovered')return {state:await worker.recoverCleanup()};
   const controller=new AbortController();const abort=()=>controller.abort();
   process.once('SIGINT',abort);process.once('SIGTERM',abort);
