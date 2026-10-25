@@ -1,0 +1,5 @@
+# Codex CLI financial capabilities — owner-authorized 25 October 2026
+
+Owner explicitly requested missing BALANCE_WRITE/PAYOUT/RECEIPT token scopes and corresponding user rights. Confirmed unique active AI codex token, user codexcli USER, GROUP MOON only, ALL existing server scope. Added EARN_BALANCE, EARN_PAYOUT, PAYPAL_RECEIPT_RECORD through shared setProxyCapabilities (journal/audit). Added only requested scopes to the existing token in a locked transaction after rechecking admin/member eligibility; OPS_TOKEN_SCOPES_UPDATE audit records before/after. Token secret/hash, expiry, project/IP limits, role, modules and server scope unchanged. No new token or credentials copied.
+
+Verified on Central moon-01 by existing mth-wow.ps1 me, using stored token without init: HTTP contract ok, codexcli, GROUP MOON, all seven effective scopes true. Financial WITHDRAWAL_PREPARE / WITHDRAWAL_STATUS / WITHDRAWAL_RECEIPT approvals remain required; inventory access policy unchanged, no PIN required. No balance/payout/receipt or real VM operation executed. No app source change or deployment.

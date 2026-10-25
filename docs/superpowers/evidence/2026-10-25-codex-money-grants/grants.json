@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "user": "codexcli",
+  "project": "GROUP MOON",
+  "role": "USER",
+  "capabilities": [
+    "VM_PROXY_FOR_OPS",
+    "EARN_BALANCE",
+    "EARN_PAYOUT",
+    "PAYPAL_RECEIPT_RECORD"
+  ],
+  "scopes": [
+    "READ",
+    "ACCOUNT_OPS",
+    "VM_OPS",
+    "PROXY_CREDENTIALS",
+    "BALANCE_WRITE",
+    "PAYOUT",
+    "RECEIPT"
+  ],
+  "effective": {
+    "READ": true,
+    "BALANCE_WRITE": true,
+    "PAYOUT": true,
+    "RECEIPT": true,
+    "VM_OPS": true,
+    "PROXY_CREDENTIALS": true,
+    "ACCOUNT_OPS": true
+  },
+  "existingTokenPreserved": true,
+  "serverScope": "ALL",
+  "allowedServerIds": [],
+  "tokenId": "cmvkz354m0009sl7fj0nib2e1",
+  "audit": true,
+  "at": "2026-10-25T07:08:17.309Z"
+}
