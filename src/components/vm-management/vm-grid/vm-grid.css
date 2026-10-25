@@ -345,3 +345,7 @@ html:not([data-theme]) .vm-chip.vm-ops-severe strong{color:#fff}
 /* Tiền / Rút (20/10/2026): badges never spill out of the column; the summary strip keeps its items apart. */
 .vm-payout .vm-money{display:inline-block;max-width:100%;vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vm-money-summary{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin:2px 0 6px}
+
+/* Selected VM payout queues: one clear card per immutable VM identity. */
+.vm-payout-bulk-row{padding:12px;border:1px solid var(--ds-border-strong);border-radius:8px;background:var(--ds-card);min-width:0;overflow-wrap:anywhere}
+.vm-payout-bulk-row .pm-input{min-width:0;max-width:100%}

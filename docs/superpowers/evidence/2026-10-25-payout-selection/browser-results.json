@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "checks": 11,
+  "results": [
+    "Synthetic local admin signs in",
+    "Selecting one VM exposes payout action",
+    "One selected VM opens editable payout form",
+    "Missing account has explicit reason in selected queue",
+    "Email selected by first VM is disabled for second",
+    "Two valid VMs saved, missing-account VM stays blocked",
+    "Bulk SENT confirms original prepared requests",
+    "Actual 6 and 12 received separately on two PP emails",
+    "Phone panel fits viewport",
+    "Phone has no page horizontal overflow",
+    "No JavaScript errors"
+  ],
+  "errors": []
+}

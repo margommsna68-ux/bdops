@@ -227,3 +227,15 @@ Cột **Tiền / Rút** thay cột "Rút tiền". Dòng trên là số dư đọ
 - **Migration** `20261020200000_earn_balance_checks`, chỉ thêm: bảng `EarnBalanceCheck`; cột `EarnPayoutRequest.submission` (mặc định SENT cho mọi yêu cầu cũ) / `submittedAt`; `PayPalEmail.holdEarnAppId` / `holdAt`.
 - **Test tiền tại VM:** `earn-money-rules.test.ts` (7), `earn-money.integration.test.ts` (8). Bằng chứng: `docs/superpowers/evidence/2026-10-20-earn-money/`.
 - **Phát hành tiền tại VM:** commit 563c642, backup 5bcf8d20, deploy 66f4c1ba; host chỉ đọc trước / sau giống hệt (host chưa có EarnApp).
+
+## Rút tiền khi chọn VM — 25/10/2026
+
+Tick một hoặc nhiều VM trong Server/VM → **Rút về PayPal** trên thanh thao tác. Không cần mở ô tiền từng máy.
+
+- **Yêu cầu rút**: chọn Mã PP / email nhận và số USD riêng cho từng VM; một email không chọn cho hai dòng. Mặc định Lưu chuẩn bị giữ email, chưa coi là đã gửi. Người có quyền ghi tiền có thể chọn đã gửi, nhưng phải xác nhận đã xem lịch sử EarnApp.
+- **Xác nhận đã gửi**: sau thao tác rút thật trên EarnApp, xác nhận các yêu cầu đang chuẩn bị/chưa rõ bằng cùng yêu cầu cũ, sau khi tick đã kiểm lịch sử. Không tạo yêu cầu mới.
+- **Ghi tiền về PP**: nhập số thực nhận và mã giao dịch riêng từng dòng. Chỉ áp dụng yêu cầu SENT còn chờ; nhận 6/10 thì sổ ghi 6, còn chờ 4. Tổng email và mã PP vẫn cùng sổ hiện có.
+- VM chưa có EarnApp hiện lý do; người có quyền gán có nút Gán tài khoản. Không tự tạo/gán tài khoản, không suy ra điều kiện rút từ tiền SDK.
+- Khung giữ định danh lúc mở (VM/lượt/EarnApp/revision; khoản nhận giữ request/revision). Nền tải lại không chuyển nháp sang máy/tài khoản mới. Nạp yêu cầu mới / bỏ nháp chưa gửi để lấy trạng thái mới khi cần.
+- Lưu từng dòng bằng các dịch vụ hiện có. Dòng thành công không gửi lại, dòng bị từ chối giữ lỗi/nội dung. Lệnh chưa rõ giữ key + nội dung trong bộ nhớ phiên tab, gắn user/dự án/VM/thao tác; Thử lại luôn gửi đúng lệnh đó, kể cả sau khi đóng mở khung. Đổi tài khoản/lượt không làm nó thành lệnh cho tài khoản mới. Đóng tab sẽ mất bộ nhớ phiên: cần đối chiếu lịch sử trước khi ghi mới.
+- Quyền cũ giữ nguyên: EARN_PAYOUT chuẩn bị/xác nhận, PAYPAL_RECEIPT_RECORD ghi khoản nhận, quản lý có quyền sổ theo quy tắc hiện hành. Đây là ghi nhận web, không điều khiển EarnApp hoặc chuyển tiền thật.

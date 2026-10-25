@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "twoRequests": true,
+    "distinctEmails": true,
+    "received6": true,
+    "received12": true,
+    "twoReceipts": true,
+    "total18": true,
+    "allSent": true,
+    "noMissingAccountRequest": true
+  },
+  "totals": [
+    {
+      "vm": "cmvngqcxm0003j7ad47l4t3qr",
+      "requested": "10.00",
+      "received": "6.00",
+      "email": "pp-2c1b36e3-1@example.invalid",
+      "sent": true
+    },
+    {
+      "vm": "cmvngqcxq0009j7adzf8yw204",
+      "requested": "12.00",
+      "received": "12.00",
+      "email": "pp-2c1b36e3-2@example.invalid",
+      "sent": true
+    }
+  ]
+}

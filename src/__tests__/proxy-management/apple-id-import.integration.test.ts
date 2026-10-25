@@ -29,7 +29,9 @@ it('imports the five-column Apple ID list: each field stored in its own place, l
     // The stock lists phone and which links exist, never the links; the journal holds digests only.
     const store=await readAccountStore(f.scope,db),l=store.logins.find(r=>r.email===a)!;
     expect(l).toMatchObject({type:'APPLE_ID',phone:'0123456789',links:{twoFa:true,sms:true},credentialsAvailable:true});expect(JSON.stringify(store)).not.toMatch(/example\.invalid\/2fa|Tok/);
-    const j=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,commandKey:key}});expect(JSON.stringify(j)).not.toMatch(/Pass:Word|Tok/);
+    const j=await db.operationJournal.findFirstOrThrow({where:{projectId:f.scope.projectId,commandKey:key}});
+    // Ciphertext may randomly contain three base64 characters "Tok". Check the actual unique secret instead.
+    expect(JSON.stringify(j)).not.toMatch(/Pass:Word/);expect(JSON.stringify(j)).not.toContain('Tok'+x);
     // A retry replays; a second import of the same list adds no copy, no cost; an existing account keeps its password / links / phone.
     expect(await commitStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text,batch,key},db)).toMatchObject({replay:true,applied:2});
     const again=await previewStockImport(f.scope,{kind:'LOGIN',loginType:'APPLE_ID',text:`${a}|other|https://example.invalid/new|https://example.invalid/new2|999`,batch},db);

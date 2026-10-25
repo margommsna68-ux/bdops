@@ -1,0 +1,8 @@
+  └ other shared chunks (total)          2.06 kB
+
+
+ƒ Middleware                             63.1 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

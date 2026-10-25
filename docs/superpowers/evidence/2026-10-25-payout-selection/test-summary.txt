@@ -1,0 +1,8 @@
+ ✓ src/__tests__/proxy-management/catalog.test.ts (1 test) 1ms
+ ✓ src/__tests__/proxy-management/seed-guard.test.ts (1 test) 1ms
+
+ Test Files  197 passed (197)
+      Tests  1058 passed (1058)
+   Start at  13:51:37
+   Duration  134.02s (transform 2.21s, setup 1.18s, import 22.75s, tests 93.19s, environment 13ms)
+

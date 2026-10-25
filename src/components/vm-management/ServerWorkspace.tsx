@@ -23,6 +23,7 @@ import {VmSidePanel} from './vm-grid/VmSidePanel';
 import {SdkStorePanel} from './vm-grid/SdkStore';
 import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels';
 import {AccountBulkPanel} from './vm-grid/AccountPanels';
+import {PayoutBulkPanel} from './vm-grid/PayoutBulkPanel';
 import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
 import {vmMoneySortKey,vmMoneyState,vmMoneySummary} from '@/lib/vm-money';
@@ -32,7 +33,7 @@ import {applyFilters,countWith,serverDistribution,vmIdLines,VIEW_LABEL,type Grid
 import {selectionKey,useSessionSelection} from '@/lib/session-selection';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
-type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|null;
+type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|'payout'|null;
 const CAUSE_TAB:Record<string,PanelTab>={HOLD:'proxy',TASK:'overview',INSTALLED:'proxy',SDK:'overview',SERVER:'overview'};
 const STATUS_ORDER={BLOCKED:0,REVIEW:1,MISSING:2,ASSIGNED:3,ARCHIVED:4} as const;
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
@@ -54,6 +55,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   useEffect(()=>{try{setPrefs(normalizePrefs(JSON.parse(localStorage.getItem(prefsKey(userId))||'null')));}catch{setPrefs(DEFAULT_PREFS);}},[userId]);
   const savePrefs=(p:GridPrefs)=>{setPrefs(p);try{localStorage.setItem(prefsKey(userId),JSON.stringify(p));}catch{/* private mode */}};
   const [blocked,setBlocked]=useState<Blocked[]>([]),[bulk,setBulk]=useState<BulkPanel>(null),[form,setForm]=useState<'CREATE'|'ADD'|null>(null),[manualCopy,setManualCopy]=useState<string|null>(null);
+  const [payoutBusy,setPayoutBusy]=useState(false);
   // A selection never survives a change of project, server, filter or search; page and sort keep it (ids, not positions). It is kept
   // in the tab's session (src/lib/session-selection.ts), so leaving the page (Thiết lập, another menu) and coming Back to the same
   // scope ticks the same rows again, minus rows no longer in it.
@@ -135,7 +137,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   // Kho SDK opens in this page (no sidebar entry): the table stays mounted underneath so its scroll position survives.
   const sdkUrl=url.sdk||SDK_STORE_DEFAULT,storeOpen=sdkUrl.open;
   const goStore=useCallback((patch:Partial<SdkStoreUrl>,mode:'push'|'replace'='push')=>{const base=(pending.current||readGridUrl(new URLSearchParams(window.location.search))).sdk||SDK_STORE_DEFAULT;go({sdk:{...base,...patch}},mode);},[go]);
-  const closePanel=useCallback(()=>{const id=new URLSearchParams(window.location.search).get('vm');setBulk(null);if(id){go({vm:null,tab:'overview',cause:null});requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-row="${id}"] .vm-id-button`)?.focus({preventScroll:true}));}},[go]);
+  const closePanel=useCallback(()=>{if(payoutBusy)return;const id=new URLSearchParams(window.location.search).get('vm');setBulk(null);if(id){go({vm:null,tab:'overview',cause:null});requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-row="${id}"] .vm-id-button`)?.focus({preventScroll:true}));}},[go,payoutBusy]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&(url.vm||bulk)&&!(e.target as HTMLElement)?.closest?.('.vm-cell-edit,.vm-popover,.vm-status-pop,[role="menu"],.pm-inline-edit,textarea,input,select')) closePanel();};window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key);},[url.vm,bulk,closePanel]);
   const copyProxies=trpc.vmManagement.copyProxies.useMutation(),copyBlocked=trpc.proxyManagement.copyBlockedEndpoints.useMutation(),updateServer=trpc.vmManagement.updateServer.useMutation(),updateVM=trpc.vmManagement.updateVM.useMutation();
   const deleteVMs=trpc.vmManagement.deleteVMs.useMutation(),restoreVMs=trpc.vmManagement.restoreVMs.useMutation(),deleteServer=trpc.vmManagement.deleteServer.useMutation(),restoreServer=trpc.vmManagement.restoreServer.useMutation(),undo=trpc.proxyManagement.undo.useMutation();
@@ -223,7 +225,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const toggle=(id:string,on:boolean)=>setSelected(prev=>{const n=new Set(prev);if(on)n.add(id);else n.delete(id);return n;});
   const togglePage=(on:boolean)=>setSelected(prev=>{const n=new Set(prev);paged.rows.forEach(v=>{if(on)n.add(v.id);else n.delete(v.id);});return n;});
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
-  const openBulk=(panel:BulkPanel,toggle=false)=>{if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
+  const openBulk=(panel:BulkPanel,toggle=false)=>{if(payoutBusy)return;if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
   useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
   const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','APPLY','TODO'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
   if(workspace.error)return <p role="alert" className="pm-error">{workspace.error.message}</p>;
@@ -276,6 +278,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
             {rights.assign&&<span className="vm-bulk-ops"><select aria-label="Tình trạng cho các VM đã chọn" className="pm-input w-auto" value={bulkOps} onChange={e=>setBulkOps(e.target.value as VmOpsStatus)}><option value="">Tình trạng…</option>{VM_OPS_STATUSES.map(st=><option key={st} value={st}>{VM_OPS[st].label}</option>)}</select><button className="pm-button pm-button-primary" disabled={!opsChanges||setOps.isLoading} onClick={()=>void applyBulkOps()}>{setOps.isLoading?'Đang lưu…':`Áp dụng ${opsChanges} VM`}</button></span>}
             {rights.assign&&<button className={'pm-button'+(bulk==='assign'?' pm-button-primary':'')} onClick={()=>openBulk('assign')}>Gán proxy</button>}
             {rights.accountAssign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
+            {(opsRights.writeMoney||opsRights.payout||opsRights.receipt)&&<button className={'pm-button'+(bulk==='payout'?' pm-button-primary':'')} disabled={payoutBusy||!board.data||!accounts.data} onClick={()=>openBulk('payout')}>Rút về PayPal</button>}
             {rights.manage&&<button className={'pm-button'+(bulk==='note'?' pm-button-primary':'')} onClick={()=>openBulk('note')}>Sửa ghi chú</button>}
             {rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void remove(selectedRows.map(v=>v.id))}><Trash2 size={15}/>Xoá</button>}</>}
             <button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}><X size={15}/>Bỏ chọn</button></span></div>}
@@ -289,7 +292,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>
-        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
+        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='payout'?`Rút về PayPal · ${selectedRows.length} VM`:bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" disabled={payoutBusy} onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
+          {bulk==='payout'&&<PayoutBulkPanel key={projectId+':'+userId} projectId={projectId} userId={userId} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={opsRights} onSaved={()=>Promise.all([board.refetch(),refresh()])} onAssign={rights.accountAssign?()=>openBulk('account'):undefined} onBusy={setPayoutBusy}/>}
           {bulk==='paste'&&<PasteTablePanel projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} onSaved={()=>void refresh()}/>}
           {bulk==='assign'&&<AssignProxyPanel projectId={projectId} vms={selectedRows} sourceConnected={rights.sourceConnected} onSaved={()=>void refresh()}/>}
           {bulk==='account'&&<AccountBulkPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "checks": 4,
+  "results": [
+    "light toolbar and remaining receipt form visible",
+    "dark toolbar and remaining receipt form visible",
+    "golden toolbar and remaining receipt form visible",
+    "bronze toolbar and remaining receipt form visible"
+  ],
+  "errors": []
+}
