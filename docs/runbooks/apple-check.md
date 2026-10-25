@@ -14,7 +14,7 @@ Mở Kho tài khoản → Apple ID. Cột **Tình trạng acc** hiện kết qu�
 Mỗi tài khoản đã bắt đầu đăng nhập phải nghỉ ít nhất 15 phút trước khi check lần nữa. Không có Check All. Không có thao tác VM hay rút tiền trong tính năng này.
 
 ## ADMIN
-Trong Kho tài khoản mở **Cấu hình Check Apple ID**. Chọn tên worker và nhóm proxy cho phép kiểm tra. TUT chỉ dùng proxy SELF, NEW chưa gán, không có giữ chỗ/lịch sử xung đột; không dùng proxy đang trên VM, BLOCKED/đã replace hoặc của nhóm khác. Custom group phải chứa proxy SELF đủ điều kiện. Không có proxy thì việc giữ trong hàng chờ.
+Trong Kho tài khoản mở **Cấu hình Check Apple ID**. Chọn tên worker và nhóm proxy cho phép kiểm tra. TUT là kho proxy SELF của chủ: chọn ngẫu nhiên proxy NEW chưa gán hoặc LIVE đang gán VM (liên kết cũ hoặc giữ DESIRED/INSTALLED đang hiệu lực). Được dùng đồng thời với VM theo quyết định chủ 25/10; không thay liên kết, trạng thái hay cấu hình VM. Bỏ qua BLOCKED/đã replace, vị trí UNCERTAIN, đã ẩn hoặc của nhóm khác. Custom group phải chứa proxy SELF đủ điều kiện. Không có proxy thì việc giữ trong hàng chờ.
 
 Lưu cấu hình phát token worker chỉ hiển thị một lần. Token này chỉ dùng các lệnh Check Apple ID, không phải token vận hành AI và không mở quyền ADMIN chung. Chuyển token vào file riêng của worker bằng kênh riêng; không gửi chat, không lưu vào bảng. Đổi token khi không còn phiên đang giữ tài nguyên. Tắt worker ngừng nhận việc/lấy bí mật, huỷ việc chưa nhận; việc đã chạy vẫn phải dọn phiên và báo kết quả.
 
@@ -39,4 +39,4 @@ Khi rollback web: tắt nhận việc và dọn/reconcile phiên worker trước
 ## Sửa Continue và chạy song song — 25/10
 Apple hiện cả ô email và mật khẩu trong bước đầu nhưng nút vẫn là Continue. Worker phải bấm Continue, đợi đúng nút Sign In rồi mới điền/gửi mật khẩu đúng một lần. Không dùng độ hiển thị ô mật khẩu làm bằng chứng đã sang bước. Thông báo chính thức #errMsg / #alertInfo được đọc cùng vùng role=alert; chỉ câu rõ nghĩa đã nhận diện mới kết luận Locked/sai thông tin.
 
-Proxy được chọn ngẫu nhiên từ nhóm NEW đủ điều kiện, chưa gán; mỗi lượt đang chạy giữ độc quyền một proxy, không dùng proxy VM hay lấy thẳng ngoài kho. Các profile có thư mục UUID và phiên cookie riêng. Chúng vẫn trên cùng Central; không phải các máy vật lý khác nhau. Kiểm thử trang trắng trên chính engine Cloak đã mở 5 profile đồng thời và đo được 5 mẫu fingerprint khác nhau, không đổi flags trình duyệt dùng chung.
+Proxy được chọn ngẫu nhiên từ kho đã chọn: NEW chưa gán hoặc LIVE đã gán VM; mỗi lượt Apple đang chạy giữ riêng một proxy. Giữ chỗ Apple chỉ ngăn hai lượt Apple dùng cùng proxy, VM tiếp tục dùng proxy bình thường. Không lấy ngoài kho. Các profile có thư mục UUID và phiên cookie riêng. Chúng vẫn trên cùng Central; không phải các máy vật lý khác nhau. Kiểm thử trang trắng trên chính engine Cloak đã mở 5 profile đồng thời và đo được 5 mẫu fingerprint khác nhau, không đổi flags trình duyệt dùng chung.

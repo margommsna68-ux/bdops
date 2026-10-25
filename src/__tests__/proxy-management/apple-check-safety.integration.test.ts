@@ -8,6 +8,7 @@ import {configureWorker, disableWorker, readChecks, requestCheck, requestCheckBa
 import {appleCheckRouter} from '@/server/routers/appleCheck';
 import {planAutoLinks} from '@/server/account-store/links';
 import {listAiAccounts} from '@/server/ops-api/ai-accounts';
+import {getEligibleInventory} from '@/server/proxy-management/repository';
 
 const accountPassword = 'Synthetic-Apple-Safety-Password';
 const proxyPassword = 'Synthetic-Apple-Safety-Proxy';
@@ -32,6 +33,8 @@ async function setup() {
     await db.appleCheckWorker.deleteMany({where:{projectId:f.scope.projectId}});
     await db.virtualMachine.updateMany({where:{server:{projectId:f.scope.projectId}},data:{proxyId:null}});
     await db.vMProxyAllocation.deleteMany({where:{projectId:f.scope.projectId}});
+    await db.vMConfiguration.deleteMany({where:{projectId:f.scope.projectId}});
+    await db.proxyStatusEvent.deleteMany({where:{projectId:f.scope.projectId}});
     await db.proxyIP.deleteMany({where:{projectId:f.scope.projectId}});
     await db.proxyGroup.deleteMany({where:{projectId:f.scope.projectId}});
     await db.proxyIdentity.deleteMany({where:{id:{in:identityIds}}});
@@ -78,6 +81,41 @@ async function setup() {
 }
 
 describe('Apple check backend and HTTP safety',()=>{
+  it.each(['legacy','installed'] as const)('checks a LIVE proxy already assigned to a VM via %s without altering its assignment',async(mode)=>{
+    const f=await setup();
+    await db.proxyIP.update({where:{id:f.proxy.id},data:{inventoryState:'LIVE',status:'IN_USE'}});
+    if(mode==='legacy')await db.virtualMachine.update({where:{id:f.vm.id},data:{proxyId:f.proxy.id}});
+    else{
+      const cfg=await db.vMConfiguration.create({data:{projectId:f.scope.projectId,vmId:f.vm.id,version:1,endpointId:f.proxy.id,status:'CONFIRMED',snapshotCipher:encrypt('{}'),configurationHash:'synthetic',createdById:f.scope.userId}});
+      await db.vMProxyAllocation.create({data:{projectId:f.scope.projectId,vmId:f.vm.id,configurationId:cfg.id,endpointId:f.proxy.id,allocationKey:f.proxy.inventoryKey!,role:'INSTALLED',createdById:f.scope.userId}});
+      await db.proxyStatusEvent.create({data:{projectId:f.scope.projectId,identityId:f.proxy.identityId!,endpointId:f.proxy.id,ip:f.proxy.host!,kind:'INSTALLED'}});
+    }
+    const before={vm:await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}}),proxy:await db.proxyIP.findUniqueOrThrow({where:{id:f.proxy.id}}),holds:await db.vMProxyAllocation.findMany({where:{projectId:f.scope.projectId}})};
+    expect(await getEligibleInventory(f.scope.projectId,db)).toEqual([]); // VM autofill remains unused-only.
+    const b=await f.lease();
+    expect((await f.http('route',b)).status).toBe(200);
+    expect(await f.call('heartbeat-job',b)).toMatchObject({cancelRequested:false});
+    expect((await f.http('submit',b)).status).toBe(200);
+    await f.result(b,'UNKNOWN');
+    expect(await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).toEqual(before.vm);
+    expect(await db.proxyIP.findUniqueOrThrow({where:{id:f.proxy.id}})).toMatchObject({inventoryState:'LIVE',status:'IN_USE',revision:before.proxy.revision,appleCheckLeaseJobId:null});
+    expect(await db.vMProxyAllocation.findMany({where:{projectId:f.scope.projectId}})).toEqual(before.holds);
+  });
+  it.each(['BLOCKED','DIE','REPLACED','VOID'] as const)('does not check a VM proxy with an unreversed %s event',async(kind)=>{
+    const f=await setup();await db.proxyIP.update({where:{id:f.proxy.id},data:{inventoryState:'LIVE',status:'IN_USE'}});
+    await db.virtualMachine.update({where:{id:f.vm.id},data:{proxyId:f.proxy.id}});
+    await db.proxyStatusEvent.create({data:{projectId:f.scope.projectId,identityId:f.proxy.identityId!,endpointId:f.proxy.id,ip:f.proxy.host!,kind}});
+    await f.ask();expect((await f.claim()).job).toBeNull();
+  });
+  it('stops an assigned LIVE proxy when it becomes BLOCKED during the check',async()=>{
+    const f=await setup();await db.proxyIP.update({where:{id:f.proxy.id},data:{inventoryState:'LIVE',status:'IN_USE'}});
+    await db.virtualMachine.update({where:{id:f.vm.id},data:{proxyId:f.proxy.id}});
+    const b=await f.lease();expect((await f.http('route',b)).status).toBe(200);
+    await db.proxyIP.update({where:{id:f.proxy.id},data:{inventoryState:'BLOCKED',status:'BLOCKED'}});
+    expect((await f.http('submit',b)).status).toBe(409);
+    expect(await f.call('heartbeat-job',b)).toMatchObject({cancelRequested:true});
+    expect((await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}})).proxyId).toBe(f.proxy.id);
+  });
   it.each(['ACTIVE','APPLE_LOCKED'] as const)('records submitted LIVE_2FA without changing account health %s or VM data',async(status)=>{
     const f=await setup();Object.assign(f.account,await db.gmailAccount.update({where:{id:f.account.id},data:{status}}));
     const account=await db.gmailAccount.findUniqueOrThrow({where:{id:f.account.id}}),vm=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vm.id}});

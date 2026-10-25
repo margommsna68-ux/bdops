@@ -154,7 +154,7 @@ function WorkerConfiguration({projectId,data,unavailable}:{projectId:string;data
   }
   return <details className="pm-surface p-3 text-sm space-y-3" onToggle={e=>{if(!e.currentTarget.open){setHeld(null);generation.current.value++;configure.reset();}}}>
     <summary className="cursor-pointer font-medium">Cấu hình Check Apple ID</summary>
-    <p className="pm-muted text-xs">Chỉ dùng proxy NEW chưa gán trong nhóm được chọn để kiểm tra; không dùng proxy đang gán cho VM. Có thể chọn TUT hoặc nhóm có sẵn. Đổi cấu hình sẽ thay token cũ.</p>
+    <p className="pm-muted text-xs">Chọn ngẫu nhiên proxy NEW hoặc LIVE đang gán VM trong kho được chọn. Proxy của VM vẫn giữ nguyên liên kết và trạng thái. Bỏ qua proxy BLOCKED, đã replace hoặc đang được lượt kiểm tra khác dùng. Đổi cấu hình sẽ thay token cũ.</p>
     {data.worker&&<p className="text-xs">{data.worker.name} · {data.worker.enabled?'Đã bật':'Đã tắt'} · {data.worker.online?'Trực tuyến':'Ngoại tuyến'} · {WORKER_STATE[data.worker.state]??'Đang cập nhật trạng thái'}{data.worker.lastSeenAt&&<> · <time dateTime={data.worker.lastSeenAt}>{when(data.worker.lastSeenAt)}</time></>}</p>}
     {!allowed&&<p className="pm-muted text-xs">Mở khoá phiên bằng 2FA / PIN để quản lý kết nối.</p>}
     <div className="flex flex-wrap gap-3"><label className="pm-label flex-1 min-w-0">Tên worker<input className="pm-input w-full" value={name} maxLength={80} disabled={busy||!!token} onChange={e=>setName(e.target.value)}/></label>

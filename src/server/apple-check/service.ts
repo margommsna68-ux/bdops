@@ -5,10 +5,11 @@ import {prisma} from '@/lib/prisma';
 import {decrypt} from '@/lib/encryption';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {withProxyTransaction} from '../proxy-management/transaction';
-import {decodeEndpoint,getEligibleInventory} from '../proxy-management/repository';
+import {decodeEndpoint} from '../proxy-management/repository';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {hasServerScope,scopedLoginWhere} from '../permissions/server-scope';
 import {assertStockWrite} from '../account-store/inventory';
+import {checkProxyIds} from './proxies';
 
 type DB=PrismaClient|Prisma.TransactionClient;
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -44,7 +45,7 @@ export async function readChecks(s:ActorScope,db:PrismaClient=prisma){
  const jobs=await db.appleCheckJob.findMany({where:{projectId:s.projectId,account:accountWhere},orderBy:{createdAt:'desc'},take:1000,include:{account:{select:{revision:true}}}});
  const w=canManage||canCheck?await db.appleCheckWorker.findUnique({where:{projectId:s.projectId}}):null;
  const customGroups=canManage?await db.proxyGroup.findMany({where:{projectId:s.projectId,archivedAt:null},select:{id:true,name:true},orderBy:{name:'asc'}}):[];
- const groups=canManage?[{id:'TUT',name:'TUT · proxy NEW chưa gán'},...customGroups]:[];
+ const groups=canManage?[{id:'TUT',name:'Kho proxy của anh (TUT) · NEW / đang gán VM'},...customGroups]:[];
  return {canManage,canCheck,groups,worker:w?{id:w.id,name:w.name,enabled:w.enabled,online:!!w.lastSeenAt&&Date.now()-w.lastSeenAt.getTime()<LEASE,state:w.state,proxyGroupId:w.proxyGroupId,lastSeenAt:w.lastSeenAt?.toISOString()??null}:null,jobs:jobs.map(j=>view(j,j.account.revision))};
 }
 
@@ -174,8 +175,7 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
   const j=await tx.appleCheckJob.findFirst({where:{projectId:w.projectId,phase:'QUEUED',cancelRequested:false},orderBy:{createdAt:'asc'}});if(!j)return {job:null};
   try{await accountForJob(tx,j);}catch{await tx.appleCheckJob.update({where:{id:j.id},data:{phase:'DONE',result:'CANCELLED',reasonCode:'CANCELLED',cleanup:'OK',activeAccountId:null}});return {job:null};}
   if(w.proxyGroupId!=='TUT'&&!await tx.proxyGroup.findFirst({where:{id:w.proxyGroupId,projectId:w.projectId,archivedAt:null}}))return {job:null};
-  const eligible=await getEligibleInventory(w.projectId,tx);
-  const ids=eligible.map(p=>p.endpointId);
+  const ids=await checkProxyIds(w.projectId,tx);
   const candidates=await tx.proxyIP.findMany({where:{id:{in:ids},groupId:w.proxyGroupId==='TUT'?null:w.proxyGroupId,appleCheckLeaseJobId:null},orderBy:{id:'asc'}});if(!candidates.length)return {job:null};
   const p=candidates[Math.floor(Math.random()*candidates.length)];
   await tx.$queryRaw`SELECT "id" FROM "ProxyIP" WHERE "id"=${p.id} FOR UPDATE`;
@@ -188,9 +188,9 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
  if(action==='route'||action==='submit'){
   const b=binding.parse(body),j=await own(tx,w.id,b);await accountForJob(tx,j);
   if(j.phase!=='CLAIMED')throw conflict('Thông tin đăng nhập đã được yêu cầu; không gửi lại');
-  const p=await tx.proxyIP.findFirst({where:{id:j.proxyId!,projectId:j.projectId,appleCheckLeaseJobId:j.id,revision:j.proxyRevision!,inventoryState:'NEW',retiredAt:null,groupId:w.proxyGroupId==='TUT'?null:w.proxyGroupId}});
+  const p=await tx.proxyIP.findFirst({where:{id:j.proxyId!,projectId:j.projectId,appleCheckLeaseJobId:j.id,revision:j.proxyRevision!,inventoryState:{in:['NEW','LIVE']},retiredAt:null,groupId:w.proxyGroupId==='TUT'?null:w.proxyGroupId}});
   if(!p)throw conflict('Proxy đã thay đổi; dừng kiểm tra');
-  if(!(await getEligibleInventory(j.projectId,tx,j.id)).some(e=>e.endpointId===p.id))throw conflict('Proxy không còn đủ điều kiện; dừng kiểm tra');
+  if(!(await checkProxyIds(j.projectId,tx,j.id,p.id)).includes(p.id))throw conflict('Proxy không còn đủ điều kiện; dừng kiểm tra');
   if(action==='route'){
    const decoded=decodeEndpoint(p);if(!decoded||decoded.format!=='FULL')throw bad('Proxy không đủ thông tin');
    await tx.appleCheckJob.update({where:{id:j.id},data:{routeReadAt:now()}});
@@ -206,8 +206,8 @@ export async function workerAction(token:string,action:string,body:unknown,db:Pr
  if(action==='heartbeat-job'){
   const b=binding.parse(body),j=await own(tx,w.id,b,false);
   let requesterAllowed=true;try{await accountForJob(tx,j);}catch{requesterAllowed=false;}
-  const reserved=await tx.proxyIP.findFirst({where:{id:j.proxyId??'',appleCheckLeaseJobId:j.id,revision:j.proxyRevision??-1,inventoryState:'NEW',retiredAt:null}});
-  const proxyAllowed=!!reserved&&(await getEligibleInventory(j.projectId,tx,j.id)).some(e=>e.endpointId===reserved.id);
+  const reserved=await tx.proxyIP.findFirst({where:{id:j.proxyId??'',appleCheckLeaseJobId:j.id,revision:j.proxyRevision??-1,inventoryState:{in:['NEW','LIVE']},retiredAt:null}});
+  const proxyAllowed=!!reserved&&(await checkProxyIds(j.projectId,tx,j.id,reserved.id)).includes(reserved.id);
   const cancelled=!proxyAllowed||!requesterAllowed||!permitted||j.cancelRequested||j.phase==='DONE'||!j.hardDeadline||j.hardDeadline.getTime()<=Date.now()||!j.expiresAt||j.expiresAt.getTime()<=Date.now();
   if(!cancelled)await tx.appleCheckJob.update({where:{id:j.id},data:{expiresAt:new Date(Math.min(Date.now()+LEASE,j.hardDeadline!.getTime()))}});
   return {cancelRequested:cancelled};
