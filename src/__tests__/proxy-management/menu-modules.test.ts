@@ -7,7 +7,7 @@ const labels=(items:NavItem[])=>items.filter((i):i is NavLinkItem=>!('type' in i
 describe('MoneyToHome menu',()=>{
   it('has one Kho proxy and one Kho tài khoản; Việc cài proxy, Giao việc and the separate PayPal item are gone',()=>{
     const menu=visibleMenu(personalItems(true),{role:'ADMIN',modules:[]});
-    expect(labels(menu)).toEqual(['Tổng quan','Kho tài khoản','Kho proxy','Server / VM','Nhận USDT về team','Tiền vào PayPal','Rút / chuyển gốc','Chi phí','Lợi nhuận','Lịch sử thao tác','Phê duyệt','Nhân viên','Dự án','Thiết lập']);
+    expect(labels(menu)).toEqual(['Tổng quan','Kho tài khoản','Kho proxy','Server / VM','Rút EarnApp → PayPal','Nhận USDT về team','Tiền vào PayPal','Rút / chuyển gốc','Chi phí','Lợi nhuận','Lịch sử thao tác','Phê duyệt','Nhân viên','Dự án','Thiết lập']);
     expect(hrefs(menu)).not.toContain('/paypals');expect(hrefs(menu)).not.toContain('/vm-tasks');expect(hrefs(menu)).not.toContain('/work');
   });
   it('switching a hidden module on brings its item back (central config, no settings screen)',()=>{

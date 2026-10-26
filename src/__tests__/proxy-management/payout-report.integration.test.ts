@@ -1,0 +1,155 @@
+import {afterAll,it,expect} from 'vitest';
+import {randomUUID} from 'node:crypto';
+import type {Prisma} from '@prisma/client';
+import {businessDB as db,businessFixture} from './business-fixture';
+import {readPayoutReport} from '@/server/vm-ops/payout-report';
+
+afterAll(()=>db.$disconnect());
+async function fixture(){
+ const f=await businessFixture(),projectId=f.scope.projectId;
+ const pp=await db.payPalAccount.create({data:{projectId,code:'PP-report',primaryEmail:randomUUID()+'@fixture.invalid'}});
+ async function request(change:Partial<Prisma.EarnPayoutRequestUncheckedCreateInput>={}){
+  const login=await db.gmailAccount.create({data:{projectId,email:randomUUID()+'@fixture.invalid'}});
+  const ea=await db.earnAppAccount.create({data:{projectId,loginId:login.id}});
+  const email=await db.payPalEmail.create({data:{projectId,paypalId:pp.id,email:randomUUID()+'@fixture.invalid'}});
+  return db.earnPayoutRequest.create({data:{projectId,earnAppId:ea.id,vmId:f.vm.id,cycle:1,paypalId:pp.id,paypalEmailId:email.id,
+   amount:'10',requestedAt:new Date('2026-10-26T12:00:00Z'),requestedById:f.scope.userId,submittedAt:new Date('2026-10-26T12:01:00Z'),...change}});
+ }
+ async function receipt(requestId:string,change:Partial<Prisma.FundTransactionUncheckedCreateInput>={}){
+  return db.fundTransaction.create({data:{projectId,paypalId:pp.id,payoutRequestId:requestId,date:new Date('2026-10-27T00:00:00+07:00'),
+   amount:'3',currency:'USD',transactionId:randomUUID(),confirmed:true,...change}});
+ }
+ const cleanup=async()=>{
+  await f.cleanup();
+  expect(await db.earnPayoutRequest.count({where:{projectId}})).toBe(0);
+  expect(await db.fundTransaction.count({where:{projectId}})).toBe(0);
+  expect(await db.project.findUnique({where:{id:projectId}})).toBeNull();
+ };
+ return {...f,pp,request,receipt,cleanup};
+}
+
+it('reports partial receipts with void/failed/pending precedence and sums only actual confirmed money',async()=>{
+ const f=await fixture();try{
+  const r=await f.request(),actual=await f.receipt(r.id),voided=await f.receipt(r.id,{amount:'9',voidedAt:new Date(),failed:true,confirmed:false}),
+   failed=await f.receipt(r.id,{amount:'8',failed:true,confirmed:false}),pending=await f.receipt(r.id,{amount:'2',confirmed:false});
+  const report=await readPayoutReport(f.scope,{},db);
+  expect(report.rows).toHaveLength(1);expect(report.rows[0]).toMatchObject({id:r.id,vmId:f.vm.id,serverId:f.server.id,server:f.server.code,vm:f.vm.code,
+   cycle:1,paypalId:f.pp.id,paypal:f.pp.code,amount:'10.00',currency:'USD',received:'3.00',remaining:'7.00',shortfall:'0.00',status:'PARTIAL'});
+  expect(report.rows[0].receipts).toEqual(expect.arrayContaining([
+   expect.objectContaining({id:actual.id,status:'CONFIRMED',transactionId:actual.transactionId}),expect.objectContaining({id:voided.id,status:'VOIDED'}),
+   expect.objectContaining({id:failed.id,status:'FAILED'}),expect.objectContaining({id:pending.id,status:'PENDING'}),
+  ]));
+  expect(report.summary).toEqual([{currency:'USD',prepared:'0.00',sent:'10.00',waiting:'7.00',received:'3.00',unknown:'0.00'}]);
+  expect(Number.isFinite(Date.parse(report.updatedAt))).toBe(true);
+ }finally{await f.cleanup();}
+});
+
+it('keeps closed account, recreated/deleted VM history on request.vmId rather than current account position',async()=>{
+ const f=await fixture();try{
+  const r=await f.request({cycle:2}),otherServer=await db.server.create({data:{projectId:f.scope.projectId,code:'CURRENT'}});
+  const moved=await db.virtualMachine.create({data:{serverId:otherServer.id,code:'CURRENT_VM',managed:true}});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:moved.id,closedAt:new Date()}});
+  await db.virtualMachine.update({where:{id:f.vm.id},data:{archivedAt:new Date()}});
+  await db.vmOperation.create({data:{projectId:f.scope.projectId,vmId:f.vm.id,cycle:3,status:'DELETED'}});
+  const report=await readPayoutReport(f.scope,{serverId:f.server.id},db);
+  expect(report.rows).toHaveLength(1);expect(report.rows[0]).toMatchObject({id:r.id,vmId:f.vm.id,serverId:f.server.id,vm:f.vm.code,cycle:2});
+  expect((await readPayoutReport(f.scope,{serverId:otherServer.id},db)).total).toBe(0);
+ }finally{await f.cleanup();}
+});
+
+it('derives submission/phase states and keeps each currency separate including shortfall settlement and review',async()=>{
+ const f=await fixture();try{
+  const preparing=await f.request({submission:'PREPARING',submittedAt:null}),unknown=await f.request({submission:'UNKNOWN',submittedAt:null}),
+   waiting=await f.request(),paid=await f.request({settledAt:new Date(),shortfall:'2'}),failed=await f.request({state:'FAILED'}),
+   cancelled=await f.request({state:'CANCELLED'}),review=await f.request({consumedAt:new Date()}),vnd=await f.request({currency:'VND',amount:'5'});
+  await f.receipt(paid.id,{amount:'8'});await f.receipt(review.id,{amount:'11'});await f.receipt(vnd.id,{currency:'VND',amount:'5'});
+  // Money that really arrived remains received even if the request was later marked failed.
+  await f.receipt(failed.id,{amount:'1'});
+  const report=await readPayoutReport(f.scope,{},db),byId=new Map(report.rows.map(r=>[r.id,r]));
+  for(const [r,status] of [[preparing,'PREPARING'],[unknown,'UNKNOWN'],[waiting,'WAITING'],[paid,'RECEIVED'],[failed,'FAILED'],[cancelled,'CANCELLED'],[review,'REVIEW'],[vnd,'RECEIVED']] as const)
+   expect(byId.get(r.id)?.status).toBe(status);
+  expect(byId.get(paid.id)).toMatchObject({shortfall:'2.00',remaining:'0.00'});
+  expect(byId.get(preparing.id)?.remaining).toBe('0.00');
+  expect(byId.get(unknown.id)?.remaining).toBe('0.00');
+  expect(report.summary).toEqual([
+   {currency:'USD',prepared:'10.00',sent:'50.00',waiting:'10.00',received:'20.00',unknown:'10.00'},
+   {currency:'VND',prepared:'0.00',sent:'5.00',waiting:'0.00',received:'5.00',unknown:'0.00'},
+  ]);
+  const partial=await f.request({consumedAt:new Date()});await f.receipt(partial.id,{amount:'1'});
+  expect((await readPayoutReport(f.scope,{status:'REVIEW'},db)).rows.map(r=>r.id)).toContain(partial.id);
+ }finally{await f.cleanup();}
+});
+
+it('filters before 50-row paging and totals; sorts timestamp/create/id stably without truncating history',async()=>{
+ const f=await fixture();try{
+  const at=new Date('2026-10-26T12:00:00Z'),created=new Date('2026-10-26T12:01:00Z');
+  for(let i=0;i<53;i++)await f.request({id:`${f.scope.projectId}-${String(i).padStart(3,'0')}`,requestedAt:at,createdAt:created,reference:'needle'});
+  await f.request({requestedAt:new Date('2026-10-25T16:59:59.999Z'),reference:'needle'});
+  await f.request({requestedAt:new Date('2026-10-26T17:00:00.000Z'),reference:'needle'});
+  const input={from:'2026-10-26',to:'2026-10-26',q:' NeEdLe ',paypalId:f.pp.id,status:'WAITING'};
+  const first=await readPayoutReport(f.scope,input,db),second=await readPayoutReport(f.scope,{...input,page:2},db);
+  expect(first).toMatchObject({total:53,page:1,pages:2});expect(first.rows).toHaveLength(50);expect(second.rows).toHaveLength(3);
+  expect(first.rows[0].id).toBe(`${f.scope.projectId}-052`);expect(second.rows.at(-1)?.id).toBe(`${f.scope.projectId}-000`);
+  expect(first.summary).toEqual([{currency:'USD',prepared:'0.00',sent:'530.00',waiting:'530.00',received:'0.00',unknown:'0.00'}]);
+  expect(second.summary).toEqual(first.summary);
+  const beyond=await readPayoutReport(f.scope,{...input,page:999},db);
+  expect(beyond).toMatchObject({page:2,pages:2,total:53});expect(beyond.rows).toEqual(second.rows);
+  // Removing the partial last page must return the new last page, not a blank.
+  await db.earnPayoutRequest.deleteMany({where:{id:{in:second.rows.map(r=>r.id)},projectId:f.scope.projectId}});
+  const shrunk=await readPayoutReport(f.scope,{...input,page:2},db);
+  expect(shrunk).toMatchObject({page:1,pages:1,total:50});expect(shrunk.rows).toHaveLength(50);
+  const empty=await readPayoutReport(f.scope,{...input,q:'no-matching-request',page:999},db);
+  expect(empty).toMatchObject({page:1,pages:1,total:0,rows:[],summary:[]});
+ }finally{await f.cleanup();}
+});
+
+it('totals confirmed receipts in their own currency even on mismatched, failed or cancelled requests',async()=>{
+ const f=await fixture();try{
+  // The fixture ledger permits USD/VND: use a real supported mismatch, no constraint bypass.
+  const review=await f.request(),failed=await f.request({state:'FAILED'}),cancelled=await f.request({state:'CANCELLED'});
+  await f.receipt(review.id,{amount:'4.25',currency:'VND'});
+  await f.receipt(failed.id,{amount:'2.10',currency:'VND'});
+  await f.receipt(cancelled.id,{amount:'1.05',currency:'VND'});
+  await f.receipt(review.id,{amount:'99',currency:'VND',confirmed:false});
+  await f.receipt(review.id,{amount:'98',currency:'VND',confirmed:false,failed:true});
+  await f.receipt(review.id,{amount:'97',currency:'VND',voidedAt:new Date()});
+  const report=await readPayoutReport(f.scope,{},db);
+  expect(report.rows.find(r=>r.id===review.id)).toMatchObject({status:'REVIEW',currency:'USD',received:'0.00'});
+  expect(report.rows.find(r=>r.id===failed.id)?.status).toBe('FAILED');
+  expect(report.rows.find(r=>r.id===cancelled.id)?.status).toBe('CANCELLED');
+  expect(report.summary).toEqual([
+   {currency:'USD',prepared:'0.00',sent:'30.00',waiting:'0.00',received:'0.00',unknown:'0.00'},
+   {currency:'VND',prepared:'0.00',sent:'0.00',waiting:'0.00',received:'7.40',unknown:'0.00'},
+  ]);
+  expect((await readPayoutReport(f.scope,{status:'REVIEW'},db)).summary.find(r=>r.currency==='VND')?.received).toBe('4.25');
+ }finally{await f.cleanup();}
+});
+
+it('searches server, VM, login, PayPal, receiving email and reference; validates filters and calendar days',async()=>{
+ const f=await fixture();try{
+  const r=await f.request({reference:'search-reference'}),ea=await db.earnAppAccount.findUniqueOrThrow({where:{id:r.earnAppId},include:{login:true}}),email=await db.payPalEmail.findUniqueOrThrow({where:{id:r.paypalEmailId}});
+  for(const q of [f.server.code,f.vm.code,ea.login.email,f.pp.code,email.email,'search-reference'])expect((await readPayoutReport(f.scope,{q},db)).total).toBe(1);
+  expect((await readPayoutReport(f.scope,{q:'not-present'},db)).total).toBe(0);
+  for(const input of [{from:'2026-02-30'},{to:'not-a-date'},{from:'2026-10-27',to:'2026-10-26'},{status:'SENT'},{page:0},{page:1.5}])
+   await expect(readPayoutReport(f.scope,input,db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ }finally{await f.cleanup();}
+});
+
+it('reloads rights, denies server-scoped money, and isolates rows, totals and options by project',async()=>{
+ const f=await fixture(),other=await fixture();try{
+  await f.request();await other.request();
+  await expect(readPayoutReport({...f.worker,role:'ADMIN',capabilities:['EARN_PAYOUT']},{},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  const member={userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}};
+  await db.projectMember.update({where:member,data:{capabilities:['EARN_PAYOUT']}});
+  expect((await readPayoutReport(f.worker,{},db)).total).toBe(1);
+  await db.projectMember.update({where:member,data:{serverScope:'SELECTED',allowedServerIds:[f.server.id]}});
+  await expect(readPayoutReport(f.worker,{},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  const report=await readPayoutReport(f.scope,{},db);
+  expect(report.servers).toEqual([{id:f.server.id,code:f.server.code}]);expect(report.paypals).toEqual([{id:f.pp.id,code:f.pp.code}]);
+  expect((await readPayoutReport(f.scope,{paypalId:other.pp.id},db)).total).toBe(0);
+  expect((await readPayoutReport(f.scope,{serverId:other.server.id},db)).total).toBe(0);
+  expect(report.total).toBe(1);expect(report.summary[0].sent).toBe('10.00');
+  await db.projectMember.update({where:member,data:{serverScope:'ALL',capabilities:['PAYPAL_RECEIPT_RECORD'],allowedModules:[]}});
+  await expect(readPayoutReport(f.worker,{},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+ }finally{await f.cleanup();await other.cleanup();}
+});

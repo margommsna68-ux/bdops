@@ -252,3 +252,15 @@ Tick một hoặc nhiều VM trong Server/VM → **Rút về PayPal** trên than
 - Khung giữ định danh lúc mở (VM/lượt/EarnApp/revision; khoản nhận giữ request/revision). Nền tải lại không chuyển nháp sang máy/tài khoản mới. Nạp yêu cầu mới / bỏ nháp chưa gửi để lấy trạng thái mới khi cần.
 - Lưu từng dòng bằng các dịch vụ hiện có. Dòng thành công không gửi lại, dòng bị từ chối giữ lỗi/nội dung. Lệnh chưa rõ giữ key + nội dung trong bộ nhớ phiên tab, gắn user/dự án/VM/thao tác; Thử lại luôn gửi đúng lệnh đó, kể cả sau khi đóng mở khung. Đổi tài khoản/lượt không làm nó thành lệnh cho tài khoản mới. Đóng tab sẽ mất bộ nhớ phiên: cần đối chiếu lịch sử trước khi ghi mới.
 - Quyền cũ giữ nguyên: EARN_PAYOUT chuẩn bị/xác nhận, PAYPAL_RECEIPT_RECORD ghi khoản nhận, quản lý có quyền sổ theo quy tắc hiện hành. Đây là ghi nhận web, không điều khiển EarnApp hoặc chuyển tiền thật.
+
+
+## Quản lý toàn bộ lượt rút EarnApp → PayPal — 26/10/2026
+
+Mở **Tài chính → Rút EarnApp → PayPal** (`/earnapp-withdrawals`), hoặc **Lịch sử rút** trên đầu bảng Server/VM. Trang Tiền vào PayPal cũng có lối mở. Đây là báo cáo đọc dữ liệu đã ghi; tạo/xác nhận yêu cầu và ghi thực nhận vẫn dùng các thao tác VM/sổ hiện có.
+
+- Một dòng là một yêu cầu rút: ngày yêu cầu, server/VM, lượt, mã PP/email nhận, số yêu cầu, thực nhận, còn chờ và trạng thái. Bao gồm tài khoản đã đóng và VM đã tạo lại/ẩn; luôn dùng VM/lượt trên chính yêu cầu cũ.
+- Lọc server, mã PP, trạng thái, ngày yêu cầu từ–đến; tìm theo server/VM, tài khoản đăng nhập, PP/email hoặc tham chiếu. Bộ lọc nằm trong URL, Back/tải lại giữ nguyên; lỗi bộ lọc có nút Xoá bộ lọc.
+- Tổng áp dụng mọi kết quả trước phân trang (50 dòng), mỗi đồng tiền riêng. Đã gửi là mọi yêu cầu có submission SENT, kể cả về sau thất bại/huỷ: đó là lịch sử gửi, không phải thu nhập. Chuẩn bị và chưa rõ không tính đã gửi hoặc chờ về. Còn chờ chỉ là phần còn thiếu của SENT/WAITING. Thực nhận chỉ cộng giao dịch confirmed, không failed/void, theo đúng đồng tiền của giao dịch, kể cả tiền về cho yêu cầu thất bại/cũ. Không tự đổi tỷ giá.
+- Chi tiết có tài khoản EarnApp, giờ đã gửi, tham chiếu, chốt thiếu và từng khoản nhận/mã giao dịch; khoản chờ/không về/thu hồi vẫn hiện để đối chiếu nhưng không tính thực nhận. Bấm tên VM mở lịch sử đúng VM.
+- Dùng chung payoutRights.requestMoney; không mở rộng quyền tiền hay phạm vi server. Người thiếu quyền bị từ chối ở endpoint và không thấy số cache. Không trả mật khẩu, link 2FA hay proxy.
+- Trang tự tải lại 30 giây; bốn theme, bảng desktop và thẻ trên điện thoại. Không migration; không thay yêu cầu hoặc sổ tiền để dựng báo cáo.
