@@ -17,6 +17,30 @@ const incidents={observe:()=>[],markMaintenance(){},clearMaintenance(){},forgetM
 function setup(extra={}){let c=clock(),calls=[];const m=createEarnAppMonitor({serverId:'host1',incidents,canaryPolicyVersion:1,listVms:async()=>[row(1),row(2)],readCore:async r=>{calls.push(r.uuid);return good();},...c,...extra});return {c,m,calls};}
 test('canary target 600; independent all-state inventory while timed-out guest remains awaited',async()=>{let resolve;let lists=0;const {c,m}=setup({listVms:async()=>{lists++;return [row(1),row(2,'PAUSED'),row(3,'ABORTED'),row(4,'POWERED_OFF'),row(5,'STARTING'),row(6,'STOPPING')];},readCore:()=>new Promise(r=>{resolve=r;})});m.start();await c.advance(61000);assert.equal(m.status().targetSec,600);assert.ok(lists>=2);assert.equal(m.status().health.samples.length,6);assert.equal(m.status().probeInFlight,true);let stopped=false;const p=m.stop().then(()=>stopped=true);await flush();assert.equal(stopped,false);resolve(good());await p;assert.equal(m.status().probeInFlight,false);});
 test('first pass precedes bounded rechecks and each VM waits until due',async()=>{let calls=[];const {c,m}=setup({listVms:async()=>Array.from({length:4},(_,i)=>row(i+1)),readCore:async r=>{calls.push(r.uuid);return good(0);}});m.start();await c.advance(460000);assert.deepEqual(calls.slice(0,4),[1,2,3,4].map(uuid));await c.advance(100000);assert.ok(calls.length<=8);await m.stop();});
+test('staggered due times preserve every running VM through the second and third rounds',async()=>{
+ const reads=[];let currentClock;
+ const {c,m}=setup({listVms:async()=>Array.from({length:4},(_,i)=>row(i+1)),readCore:async r=>{reads.push({uuid:r.uuid,at:currentClock.now()});return good();}});currentClock=c;
+ m.start();await c.advance(1810000);
+ for(const id of [1,2,3,4].map(uuid)){
+  const times=reads.filter(r=>r.uuid===id).map(r=>r.at);
+  assert.ok(times.length>=3,`${id} missed later rounds: ${JSON.stringify(times)}`);
+  for(let i=1;i<times.length;i++){assert.ok(times[i]-times[i-1]>=600000,'never probe before due');assert.ok(times[i]-times[i-1]<=601000,'do not starve a later VM behind the first due target');}
+ }
+ await m.stop();
+});
+test('later healthy VMs remain covered while a failed app has bounded rechecks and slow native reads',async()=>{
+ const reads=[];let currentClock;
+ const {c,m}=setup({listVms:async()=>Array.from({length:4},(_,i)=>row(i+1)),readCore:r=>{
+  reads.push({uuid:r.uuid,at:currentClock.now()});
+  return new Promise(resolve=>currentClock.setTimer(()=>resolve(good(r.uuid===uuid(1)?0:1)),2000));
+ }});currentClock=c;m.start();await c.advance(1900000);
+ assert.deepEqual(reads.slice(0,4).map(r=>r.uuid),[1,2,3,4].map(uuid),'first pass precedes retries');
+ for(const id of [2,3,4].map(uuid)){
+  const times=reads.filter(r=>r.uuid===id).map(r=>r.at);assert.ok(times.length>=3,'healthy later VM is still covered');
+  for(let i=1;i<times.length;i++){assert.ok(times[i]-times[i-1]>=600000);assert.ok(times[i]-times[i-1]<750000,'bounded recheck must not cause another 600-second starvation');}
+ }
+ await m.stop();
+});
 test('slow probe does not add 50 percent rest; reentrant step cannot overlap guest',async()=>{let resolve,started=[];const {c,m}=setup({listVms:async()=>Array.from({length:100},(_,i)=>row(i+1)),readCore:r=>{started.push(r.uuid);return new Promise(r=>{resolve=r;});}});m.start();await c.advance(1001);await m.step();assert.equal(started.length,1);await c.advance(10000);assert.equal(started.length,1);resolve(good());await flush();await c.advance(1001);assert.equal(started.length,2);resolve(good());await flush();await m.stop();});
 test('native evidence is UUID/time bound, detached, unknown network/service/applied proxy, SDK zero TCP not dead',async()=>{const {c,m}=setup();m.start();await c.advance(1001);let h=m.status().health;assert.equal(h.samples[0].uuid,uuid(1));assert.equal(h.samples[0].app.sdk,'RUNNING');assert.equal(h.samples[0].app.connection,'NOT_OBSERVED');assert.equal(h.samples[0].network.https,'UNKNOWN');assert.equal(h.samples[0].network.ncsi,'UNKNOWN');assert.equal(h.samples[0].service,'UNKNOWN');assert.equal(h.samples[0].appliedProxy,'UNKNOWN');assert.ok(h.samples[0].app.observedAt);h.samples[0].app.sdk='STOPPED';assert.equal(m.status().health.samples[0].app.sdk,'RUNNING');await m.stop();});
 test('auth failure is response unknown app, never absent GA or BLOCKED',async()=>{const {c,m}=setup({readCore:async()=>({ok:false,reason:'GUEST_AUTH_FAILED'})});m.start();await c.advance(1001);let s=m.status().health.samples[0];assert.equal(s.guest.response,'AUTH_FAILED');assert.equal(s.guest.additions,'UNKNOWN');assert.equal(s.app.earnApp,'UNKNOWN');assert.ok(!JSON.stringify(s).includes('BLOCKED'));await m.stop();});

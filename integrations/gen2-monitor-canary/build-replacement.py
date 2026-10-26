@@ -66,6 +66,11 @@ swap('    if (recheck) delay =', '''    if (canary) {
       if (!queue.length && rechecks.size) delay = Math.min(delay,Math.max(o.minGapMs,Math.min(...[...rechecks.values()].map(r=>r.dueAt))-now()));
     }
     if (recheck) delay =''')
+swap('    const slotMs = targetMs() / Math.max(1, cycle ? cycle.targets : 1);', '''    // Later rounds may contain only the first individually due VM. Budget
+    // against the whole running host, otherwise that single-target subset
+    // sleeps for 600 seconds and starves the other staggered due VMs.
+    const pacingTargets=canary?lanes.getRows().filter(r=>r.state==='RUNNING').length:(cycle?cycle.targets:1);
+    const slotMs = targetMs() / Math.max(1,pacingTargets);''')
 swap('    schedule(o.minGapMs);\n    return { ok: true };', '''    if (canary) lanes.start().then(() => { if (running) schedule(o.minGapMs); });
     else schedule(o.minGapMs);
     return { ok: true };''')

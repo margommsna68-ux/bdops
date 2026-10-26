@@ -316,7 +316,11 @@ export function createEarnAppMonitor({
         rechecks.set(target.uuid,{uuid:target.uuid,name:target.name,dueAt:now()+o.recheckDelayMs});
     } else if (c.verdict.recheck) recheck = { uuid: target.uuid, name: target.name, dueAt: now() + o.recheckDelayMs };
 
-    const slotMs = targetMs() / Math.max(1, cycle ? cycle.targets : 1);
+    // Later rounds may contain only the first individually due VM. Budget
+    // against the whole running host, otherwise that single-target subset
+    // sleeps for 600 seconds and starves the other staggered due VMs.
+    const pacingTargets=canary?lanes.getRows().filter(r=>r.state==='RUNNING').length:(cycle?cycle.targets:1);
+    const slotMs = targetMs() / Math.max(1,pacingTargets);
     const over = durationMs > slotMs;
     let delay = over ? Math.max(o.minGapMs, durationMs * o.restRatio) : Math.max(o.minGapMs, slotMs - durationMs);
     if (canary) {
