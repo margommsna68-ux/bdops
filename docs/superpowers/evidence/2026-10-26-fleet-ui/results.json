@@ -1,0 +1,45 @@
+{
+  "status": "CORE_BROWSER_CHECKS_PASS_THEME_COVERAGE_PARTIAL",
+  "browser": "155.0.8059.86",
+  "localOnly": {
+    "host": "127.0.0.1",
+    "port": 55432,
+    "database": "proxy_app_trial",
+    "projectId": "pulse-ui-4aad3997"
+  },
+  "coreReadback": "source-api.json",
+  "actualValidatedThemes": [
+    "dark",
+    "bronze"
+  ],
+  "viewports": [
+    1280,
+    390
+  ],
+  "fourThemeComplete": false,
+  "themeBlocker": "Light and Golden preferences did not apply to data-theme in this isolated source-copy harness. One final painted-card assertion confirmed actual Dark for requested Light; no further retries.",
+  "layoutAndBehaviorChecksPassed": 120,
+  "failedAssertion": "Four actual theme surfaces are distinct",
+  "scriptExceptions": [],
+  "consoleErrors": [],
+  "failedBrowserRequests": [],
+  "noBusinessMutation": true,
+  "beforeCounts": {
+    "vms": 8,
+    "sdks": 8,
+    "accounts": 0,
+    "funds": 0
+  },
+  "afterCounts": {
+    "vms": 8,
+    "sdks": 8,
+    "accounts": 0,
+    "funds": 0
+  },
+  "screenshots": [
+    "dark-1280.png",
+    "bronze-390.png"
+  ],
+  "video": false,
+  "productEdits": false
+}

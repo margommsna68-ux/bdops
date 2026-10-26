@@ -1,6 +1,6 @@
 # Fleet monitoring milestone 1 — 26 October 2026
 
-Status: source implementation verified; web/Central deployment pending. Native GEN2 canary installation is BLOCKED; M1 is NOT accepted, M2/M3 must not start. This report does not claim resource measurements or live guest coverage.
+Status: web and Central bridge deployed; native GEN2 installation blocked. Native GEN2 canary installation is BLOCKED; M1 is NOT accepted, M2/M3 must not start. This report does not claim resource measurements or live guest coverage.
 
 ## Reuse and scope
 
@@ -33,3 +33,16 @@ Status: source implementation verified; web/Central deployment pending. Native G
 No native source package has been installed. No production VM power, NAT, proxy, RAM, EarnApp/account or Auto-FIX/hold configuration action was issued. Apple worker unchanged. The website and Central bridge may be deployed independently; this does not prove native end-to-end coverage. Real CPU/RAM delta, probe p95/p99, guest child cleanup and actual600s coverage remain unmeasured.
 
 Native installation blocker: `integrations/gen2-monitor-canary/DEPLOYMENT-BLOCKER.md`. Installed3.1.18 lacks a verified external ingress into the running process guarded updater, private immutable canary feed and successor environment gates. The separate headless updater can miss running jobs. No unsafe workaround, shared feed publication or false canary acceptance is authorized by this evidence.
+
+
+## Installed and live verification
+
+- Web15df173 / buildyFWk4680Rv6YEVgcyqHoB installed12:52Bangkok.44 migrations now applied, only MonitorHeartbeat table added. Explicit Moon05/Central source enrollment; no scope/token grants or financial switch changes.
+- Central publisher installed `Desktop/MoneyToHome/Gen2Dashboard/releases/20261026-fleet-m1`; original existing task/token/state retained.21 packaged files verified. Task Scheduler stop left the old cache publisher child; exact command path and durable lock-owner PID were checked before stopping only that publisher. Native GEN2/AE/VM processes were excluded. Pending journal preserved; no overlapping publishers.
+- Live policy GET from Central returns1/60s inventory/600s guest. CENTRAL heartbeat accepted on the true HTTP path; no AGENT source manufactured. Sample Central→web delays0.8s and3.4s; not Agent→web measurements or an SLA.90 UUID-bound Moon05 targets in publisher,91 positions in web; the unbound position stays unverified.
+- Business hash immediately before/after deployment identical (`business-*-deploy.json`). Three existing payout requests were preserved. Backup125218 local+encrypted/decryption-verifiedmoon supersedes earlier124345 because another operator added a request before deployment.
+- Public exact build manifest200; Postgres/Web/Tunnel Running. No claim of logged-in production browser verification. Local actual Chrome120 behavior/API/layout assertions, noJS/console/request errors,1280+390px. Dark/Bronze verified; Light/Golden application incomplete in isolated harness; see sibling fleet-ui report.
+- Read-only AE Moon05 inventory91/91 Running; UUID/state/RAM/Balloon/keep-off before/after exact. No enginePID/start measurement. No VM power/proxy/NAT/EarnApp/account/Auto-FIX/hold/Apple action issued.
+- Source-only GEN2 patch ZIP34files SHA256 `2b1d037be783134f112af9b0e31d0d047a6c72304fc3273250b7f70fc6ad1bfc` copied to common Central MoneyToHome folder, explicitly SOURCE_ONLY. Native source and installed3.1.18 untouched. No native CPU/RAM/probe p95/p99/socket/handle measurements, no real600s native round, no power canary, no Telegram control/delivery acceptance and no24–48h observation yet.
+
+M1 remains NOT ACCEPTED; M2/M3 and fleet rollout must not begin. Next dependency is a safe initial product updater ingress into the live3.1.18 process; no forced GEN2 termination, GUI workaround, shared feed publication or relabeled release evidence. Full source/handoff/rollback: docs/runbooks/fleet-monitor-canary-20261026.md.

@@ -1,0 +1,10 @@
+{
+  "readOnly": true,
+  "host": "moon-05",
+  "beforeCount": 91,
+  "afterCount": 91,
+  "running": 91,
+  "sameInventory": true,
+  "changedUuids": [],
+  "enginePidStartNotMeasured": true
+}

@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "policyVersion": 1,
+  "inventorySeconds": 60,
+  "guestSeconds": 600
+}

@@ -1,0 +1,492 @@
+{
+  "results": [
+    {
+      "name": "Synthetic administrator login through real local API",
+      "passed": true
+    },
+    {
+      "name": "Real source overview API returns the existing eight-VM fixture",
+      "passed": true
+    },
+    {
+      "name": "Fresh agent evidence confirms exactly one GOOD VM",
+      "passed": true
+    },
+    {
+      "name": "Fresh native ABORTED contradicts positive earning",
+      "passed": true
+    },
+    {
+      "name": "Central contact without AGENT cannot manufacture GOOD",
+      "passed": true
+    },
+    {
+      "name": "Stale and unsupported native states are explicit",
+      "passed": true
+    },
+    {
+      "name": "Inventory sample over 120 seconds is stale while three-minute guest evidence is fresh",
+      "passed": true
+    },
+    {
+      "name": "Missing independent VM evidence remains UNKNOWN",
+      "passed": true
+    },
+    {
+      "name": "light 1280 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "light 1280 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "light 1280 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "light 1280 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "light 1280 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "light 1280 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "light 390 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "light 390 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "light 390 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "light 390 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "light 390 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "light 390 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "light 390 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "light 390 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "light 390 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "light 390 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "light 390 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "light 390 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "light 390 enrolled server without AGENT has zero GOOD",
+      "passed": true
+    },
+    {
+      "name": "light 390 unknown server filter retains independent coverage",
+      "passed": true
+    },
+    {
+      "name": "light 390 unknown drilldown uses three exact scoped VMs",
+      "passed": true
+    },
+    {
+      "name": "light 390 unavailable earning never shows GOOD",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "dark 1280 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "dark 390 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "dark 390 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "dark 390 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "dark 390 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "dark 390 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "dark 390 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "dark 390 enrolled server without AGENT has zero GOOD",
+      "passed": true
+    },
+    {
+      "name": "dark 390 unknown server filter retains independent coverage",
+      "passed": true
+    },
+    {
+      "name": "dark 390 unknown drilldown uses three exact scoped VMs",
+      "passed": true
+    },
+    {
+      "name": "dark 390 unavailable earning never shows GOOD",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "golden 1280 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "golden 390 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "golden 390 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "golden 390 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "golden 390 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "golden 390 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "golden 390 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "golden 390 enrolled server without AGENT has zero GOOD",
+      "passed": true
+    },
+    {
+      "name": "golden 390 unknown server filter retains independent coverage",
+      "passed": true
+    },
+    {
+      "name": "golden 390 unknown drilldown uses three exact scoped VMs",
+      "passed": true
+    },
+    {
+      "name": "golden 390 unavailable earning never shows GOOD",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "bronze 1280 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 VM 5/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Guest 2/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Mạng 2/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Proxy 0/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Ứng dụng 3/8",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Đang chạy: 2",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Ứng dụng / SDK có kết nối: 1",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 Chưa xác minh kiếm tiền: 7",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 separate Central/agent fresh-stale-unknown indicators",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 source and receipt times stay distinct",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 no horizontal document overflow",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 coverage stays inside viewport",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 enrolled server without AGENT has zero GOOD",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 unknown server filter retains independent coverage",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 unknown drilldown uses three exact scoped VMs",
+      "passed": true
+    },
+    {
+      "name": "bronze 390 unavailable earning never shows GOOD",
+      "passed": true
+    },
+    {
+      "name": "Four actual theme surfaces are distinct",
+      "passed": false
+    }
+  ],
+  "errors": [],
+  "consoleErrors": [],
+  "networkErrors": [],
+  "message": "Four actual theme surfaces are distinct"
+}

@@ -1,0 +1,55 @@
+{
+  "logs": [
+    {
+      "at": "2026-10-26T05:54:23.594Z",
+      "state": "IDLE",
+      "saved": 0,
+      "rejected": 197
+    },
+    {
+      "at": "2026-10-26T05:55:00.382Z",
+      "monitorHeartbeat": "UNKNOWN",
+      "sources": [
+        {
+          "source": "CENTRAL",
+          "state": "SAVED"
+        },
+        {
+          "source": "AGENT",
+          "state": "UNKNOWN"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-26T05:55:02.232Z",
+      "state": "IDLE",
+      "saved": 0,
+      "rejected": 197
+    },
+    {
+      "at": "2026-10-26T05:56:00.643Z",
+      "monitorHeartbeat": "UNKNOWN",
+      "sources": [
+        {
+          "source": "CENTRAL",
+          "state": "SAVED"
+        },
+        {
+          "source": "AGENT",
+          "state": "UNKNOWN"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-26T05:56:04.999Z",
+      "state": "IDLE",
+      "saved": 0,
+      "rejected": 197
+    }
+  ],
+  "heartbeatRoles": [
+    "CENTRAL"
+  ],
+  "centralPending": false,
+  "agentFabricated": false
+}

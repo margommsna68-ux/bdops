@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "build": "yFWk4680Rv6YEVgcyqHoB",
+  "commit": "15df173",
+  "previous": "D:\\MoneyToHome\\app-before-fleet-monitor-20261026",
+  "at": "2026-10-26T12:52:59.2216127+07:00",
+  "migration": "20261026130000_monitor_heartbeat"
+}

@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "file": "CAP_NHAT_FLEET_M1_20261026.md",
+      "verified": true,
+      "bytes": 5037
+    },
+    {
+      "file": "GEN2_NATIVE_MONITOR_SOURCE_ONLY_20261026.zip",
+      "verified": true,
+      "bytes": 66976
+    },
+    {
+      "file": "OPENAPI_WEB_HIEN_TAI.json",
+      "verified": true,
+      "bytes": 276463
+    }
+  ],
+  "logRotation": {
+    "rotated": true,
+    "publisherStopped": false
+  },
+  "nativePackageInstalled": false
+}

@@ -1,0 +1,17 @@
+{
+  "browser": "155.0.8059.86",
+  "complete": false,
+  "measurement": "Painted .bp-cards backgroundColor plus --ds-card, with actual data-theme",
+  "themes": [
+    {
+      "requested": "light",
+      "applied": false,
+      "actualTheme": "dark",
+      "card": "rgb(21, 29, 48)",
+      "token": "#151d30",
+      "noOverflow": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": []
+}

@@ -1,0 +1,247 @@
+{
+  "generatedAt": "2026-10-26T05:49:37.134Z",
+  "projectId": "pulse-ui-4aad3997",
+  "health": {
+    "total": 8,
+    "active": 6,
+    "good": 1,
+    "error": 0,
+    "unknown": 5,
+    "paused": 1,
+    "new": 1
+  },
+  "heartbeats": [
+    {
+      "serverId": "cmvoogvvw00073fdr5ppzqpb4",
+      "server": "an-test",
+      "central": {
+        "freshness": "FRESH",
+        "observedAt": "2026-10-26T05:49:35.022Z",
+        "receivedAt": "2026-10-26T05:49:36.058Z",
+        "configVersion": 1,
+        "counts": {
+          "managed": 3,
+          "inventory": 2,
+          "guest": 0,
+          "proxy": 0,
+          "app": 1
+        }
+      },
+      "agent": {
+        "freshness": "UNKNOWN",
+        "observedAt": null,
+        "receivedAt": null,
+        "configVersion": null,
+        "counts": null
+      }
+    },
+    {
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "server": "moon-test",
+      "central": {
+        "freshness": "STALE",
+        "observedAt": "2026-10-26T05:46:35.022Z",
+        "receivedAt": "2026-10-26T05:49:36.057Z",
+        "configVersion": 1,
+        "counts": {
+          "managed": 5,
+          "inventory": 4,
+          "guest": 2,
+          "proxy": 0,
+          "app": 2
+        }
+      },
+      "agent": {
+        "freshness": "FRESH",
+        "observedAt": "2026-10-26T05:49:35.022Z",
+        "receivedAt": "2026-10-26T05:49:36.055Z",
+        "configVersion": 1,
+        "counts": {
+          "managed": 5,
+          "inventory": 4,
+          "guest": 2,
+          "proxy": 0,
+          "app": 2
+        }
+      }
+    }
+  ],
+  "rows": [
+    {
+      "id": "cmvoogvwr001r3fdru9lgwt77",
+      "serverId": "cmvoogvvw00073fdr5ppzqpb4",
+      "code": "VM_006",
+      "health": "UNKNOWN",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T05:49:35.022Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "FRESH",
+        "guest": "UNKNOWN",
+        "network": "UNKNOWN",
+        "proxy": "UNKNOWN",
+        "app": "FRESH",
+        "running": true,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvww00223fdroi3zlpgo",
+      "serverId": "cmvoogvvw00073fdr5ppzqpb4",
+      "code": "VM_007",
+      "health": "UNKNOWN",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T03:08:09.327Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "STALE",
+        "guest": "UNKNOWN",
+        "network": "UNKNOWN",
+        "proxy": "UNKNOWN",
+        "app": "UNKNOWN",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvx1002d3fdr3b0tihf9",
+      "serverId": "cmvoogvvw00073fdr5ppzqpb4",
+      "code": "VM_008",
+      "health": "UNKNOWN",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T03:08:09.327Z",
+      "monitor": {
+        "configVersion": 2,
+        "vmState": "UNSUPPORTED",
+        "guest": "UNSUPPORTED",
+        "network": "UNSUPPORTED",
+        "proxy": "UNSUPPORTED",
+        "app": "UNSUPPORTED",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvvx00093fdr8x47mfmg",
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "code": "VM_001",
+      "health": "GOOD",
+      "earning": true,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T05:49:35.022Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "FRESH",
+        "guest": "FRESH",
+        "network": "FRESH",
+        "proxy": "UNKNOWN",
+        "app": "FRESH",
+        "running": true,
+        "guestNetworkVerified": true,
+        "guestProxyVerified": false,
+        "appConnectionVerified": true
+      }
+    },
+    {
+      "id": "cmvoogvw6000k3fdrcykguq9m",
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "code": "VM_002",
+      "health": "UNKNOWN",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T05:49:35.022Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "FRESH",
+        "guest": "FRESH",
+        "network": "FRESH",
+        "proxy": "UNKNOWN",
+        "app": "FRESH",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvwc000v3fdrzff5p5qs",
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "code": "VM_003",
+      "health": "UNKNOWN",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T05:49:35.022Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "UNKNOWN",
+        "guest": "UNKNOWN",
+        "network": "UNKNOWN",
+        "proxy": "UNKNOWN",
+        "app": "UNKNOWN",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvwh00153fdr2zo7btz4",
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "code": "VM_004",
+      "health": "PAUSED",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T03:08:09.327Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "FRESH",
+        "guest": "UNKNOWN",
+        "network": "UNKNOWN",
+        "proxy": "UNKNOWN",
+        "app": "UNKNOWN",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    },
+    {
+      "id": "cmvoogvwm001g3fdrztwg6y5b",
+      "serverId": "cmvoogvvt00053fdr21dki078",
+      "code": "VM_005",
+      "health": "NEW",
+      "earning": null,
+      "checkedAt": "2026-10-26T05:49:35.022Z",
+      "receivedAt": "2026-10-26T05:49:36.022Z",
+      "earningCheckedAt": "2026-10-26T03:08:09.327Z",
+      "monitor": {
+        "configVersion": 1,
+        "vmState": "FRESH",
+        "guest": "UNKNOWN",
+        "network": "UNKNOWN",
+        "proxy": "UNKNOWN",
+        "app": "UNKNOWN",
+        "running": false,
+        "guestNetworkVerified": false,
+        "guestProxyVerified": false,
+        "appConnectionVerified": false
+      }
+    }
+  ]
+}

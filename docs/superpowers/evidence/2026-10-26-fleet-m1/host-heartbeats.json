@@ -1,0 +1,23 @@
+{
+  "readOnly": true,
+  "at": "2026-10-26T06:00:47.230Z",
+  "rows": [
+    {
+      "serverId": "cmvkqqh5h0e61u6saw2cbqbuk",
+      "source": "CENTRAL",
+      "seq": 5,
+      "observedAt": "2026-10-26T05:59:59.592Z",
+      "receivedAt": "2026-10-26T06:00:03.033Z",
+      "configVersion": 1,
+      "counts": {
+        "app": 0,
+        "guest": 0,
+        "proxy": 0,
+        "managed": 90,
+        "inventory": 0
+      },
+      "ageSeconds": 47
+    }
+  ],
+  "agentRows": 0
+}

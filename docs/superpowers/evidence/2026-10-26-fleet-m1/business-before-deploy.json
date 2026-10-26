@@ -1,0 +1,13 @@
+{
+  "readOnly": true,
+  "counts": {
+    "requests": 3,
+    "vms": 678,
+    "logins": 149,
+    "proxies": 1465,
+    "batches": 4,
+    "costs": 4,
+    "funds": 0
+  },
+  "hash": "e7945655c985f42156c21e6c8b713a06fedf4b25b018ed7ac78a0abe9f21d2b8"
+}
