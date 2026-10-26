@@ -56,7 +56,7 @@ export function matchVm(f:VmFacts,fl:GridFilters,omit?:FilterGroup):Tri{
     if(omit!=='warn'&&fl.warn)parts.push(f.view==='BLOCKED');
   }
   const needle=fl.q.trim().toLowerCase();
-  if(omit!=='q'&&needle)parts.push(f.text.includes(needle));
+  if(omit!=='q'&&needle)parts.push(/^\d+$/.test(needle)?Number(f.code.match(/(?:^|[_-])(\d+)$/)?.[1]??NaN)===Number(needle):f.text.includes(needle));
   if(parts.some(p=>p===false))return false;
   return parts.some(p=>p===null)?null:true;
 }

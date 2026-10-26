@@ -64,3 +64,9 @@ describe('Server/VM filter model',()=>{
 
 it('filters VMs with an EarnApp account independently of SDK, money and proxy',()=>{const accounts=[fact({id:'assigned',server:'An-01',code:'VM_001',hasAccount:true,noSdk:true}),fact({id:'empty',server:'moon06',code:'VM_001',hasAccount:false,noSdk:false}),fact({id:'old',server:'An-01',code:'VM_002',hasAccount:true,archived:true})];expect(applyFilters(accounts,F({view:'ACCOUNT_PRESENT'})).map(r=>r.id)).toEqual(['assigned']);expect(applyFilters(accounts,F({view:'ACCOUNT_MISSING'})).map(r=>r.id)).toEqual(['empty']);expect(serverDistribution(accounts,F({view:'ACCOUNT_PRESENT'}))).toMatchObject({total:1,items:[{code:'An-01',count:1}]});});
 it('has-account filter remains unknown until account links are loaded',()=>{const pending=[fact({id:'loading',server:'An-01',code:'VM_001',hasAccount:null})];expect(countWith(pending,F(),{view:'ACCOUNT_PRESENT'})).toBeNull();expect(applyFilters(pending,F({view:'ACCOUNT_PRESENT'}))).toEqual([]);});
+
+it('numeric search matches exact VM number, never incidental IP or larger VM code',()=>{
+ const sample=[fact({id:'62',server:'A',code:'VM_062'}),fact({id:'162',server:'A',code:'VM_162'}),fact({id:'ip',server:'A',code:'VM_001',text:'vm_001 10.62.1.1'}),fact({id:'legacy',server:'B',code:'M-062'})];
+ for(const q of ['62','062',' 0062 '])expect(applyFilters(sample,F({q})).map(v=>v.id)).toEqual(['62','legacy']);
+ expect(applyFilters(sample,F({q:'10.62.'})).map(v=>v.id)).toEqual(['ip']);
+});

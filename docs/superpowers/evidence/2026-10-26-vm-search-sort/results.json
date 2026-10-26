@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "Local login",
+    "62 finds only VM_062",
+    "062 finds only VM_062",
+    "Money ascending numeric with missing last",
+    "Money descending",
+    "Tình trạng both directions accessible",
+    "Tài khoản EarnApp both directions accessible",
+    "URL holds account sort",
+    "Sort survives reload",
+    "No JS errors"
+  ],
+  "errors": []
+}

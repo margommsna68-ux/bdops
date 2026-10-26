@@ -63,7 +63,7 @@ export function nextCell(rowIds:string[],fields:EditField[],at:{vmId:string;fiel
 // APPLY (21/10/2026): the web has a new proxy the real machine has not applied yet. TODO: what needs a hand on the machine (New VM, Chờ
 // áp dụng proxy, Blocked, Earn/VM lỗi, a proxy still to apply).
 export type GridView=''|'MISSING'|'ASSIGNED'|'BLOCKED'|'REVIEW'|'SDK_MISSING'|'ACCOUNT_MISSING'|'ACCOUNT_PRESENT'|'PAYPAL_MISSING'|'DELETED'|'APPLY'|'TODO';
-export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS'|'BALANCE'|'CHECKED_OLD'|'WAITING_OLD';
+export type GridSort='VM'|'PRIORITY'|'SDK'|'PROXY'|'STATUS'|'BALANCE'|'CHECKED_OLD'|'WAITING_OLD'|'BALANCE_ASC'|'OPS_ASC'|'OPS_DESC'|'ACCOUNT_ASC'|'ACCOUNT_DESC';
 // Operating status filter (several at once; NONE = Chưa ghi) and money milestone filter.
 export const OPS_FILTERS=['NONE','OK','NOT_LINKED','OFF','PROXY_BLOCKED','LINKED','EARN_ERROR','SUSPENDED','DELETED','NEW_VM','MAIL_LOGGED','PROXY_PENDING'] as const;
 export type OpsFilter=typeof OPS_FILTERS[number];
@@ -82,7 +82,7 @@ function readSdkUrl(p:{get(name:string):string|null}):SdkStoreUrl{
   const pick=<T extends string>(v:string|null,all:T[],d:T)=>(all as string[]).includes(v||'')?v as T:d;
   return {open:p.get('sdk')==='1',q:p.get('sq')||'',state:pick(p.get('sf'),SDK_STATES,'FREE'),place:pick(p.get('sl'),SDK_PLACES,'ALL'),sort:pick(p.get('ss'),SDK_SORTS,'UPDATED'),page:Math.max(1,Math.floor(Number(p.get('sp'))||1))};
 }
-const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','ACCOUNT_PRESENT','PAYPAL_MISSING','DELETED','APPLY','TODO'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','STALE','VM_FAILED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
+const VIEWS:GridView[]=['','MISSING','ASSIGNED','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','ACCOUNT_PRESENT','PAYPAL_MISSING','DELETED','APPLY','TODO'],SORTS:GridSort[]=['VM','PRIORITY','SDK','PROXY','STATUS','BALANCE','CHECKED_OLD','WAITING_OLD','BALANCE_ASC','OPS_ASC','OPS_DESC','ACCOUNT_ASC','ACCOUNT_DESC'],MONEY:MoneyFilter[]=['','WAITING','RECREATE','MONEY_REVIEW','FAILED','NONE','UNCHECKED','STALE','VM_FAILED','WITHDRAWABLE','RECEIVED','CHECK'],TABS:PanelTab[]=['overview','proxy','work','account','history'];
 // Links from before 19/10/2026: Chờ cài / Đã cài are now "Có proxy", the orphan install-task view is gone, the install tab is the proxy tab.
 const OLD_VIEW:Record<string,GridView>={PENDING:'ASSIGNED',INSTALLED:'ASSIGNED',TASK_ORPHAN:''};
 export function readGridUrl(p:{get(name:string):string|null}):GridUrl{
@@ -100,3 +100,10 @@ export function writeGridUrl(state:GridUrl):string{
 export function pageOf<T>(rows:T[],page:number,size:number){const pages=Math.max(1,Math.ceil(rows.length/size)),current=Math.min(page,pages),start=(current-1)*size;return {pages,current,first:rows.length?start+1:0,last:Math.min(rows.length,start+size),rows:rows.slice(start,start+size)};}
 // Long SDK codes: head…tail when shown, full value in the title, copy and edit.
 export function shortCode(value:string,keep=8){return value.length<=keep*2+1?value:value.slice(0,keep)+'…'+value.slice(-keep);}
+
+/** Empty / hidden values stay last in either direction; never treated as zero. */
+export function compareVmColumn(a:number|string|null,b:number|string|null,descending=false){
+ if(a===null||b===null)return a===b?0:a===null?1:-1;
+ const d=typeof a==='number'&&typeof b==='number'?a-b:String(a).localeCompare(String(b),'vi',{numeric:true,sensitivity:'base'});
+ return descending?-d:d;
+}

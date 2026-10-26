@@ -13,7 +13,7 @@ import {ProxyCell} from './ProxyCell';
 import {SdkCell,type SdkDraft} from './SdkCell';
 import {OpsStatusCell,PayoutCell,type OpsRow,type OpsRights} from './OpsCells';
 import type {VmOpsStatus} from '@/lib/vm-ops';
-import {FIXED,editableFields,nextCell,resizeColumn,visibleColumns,widthOf,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
+import {FIXED,editableFields,nextCell,resizeColumn,visibleColumns,widthOf,type GridSort,type ColumnKey,type EditField,type GridPrefs,type PanelTab} from './grid-model';
 export interface GridRights {manage:boolean;assign:boolean;accountAssign?:boolean;sdkMoneyRead?:boolean;sdkMoneyWrite?:boolean;copy:boolean;confirm:boolean;costs:boolean;sourceConnected:boolean;replace?:boolean;block?:boolean}
 export type CopyWhich='DESIRED'|'INSTALLED';
 type Draft=Record<string,string>;
@@ -46,10 +46,12 @@ function CellEditor({field,label,value,error,active,saving,onChange,onSave,onCan
     {error&&<span role="alert" className="vm-cell-error">{error}</span>}
   </div>;
 }
-export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;accountOf:(vmId:string)=>VmAccount|undefined;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
+export function VmGrid(props:{sort?:GridSort;onSort?:(sort:GridSort)=>void;projectId:string;rows:ManagedVM[];single:boolean;deletedView:boolean;prefs:GridPrefs;onPrefs:(p:GridPrefs)=>void;rights:GridRights;selected:Set<string>;onToggle:(id:string,on:boolean)=>void;onTogglePage:(on:boolean)=>void;accountOf:(vmId:string)=>VmAccount|undefined;activeVmId:string|null;maxHeight:number;loading:boolean;emptyText:string;
   onOpen:(vmId:string,tab?:PanelTab)=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void;onDelete:(vm:ManagedVM)=>void;onRestore:(vm:ManagedVM)=>void;onSave:(vm:ManagedVM,field:EditField,value:string)=>Promise<void>;
   opsOf:(vmId:string)=>OpsRow|undefined;opsRights:OpsRights;onOpsStatus:(vm:ManagedVM,status:VmOpsStatus,cycle:number)=>Promise<void>;onOpsDone:()=>Promise<unknown>|void;accountState?:'READY'|'LOADING'|'ERROR'}){
   const {rows,single,deletedView,prefs,rights,selected}=props,columns=visibleColumns(prefs),drafts=useDrafts(props.projectId);
+  const sortHeading=(label:string,asc:GridSort,desc:GridSort)=>{const direction=props.sort===asc?'ascending':props.sort===desc?'descending':undefined;return <button type="button" className="inline-flex items-center gap-1" aria-label={'Sắp xếp '+label+(direction==='ascending'?' giảm dần':' tăng dần')} onClick={()=>props.onSort?.(direction==='ascending'?desc:asc)}>{label}<span aria-hidden="true">{direction==='ascending'?'↑':direction==='descending'?'↓':'↕'}</span></button>;};
+
   // A row whose status action is saving is locked (other cells and ⋯) until the answer comes back.
   const [busyRows,setBusyRows]=useState<Set<string>>(new Set()),markBusy=(id:string,on:boolean)=>setBusyRows(p=>{const n=new Set(p);if(on)n.add(id);else n.delete(id);return n;});
   const [active,setActive]=useState<{vmId:string;field:EditField}|null>(null),[errors,setErrors]=useState<Record<string,string>>({}),[saving,setSaving]=useState<string|null>(null);
@@ -104,8 +106,8 @@ export function VmGrid(props:{projectId:string;rows:ManagedVM[];single:boolean;d
         <th className="vm-sticky vm-sticky-check" style={left(0)}><input ref={headCheck} type="checkbox" aria-label={`Chọn ${rows.length} VM trên trang này`} title={`Chọn ${rows.length} VM trên trang này`} checked={allOnPage} disabled={!rows.length} onChange={e=>props.onTogglePage(e.target.checked)}/></th>
         {!single&&<th className="vm-sticky" style={left(selectW)}>Server{resizer('server')}</th>}
         <th className="vm-sticky" style={left(selectW+serverW)}>VM{resizer('vm')}</th>
-        <th className="vm-sticky vm-sticky-last" style={left(selectW+serverW+vmW)} title="Trạng thái vận hành do người / AI ghi nhận">Tình trạng</th>
-        {columns.map(c=><th key={c.key}>{c.label}{resizer(c.key)}</th>)}
+        <th className="vm-sticky vm-sticky-last" style={left(selectW+serverW+vmW)} title="Trạng thái vận hành do người / AI ghi nhận" aria-sort={props.sort==='OPS_ASC'?'ascending':props.sort==='OPS_DESC'?'descending':'none'}>{sortHeading('Tình trạng','OPS_ASC','OPS_DESC')}</th>
+        {columns.map(c=><th key={c.key} aria-sort={c.key==='payout'?(props.sort==='BALANCE_ASC'?'ascending':props.sort==='BALANCE'?'descending':'none'):c.key==='account'?(props.sort==='ACCOUNT_ASC'?'ascending':props.sort==='ACCOUNT_DESC'?'descending':'none'):undefined}>{c.key==='payout'?sortHeading(c.label,'BALANCE_ASC','BALANCE'):c.key==='account'?sortHeading(c.label,'ACCOUNT_ASC','ACCOUNT_DESC'):c.label}{resizer(c.key)}</th>)}
         <th className="vm-sticky-right" aria-label="Thao tác"></th>
       </tr></thead>
       <tbody>{rows.map(v=>{const status=vmView(v),isSel=selected.has(v.id),blockedProxy=status==='BLOCKED';
