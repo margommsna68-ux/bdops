@@ -1,14 +1,16 @@
 "use client";
+import {useState} from 'react';
 import Link from 'next/link';
 import {usePathname,useRouter,useSearchParams} from 'next/navigation';
 import {RefreshCw,ChevronRight} from 'lucide-react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
-import {links,query} from '@/lib/links';
+import {links} from '@/lib/links';
 import {today} from '@/components/business-management/workflow';
 import {CashChart,StockChart,VmByServerChart} from './OverviewCharts';
 import {financeTargets} from './finance-links';
+import {BusinessPulse} from './BusinessPulse';
 import '@/components/proxy-management/proxy-management.css';
 import './dashboard.css';
 export type Overview=inferRouterOutputs<AppRouter>['businessManagement']['overview'];
@@ -21,29 +23,38 @@ export function Overview({projectId}:{projectId:string}){
   const params=useSearchParams(),router=useRouter(),pathname=usePathname(),thisMonth=today().slice(0,7);
   const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(params.get('month')||'')?params.get('month')!:thisMonth;
   // A month change is a history entry: Back returns to the previous month.
-  const setMonth=(m:string)=>router.push(pathname+query({month:m===thisMonth?undefined:m}),{scroll:false});
+  const setMonth=(m:string)=>{const next=new URLSearchParams(params.toString());if(m===thisMonth)next.delete('month');else next.set('month',m);const search=next.toString();router.push(pathname+(search?'?'+search:''),{scroll:false});};
   // Operations and finance are read separately: an error in one section leaves the other on screen, each with its own retry. A section
   // the member may not read comes back null (not an error); an error is never shown as zeros.
-  const ops=trpc.businessManagement.overview.useQuery({projectId,month:thisMonth,part:'operations'},{keepPreviousData:true,refetchOnWindowFocus:true,retry:1});
+  const ops=trpc.businessManagement.overview.useQuery({projectId,month:thisMonth,part:'operations'},{keepPreviousData:true,refetchInterval:30000,refetchOnWindowFocus:true,retry:1});
   const fin=trpc.businessManagement.overview.useQuery({projectId,month,part:'finance'},{keepPreviousData:true,refetchOnWindowFocus:true,retry:1});
-  const o=ops.data,f=fin.data,rights=(o||f)?.rights,fetching=ops.isFetching||fin.isFetching;
+  // A query-key change must not label another project's/month's cached data as the current selection.
+  const o=ops.isPreviousData?undefined:ops.data,f=fin.isPreviousData?undefined:fin.data,rights=(o||f)?.rights,fetching=ops.isFetching||fin.isFetching;
+  const pulse=o?.operations?.pulse;
   return <div className="proxy-workspace ov">
     <div className="ov-head"><h1>Tổng quan</h1>
-      <span className="pm-muted text-xs">{o?'Vận hành hiện tại · cập nhật '+new Date(o.generatedAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}):ops.isLoading?'Đang tải…':''}</span>
+      <span className="pm-muted text-xs">{o?'Làm mới trang: '+new Date(o.generatedAt).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}):ops.isLoading?'Đang tải…':''}</span>
       <button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" disabled={fetching} onClick={()=>{void ops.refetch();void fin.refetch();}}><RefreshCw size={16} className={fetching?'animate-spin':''}/></button></div>
-    {ops.isLoading&&<div className="ov-skeleton" aria-busy="true"><div/><div/><div/></div>}
-    {ops.error&&<SectionError label="phần vận hành" message={ops.error.message} busy={ops.isFetching} retry={()=>void ops.refetch()}/>}
+    {ops.error&&<SectionError label="phần vận hành" stale={!!o} busy={ops.isFetching} retry={()=>void ops.refetch()}/>}
+    {fin.error&&<SectionError label="phần tài chính" stale={!!f} busy={fin.isFetching} retry={()=>void fin.refetch()}/>}
+    {(ops.isLoading||ops.isPreviousData)&&<div className="ov-skeleton" aria-busy="true" aria-label="Đang tải vận hành"><div/><div/><div/></div>}
     {o&&f&&!o.operations&&!showFinance(f)&&<p className="ov-empty">Tài khoản này chưa được cấp mục nào hiển thị ở Tổng quan. Mở các mục ở menu bên trái theo quyền được giao.</p>}
-    {o?.operations&&<Operations ops={o.operations}/>}
-    {fin.error&&<SectionError label="phần tài chính" message={fin.error.message} busy={fin.isFetching} retry={()=>void fin.refetch()}/>}
-    {f&&rights&&showFinance(f)&&<Finance projectId={projectId} o={f} month={month} onMonth={setMonth} fetching={fin.isFetching}/>}
+    {o?.operations&&<>
+      {pulse?<BusinessPulse key={projectId} pulse={pulse} packages={o.operations.packages} costsVisible={o.rights.costs}/>:<p className="ov-empty">Chưa có dữ liệu tổng quan kiếm tiền. Mở Server / VM để xem từng máy.</p>}
+      <Fold key={'operations-'+projectId} label="Kho proxy và vận hành chi tiết"><Operations ops={o.operations}/></Fold>
+    </>}
+    {(fin.isPreviousData||(f&&rights&&showFinance(f)))&&<Fold key={'finance-'+projectId} label="Tài chính theo tháng">{f?<Finance projectId={projectId} o={f} month={month} onMonth={setMonth} fetching={fin.isFetching}/>:<p className="ov-empty" aria-busy="true">Đang tải tài chính tháng {month.split('-').reverse().join('/')}…</p>}</Fold>}
   </div>;
 }
 // Finance shows for members who may read it (team cash on), or as the switch-on prompt for an admin while it is off.
 const showFinance=(o:Overview)=>o.finance?.enabled===true||(o.rights.admin&&!o.rights.cashEnabled);
 // One section could not be read (network, server): say so in place, keep the rest of the page, offer a retry of that section only.
-function SectionError({label,message,busy,retry}:{label:string;message:string;busy:boolean;retry:()=>void}){
-  return <div className="ov-error" role="alert"><span>Chưa tải được {label}: {message}</span><button className="pm-button" disabled={busy} onClick={retry}>{busy?'Đang thử lại…':'Thử lại'}</button></div>;
+function SectionError({label,stale,busy,retry}:{label:string;stale:boolean;busy:boolean;retry:()=>void}){
+  return <div className="ov-error" role="alert"><span>Chưa tải được {label}. {stale?'Dữ liệu đang hiển thị là lần tải thành công trước, có thể đã cũ.':'Chưa có dữ liệu để hiển thị.'}</span><button className="pm-button" disabled={busy} onClick={retry}>{busy?'Đang thử lại…':'Thử lại'}</button></div>;
+}
+function Fold({label,children}:{label:string;children:React.ReactNode}){
+  const [open,setOpen]=useState(false);
+  return <details className="bp-fold" open={open} onToggle={e=>setOpen(e.currentTarget.open)}><summary>{label}</summary>{open&&<div className="bp-fold-body">{children}</div>}</details>;
 }
 function Kpi({href,label,value,tone,hint}:{href:string|null;label:string;value:number|string|null;tone?:'green'|'blue'|'amber'|'red';hint?:string}){
   const body=<><span>{label}</span><strong>{value===null?'—':typeof value==='number'?fmt(value):value}</strong>{hint&&<small>{hint}</small>}</>;

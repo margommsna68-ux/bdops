@@ -21,6 +21,9 @@ import {normalizeSdk} from '../vm-management/sdk-parse';
 import {sdkVisibleVmIds,sdkBindingVisible} from '../vm-management/sdk-scope';
 import {vmMoneyState} from '@/lib/vm-money';
 import {maskSdk} from '@/lib/sdk-mask';
+import {ScanBody,recordGen2Scan,machineUuid} from '../dashboard/scan';
+import {packageReminders} from '../proxy-management/reminders';
+import {assertBusinessArea} from '../business-management/scope';
 import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
 import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount,reportAiLoginIssue} from './ai-accounts';
 import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory';
@@ -54,6 +57,9 @@ const routes:Route[]=[
   {method:'POST',path:/^batch$/,scope:null,action:'BATCH',run:async()=>{throw fail('INTERNAL','batch runs through runBatch');}},
   {method:'GET',path:/^projects$/,scope:'READ',action:'PROJECTS',run:projects},
   {method:'GET',path:/^servers$/,scope:'READ',action:'SERVERS',run:servers},
+  {method:'GET',path:/^gen2-targets$/,scope:'READ',action:'GEN2_TARGETS',run:gen2Targets},
+  {method:'GET',path:/^gen2-reminders$/,scope:'READ',action:'GEN2_REMINDERS',run:gen2Reminders},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/scan-observations$'),scope:'VM_OPS',action:'GEN2_SCAN',run:gen2Scan},
   {method:'GET',path:/^vms$/,scope:'READ',action:'VMS',run:vms},
   {method:'GET',path:/^vms\/resolve$/,scope:'READ',action:'VM_RESOLVE',run:resolveVm},
   {method:'GET',path:new RegExp('^vms/'+ID+'$'),scope:'READ',action:'VM',run:vmDetail},
@@ -247,7 +253,7 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
   return {status:summary.waiting?202:200,result:summary.waiting?'WAITING_APPROVAL':summary.refused?'PARTIAL':'OK',body:{ok:true,data:{batchKey,approval:approvalInfo,items:results,summary},error:null},audit};
 }
 // Only bound operational data is available to selected-server members. New routes fail closed.
-const SCOPED_ACTIONS=new Set(['ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
+const SCOPED_ACTIONS=new Set(['GEN2_TARGETS','GEN2_SCAN','GEN2_REMINDERS','ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
 function routeTargets(c:Ctx,path:string,params:string[]){
  const root=path.split('/')[0],id=params[0];
  const identity=id?(root==='vms'?{vmId:id}:root==='jobs'?{jobId:id}:root==='sdks'?{sdkId:id}:root==='earnapp-accounts'?{earnAppId:id}:root==='withdrawals'?{requestId:id}:{}):{};
@@ -637,6 +643,25 @@ async function finishProxy(c:Ctx,[id]:string[]){
 // token and the EarnApp balance write right (EARN_BALANCE), checked again inside the write transaction. A refused code refuses the whole
 // command (nothing written, nothing moved).
 const sdkMoney=z.string().regex(/^\d{1,10}(\.\d{1,6})?$/,'Tiền SDK USD là chuỗi thập phân đã kiểm tra, ví dụ "12.345" (OCR lỗi như "5_17" bị từ chối)');
+async function gen2Targets(c:Ctx){
+ const {projectId}=await projectOf(c,q(c,'projectId')),scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+ assertInfrastructureAction(scope,'READ');
+ const rows=await c.db.virtualMachine.findMany({where:{managed:true,archivedAt:null,server:{projectId,managed:true,archivedAt:null},...vmWhere(scope)},select:{id:true,code:true,serverId:true,notes:true,revision:true,desiredConfigurationId:true,server:{select:{code:true}},operation:{select:{cycle:true}},sdkRecord:{select:{id:true,revision:true}}}});
+ return {capturedAt:new Date().toISOString(),items:rows.map(v=>({id:v.id,serverId:v.serverId,serverCode:v.server.code,code:v.code,machineUuid:machineUuid(v.notes),expectedCycle:v.operation?.cycle??1,expectedVmRevision:v.revision,configurationId:v.desiredConfigurationId,sdkId:v.sdkRecord?.id??null,sdkRevision:v.sdkRecord?.revision??null}))};
+}
+async function gen2Reminders(c:Ctx){
+ const {projectId}=await projectOf(c,q(c,'projectId')),scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+ assertBusinessArea(scope,'INFRASTRUCTURE',false);if(hasServerScope(scope))return {items:[]};
+ let costs=false;try{assertBusinessArea(scope,'COSTS',false);costs=true;}catch{/* Prices stay hidden. */}
+ const packages=await c.db.proxyProviderAccount.findMany({where:{projectId,nextDueDate:{not:null},renewalStoppedAt:null}});
+ return {items:packageReminders(packages.map(p=>({...p,price:p.price?.toString()??null,reminderDays:3})),new Date(),costs).map(r=>{const p=packages.find(p=>p.id===r.packageId)!;return {key:projectId+':'+p.id+':'+r.createdAt.toISOString(),packageCode:p.code,dueAt:r.createdAt.toISOString(),daysLeft:r.daysLeft,amount:costs?p.price?.toString()??null:null,currency:costs?p.priceCurrency:null,link:r.link};})};
+}
+async function gen2Scan(c:Ctx,[vmId]:string[]){
+ const b=ScanBody.parse(c.body),{projectId,ops}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+ if(b.money&&(!c.token.scopes.includes('BALANCE_WRITE')||!ops.BALANCE_WRITE))throw fail('FORBIDDEN','Ghi tiền cần BALANCE_WRITE và EARN_BALANCE');
+ const r=await asOps(c,projectId,vmId,()=>runWithOpsAuth({tokenId:c.token.id,userId:c.token.userId,operation:'VM_OPS',also:b.money?['BALANCE_WRITE']:[],targets:{vmId,body:b}},()=>recordGen2Scan(scopeOf(c,projectId),{...b,vmId,key:serviceKey(c,projectId)},c.db)));
+ c.audit.replay=!!r.replay;return {replay:!!r.replay,recorded:{id:r.id,vmId:r.vmId,cycle:r.cycle,observedAt:r.observedAt,vmRevisionAfter:r.vmRevisionAfter,sdkRevisionAfter:r.sdkRevisionAfter,money:(await rightsOf(c,projectId)).balanceRead?r.money:null}};
+}
 const ObserveBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,observedAt:iso,source:z.string().min(2).max(120),evidence:z.string().max(300).nullish(),
   sdks:z.array(z.object({code:z.string().min(8).max(128),expectedSdkRevision:rev.nullable(),amountUsd:sdkMoney.nullish(),amountRead:z.boolean().optional(),current:z.boolean().optional()}).strict()).min(1).max(OBSERVE_MAX)}).strict();
 async function vmSdkObserve(c:Ctx,[vmId]:string[]){

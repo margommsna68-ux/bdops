@@ -105,8 +105,9 @@ export async function syncMirror(tx:Tx,vmId:string,actorId:string,now:Date):Prom
 async function applyInfo(tx:Tx,ctx:WriteCtx,record:SdkRecord,info:SdkInfo){
   const ch=infoChanges(record,info);if(!ch.amount&&!ch.note)return false;
   await ctx.images.remember('SDK',record.id);
-  await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,...await moneyBinding(tx,record)}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
-  if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:ch.amount});
+    const binding=ch.amount?await moneyBinding(tx,record):null;
+    await tx.sdkRecord.update({where:{id:record.id},data:{...(ch.amount?{amount:ch.amount.to,amountAt:ctx.now,amountById:ctx.actorId,amountObservedAt:ctx.now,amountSource:'Web · '+ctx.via,...binding}:{}),...(ch.note?{note:ch.note.to,noteAt:ctx.now,noteById:ctx.actorId}:{}),revision:{increment:1}}});
+    if(ch.amount)await event(tx,ctx,record.id,'AMOUNT',{detail:{...ch.amount,vmId:binding!.amountVmId,cycle:binding!.amountCycle,observedAt:ctx.now.toISOString()}});
   if(ch.note)await event(tx,ctx,record.id,'NOTE',{detail:ch.note});
   return true;
 }

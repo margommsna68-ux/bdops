@@ -1,0 +1,45 @@
+┌ ○ /                                      148 B         103 kB
+├ ○ /_not-found                             1 kB         104 kB
+├ ○ /admin/delete-requests               4.47 kB         151 kB
+├ ○ /admin/projects                      9.29 kB         183 kB
+├ ○ /admin/users                         12.5 kB         197 kB
+├ ○ /agent-pp                            23.2 kB         191 kB
+├ ƒ /api/apple-check/v1/[action]           148 B         103 kB
+├ ƒ /api/auth/[...nextauth]                148 B         103 kB
+├ ƒ /api/autotype                          148 B         103 kB
+├ ƒ /api/ops/v1/[...path]                  148 B         103 kB
+├ ƒ /api/seed                              148 B         103 kB
+├ ƒ /api/trpc/[trpc]                       148 B         103 kB
+├ ○ /apple-icon.png                          0 B            0 B
+├ ○ /approvals                           7.53 kB         148 kB
+├ ○ /audit-log                           5.65 kB         152 kB
+├ ○ /costs                               7.64 kB         223 kB
+├ ○ /dashboard                            144 kB         298 kB
+├ ○ /funds                                 18 kB         225 kB
+├ ○ /gmails                              6.33 kB         261 kB
+├ ○ /history                             6.65 kB         196 kB
+├ ○ /icon.png                                0 B            0 B
+├ ○ /infrastructure/proxies              33.6 kB         276 kB
+├ ○ /infrastructure/servers              13.2 kB         300 kB
+├ ƒ /infrastructure/servers/[id]         4.16 kB         265 kB
+├ ○ /infrastructure/vms                  7.51 kB         287 kB
+├ ○ /login                               3.15 kB         134 kB
+├ ○ /paypals                             18.9 kB         274 kB
+├ ƒ /paypals/[id]                        17.3 kB         193 kB
+├ ○ /profit                                11 kB         210 kB
+├ ○ /settings                            7.14 kB         200 kB
+├ ƒ /users/[id]                          14.4 kB         186 kB
+├ ○ /vm-tasks                            5.41 kB         193 kB
+├ ○ /withdrawals                         15.3 kB         219 kB
+└ ○ /work                                4.26 kB         157 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/1255-60d8dc7c8c9309a1.js      46.3 kB
+  ├ chunks/4bd1b696-100b9d70ed4e49c1.js  54.2 kB
+  └ other shared chunks (total)          2.07 kB
+
+
+ƒ Middleware                             63.1 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

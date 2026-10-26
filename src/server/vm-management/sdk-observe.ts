@@ -62,7 +62,7 @@ export function normalizeObservation(input:Omit<ObserveInput,'key'>){
 }
 export const hasAmounts=(items:{amount?:string|null}[])=>items.some(i=>i.amount!==undefined);
 const conflict=(m:string,details:Record<string,unknown>)=>new ProxyDomainError('STALE_PREVIEW',m,'SDK_CONFLICT',details);
-async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null,at:{vmId:string;cycle:number},visible=true):Promise<ObservedRow['amount']>{
+export async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|undefined,observedAt:Date,source:string,evidence:string|null,at:{vmId:string;cycle:number},visible=true):Promise<ObservedRow['amount']>{
   const now=canonicalAmount(rec.amount?.toString()??null),prev=rec.amountObservedAt;
   const kept=visible?{value:now,observedAt:prev?.toISOString()??null,source:rec.amountSource}:{value:null,observedAt:null,source:null};
   if(amount===undefined)return {outcome:'NOT_SENT',...kept};
@@ -70,7 +70,7 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
     // Could not read: the figure and its time stay; only the latest failed-reading time moves forward (Tiền VM shows "Kiểm tra lỗi").
     if(!rec.amountFailedAt||observedAt>rec.amountFailedAt){await ctx.images.remember('SDK',rec.id);const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{amountFailedAt:observedAt,amountFailedVmId:at.vmId,amountFailedCycle:at.cycle,revision:{increment:1}}});
       if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa được người khác thay đổi; đọc lại VM rồi gửi lại','REVISION_CONFLICT',{code:rec.code});}
-    await event(tx,ctx,rec.id,'OBSERVE',{detail:{observedAt:observedAt.toISOString(),source,evidence,readable:false}});return {outcome:'UNREADABLE',...kept};}
+    await event(tx,ctx,rec.id,'OBSERVE',{detail:{...at,observedAt:observedAt.toISOString(),source,evidence,readable:false}});return {outcome:'UNREADABLE',...kept};}
   // A reading older than the one stored never replaces it; the same moment with another figure is a conflict to look at.
   if(prev&&observedAt<prev)return {outcome:'OLDER',...kept};
   if(prev&&observedAt.getTime()===prev.getTime()){
@@ -81,7 +81,7 @@ async function observeAmount(tx:Tx,ctx:Ctx,rec:SdkRecord,amount:string|null|unde
   await ctx.images.remember('SDK',rec.id);
   const n=await tx.sdkRecord.updateMany({where:{id:rec.id,revision:rec.revision},data:{...(now!==amount?{amount,amountAt:ctx.now,amountById:ctx.actorId}:{}),amountObservedAt:observedAt,amountSource:source,amountVmId:at.vmId,amountCycle:at.cycle,revision:{increment:1}}});
   if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','SDK '+rec.code+' vừa được người khác thay đổi; đọc lại VM rồi gửi lại','REVISION_CONFLICT',{code:rec.code});
-  await event(tx,ctx,rec.id,now!==amount?'AMOUNT':'OBSERVE',{detail:{from:now,to:amount,observedAt:observedAt.toISOString(),source,evidence}});
+  await event(tx,ctx,rec.id,now!==amount?'AMOUNT':'OBSERVE',{detail:{...at,from:now,to:amount,observedAt:observedAt.toISOString(),source,evidence}});
   return {outcome:now===amount?'SAME':'SAVED',value:amount,observedAt:observedAt.toISOString(),source};
 }
 export async function observeVmSdks(scope:ActorScope,input:ObserveInput,db:PrismaClient=prisma,caller:{tokenLabel?:string}={}){

@@ -13,6 +13,8 @@ import {teamCashSources} from '../business-management/team-cash-report';
 import {assertBusinessArea} from '../business-management/scope';
 import {dayText,period} from '../business-management/money';
 import {CashDecimal} from '../business-management/usdt-money';
+import {readBusinessPulse} from './pulse';
+import {hasServerScope} from '../permissions/server-scope';
 // Dashboard read model (MoneyToHome Proxy / VM). Giao việc and Việc cài proxy are hidden modules (src/lib/features.ts): no work
 // block here. Since 19/10/2026 there is no install step: VMs are counted as with a proxy, with a Blocked proxy, to review or missing.
 // Dashboard read model. Every section reuses the checked read of the page it links to (same permission, same rule, whole result
@@ -34,7 +36,7 @@ export async function readOverview(scope:ActorScope,input:{month:string;part?:Ov
   const range=monthBounds(input.month),current=await loadInfrastructureScope(db,scope.userId,scope.projectId),want=(p:OverviewPart)=>!input.part||input.part===p;
   const can=(area:'INFRASTRUCTURE'|'COSTS'|'PROFIT'|'FUNDS'|'WITHDRAWALS'|'PAYPALS',write=false)=>{try{assertBusinessArea(current,area,write);return true;}catch{return false;}};
   const rights={infra:current.businessMode==='PROXY_VM'&&can('INFRASTRUCTURE'),cashEnabled:!!current.teamCashEnabled,admin:current.role==='ADMIN',costs:can('COSTS'),profit:can('PROFIT'),funds:can('FUNDS'),withdrawals:can('WITHDRAWALS'),paypals:can('PAYPALS')};
-  const [operations,finance]=await Promise.all([want('operations')&&rights.infra?readOperations(scope,db,now,rights.costs):Promise.resolve(null),want('finance')?readFinance(scope,input.month,range,!!current.teamCashEnabled,db):Promise.resolve(null)]);
+  const [operations,finance]=await Promise.all([want('operations')&&rights.infra?readOperations(current,db,now,rights.costs):Promise.resolve(null),want('finance')?readFinance(scope,input.month,range,!!current.teamCashEnabled,db):Promise.resolve(null)]);
   return {generatedAt:now.toISOString(),month:input.month,part:input.part??null,rights,operations,finance};
 }
 async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:boolean){
@@ -42,9 +44,9 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   const [accounts,registry,packages,autofill,manual]=await Promise.all([
     maybe(()=>readVmAccounts(scope,db)),
     loadRegistryRows(scope,{view:'CURRENT'},db),
-    db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null},renewalStoppedAt:null}}),
+    hasServerScope(scope)?Promise.resolve([]):db.proxyProviderAccount.findMany({where:{projectId:scope.projectId,nextDueDate:{not:null},renewalStoppedAt:null}}),
     // NEW is a state; "can be given to a VM" is the allocation pool itself (not held, no install/BLOCKED event, package, credentials).
-    getEligibleInventory(scope.projectId,db),getManualInventory(scope.projectId,db),
+    hasServerScope(scope)?Promise.resolve([]):getEligibleInventory(scope.projectId,db),hasServerScope(scope)?Promise.resolve([]):getManualInventory(scope.projectId,db),
   ]);
   // Server / VM: deleted servers and VMs are not operating; buckets are the grid's own vmView rule.
   const servers=workspace.servers.filter(s=>!s.archivedAt).sort((a,b)=>compareCodes(a.code,b.code)),active=new Set(servers.map(s=>s.id));
@@ -63,11 +65,12 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   for(const r of registry.rows){const row=rowOf(registryGroupKey(r)),s=(MAIN.includes(r.state)?r.state:'OTHER') as StockBucket;row[s]++;row.total++;}
   const reminders=packageReminders(packages.map(p=>({id:p.id,code:p.code,nextDueDate:p.nextDueDate,reminderDays:p.reminderDays,renewalStoppedAt:p.renewalStoppedAt,price:p.price?.toString()??null,priceCurrency:p.priceCurrency,disabled:p.disabled})),now,costs);
   return {
+    pulse:await readBusinessPulse(scope,workspace,accounts,db,now),
     servers:perServer,
     totals:{servers:servers.length,vms:vms.length,ASSIGNED:sum('ASSIGNED'),BLOCKED:sum('BLOCKED'),REVIEW:sum('REVIEW'),MISSING:sum('MISSING')},
     gaps,
     stock:{rows:Array.from(stock.values()),total:registry.rows.length,ready:{autofill:autofill.length,sharedManual:manual.filter(m=>m.shared).length}},
-    packages:reminders.map(r=>({id:r.packageId,code:r.code,title:r.title,severity:r.severity,daysLeft:r.daysLeft,link:r.link})),
+    packages:reminders.map(r=>{const p=packages.find(p=>p.id===r.packageId)!;return {id:r.packageId,code:r.code,title:r.title,severity:r.severity,daysLeft:r.daysLeft,link:r.link,dueAt:r.createdAt.toISOString(),amount:costs?p.price?.toString()??null:null,currency:costs?p.priceCurrency:null};}),
   };
 }
 // Finance for one month: USDT confirmed as received by the team minus valid costs, each at its own recorded rate — the team cash
