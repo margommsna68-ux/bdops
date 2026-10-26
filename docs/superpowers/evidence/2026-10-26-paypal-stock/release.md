@@ -1,0 +1,2 @@
+# Release
+Deployed ad2f220/build oHOjVifP-LlFt5tztznWD at10:58:12 Bangkok26October2026. No migration. Backup105721 local+encryptedmoon verified/decryptionVerified. Public exactbuild manifest200;Web/TunnelRunning. Business snapshot beforeafter same hash509b63d811b87135555dca5e684d631ebab99caffb7b6ac686b6342ee282039b,0requests/0funds. Logged-in UI tested only local syntheticdata; no real payout/prod test writes. Rollback D:/MoneyToHome/app-before-paypal-stock-20261026;script tools/deploy-paypal-stock.ps1. AI uses existing paypal/suggest quota contract; no client/token changes.
