@@ -1,0 +1,37 @@
+{
+  "runtimeVersion": "3.1.18.2",
+  "at": "2026-10-26T09:54:25.9652223Z",
+  "windowStart": "2026-10-26T09:42:40.1149183Z",
+  "windowEnd": "2026-10-26T09:54:25.9652223Z",
+  "windowSeconds": 705.850304,
+  "completedBoundedObserver": true,
+  "samples": 47,
+  "errors": 0,
+  "cpuCorePercent": 0.686,
+  "workingSetMiB": {
+    "first": 410.25,
+    "last": 347.34,
+    "max": 411.54
+  },
+  "privateMiB": {
+    "first": 235.46,
+    "last": 174.25
+  },
+  "handles": {
+    "first": 1979,
+    "last": 1965,
+    "max": 1990
+  },
+  "tcpConnections": {
+    "first": 21,
+    "last": 21,
+    "max": 27
+  },
+  "maxSampledVBoxChildren": 2,
+  "maxGen2Processes": 4,
+  "interpretation": "whole GEN2 process usage; one core=100%, not host-normalised; no collector-off baseline; discrete samples may miss child lifetimes",
+  "includesSourcePersistenceStall": true,
+  "healthySustainedLoadProven": false,
+  "incrementalCpuRamProven": false,
+  "probeP95P99Measured": false
+}

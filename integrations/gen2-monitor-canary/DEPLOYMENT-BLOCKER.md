@@ -1,6 +1,30 @@
 # Deployment blocked — initial native-monitor canary ingress
 
-Status: accepted source/test package only. **Not installed; M1 cannot be accepted; M2 must not begin.** Independent web deployment/source handoff may proceed without claiming native canary acceptance.
+## Current moon1 canary — 26 October 2026, 3.1.18.3
+
+GEN2 **3.1.18.3** is installed and activation-confirmed on moon1/Central after the owner normally exited GEN2. Fingerprint `c951ed5ce7f054afd9e2858195493b19c8ed362842e71ccb5f884c06f6446676`; transaction `63dc312b-8232-48c0-956f-e687ca36414e`; session 2; `pendingBoot:null`. Native monitoring resumed in a new source instance and fresh guest observations reached the web. See `moon1-live.md` in the fleet-M1 evidence directory for the final measured snapshot. **M1 is not fully accepted; M2/M3 and other-host rollout have not begun.**
+
+Live 3.1.18.2 completed its first 61/61 running-VM round in 600.485 s, then read eight VMs in the next round before a source-write admission failure falsely latched guest quarantine. Version 3.1.18.3 defers such a failure before any guest call; real uncertain guest cleanup still latches. A one-time explicit offline reconciliation verified the exact prior build/module, source bytes, prior clean lane, normal exit and no guestcontrol children, and archived the old source. It did not invent guest-exit evidence or clear timeout/cancellation quarantine. Native core axis timestamps are probe-start times; a later complete responsive triplet before the failed admission is permitted only under this pinned control flow.
+
+57/57 package tests and the legacy baseline/patched groups pass. The installer EXE self-test and installed fingerprint match. The previous 3.1.18/3.1.18.1/3.1.18.2 builds are retained. No VM power, RAM, proxy/NAT, account, SDK, money or Auto-FIX setting was changed by this canary. All 61 VM engine PIDs/start times/paths remain equal to baseline. Read the producer snapshot through Node/libuv or a file handle with **read/write/delete sharing**; SFTP or default PowerShell reads can block atomic rename on Windows. The lock reproduction proves susceptibility, not the exact historical lock holder.
+
+The paragraphs below that describe an installation blocker or source-only state are historical. The current canary uses process-local environment gates and is not a fleet release or a restart-persistent production rollout.
+
+## Update — initial bootstrap resolved on moon1, 26 October 2026
+
+**Historical second installed version was 3.1.18.2**, fingerprint `edd656962da9070ecb7d8e82cfeed34fe1905026655ccf547fcfbaed81cea43f`. Live observation of 3.1.18.1 revealed second-round scheduling starvation; the native pacing fix and matching generator were reviewed, 2 reproductions went red→green and 41 package tests passed. After a second owner-normal exit, the same canonical FULL installer confirmed transaction `ddba2d1d-43fd-4102-9def-50c448f150e0` and a real session-2 start, `pendingBoot:null`. Do not reactivate 3.1.18.1 as a healthy long-running build. Original 3.1.18 is still retained; use a reviewed product recovery path rather than editing current/active state.
+
+The owner normally exited GEN2 and confirmed the VMs remained running. Direct checks found no remaining GEN2 or guestcontrol process. The existing FULL installer was then used, not the unsafe second-process live updater:
+
+`GenToolPro.exe --install-managed --home=C:/GEN-TOOL-PRO --from-legacy=C:/GEN-TOOL-PRO/versions/3.1.18 --state-home=<isolated-installer-state> --gen-profile=fleet-monitor-install`
+
+It verified candidate **3.1.18.1**, fingerprint **dfa637eb57b59fe01e2a55bfa9ffffe806a32c674e3ae79ee5b3facd5b766ab1**, preserved 3.1.18, and returned its canonical transaction/start arguments. A one-off Interactive/Limited task started the successor in the existing session 2 with the real machine state and only the three native canary environment keys. `active.json` confirms the exact build, transaction and `pendingBoot:null`. No manual junction rewrite, forced GEN2 exit, shared feed publication, AE upgrade or VM power command was used.
+
+The **native canary is now installed on moon1/Central**. Real AGENT and CENTRAL heartbeats and 70 UUID-bound web VM observations have been received. Full measurements and remaining gates are recorded in `docs/superpowers/evidence/2026-10-26-fleet-m1/moon1-live.md`. This resolves initial installation only; it does not create an external live-process update API or accept M1/M2/M3. The installed canary gates are process-local and do not automatically persist across an ordinary later restart.
+
+The sections below are retained as the **earlier, pre-owner-exit investigation**, not the current installation status.
+
+Historical status: accepted source/test package only, before normal exit and FULL installation. Independent web deployment/source handoff proceeded without claiming native canary acceptance.
 
 ## Read-only evidence — 26 October 2026
 

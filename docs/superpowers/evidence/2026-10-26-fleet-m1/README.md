@@ -1,6 +1,18 @@
 # Fleet monitoring milestone 1 — 26 October 2026
 
-Status: web and Central bridge deployed; native GEN2 installation blocked. Native GEN2 canary installation is BLOCKED; M1 is NOT accepted, M2/M3 must not start. This report does not claim resource measurements or live guest coverage.
+## Current moon1 canary — 26 October 2026, 3.1.18.3
+
+GEN2 **3.1.18.3** is installed and activation-confirmed on moon1/Central after the owner normally exited GEN2. Fingerprint `c951ed5ce7f054afd9e2858195493b19c8ed362842e71ccb5f884c06f6446676`; transaction `63dc312b-8232-48c0-956f-e687ca36414e`; session 2; `pendingBoot:null`. Native monitoring resumed in a new source instance and fresh guest observations reached the web. See `moon1-live.md` in the fleet-M1 evidence directory for the final measured snapshot. **M1 is not fully accepted; M2/M3 and other-host rollout have not begun.**
+
+Live 3.1.18.2 completed its first 61/61 running-VM round in 600.485 s, then read eight VMs in the next round before a source-write admission failure falsely latched guest quarantine. Version 3.1.18.3 defers such a failure before any guest call; real uncertain guest cleanup still latches. A one-time explicit offline reconciliation verified the exact prior build/module, source bytes, prior clean lane, normal exit and no guestcontrol children, and archived the old source. It did not invent guest-exit evidence or clear timeout/cancellation quarantine. Native core axis timestamps are probe-start times; a later complete responsive triplet before the failed admission is permitted only under this pinned control flow.
+
+57/57 package tests and the legacy baseline/patched groups pass. The installer EXE self-test and installed fingerprint match. The previous 3.1.18/3.1.18.1/3.1.18.2 builds are retained. No VM power, RAM, proxy/NAT, account, SDK, money or Auto-FIX setting was changed by this canary. All 61 VM engine PIDs/start times/paths remain equal to baseline. Read the producer snapshot through Node/libuv or a file handle with **read/write/delete sharing**; SFTP or default PowerShell reads can block atomic rename on Windows. The lock reproduction proves susceptibility, not the exact historical lock holder.
+
+The paragraphs below that describe an installation blocker or source-only state are historical. The current canary uses process-local environment gates and is not a fleet release or a restart-persistent production rollout.
+
+Historical second run: **native GEN2 canary 3.1.18.2 was installed on moon1/Central** after owner-normal exit. Live observation of superseded 3.1.18.1 completed its first 61/61 round but found second-round starvation; the corrected source/generator, two reproductions and current measurements are recorded in [moon1-live.md](moon1-live.md). All 90 managed VM positions are inventoried. Full M1, M2/M3 and fleet acceptance remain separate gates.
+
+The report below records the earlier web/bridge-only deployment, before the owner's normal exit resolved initial native installation. Its statements about blocked installation and absent native measurements are historical.
 
 ## Reuse and scope
 

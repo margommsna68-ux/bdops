@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "replay": false,
+  "sourceHash": "9e5a15ff7a13bc9086bcde1446593ca48978026c53c3c7607f8fb6c2dc2bbbdd",
+  "serverUuid": "dda631e2-3ce9-492c-a733-f2b96873dd02",
+  "instanceUuid": "57a74326-05b6-4bfa-ad14-6b23a04bd5ae",
+  "sourceSeq": 527,
+  "priorIdleSeq": 297,
+  "at": "2026-10-26T10:21:54.767Z",
+  "attemptedVm": null,
+  "attemptedVmKnown": false,
+  "guestExitProofClaimed": false
+}

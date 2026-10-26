@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "proof": {
+    "ok": true,
+    "version": "3.1.18.3",
+    "codeFingerprint": "c951ed5ce7f054afd9e2858195493b19c8ed362842e71ccb5f884c06f6446676",
+    "codeIntegrity": "VERIFIED",
+    "appDir": "c:\\gen-merge\\canary\\monitor-moon1-20261026\\3.1.18.3",
+    "exePath": "c:\\gen-merge\\canary\\monitor-moon1-20261026\\3.1.18.3\\gentoolpro.exe",
+    "bootId": "23eed336-7061-453a-89e0-e2ec68397b1e",
+    "transactionId": null,
+    "home": "C:\\GEN-MERGE\\canary\\monitor-moon1-20261026\\3.1.18.3",
+    "from": "3.1.18.2",
+    "migration": {
+      "ok": true,
+      "from": 1,
+      "to": 1,
+      "applied": [],
+      "backup": null,
+      "why": null
+    },
+    "dataDir": "C:\\GEN-MERGE\\canary\\monitor-moon1-20261026\\qa-third-state\\data",
+    "settingsLoaded": false,
+    "autoScanEnabled": false,
+    "scanTimes": [
+      "06:00",
+      "18:00"
+    ],
+    "serverName": "",
+    "serverIdPrefix": "b5c3e3e9",
+    "hostId": "H_88bf79f289633214",
+    "slots": 0,
+    "moneySnapshots": 0
+  },
+  "exitCode": null,
+  "activated": false
+}

@@ -1,0 +1,98 @@
+{
+  "ok": true,
+  "at": "2026-10-26T09:50:53.321Z",
+  "status": 202,
+  "keys": [
+    "ok",
+    "operationId",
+    "kind",
+    "servers"
+  ],
+  "row": {
+    "serverId": "dda631e2-3ce9-492c-a733-f2b96873dd02",
+    "version": "3.1.18.2",
+    "keys": [
+      "serverId",
+      "serverName",
+      "state",
+      "version",
+      "local",
+      "operation",
+      "earnappMonitor",
+      "hostCache"
+    ],
+    "earnappMonitor": {
+      "schema": 1,
+      "enabled": true,
+      "running": true,
+      "paused": false,
+      "alerts": true,
+      "alertCanary": false,
+      "targetSec": 600,
+      "lastCycle": {
+        "startedAt": "2026-10-26T09:40:43.372Z",
+        "endedAt": "2026-10-26T09:50:43.857Z",
+        "durationMs": 600485,
+        "wallMs": 600485,
+        "pausedMs": 0,
+        "targetSec": 600,
+        "inScope": 90,
+        "targets": 61,
+        "probed": 61,
+        "probes": 61,
+        "rechecks": 0,
+        "deferred": 0,
+        "ok": 61,
+        "pending": 0,
+        "alerting": 0,
+        "unreadable": 0,
+        "timeouts": 0,
+        "errors": 0,
+        "avgProbeMs": 985,
+        "maxProbeMs": 6727,
+        "vboxCalls": 366,
+        "canaryInScope": 0,
+        "canaryProbed": 0,
+        "canaryAlerting": 0,
+        "slowCycles": 0,
+        "coverage": 1,
+        "vboxCallsPerProbe": 6,
+        "overBudget": true,
+        "partial": false,
+        "listFailed": false,
+        "skipped": {
+          "NOT_RUNNING": 10,
+          "INTENTIONAL_OFF": 19
+        },
+        "gapReasons": {}
+      },
+      "totals": {
+        "since": "2026-10-26T09:40:43.372Z",
+        "cycles": 1,
+        "probes": 62,
+        "rechecks": 0,
+        "ok": 61,
+        "pending": 0,
+        "alerting": 0,
+        "unreadable": 0,
+        "timeouts": 0,
+        "errors": 0,
+        "vboxCalls": 371,
+        "vboxProbes": 62,
+        "cacheStopEvents": 0,
+        "vboxCallsPerProbe": 5.98,
+        "skipped": {
+          "NOT_RUNNING": 20,
+          "INTENTIONAL_OFF": 38
+        }
+      },
+      "openIncidents": {
+        "total": 0,
+        "canary": 0,
+        "byFault": {}
+      },
+      "canaryVms": [],
+      "at": "2026-10-26T09:50:53.306Z"
+    }
+  }
+}

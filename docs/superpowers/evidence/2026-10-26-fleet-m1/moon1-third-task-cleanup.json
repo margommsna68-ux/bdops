@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "removed": [
+    "MoneyToHome-GEN2-Canary-FirstStart",
+    "MoneyToHome-GEN2-Canary-SecondStart",
+    "MoneyToHome-GEN2-Canary-ThirdStart"
+  ],
+  "kept": []
+}

@@ -1,0 +1,242 @@
+{
+  "runtimeVersion": "3.1.18.3",
+  "fingerprint": "c951ed5ce7f054afd9e2858195493b19c8ed362842e71ccb5f884c06f6446676",
+  "transactionId": "63dc312b-8232-48c0-956f-e687ca36414e",
+  "pendingBoot": null,
+  "session": 2,
+  "sourceAt": "2026-10-26T10:27:00.090Z",
+  "sourceStartedAt": "2026-10-26T10:22:19.781Z",
+  "counts": {
+    "managed": 90,
+    "inventory": 90,
+    "guest": 29,
+    "proxy": 71,
+    "app": 29
+  },
+  "guestSlot": {
+    "state": "IDLE",
+    "reason": null,
+    "observedAt": "2026-10-26T10:27:00.087Z"
+  },
+  "currentGuestReads": 29,
+  "currentFirstFullRoundComplete": false,
+  "historicalSecondRuntime": {
+    "version": "3.1.18.2",
+    "secondRoundObservedCount": 8,
+    "secondRound": [
+      {
+        "vm": "VM_001",
+        "uuid": "7873c1ec-3cfb-4afc-a8ca-30dd89c86d0c",
+        "observedAt": "2026-10-26T09:50:43.870Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_002",
+        "uuid": "6e3a8491-6e41-4e34-aac8-a51aa1efbc5c",
+        "observedAt": "2026-10-26T09:50:53.723Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_003",
+        "uuid": "43181186-aa52-4a8e-9278-e8bc639fb839",
+        "observedAt": "2026-10-26T09:51:03.575Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_004",
+        "uuid": "f3cf593d-5197-46d6-a275-2bf0e5e04123",
+        "observedAt": "2026-10-26T09:51:13.428Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_005",
+        "uuid": "6b5aa976-deb0-48a8-96e1-596c9258c5d2",
+        "observedAt": "2026-10-26T09:51:23.281Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_006",
+        "uuid": "14bc4029-3aeb-4f2a-b410-fc1c4ea4662e",
+        "observedAt": "2026-10-26T09:51:33.134Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_007",
+        "uuid": "84f52b23-3144-4a33-b55a-a803adf6272c",
+        "observedAt": "2026-10-26T09:51:43.001Z",
+        "response": "RESPONSIVE"
+      },
+      {
+        "vm": "VM_008",
+        "uuid": "719dc463-f62a-484b-84b9-103d3e242666",
+        "observedAt": "2026-10-26T09:51:52.854Z",
+        "response": "RESPONSIVE"
+      }
+    ],
+    "secondFullRoundComplete": false,
+    "guestSlot": {
+      "state": "QUARANTINED",
+      "reason": "SOURCE_PERSIST_FAILED",
+      "observedAt": "2026-10-26T09:52:02.708Z"
+    }
+  },
+  "reconciliation": {
+    "ok": true,
+    "replay": false,
+    "sourceHash": "9e5a15ff7a13bc9086bcde1446593ca48978026c53c3c7607f8fb6c2dc2bbbdd",
+    "serverUuid": "dda631e2-3ce9-492c-a733-f2b96873dd02",
+    "instanceUuid": "57a74326-05b6-4bfa-ad14-6b23a04bd5ae",
+    "sourceSeq": 527,
+    "priorIdleSeq": 297,
+    "at": "2026-10-26T10:21:54.767Z",
+    "attemptedVm": null,
+    "attemptedVmKnown": false,
+    "guestExitProofClaimed": false
+  },
+  "startupAuditEvents": [
+    {
+      "t": "2026-10-26T10:22:19.786Z",
+      "host_id": "H_88bf79f289633214",
+      "kind": "native-monitor-preflight-reconciled",
+      "code": "NO_GUEST_STARTED_PREFLIGHT",
+      "instanceUuid": "57a74326-05b6-4bfa-ad14-6b23a04bd5ae",
+      "sourceSeq": 527,
+      "sourceHash": "9e5a15ff7a13bc9086bcde1446593ca48978026c53c3c7607f8fb6c2dc2bbbdd"
+    }
+  ],
+  "extraPhysicalPositions": [
+    {
+      "vm": "VM_071",
+      "uuid": "c0bf0439-ca5e-4254-ac51-b55f4b91a412",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_072",
+      "uuid": "1b992529-5d35-4e76-bec9-56ef3bce6ec8",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_073",
+      "uuid": "5be1bc32-4287-48fd-8c32-b33111079814",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_074",
+      "uuid": "7ddb8734-22b2-4ce9-ae71-d4608757abe3",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_075",
+      "uuid": "b9586d24-6556-4eaf-8e73-5126e230876e",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_076",
+      "uuid": "b8bddf62-46cc-4993-9ef7-1ab6ce38aa5f",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_077",
+      "uuid": "8fc198a5-1722-4585-bb2c-565bc461512d",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_078",
+      "uuid": "bc9a8e3d-ee20-40e7-b182-6ab9541cf674",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_079",
+      "uuid": "acc005a4-8719-450e-b7f4-f73af11721c2",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_080",
+      "uuid": "ba9422f1-45ae-4e96-836c-50de825f9b0d",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_081",
+      "uuid": "d1ca49ba-079f-4357-8989-dee3184f187a",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_082",
+      "uuid": "5631339b-5b4e-4b71-af35-5e17776747ad",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_083",
+      "uuid": "a07c8c06-afb0-4161-a358-99aecd535aa0",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_084",
+      "uuid": "7ba826af-a6c7-4fa1-b304-eec03ec1580b",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_085",
+      "uuid": "525bd1fa-49e4-44f1-9f81-655677bf8dbb",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_086",
+      "uuid": "0cdbd5db-41c9-4388-9dfc-89e3dc6d1fdf",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_087",
+      "uuid": "7f150a9e-47b5-42d4-a71c-0592246b1ba3",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_088",
+      "uuid": "830ef50d-18c9-4357-a9f7-c42ac0acacd1",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_089",
+      "uuid": "799c60c5-92f8-45f1-8079-23f5ab50ff4c",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    },
+    {
+      "vm": "VM_090",
+      "uuid": "02558a68-5b54-4ef0-b9a7-bd87026288cf",
+      "state": "POWERED_OFF",
+      "excludedReason": "EXTRA_PHYSICAL_RESERVE_NOT_IN_70_WEB_POSITIONS"
+    }
+  ],
+  "extraAllOff": true,
+  "vmUuidStateEqual": true,
+  "vmInventoryCompared": 90,
+  "running": 61,
+  "freshAeRamComparisonAvailable": false,
+  "freshAeLimitation": "AE_NOT_RUNNING_OR_AMBIGUOUS",
+  "vmEngineCountBefore": 61,
+  "vmEngineCountAfter": 61,
+  "vmEnginePidStartPathEqual": true,
+  "m1FullyAccepted": false,
+  "m2Started": false,
+  "m3Started": false,
+  "fleetReleased": false
+}

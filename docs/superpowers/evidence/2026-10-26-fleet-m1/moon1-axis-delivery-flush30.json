@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-26T09:54:27.968Z",
+  "units": "milliseconds",
+  "meaning": "first web receipt of each distinct VM-axis-observedAt; not recurring envelope age or failure-detection latency",
+  "axes": {
+    "vmState": {
+      "uniqueObservations": 1260,
+      "min": 1843,
+      "median": 31129,
+      "p95": 53914,
+      "max": 74424
+    },
+    "guest": {
+      "uniqueObservations": 69,
+      "min": 3243,
+      "median": 32750,
+      "p95": 70141,
+      "max": 104545
+    },
+    "app": {
+      "uniqueObservations": 69,
+      "min": 3243,
+      "median": 32750,
+      "p95": 70141,
+      "max": 104545
+    },
+    "proxy": {
+      "uniqueObservations": 210,
+      "min": 3807,
+      "median": 42442,
+      "p95": 97129,
+      "max": 106654
+    },
+    "network": {
+      "uniqueObservations": 69,
+      "min": 3243,
+      "median": 32750,
+      "p95": 70141,
+      "max": 104545
+    }
+  }
+}

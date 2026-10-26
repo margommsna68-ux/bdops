@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "phase": "PENDING_REAL_START",
+  "version": "3.1.18.2",
+  "codeFingerprint": "edd656962da9070ecb7d8e82cfeed34fe1905026655ccf547fcfbaed81cea43f",
+  "home": "C:/GEN-TOOL-PRO",
+  "current": "C:\\GEN-TOOL-PRO\\current",
+  "previous": "3.1.18.1",
+  "backupFile": "C:\\GEN-TOOL-PRO\\updater\\active-before-ddba2d1d-43fd-4102-9def-50c448f150e0.json",
+  "transactionId": "ddba2d1d-43fd-4102-9def-50c448f150e0",
+  "exe": "C:\\GEN-TOOL-PRO\\current\\GenToolPro.exe",
+  "args": [
+    "--updated-from=3.1.18.1",
+    "--update-transaction=ddba2d1d-43fd-4102-9def-50c448f150e0"
+  ]
+}

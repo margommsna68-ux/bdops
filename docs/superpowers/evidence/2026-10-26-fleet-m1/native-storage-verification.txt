@@ -1,0 +1,108 @@
+LEGACY baseline
+ok 1 shared naming: VM_### and m_### on every host; strict scan rule unchanged; canary = m_9##
+ok 2 earnapp-monitor-cycle line + status lastCycle/totals; m_969 probed on a VM_ host
+ok 3 m_ host monitors VM_### too; a failed VM listing is visible (listFailed)
+ok 4 [CANARY] tag per canary-VM line (+ header when the batch is canary-only); production text and payload unchanged
+ok 5 STATUS: compact monitor state in cluster STATUS, heartbeat health, registry and port 8768 rows (Central + Agents)
+ok 6 defaults unchanged: monitor/alerts/canary OFF; nothing in 3.1.18 turns them on
+earnapp-monitor-cycle-v3118 PASS (6 groups)
+ok 1 classification rules (recheck, 2x60s, GAP never Blocked)
+ok 2 round-robin, one probe in flight, ~120 s per VM
+ok 3 busy/hold/keep-off/pause -> deferred and labelled, never probed
+ok 4 timeout -> MONITORING_GAP (not Blocked, not app down), still one probe at a time
+ok 5 APP_DOWN after a short recheck, one NEW, stable RECOVERED
+ok 6 over budget -> slows down, reports coverage, host MONITORING_GAP
+ok 7 host cache result contract + HOST_CACHE_CHECK incident (GEN2 never flushes)
+ok 8 source guard: detection only (no NAT/power/FIX/lock/UIA/OCR)
+{"synthetic":true,"label":"SYNTHETIC fake 100-VM fleet; scheduling+classification+incident logic only; no guest, no VBoxManage, no disk; NOT a production measurement","probes":2000,"cpuMs":62,"wallMs":31,"cpuPerProbeUs":31,"cpuPerHostCycleMs":3.1,"status":{"cycles":19,"probes":2000}}
+ok 9 SYNTHETIC overhead measured (logic only)
+earnapp-monitor-v3116 PASS (9 groups)
+LEGACY patched
+ok 1 shared naming: VM_### and m_### on every host; strict scan rule unchanged; canary = m_9##
+ok 2 earnapp-monitor-cycle line + status lastCycle/totals; m_969 probed on a VM_ host
+ok 3 m_ host monitors VM_### too; a failed VM listing is visible (listFailed)
+ok 4 [CANARY] tag per canary-VM line (+ header when the batch is canary-only); production text and payload unchanged
+ok 5 STATUS: compact monitor state in cluster STATUS, heartbeat health, registry and port 8768 rows (Central + Agents)
+ok 6 defaults unchanged: monitor/alerts/canary OFF; nothing in 3.1.18 turns them on
+earnapp-monitor-cycle-v3118 PASS (6 groups)
+ok 1 classification rules (recheck, 2x60s, GAP never Blocked)
+ok 2 round-robin, one probe in flight, ~120 s per VM
+ok 3 busy/hold/keep-off/pause -> deferred and labelled, never probed
+ok 4 timeout -> MONITORING_GAP (not Blocked, not app down), still one probe at a time
+ok 5 APP_DOWN after a short recheck, one NEW, stable RECOVERED
+ok 6 over budget -> slows down, reports coverage, host MONITORING_GAP
+ok 7 host cache result contract + HOST_CACHE_CHECK incident (GEN2 never flushes)
+ok 8 source guard: detection only (no NAT/power/FIX/lock/UIA/OCR)
+{"synthetic":true,"label":"SYNTHETIC fake 100-VM fleet; scheduling+classification+incident logic only; no guest, no VBoxManage, no disk; NOT a production measurement","probes":2000,"cpuMs":32,"wallMs":32,"cpuPerProbeUs":16,"cpuPerHostCycleMs":1.6,"status":{"cycles":19,"probes":2000}}
+ok 9 SYNTHETIC overhead measured (logic only)
+earnapp-monitor-v3116 PASS (9 groups)
+PACKAGE
+✔ CLI accepts exactly three required absolute paths; rejects duplicates and unknown switches (0.9034ms)
+✔ writes real-validator-approved proof and immutable source audit; preserves exact row bytes hash and unknown attempted VM (13.4731ms)
+✔ busy, unavailable or non-Windows host gates refuse without publishing a proof (5.9882ms)
+✔ never reconciles guest uncertainty, wrong identity/build, missing clean evidence or out-of-epoch rows (9.7771ms)
+✔ input bounds, malformed JSONL and mismatching existing proof all fail closed (7.3323ms)
+✔ rechecks process absence and source bytes immediately before publication (4.5669ms)
+✔ fixed CIM reader emits counts only and refuses unknown process-query output (0.273ms)
+✔ rejects monitor drift, wrong validator pins, identity ambiguity and stale slot chronology (6.9336ms)
+✔ conflicting audit never publishes proof; original audit and source remain untouched (4.1192ms)
+✔ canonical inspector refuses an unverified installation without launching any process (1.5865ms)
+(node:9032) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/TUNTUN/Desktop/project%20web%20new/bdops-proxy-app/src/lib/monitor-policy.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\TUNTUN\Desktop\project web new\bdops-proxy-app\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ shared web policy v1 and actual strict MonitorObservation schema accept source monitor axes (53.8746ms)
+✔ native environment allowlist fails closed; no embedded production host IDs (0.1211ms)
+✔ guestcontrol timeout prevents even readiness/internal helper retries from launching another guest command; inventory remains available (0.4505ms)
+✔ canary single native helper attempt returns timeout without internal retry; legacy keeps two attempts (0.9143ms)
+✔ existing-helper-only path verifies hash with fixed certutil read and never copies guest binary (0.8264ms)
+✔ actual pinned main is transformed once, opt-in only, using one existing collector and unchanged core API (10.095ms)
+✔ main canary retirement holds restart barrier until all old guest/proxy cleanup settles (7.0153ms)
+✔ canary target 600; independent all-state inventory while timed-out guest remains awaited (3.3726ms)
+✔ first pass precedes bounded rechecks and each VM waits until due (3.0259ms)
+✔ staggered due times preserve every running VM through the second and third rounds (3.1847ms)
+✔ later healthy VMs remain covered while a failed app has bounded rechecks and slow native reads (2.986ms)
+✔ slow probe does not add 50 percent rest; reentrant step cannot overlap guest (1.978ms)
+✔ native evidence is UUID/time bound, detached, unknown network/service/applied proxy, SDK zero TCP not dead (0.412ms)
+✔ auth failure is response unknown app, never absent GA or BLOCKED (0.2854ms)
+✔ legacy default target and behavior retained (0.1026ms)
+✔ a preflight source-write failure never starts a guest or permanently quarantines a clean lane (1.2514ms)
+✔ storage failure on a recheck waits for a new ordinary due time rather than retrying the same target early (1.1451ms)
+✔ timeout transport completion does not prove guest child exit: guest lane remains quarantined (3.1331ms)
+✔ native timeout returned by core also quarantines; persisted uncertain slot refuses new guest work (1.3858ms)
+✔ inventory errors preserve old sample age; no fake OFF; stale axes stay stale (0.7665ms)
+✔ startup grace is conservative, only valid down observations after grace can confirm incidents (0.6329ms)
+✔ explicit audit-bound preflight recovery is single-source only; default remains quarantined (2.2039ms)
+✔ preflight reconciliation refuses missing proof, old build mismatch, guest uncertainty and conflicting clean-state evidence (4.6538ms)
+✔ known preflight branch permits a complete responsive core result between the observer row and failed next admission (0.992ms)
+✔ proxy host success: HOST evidence only, no BLOCKED, no credentials (1.6916ms)
+✔ proxy auth: HOST evidence only, no BLOCKED, no credentials (0.2658ms)
+✔ proxy timeout: HOST evidence only, no BLOCKED, no credentials (0.2939ms)
+✔ proxy 403: HOST evidence only, no BLOCKED, no credentials (0.2383ms)
+✔ proxy 429: HOST evidence only, no BLOCKED, no credentials (0.1897ms)
+✔ proxy endpoint error: HOST evidence only, no BLOCKED, no credentials (0.191ms)
+✔ unverified applied configuration cannot borrow registry proxy (0.2073ms)
+✔ host network outage suppresses proxy checks rather than mass proxy failure (0.2757ms)
+✔ route change while proxy check runs invalidates result (0.2705ms)
+✔ two proxy slots remain held after 8s deadline until underlying promises settle; inventory continues (0.6042ms)
+✔ cancel aborts proxy transport and waits for cleanup without launching queued work (0.3031ms)
+✔ real existing transport handles local HTTP407 and releases socket (10.7005ms)
+✔ fixed native inventory reader preserves every managed VM state without per-VM commands (1.0201ms)
+✔ native inventory rejects failed/malformed/duplicate lists instead of false OFF (0.2276ms)
+✔ applied proxy reads exact UUID extradata; route hash changes with config/credentials; no registry (0.7877ms)
+✔ source failure diagnostics retain phase/code but never filesystem messages or snapshot payloads (0.7237ms)
+✔ source snapshot bounded atomic JSON: instance sequence source time, no mutable references (1.9298ms)
+✔ source writer rejects raw guest/secrets/money and oversized samples without replacing good snapshot (0.7456ms)
+✔ wire-compatible envelope uses true instance UUID, start/observed time, seq and fresh coverage; local proxy fingerprint is not a web ID (0.7698ms)
+✔ 91 VM native source crosses real Agent health sanitizer, heartbeat frame codec, authenticated Central controller, registry sanitizer and actual transformed persistence hook (17.8836ms)
+✔ opt-in VBox timeout kills but retains promise until close, preserving one real guest slot (16.2112ms)
+✔ strict bounded wire rejects secrets, future sample time, oversized lists and false source identity (2.5872ms)
+✔ Central persists authenticated source unchanged, rejects replay conflicts/regression, bounds to one file (2.3109ms)
+ℹ tests 57
+ℹ suites 0
+ℹ pass 57
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 803.5625

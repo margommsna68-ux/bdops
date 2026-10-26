@@ -1,5 +1,15 @@
 # GEN2 3.1.18 native-monitor canary source package
 
+## Current moon1 canary — 26 October 2026, 3.1.18.3
+
+GEN2 **3.1.18.3** is installed and activation-confirmed on moon1/Central after the owner normally exited GEN2. Fingerprint `c951ed5ce7f054afd9e2858195493b19c8ed362842e71ccb5f884c06f6446676`; transaction `63dc312b-8232-48c0-956f-e687ca36414e`; session 2; `pendingBoot:null`. Native monitoring resumed in a new source instance and fresh guest observations reached the web. See `moon1-live.md` in the fleet-M1 evidence directory for the final measured snapshot. **M1 is not fully accepted; M2/M3 and other-host rollout have not begun.**
+
+Live 3.1.18.2 completed its first 61/61 running-VM round in 600.485 s, then read eight VMs in the next round before a source-write admission failure falsely latched guest quarantine. Version 3.1.18.3 defers such a failure before any guest call; real uncertain guest cleanup still latches. A one-time explicit offline reconciliation verified the exact prior build/module, source bytes, prior clean lane, normal exit and no guestcontrol children, and archived the old source. It did not invent guest-exit evidence or clear timeout/cancellation quarantine. Native core axis timestamps are probe-start times; a later complete responsive triplet before the failed admission is permitted only under this pinned control flow.
+
+57/57 package tests and the legacy baseline/patched groups pass. The installer EXE self-test and installed fingerprint match. The previous 3.1.18/3.1.18.1/3.1.18.2 builds are retained. No VM power, RAM, proxy/NAT, account, SDK, money or Auto-FIX setting was changed by this canary. All 61 VM engine PIDs/start times/paths remain equal to baseline. Read the producer snapshot through Node/libuv or a file handle with **read/write/delete sharing**; SFTP or default PowerShell reads can block atomic rename on Windows. The lock reproduction proves susceptibility, not the exact historical lock holder.
+
+The paragraphs below that describe an installation blocker or source-only state are historical. The current canary uses process-local environment gates and is not a fleet release or a restart-persistent production rollout.
+
 **Code/test milestone only — NOT installed, NOT M1 accepted.** No commit, production restart, VM action, remote command, token, settings or AE change was performed. All new deliverables are in this directory. Read-only source retrieval used pinned SSH/SFTP and the existing DPAPI helper; no secret was printed. Installed GEN2/AE identities supplied by the owner are context, not newly measured runtime results.
 
 Initial deployment is blocked: see [DEPLOYMENT-BLOCKER.md](DEPLOYMENT-BLOCKER.md) for the subsequent live readback, exact updater/CLI limitations and bounded ingress prerequisites. **M1 cannot be accepted; M2 must not begin.** Independent web deployment/source handoff does not establish native canary acceptance.
@@ -15,7 +25,15 @@ node verify.mjs
 
 `fetch-source.py` copies exact SHA-256-pinned fixtures from the existing repository staging area. If absent, `python fetch-source.py --sftp` retrieves only manifest-listed source through the existing pinned backup SSH connection, using SFTP only. A mismatch stops. It never invokes the backup helper's remote-command `connect()` routine. `base-sha256.json` pins original main, replacement-module bases, dependency/test fixtures and the original 3.1.18 package metadata. `build-replacement.py` deterministically derives the four existing-module replacements; it is optional when using the included replacement sources. `transform-main.mjs` checks the exact original main bytes and each unique anchor; rerunning on patched main fails closed. `build.mjs` writes only this package's ignored `output/` (main plus nine engine modules), never an app installation.
 
-`base/`, `.work/` and `output/` are ignored and excluded from source handoff. Neither downloaded 544 KB main nor unchanged dependencies belong in the handoff. Source is uncommitted as requested.
+`base/`, `.work/` and `output/` are ignored and excluded from source handoff. Neither downloaded 544 KB main nor unchanged dependencies belong in the source handoff. The reviewed source is tracked in the web repository.
+
+### Live moon1 update — 26 October 2026
+
+Historical **3.1.18.2 / commit 617e51e** fixes a second-round starvation found during live observation of 3.1.18.1: pacing now uses every running target rather than the tiny individually due subset. Two reproductions fail on the original pacing and pass with the fix; 41 package tests pass, including three staggered rounds and mixed slow-read/app-recheck behavior. The source generator was synchronized and all regenerated engine hashes match. The owner normally exited GEN2 a second time and the product installer confirmed the new exact fingerprint `edd656962da9070ecb7d8e82cfeed34fe1905026655ccf547fcfbaed81cea43f`. 3.1.18.1 is retained as incident history, not accepted for long-running monitoring.
+
+After owner-confirmed normal GEN2 exit, the product FULL installer installed numeric canary **3.1.18.1** on moon1/Central, preserving 3.1.18. Its EXE self-test and real session-2 start verified the exact code fingerprint and completed the activation transaction. Native inventory covers 90 VM positions; the first guest round covered all 61 running VMs in **605.093 seconds**, with 366 VBox calls, no timeout/unreadable/error and no VM power operation. The 29 non-running VMs were not guest-probed. Existing 70 UUID-bound web positions received real monitor observations and genuine AGENT/CENTRAL heartbeats; the additional 20 physical positions are all off and not created on the web. This is a **live read-only canary result**, not full M1, M2, Telegram, other-host or fleet acceptance.
+
+Read `docs/superpowers/evidence/2026-10-26-fleet-m1/moon1-live.md` and the current runbook for measured resources, per-axis delivery latency, exclusions and remaining gaps. The capability table below describes source capabilities and **the earlier source-only test state**. Live HOST checks do not establish guest network or earnings. No general release feed was updated. Canary environment flags apply to the installed process only.
 
 ## Opt-in and one collector
 
