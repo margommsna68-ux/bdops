@@ -4,13 +4,14 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {businessPulse,type PulseInput} from '@/lib/business-pulse';
 import {BusinessPulse,type PulsePackage} from '@/components/dashboard/BusinessPulse';
-const overviewMock=vi.hoisted(()=>({ops:{data:undefined,error:null,isLoading:false,isFetching:false,isPreviousData:false} as Record<string,unknown>,fin:{data:undefined,error:null,isLoading:false,isFetching:false,isPreviousData:false} as Record<string,unknown>,refetch:vi.fn(),push:vi.fn(),params:'month=2026-09&keep=1',options:[] as {part:string;options:Record<string,unknown>}[]}));
+const overviewMock=vi.hoisted(()=>({ops:{data:undefined,error:null,isLoading:false,isFetching:false,isPreviousData:false} as Record<string,unknown>,fin:{data:undefined,error:null,isLoading:false,isFetching:false,isPreviousData:false} as Record<string,unknown>,refetch:vi.fn(),payoutRefresh:vi.fn(),push:vi.fn(),params:'month=2026-09&keep=1',options:[] as {part:string;options:Record<string,unknown>}[]}));
 vi.mock('next/navigation',()=>({usePathname:()=>'/dashboard',useRouter:()=>({push:overviewMock.push}),useSearchParams:()=>new URLSearchParams(overviewMock.params)}));
-vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({}),businessManagement:{
+vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({vmOps:{payoutDashboard:{invalidate:overviewMock.payoutRefresh}}}),businessManagement:{
   overview:{useQuery:(input:{part:string},options:Record<string,unknown>)=>{overviewMock.options.push({part:input.part,options});return {...(input.part==='operations'?overviewMock.ops:overviewMock.fin),refetch:overviewMock.refetch};}},
   activateCash:{useMutation:()=>({isLoading:false,error:null})},
 }}}));
 vi.mock('@/components/dashboard/OverviewCharts',()=>({CashChart:()=>null,StockChart:()=>null,VmByServerChart:()=>null}));
+vi.mock('@/components/dashboard/PayoutSummary',()=>({PayoutSummary:({serverId}:{serverId?:string})=><section data-testid="payout-summary" data-server={serverId||''}/> }));
 import {Overview} from '@/components/dashboard/Overview';
 
 const now=new Date('2026-10-26T05:00:00Z'),checked='2026-10-26T04:00:00Z',healthChecked='2026-10-26T04:55:00Z';
@@ -200,6 +201,8 @@ describe('Overview integration',()=>{
     expect(summaries).toHaveLength(2);expect(summaries.every(d=>!d.open)).toBe(true);
     expect(overviewMock.options.find(o=>o.part==='operations')?.options.refetchInterval).toBe(30000);
     await server('moon-1');await click('Sắp đủ: 2 VM');
+    expect(host.querySelector('[data-testid="payout-summary"]')?.getAttribute('data-server')).toBe('moon-1');
+    expect(host.querySelector('.bp-summary-foot')!.compareDocumentPosition(host.querySelector('[data-testid="payout-summary"]')!)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     overviewMock.ops={...overviewMock.ops,data:{...overviewData(),generatedAt:'2026-10-26T05:00:30Z'}};
     await overview();expect(codes()).toEqual(['VM-soon','VM-soon-edge']);
     expect(host.textContent).toContain('Làm mới trang');expect(list().querySelector('time')?.dateTime).toBe(healthChecked);
@@ -230,4 +233,5 @@ describe('Overview integration',()=>{
     overviewMock.ops={data:undefined,error:{message:'offline'},isLoading:false,isFetching:false};await overview();
     expect(host.querySelector('[role="alert"]')).not.toBeNull();expect(host.textContent).not.toMatch(/\$0|có thể đã cũ/);
   });
+  it('refresh button also refreshes payout numbers for the current project',async()=>{await overview();overviewMock.payoutRefresh.mockClear();await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Tải lại"]')!.click());expect(overviewMock.payoutRefresh).toHaveBeenCalledWith({projectId:'synthetic-project'});});
 });

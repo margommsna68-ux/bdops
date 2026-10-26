@@ -6,12 +6,13 @@ import {VM_OPS_STATUSES} from '@/lib/vm-ops';
 import {setVmStatus,recordRecreated} from '../vm-ops/ops';
 import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readPayoutPick,readPaypalGather,recordPayoutReceipt} from '../vm-ops/payout';
 import {recordBalanceChecks,readBalanceHistory,previewBalancePaste} from '../vm-ops/balance';
-import {readPayoutReport} from '../vm-ops/payout-report';
+import {readPayoutReport,readPayoutDashboard,PAYOUT_REPORT_VIEWS} from '../vm-ops/payout-report';
 // VM operating state, payout requests and recreation (owner brief 18/10/2026). People and AI use these same checked endpoints.
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),cycle=z.number().int().positive(),revision=z.number().int().nonnegative();
 const scope=(ctx:{prisma:Parameters<typeof loadInfrastructureScope>[0];user:{id:string}},projectId:string)=>loadInfrastructureScope(ctx.prisma,ctx.user.id,projectId);
 export const vmOpsRouter=router({
-  payoutReport:protectedProcedure.input(project.extend({serverId:id.optional(),paypalId:id.optional(),status:z.enum(['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW']).optional(),q:z.string().max(200).optional(),from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),page:z.number().int().min(1).max(100000).optional()})).query(({ctx,input})=>domain(async()=>readPayoutReport(await scope(ctx,input.projectId),input,ctx.prisma))),
+  payoutDashboard:protectedProcedure.input(project.extend({serverId:id.optional()})).query(({ctx,input})=>domain(async()=>readPayoutDashboard(await scope(ctx,input.projectId),input,ctx.prisma))),
+  payoutReport:protectedProcedure.input(project.extend({serverId:id.optional(),paypalId:id.optional(),status:z.enum(['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW']).optional(),q:z.string().max(200).optional(),from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),page:z.number().int().min(1).max(100000).optional(),view:z.enum(PAYOUT_REPORT_VIEWS).optional(),day:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()})).query(({ctx,input})=>domain(async()=>readPayoutReport(await scope(ctx,input.projectId),input,ctx.prisma))),
   board:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readVmOps(await scope(ctx,input.projectId),ctx.prisma))),
   history:protectedProcedure.input(project.extend({vmId:id})).query(({ctx,input})=>domain(async()=>readVmOpsHistory(await scope(ctx,input.projectId),input,ctx.prisma))),
   setStatus:protectedProcedure.input(project.extend({key,note:z.string().max(500).nullish(),items:z.array(z.object({vmId:id,status:z.enum(VM_OPS_STATUSES),expectedCycle:cycle,expectedRevision:revision.nullish(),expectedEndpointId:id.nullish()})).min(1).max(1000)})).mutation(({ctx,input})=>domain(async()=>setVmStatus(await scope(ctx,input.projectId),input,ctx.prisma))),

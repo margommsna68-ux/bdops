@@ -1,10 +1,12 @@
-import {afterAll,it,expect} from 'vitest';
+import {afterAll,afterEach,it,expect,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
-import {readPayoutReport} from '@/server/vm-ops/payout-report';
+import {readPayoutReport,readPayoutDashboard} from '@/server/vm-ops/payout-report';
+import {appRouter} from '@/server/routers/_app';
 
 afterAll(()=>db.$disconnect());
+afterEach(()=>vi.useRealTimers());
 async function fixture(){
  const f=await businessFixture(),projectId=f.scope.projectId;
  const pp=await db.payPalAccount.create({data:{projectId,code:'PP-report',primaryEmail:randomUUID()+'@fixture.invalid'}});
@@ -27,6 +29,101 @@ async function fixture(){
  };
  return {...f,pp,request,receipt,cleanup};
 }
+
+const dashboardClock=()=>{vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-26T17:00:00.001Z'));};
+const cardsToViews={sent:'SENT_TODAY',waiting:'WAITING',received:'RECEIVED_TODAY',attention:'ATTENTION'} as const;
+it('dashboard and focused report share Bangkok day, submission/receipt selection, lifetime history and separate receipt currencies',async()=>{
+ dashboardClock();const f=await fixture();try{
+  const before=await f.request({submittedAt:new Date('2026-10-26T16:59:59.999Z')});
+  const sent=await f.request({amount:'7',state:'FAILED',requestedAt:new Date('2026-09-01T00:00:00Z'),submittedAt:new Date('2026-10-26T17:00:00Z')});
+  const cancelled=await f.request({amount:'8',state:'CANCELLED',submittedAt:new Date('2026-10-26T17:00:00Z')});
+  const old=await f.request({cycle:1,requestedAt:new Date('2026-09-02T00:00:00Z'),submittedAt:new Date('2026-09-02T00:01:00Z')});
+  await db.earnAppAccount.update({where:{id:old.earnAppId},data:{closedAt:new Date()}});
+  await db.vmOperation.create({data:{projectId:f.scope.projectId,vmId:f.vm.id,cycle:2,status:'DELETED'}});
+  await f.receipt(old.id,{amount:'2',date:new Date('2026-10-26T00:00:00+07:00')});
+  await f.receipt(old.id,{amount:'3.25',date:new Date('2026-10-27T00:00:00+07:00')});
+  await f.receipt(old.id,{amount:'4',date:new Date('2026-10-28T00:00:00+07:00')});
+  await f.receipt(old.id,{amount:'99',confirmed:false});
+  await f.receipt(old.id,{amount:'98',confirmed:false,failed:true});
+  await f.receipt(old.id,{amount:'97',voidedAt:new Date()});
+  const mismatch=await f.request();await f.receipt(mismatch.id,{amount:'5',currency:'VND'});
+  await f.request({amount:'6',submission:'UNKNOWN',submittedAt:null});
+  await f.request({submission:'PREPARING',submittedAt:null});
+  const dashboard=await readPayoutDashboard(f.scope,{},db);if(!dashboard.available)throw Error('expected available');
+  expect(dashboard.day).toBe('2026-10-27');expect(dashboard.updatedAt).toBe('2026-10-26T17:00:00.001Z');
+  expect(dashboard.cards.sent).toEqual({requests:2,vms:1,amounts:[{currency:'USD',amount:'15.00'}]});
+  expect(dashboard.cards.received).toEqual({requests:2,vms:1,amounts:[{currency:'USD',amount:'3.25'},{currency:'VND',amount:'5.00'}]});
+  expect(dashboard.cards.attention).toEqual({requests:3,vms:1,amounts:[{currency:'USD',amount:'23.00'}]});
+  expect(dashboard.cards.waiting).toEqual({requests:2,vms:1,amounts:[{currency:'USD',amount:'10.75'}]});
+  for(const [card,view] of Object.entries(cardsToViews)){
+   const report=await readPayoutReport(f.scope,{view,day:dashboard.day},db);
+   expect(report.focus).toEqual({view,day:dashboard.day,...dashboard.cards[card as keyof typeof cardsToViews]});
+   expect(report.total).toBe(dashboard.cards[card as keyof typeof cardsToViews].requests);
+  }
+  const received=await readPayoutReport(f.scope,{view:'RECEIVED_TODAY'},db);
+  expect(received.rows.find(r=>r.id===old.id)).toMatchObject({cycle:1,current:false,received:'9.25',receivedInView:[{currency:'USD',amount:'3.25'}]});
+  expect(received.summary.find(s=>s.currency==='USD')?.received).toBe('3.25');
+  expect(received.summary.find(s=>s.currency==='VND')?.received).toBe('5.00');
+  const todaySent=await readPayoutReport(f.scope,{view:'SENT_TODAY'},db);
+  expect(todaySent.rows.map(r=>r.id).sort()).toEqual([sent.id,cancelled.id].sort());
+  expect(todaySent.summary[0].sent).toBe('15.00');expect(todaySent.rows.every(r=>r.receivedInView===null)).toBe(true);
+  expect((await readPayoutReport(f.scope,{view:'SENT_TODAY',day:'2026-10-26'},db)).rows.map(r=>r.id)).toContain(before.id);
+  expect((await readPayoutReport(f.scope,{},db)).focus).toBeNull();
+ }finally{await f.cleanup();}
+});
+
+it('focused totals cover more than 50 historical requests and count distinct VMs within the selected server',async()=>{
+ dashboardClock();const f=await fixture();try{
+  const second=await db.virtualMachine.create({data:{serverId:f.server.id,code:'VM_002',managed:true}});
+  for(let i=0;i<53;i++)await f.request({vmId:i%2?second.id:f.vm.id,requestedAt:new Date('2025-01-01T00:00:00Z'),submittedAt:new Date('2026-10-26T17:00:00Z')});
+  const anotherServer=await db.server.create({data:{projectId:f.scope.projectId,code:'ANOTHER'}});
+  const outside=await db.virtualMachine.create({data:{serverId:anotherServer.id,code:'OUTSIDE',managed:true}});
+  await f.request({vmId:outside.id,submittedAt:new Date('2026-10-26T17:00:00Z')});
+  const input={serverId:f.server.id,view:'SENT_TODAY' as const};
+  const report=await readPayoutReport(f.scope,{...input,page:2},db),dashboard=await readPayoutDashboard(f.scope,{serverId:f.server.id},db);
+  if(!dashboard.available)throw Error('expected available');
+  expect(report).toMatchObject({page:2,pages:2,total:53});expect(report.rows).toHaveLength(3);
+  expect(report.focus).toEqual({view:'SENT_TODAY',day:'2026-10-27',requests:53,vms:2,amounts:[{currency:'USD',amount:'530.00'}]});
+  expect(report.focus).toEqual({view:'SENT_TODAY',day:dashboard.day,...dashboard.cards.sent});
+ }finally{await f.cleanup();}
+});
+
+it('view day validates real calendar dates and rejects ambiguous request-date ranges',async()=>{
+ dashboardClock();const f=await fixture();try{
+  for(const input of [{view:'INVALID'},{view:'SENT_TODAY',day:'2026-02-29'},{view:'RECEIVED_TODAY',day:'2026-13-01'},
+   {view:'WAITING',day:'20261027'},{view:'ATTENTION',from:'2026-10-01'},{view:'SENT_TODAY',to:'2026-10-27'}])
+   await expect(readPayoutReport(f.scope,input,db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+  const empty=await readPayoutReport(f.scope,{view:'RECEIVED_TODAY',day:'2024-02-29'},db);
+  expect(empty.focus).toEqual({view:'RECEIVED_TODAY',day:'2024-02-29',requests:0,vms:0,amounts:[]});
+ }finally{await f.cleanup();}
+});
+
+it('protected dashboard denies anonymous/nonmembers, returns no-leak unavailable for ordinary members, and preserves scoped finance denial',async()=>{
+ dashboardClock();const f=await fixture(),other=await fixture();try{
+  await f.request({submittedAt:new Date('2026-10-26T17:00:00Z')});
+  await other.request({submittedAt:new Date('2026-10-26T17:00:00Z')});
+  const caller=(userId?:string,queryDb=db)=>appRouter.createCaller({prisma:queryDb,session:userId?{user:{id:userId,email:'fixture@invalid'},expires:new Date(Date.now()+60000).toISOString()} as never:null});
+  await expect(caller().vmOps.payoutDashboard({projectId:f.scope.projectId})).rejects.toMatchObject({code:'UNAUTHORIZED'});
+  await expect(caller(other.scope.userId).vmOps.payoutDashboard({projectId:f.scope.projectId})).rejects.toMatchObject({code:'FORBIDDEN'});
+  let payoutReads=0;
+  const guarded=new Proxy(db,{get(target,key,receiver){
+   if(key==='earnPayoutRequest')return {findMany:()=>{payoutReads++;throw Error('Payout read forbidden for unavailable dashboard');}};
+   const value=Reflect.get(target,key,receiver);return typeof value==='function'?value.bind(target):value;
+  }}) as typeof db;
+  expect(await caller(f.worker.userId,guarded).vmOps.payoutDashboard({projectId:f.scope.projectId})).toEqual({available:false});expect(payoutReads).toBe(0);
+  const member={userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}};
+  await db.projectMember.update({where:member,data:{capabilities:['EARN_PAYOUT']}});
+  const dash=await caller(f.worker.userId).vmOps.payoutDashboard({projectId:f.scope.projectId});if(!dash.available)throw Error('expected available');
+  expect(dash.cards.sent.requests).toBe(1);
+  const drilldown=await caller(f.worker.userId).vmOps.payoutReport({projectId:f.scope.projectId,view:'SENT_TODAY',day:dash.day});
+  expect(drilldown.focus).toEqual({view:'SENT_TODAY',day:dash.day,...dash.cards.sent});
+  const foreign=await caller(f.worker.userId).vmOps.payoutDashboard({projectId:f.scope.projectId,serverId:other.server.id});
+  if(!foreign.available)throw Error('expected available');expect(foreign.cards.sent.requests).toBe(0);
+  await db.projectMember.update({where:member,data:{serverScope:'SELECTED',allowedServerIds:[f.server.id]}});
+  expect(await readPayoutDashboard(f.worker,{},db)).toEqual({available:false});
+  await expect(caller(f.worker.userId).vmOps.payoutDashboard({projectId:f.scope.projectId})).rejects.toMatchObject({code:'FORBIDDEN'});
+ }finally{await f.cleanup();await other.cleanup();}
+});
 
 it('reports partial receipts with void/failed/pending precedence and sums only actual confirmed money',async()=>{
  const f=await fixture();try{

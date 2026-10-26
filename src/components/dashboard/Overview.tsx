@@ -11,6 +11,7 @@ import {today} from '@/components/business-management/workflow';
 import {CashChart,StockChart,VmByServerChart} from './OverviewCharts';
 import {financeTargets} from './finance-links';
 import {BusinessPulse} from './BusinessPulse';
+import {PayoutSummary} from './PayoutSummary';
 import '@/components/proxy-management/proxy-management.css';
 import './dashboard.css';
 export type Overview=inferRouterOutputs<AppRouter>['businessManagement']['overview'];
@@ -20,6 +21,7 @@ const usdt=(s:string)=>Number(s).toLocaleString('vi-VN',{minimumFractionDigits:2
 // Tổng quan: operations (current state) and what needs attention first, finance in its own section (the month only filters finance). Every number
 // links to the list it counts; the read model uses the same rules as those lists (see src/server/dashboard/overview.ts).
 export function Overview({projectId}:{projectId:string}){
+  const utils=trpc.useUtils();
   const params=useSearchParams(),router=useRouter(),pathname=usePathname(),thisMonth=today().slice(0,7);
   const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(params.get('month')||'')?params.get('month')!:thisMonth;
   // A month change is a history entry: Back returns to the previous month.
@@ -34,13 +36,13 @@ export function Overview({projectId}:{projectId:string}){
   return <div className="proxy-workspace ov">
     <div className="ov-head"><h1>Tổng quan</h1>
       <span className="pm-muted text-xs">{o?'Làm mới trang: '+new Date(o.generatedAt).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}):ops.isLoading?'Đang tải…':''}</span>
-      <button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" disabled={fetching} onClick={()=>{void ops.refetch();void fin.refetch();}}><RefreshCw size={16} className={fetching?'animate-spin':''}/></button></div>
+      <button className="pm-icon-button" aria-label="Tải lại" title="Tải lại" disabled={fetching} onClick={()=>{void ops.refetch();void fin.refetch();void utils.vmOps.payoutDashboard.invalidate({projectId});}}><RefreshCw size={16} className={fetching?'animate-spin':''}/></button></div>
     {ops.error&&<SectionError label="phần vận hành" stale={!!o} busy={ops.isFetching} retry={()=>void ops.refetch()}/>}
     {fin.error&&<SectionError label="phần tài chính" stale={!!f} busy={fin.isFetching} retry={()=>void fin.refetch()}/>}
     {(ops.isLoading||ops.isPreviousData)&&<div className="ov-skeleton" aria-busy="true" aria-label="Đang tải vận hành"><div/><div/><div/></div>}
     {o&&f&&!o.operations&&!showFinance(f)&&<p className="ov-empty">Tài khoản này chưa được cấp mục nào hiển thị ở Tổng quan. Mở các mục ở menu bên trái theo quyền được giao.</p>}
     {o?.operations&&<>
-      {pulse?<BusinessPulse key={projectId} pulse={pulse} packages={o.operations.packages} costsVisible={o.rights.costs}/>:<p className="ov-empty">Chưa có dữ liệu tổng quan kiếm tiền. Mở Server / VM để xem từng máy.</p>}
+      {pulse?<BusinessPulse key={projectId} pulse={pulse} packages={o.operations.packages} costsVisible={o.rights.costs} payoutSummary={serverId=><PayoutSummary projectId={projectId} serverId={serverId}/>}/>:<><p className="ov-empty">Chưa có dữ liệu tổng quan kiếm tiền. Mở Server / VM để xem từng máy.</p><PayoutSummary projectId={projectId}/></>}
       <Fold key={'operations-'+projectId} label="Kho proxy và vận hành chi tiết"><Operations ops={o.operations}/></Fold>
     </>}
     {(fin.isPreviousData||(f&&rights&&showFinance(f)))&&<Fold key={'finance-'+projectId} label="Tài chính theo tháng">{f?<Finance projectId={projectId} o={f} month={month} onMonth={setMonth} fetching={fin.isFetching}/>:<p className="ov-empty" aria-busy="true">Đang tải tài chính tháng {month.split('-').reverse().join('/')}…</p>}</Fold>}

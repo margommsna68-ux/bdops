@@ -67,7 +67,7 @@ function Time({at,dateOnly=false}:{at:string|null|undefined;dateOnly?:boolean}){
 }
 const healthTone=(r:Row)=>r.health==='GOOD'?'good':r.health==='ERROR'?'error':'neutral';
 
-export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;packages:PulsePackage[];costsVisible:boolean}) {
+export function BusinessPulse({pulse,packages,costsVisible,payoutSummary}:{pulse:Pulse;packages:PulsePackage[];costsVisible:boolean;payoutSummary?:(serverId:string)=>React.ReactNode}) {
   // Local selections survive the 30-second query refresh; a new project remounts this component in Overview.
   const [serverId,setServerId]=useState(''),[selected,setSelected]=useState<Filter|null>(null),[limit,setLimit]=useState(12);
   const [allServers,setAllServers]=useState(false);
@@ -133,6 +133,7 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
       </div>
       <div className="bp-summary-foot"><div>{metric('ALL',<>{number(rows.length)} tổng VM</>,'bp-text-button')}{metric('ACTIVE',<>{number(totalActive)} đang hoạt động</>,'bp-text-button')}{metric('PAUSED',<><Pause size={12} aria-hidden="true"/>{number(count('PAUSED'))} tạm dừng</>,'bp-text-button')}{metric('NEW',<>{number(count('NEW'))} chưa cài</>,'bp-text-button')}</div><p>GEN2 · kiểm tra gần nhất: <Time at={latestCheck}/></p></div>
 
+      {payoutSummary?.(serverId)}
       <section className="bp-attention" aria-labelledby="bp-attention"><h2 id="bp-attention">Cần xem</h2>
         <div className="bp-actions">
           <Action label="Đã báo / chờ xử lý" hint="Vấn đề đã ghi trên web, cần xử lý hoặc xác nhận lại." count={count('REPORTED')} tone="warn" selected={filter==='REPORTED'} onClick={()=>choose('REPORTED')}/>
@@ -165,6 +166,7 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
         })}</tbody></table><div className="bp-table-foot"><span>Thanh màu tính trong số VM đang hoạt động.</span>{comparison.length>5&&<button type="button" aria-label={allServers?'Thu gọn server':`Xem cả ${comparison.length} server`} aria-expanded={allServers} onClick={()=>setAllServers(v=>!v)}>{allServers?'Thu gọn':`Xem cả ${number(comparison.length)} server`}{allServers?<ChevronUp size={14}/>:<ChevronDown size={14}/>}</button>}</div>
       </section>
     </>}
+    {!pulse.rows.length&&payoutSummary?.(serverId)}
     <section className="bp-panel" aria-labelledby="bp-packages"><div className="bp-section-head"><h2 id="bp-packages">Gói proxy đến hạn</h2><Link href={links.packages()} className="pm-link">Mở gói proxy</Link></div>
       <p className="bp-note bp-list-note">Theo lịch thanh toán đã lưu, gồm gói sắp đến hạn và quá hạn. Không phải kết quả kiểm tra proxy.{serverId?' Danh sách gói theo toàn bộ phạm vi được xem.':''}</p>
       {packages.length===0?<p className="bp-empty">Không có gói cần nhắc thanh toán.</p>:<ul className="bp-packages">{packages.map(p=><li key={p.id}>

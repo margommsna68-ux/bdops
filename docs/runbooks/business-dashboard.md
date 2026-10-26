@@ -17,4 +17,17 @@ Dữ liệu làm mới trên trang mỗi 30 giây. Giờ làm mới trang và gi
 
 Web nhận kết quả qua API ops thông thường: GET `gen2-targets`, POST `vms/{id}/scan-observations`, GET `gen2-reminders`. OpenAPI 1.5.0. Ghi scan cần VM_OPS; kèm tiền cần BALANCE_WRITE và EARN_BALANCE. Các lệnh giữ kiểm tra token/user/phạm vi/revision/lượt/idempotency. Chỉ ghi quan sát, không đổi proxy/status/account hay chạy việc trong VM. SDK tiền dùng chung dịch vụ có sẵn; lịch sử mới ghi kèm VM/lượt để tính tăng.
 
-Bridge và vận hành Central: xem `gen2-dashboard.md`. Dùng kết quả GEN2 đã quét, không tạo lịch quét mới. Cảnh báo lỗi/phục hồi dùng hệ thống Telegram hiện có của GEN2; bridge chỉ thêm nhắc kỳ proxy với một key mỗi gói/ngày đến hạn. Không tự thay proxy/thanh toán/rút tiền. Tiền thực nhận PayPal hôm nay để giai đoạn sau.
+Bridge và vận hành Central: xem `gen2-dashboard.md`. Dùng kết quả GEN2 đã quét, không tạo lịch quét mới. Cảnh báo lỗi/phục hồi dùng hệ thống Telegram hiện có của GEN2; bridge chỉ thêm nhắc kỳ proxy với một key mỗi gói/ngày đến hạn. Không tự thay proxy/thanh toán/rút tiền.
+
+## EarnApp → PayPal
+
+Khung ngay dưới ba số vận hành, theo server đang chọn:
+
+- **Đã gửi hôm nay**: số VM và tiền của các yêu cầu thực sự gửi trong ngày Việt Nam (`submittedAt`), kể cả yêu cầu tạo từ hôm trước. Đã gửi vẫn là sự kiện đã xảy ra dù sau đó thất bại/huỷ.
+- **Đang chờ về**: số còn chờ của yêu cầu đã gửi, gồm mọi ngày; đã nhận từng phần chỉ còn phần thiếu. Đang chuẩn bị/chưa rõ kết quả không tự tính là đã gửi.
+- **PayPal nhận hôm nay**: khoản nhận xác nhận, không lỗi/không thu hồi, theo ngày thực nhận trong sổ. Không lấy ngày tạo yêu cầu, không coi EarnApp báo Paid là đã về. Các đồng tiền hiện riêng, không quy đổi.
+- **Cần xử lý**: số yêu cầu thất bại, chưa rõ kết quả hoặc cần đối chiếu; gồm mọi ngày. Một VM có nhiều lượt cũ thì số VM và số yêu cầu có thể khác nhau.
+
+Bấm từng ô mở `/earnapp-withdrawals?view=...` giữ server. Hai ô trong ngày mang `day=YYYY-MM-DD`, nên qua nửa đêm báo cáo vẫn mở đúng ngày vừa thấy. Báo cáo nhận trong ngày chỉ cộng ngày đang chọn, cả tổng và từng dòng; mở khung chi tiết vẫn có toàn bộ lịch sử của yêu cầu. Bấm × để bỏ nhóm và giữ các bộ lọc server/PayPal/tìm kiếm. Không trộn bộ lọc ngày yêu cầu với bộ lọc sự kiện từ dashboard.
+
+Cùng quyền `requestMoney` như báo cáo rút; người thiếu quyền không có khung tiền, user bị giới hạn server vẫn theo quy tắc quyền tài chính hiện có. Lỗi tải ẩn số đã cache và có Thử lại. Tự cập nhật 30 giây và theo nút Tải lại; không mất server đang chọn. Trên điện thoại khung có hai cột. Các số này là EarnApp về PayPal, độc lập với USDT thực nhận về team và lợi nhuận.
