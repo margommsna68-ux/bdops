@@ -1,0 +1,10 @@
+{
+  "publicBuild": 200,
+  "localHealth": 200,
+  "sourceMatches": {
+    "src/components/dashboard/payout-summary.css": true,
+    "src/components/dashboard/PayoutSummary.tsx": true,
+    "src/server/vm-ops/payout-report.ts": true,
+    "src/components/business-management/PayoutReportWorkspace.tsx": true
+  }
+}

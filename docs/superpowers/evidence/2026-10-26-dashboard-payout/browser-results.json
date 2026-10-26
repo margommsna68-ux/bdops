@@ -1,0 +1,73 @@
+{
+  "checks": [
+    "HTTP dashboard uses ISO business day",
+    "HTTP distinct accounting totals",
+    "summary immediately follows operating metrics",
+    "four compact links",
+    "SENT_TODAY exact URL",
+    "SENT_TODAY matching request count",
+    "SENT_TODAY matching amount",
+    "WAITING exact URL",
+    "WAITING matching request count",
+    "WAITING matching amount",
+    "RECEIVED_TODAY exact URL",
+    "RECEIVED_TODAY matching request count",
+    "RECEIVED_TODAY matching amount",
+    "receipt table shows six received today",
+    "receipt detail retains eight lifetime and both dates",
+    "changing receipt day uses yesterday only",
+    "ATTENTION exact URL",
+    "ATTENTION matching request count",
+    "selected server filters payout and sent metric",
+    "server survives drilldown",
+    "clear group retains server",
+    "dark desktop no overflow",
+    "dark four columns",
+    "dark phone two columns",
+    "dark phone no overflow",
+    "dark phone drilldown usable",
+    "light desktop no overflow",
+    "light four columns",
+    "light phone two columns",
+    "light phone no overflow",
+    "light phone drilldown usable",
+    "golden desktop no overflow",
+    "golden four columns",
+    "golden phone two columns",
+    "golden phone no overflow",
+    "golden phone drilldown usable",
+    "bronze desktop no overflow",
+    "bronze four columns",
+    "bronze phone two columns",
+    "bronze phone no overflow",
+    "bronze phone drilldown usable",
+    "four distinct real theme backgrounds",
+    "auto refresh preserves selected server",
+    "global refresh reloads payout numbers",
+    "restricted HTTP has no payout money",
+    "no JS errors"
+  ],
+  "errors": [],
+  "colors": [
+    {
+      "theme": "dark",
+      "background": "rgb(21, 29, 48)",
+      "color": "rgb(248, 250, 252)"
+    },
+    {
+      "theme": "light",
+      "background": "rgb(255, 255, 255)",
+      "color": "rgb(17, 24, 39)"
+    },
+    {
+      "theme": "golden",
+      "background": "rgb(24, 24, 24)",
+      "color": "rgb(250, 250, 250)"
+    },
+    {
+      "theme": "bronze",
+      "background": "rgb(255, 253, 249)",
+      "color": "rgb(58, 42, 28)"
+    }
+  ]
+}

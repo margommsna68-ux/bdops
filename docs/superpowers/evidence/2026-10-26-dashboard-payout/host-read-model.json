@@ -1,0 +1,38 @@
+{
+  "readOnly": true,
+  "available": true,
+  "day": "2026-10-26",
+  "updatedAt": "2026-10-26T13:53:17.300Z",
+  "cards": {
+    "sent": {
+      "requests": 4,
+      "vms": 4,
+      "amounts": [
+        {
+          "currency": "USD",
+          "amount": "71.71"
+        }
+      ]
+    },
+    "waiting": {
+      "requests": 4,
+      "vms": 4,
+      "amounts": [
+        {
+          "currency": "USD",
+          "amount": "71.71"
+        }
+      ]
+    },
+    "received": {
+      "requests": 0,
+      "vms": 0,
+      "amounts": []
+    },
+    "attention": {
+      "requests": 0,
+      "vms": 0,
+      "amounts": []
+    }
+  }
+}
