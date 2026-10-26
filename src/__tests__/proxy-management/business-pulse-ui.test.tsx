@@ -42,6 +42,17 @@ const codes=()=>Array.from(list().querySelectorAll('a')).map(a=>a.textContent);
 const server=async(value:string)=>{const el=host.querySelector<HTMLSelectElement>('[aria-label="Chọn server"]')!;await act(async()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
 
 describe('business pulse drilldowns',()=>{
+  it('prioritizes servers needing attention, collapses to five and preserves expansion on refresh',async()=>{
+    const many=Array.from({length:7},(_,i)=>vm(`VM-server-${i}`,'10',{serverId:`s${i}`,server:`Server ${i}`,health:i===6?null:i===5?{at:checked,earning:false,problem:'PROXY_AUTH'}:{at:checked,earning:true,problem:null}}));
+    await render(many);
+    const names=()=>Array.from(host.querySelectorAll('.bp-server-name button')).map(b=>b.textContent);
+    expect(names()).toHaveLength(5);expect(names().slice(0,2)).toEqual(['Server 5','Server 6']);
+    await click('Xem cả 7 server');expect(names()).toHaveLength(7);
+    await render([...many,vm('VM-extra','11',{serverId:'s6',server:'Server 6',health:null})]);
+    expect(names()).toHaveLength(7);expect(names()[0]).toBe('Server 6');
+    await click('Server 6 · Đủ tiền rút: 2 VM');expect(codes()).toEqual(['VM-server-6','VM-extra']);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Chọn server"]')?.value).toBe('s6');
+  });
   it('draws mutually exclusive health and money distributions from the same scoped rows',async()=>{
     await render();
     expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('75%');

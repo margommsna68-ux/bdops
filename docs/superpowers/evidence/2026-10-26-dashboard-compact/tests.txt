@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ✓ src/__tests__/proxy-management/business-pulse-ui.test.tsx (26 tests) 604ms
+ ✓ src/__tests__/proxy-management/business-pulse.test.ts (7 tests) 4ms
+
+ Test Files  2 passed (2)
+      Tests  33 passed (33)
+   Start at  10:16:37
+   Duration  1.39s (transform 188ms, setup 28ms, import 276ms, tests 608ms, environment 301ms)
+

@@ -1,7 +1,7 @@
 "use client";
 import {useState} from 'react';
 import Link from 'next/link';
-import {Activity,ArrowDownRight,ArrowRight,ArrowUpRight,ChartNoAxesCombined,Check,ChevronRight,CircleHelp,Clock3,Pause,TriangleAlert,Wallet} from 'lucide-react';
+import {Activity,ArrowDownRight,ArrowRight,ArrowUpRight,ChartNoAxesCombined,ChevronDown,ChevronRight,ChevronUp,CircleHelp,Clock3,Pause,Server,TriangleAlert,Wallet} from 'lucide-react';
 import {HEALTH_LABEL,PROBLEM_LABEL,type BusinessPulse as Pulse} from '@/lib/business-pulse';
 import {links} from '@/lib/links';
 import './business-pulse.css';
@@ -35,7 +35,7 @@ const filters={
 type Filter=keyof typeof filters;
 const moneyFilters=new Set<Filter>(['COVERED','INCREASING','FLAT','DECREASED','MONEY_UNKNOWN','ENOUGH','SOON','LOW','THRESHOLD_UNKNOWN']);
 const healthParts=[['GOOD','good'],['ERROR','error'],['UNKNOWN','unknown']] as const;
-const growthParts=[['INCREASING','good'],['FLAT','warn'],['DECREASED','blue'],['MONEY_UNKNOWN','unknown']] as const;
+const growthParts=[['INCREASING','good'],['FLAT','warn'],['DECREASED','muted'],['MONEY_UNKNOWN','unknown']] as const;
 const growthIcons={INCREASING:ArrowUpRight,FLAT:ArrowRight,DECREASED:ArrowDownRight,MONEY_UNKNOWN:CircleHelp};
 type Part={key:Filter;tone:string;value:number};
 const number=(n:number)=>n.toLocaleString('vi-VN');
@@ -64,11 +64,12 @@ function Time({at,dateOnly=false}:{at:string|null|undefined;dateOnly?:boolean}){
   if(!at||!Number.isFinite(Date.parse(at)))return <>Chưa có thời điểm</>;
   return <time dateTime={at}>{new Date(at).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',...(!dateOnly?{hour:'2-digit',minute:'2-digit'} as const:{})})}</time>;
 }
-const healthTone=(r:Row)=>r.health==='GOOD'?'good':r.health==='ERROR'?'error':r.health==='UNKNOWN'?'warn':'neutral';
+const healthTone=(r:Row)=>r.health==='GOOD'?'good':r.health==='ERROR'?'error':'neutral';
 
 export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;packages:PulsePackage[];costsVisible:boolean}) {
   // Local selections survive the 30-second query refresh; a new project remounts this component in Overview.
   const [serverId,setServerId]=useState(''),[selected,setSelected]=useState<Filter|null>(null),[limit,setLimit]=useState(12);
+  const [allServers,setAllServers]=useState(false);
   const servers=Array.from(new Map(pulse.rows.map(r=>[r.serverId,r.server])).entries()).sort((a,b)=>a[1].localeCompare(b[1],'vi',{numeric:true}));
   const rows=serverId?pulse.rows.filter(r=>r.serverId===serverId):pulse.rows;
   const filter=selected&&(!moneyFilters.has(selected)||pulse.moneyRead)?selected:null;
@@ -82,35 +83,33 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
   const growthSegments=growthParts.map(([key,tone])=>({key,tone,value:count(key)}));
   const comparison=servers.filter(([id])=>!serverId||id===serverId).map(([id,name])=>{
     const own=pulse.rows.filter(r=>r.serverId===id);
-    return {id,name,own,amount:pulse.moneyRead?growth(own):null};
-  });
-  const maxGrowth=comparison.reduce((max,s)=>s.amount!==null&&units(s.amount)>max?units(s.amount):max,BigInt(0));
+    return {id,name,own,amount:pulse.moneyRead?growth(own):null,attention:own.filter(r=>active(r)&&(r.health==='ERROR'||r.health==='UNKNOWN'||!!r.recordedIssue)).length};
+  }).sort((a,b)=>b.attention-a.attention||a.name.localeCompare(b.name,'vi',{numeric:true}));
+  const shownServers=allServers?comparison:comparison.slice(0,5);
   const latestCheck=rows.filter(active).map(r=>r.checkedAt).filter((at):at is string=>!!at&&Number.isFinite(Date.parse(at))&&Date.parse(at)<=Date.parse(pulse.generatedAt)).sort((a,b)=>Date.parse(b)-Date.parse(a))[0]??null;
   const metric=(key:Filter,children?:React.ReactNode,className='bp-chip',label=filters[key].label)=><button key={key} type="button" className={className} aria-label={`${label}: ${number(count(key))} VM`} aria-pressed={filter===key} aria-controls="bp-vm-list" onClick={()=>choose(key)}>{children??<>{filters[key].label} <strong>{number(count(key))}</strong></>}</button>;
   return <div className="business-pulse">
-    <div className="bp-toolbar"><label>Phạm vi VM <select className="pm-input" aria-label="Chọn server" value={serverId} onChange={e=>{setServerId(e.target.value);setLimit(12);}}>
+    <div className="bp-toolbar"><span className="bp-note">Hôm nay, {pulse.day.split('-').reverse().join('/')} · giờ Việt Nam</span><label><Server size={15} aria-hidden="true"/><span className="bp-sr-only">Phạm vi VM</span><select className="pm-input" aria-label="Chọn server" value={serverId} onChange={e=>{setServerId(e.target.value);setLimit(12);}}>
       <option value="">Tất cả server được xem</option>{servers.map(([id,name])=><option key={id} value={id}>{name}</option>)}
       {serverId&&!servers.some(([id])=>id===serverId)&&<option value={serverId}>Server không còn trong phạm vi</option>}
-    </select></label><span className="bp-note">Ngày {pulse.day.split('-').reverse().join('/')} · giờ Việt Nam</span></div>
+    </select></label></div>
     {!pulse.rows.length?<p className="bp-empty">Chưa có VM trong phạm vi được xem. <Link href={links.vms()} className="pm-link">Mở Server / VM</Link></p>:<>
-      <div className="bp-cards">
-        <section className="bp-card" aria-labelledby="bp-health"><div className="bp-card-title"><Activity size={18} aria-hidden="true"/><h2 id="bp-health">VM hoạt động</h2></div>
+      <div className="bp-cards" aria-label="Tổng quan điều hành">
+        <section className="bp-card" aria-labelledby="bp-health"><div className="bp-card-title"><Activity size={17} aria-hidden="true"/><h2 id="bp-health">Hoạt động</h2></div>
           <div className="bp-health-visual">
             <HealthRing parts={healthSegments} total={totalActive}/>
-            <div className="bp-legend">{healthParts.map(([key,tone])=>metric(key,<><i className={'bp-dot bp-fill-'+tone} aria-hidden="true"/><span>{filters[key].label}</span><strong>{number(count(key))}</strong></>,'bp-legend-item'))}</div>
+            <div>{metric('GOOD',<><strong>{number(count('GOOD'))}</strong><span className="bp-unit">/ {number(totalActive)}</span></>,'bp-number-button bp-main-number')}<p className="bp-note">VM đang kiếm tiền</p></div>
           </div>
-          <div className="bp-health-total">{metric('ACTIVE',<><strong>{number(totalActive)}</strong> VM đang hoạt động</>,'bp-text-button')}<span className="bp-note">/ {number(rows.length)} tổng VM</span></div>
-          <div className="bp-separated">{metric('PAUSED',<><Pause size={12} aria-hidden="true"/> Tạm dừng <strong>{number(count('PAUSED'))}</strong></>)}{metric('NEW')}</div>
-          <p className="bp-note bp-check-time">Lần kiểm tra gần nhất: <Time at={latestCheck}/></p>
-          <details className="bp-explain"><summary>Cách tính hoạt động</summary><p>Tạm dừng và chưa cài được tính riêng. Kiếm tiền cần kết quả kiểm tra trong 24 giờ. Mốc gần nhất không đại diện cho tất cả VM.</p></details>
+          <div className="bp-legend">{healthParts.map(([key,tone])=>metric(key,<><i className={'bp-dot bp-fill-'+tone} aria-hidden="true"/><strong>{number(count(key))}</strong><span>{key==='GOOD'?'tốt':key==='ERROR'?'lỗi':'chưa rõ'}</span></>,'bp-legend-item',key==='GOOD'?'VM tốt':filters[key].label))}</div>
+          <details className="bp-explain"><summary>Cách tính hoạt động</summary><p>Tạm dừng và chưa cài được tính riêng. Kiếm tiền cần kết quả kiểm tra trong 24 giờ. Mốc gần nhất không đại diện cho tất cả VM.</p><p>Lần kiểm tra gần nhất: <Time at={latestCheck}/></p></details>
         </section>
         <section className="bp-card" aria-labelledby="bp-growth"><div className="bp-card-title"><ChartNoAxesCombined size={18} aria-hidden="true"/><h2 id="bp-growth">Tăng ghi nhận hôm nay</h2></div>
           {!pulse.moneyRead?<p className="bp-unavailable">Chưa có quyền xem tiền</p>:<>
-            {daily===null?<p className="bp-unavailable">Chưa đủ dữ liệu</p>:metric('COVERED',<strong>{dollars(daily)}</strong>,'bp-number-button bp-main-number bp-good')}
+            {daily===null?<p className="bp-unavailable">Chưa đủ dữ liệu</p>:metric('COVERED',<strong>{dollars(daily)}</strong>,'bp-number-button bp-main-number')}
             <p className="bp-note">Có số tăng ghi nhận: {number(count('COVERED'))} / {number(totalActive)} VM</p>
             <div className="bp-growth-chart" role="group" aria-label="Phân bố tiền hôm nay" data-total={totalActive}>
               <SegmentBar parts={growthSegments} total={totalActive}/>
-              <div className="bp-growth-legend">{growthParts.map(([key,tone])=>{const Icon=growthIcons[key];return metric(key,<><Icon className={'bp-'+tone} size={16} aria-hidden="true"/><span>{filters[key].label}</span><strong>{number(count(key))}</strong></>,'bp-legend-item');})}</div>
+              <div className="bp-growth-legend">{growthParts.map(([key])=>{const Icon=growthIcons[key];return metric(key,<><Icon size={13} aria-hidden="true"/><strong>{number(count(key))}</strong><span>{key==='INCREASING'?'tăng':key==='FLAT'?'chưa tăng':key==='DECREASED'?'giảm':'thiếu dữ liệu'}</span></>,'bp-legend-item');})}</div>
             </div>
             <details className="bp-explain"><summary>Cách tính tiền tăng</summary><p>Từ lần đọc đầu đến lần đọc cuối hôm nay trên cùng mã SDK, VM và lượt. Số giảm được đối chiếu riêng; đây chưa phải tiền nhận. Thanh màu thể hiện số VM trong từng nhóm, không phải diễn biến theo giờ.</p></details>
           </>}
@@ -119,24 +118,27 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
           {!pulse.moneyRead?<p className="bp-unavailable">Chưa có quyền xem tiền</p>:<>
             {metric('ENOUGH',<><strong>{number(count('ENOUGH'))}</strong><span className="bp-unit">VM từ $10</span></>,'bp-number-button bp-main-number')}
             {enoughAmount!==null&&<p>Tiền trong {number(enough.length)} VM: <strong>{dollars(enoughAmount)}</strong></p>}
-            <div className="bp-thresholds">{([['LOW','Dưới $8','neutral'],['SOON','$8 – dưới $10','warn'],['ENOUGH','Từ $10','good']] as const).map(([key,label,tone])=>
-              metric(key,<><span className="bp-threshold-label">{label}</span><span className="bp-level-track" aria-hidden="true"><i className={'bp-fill-'+tone} style={{width:`${totalActive?count(key)/totalActive*100:0}%`}}/></span><strong>{number(count(key))}</strong></>,'bp-threshold-row',key==='ENOUGH'?'Mức từ $10':filters[key].label))}
+            <div className="bp-thresholds"><SegmentBar total={totalActive} parts={([
+              ['ENOUGH','good'],['SOON','warn'],['LOW','neutral'],['THRESHOLD_UNKNOWN','unknown'],
+            ] as const).map(([key,tone])=>({key,tone,value:count(key)}))}/>
+              {metric('SOON',<><span>Sắp đủ · từ $8</span><strong>{number(count('SOON'))} VM</strong></>,'bp-threshold-row')}
+              <div className="bp-threshold-meta">{metric('LOW',<>{number(count('LOW'))} dưới $8</>,'bp-text-button')}{metric('THRESHOLD_UNKNOWN',<>{number(count('THRESHOLD_UNKNOWN'))} chưa rõ</>,'bp-text-button')}</div>
             </div>
-            {metric('THRESHOLD_UNKNOWN',<><CircleHelp size={13} aria-hidden="true"/> Chưa rõ mức tiền <strong>{number(count('THRESHOLD_UNKNOWN'))}</strong></>)}
             <p className="bp-note">Đạt $10: kiểm tra điều kiện trước khi rút.</p>
-            <details className="bp-explain"><summary>Cần kiểm tra những gì?</summary><p>Kiểm tra tài khoản, email PayPal và yêu cầu rút. Đây là tiền trong VM đã đọc, chưa phải tiền nhận hoặc cam kết rút được. Mỗi thanh biểu diễn tỷ lệ VM của nhóm trong số VM đang hoạt động.</p></details>
+            <details className="bp-explain"><summary>Cần kiểm tra những gì?</summary><p>Kiểm tra tài khoản, email PayPal và yêu cầu rút. Đây là tiền trong VM đã đọc, chưa phải tiền nhận hoặc cam kết rút được. Thanh màu biểu diễn các nhóm trong số VM đang hoạt động.</p></details>
           </>}
         </section>
       </div>
+      <div className="bp-summary-foot"><div>{metric('ALL',<>{number(rows.length)} tổng VM</>,'bp-text-button')}{metric('ACTIVE',<>{number(totalActive)} đang hoạt động</>,'bp-text-button')}{metric('PAUSED',<><Pause size={12} aria-hidden="true"/>{number(count('PAUSED'))} tạm dừng</>,'bp-text-button')}{metric('NEW',<>{number(count('NEW'))} chưa cài</>,'bp-text-button')}</div><p>GEN2 · kiểm tra gần nhất: <Time at={latestCheck}/></p></div>
 
-      <section className="bp-panel" aria-labelledby="bp-attention"><div className="bp-section-head"><h2 id="bp-attention">Cần xem</h2><span className="bp-note">Một VM có thể ở nhiều nhóm.</span></div>
-        <div className="bp-actions" style={{'--bp-action-count':pulse.moneyRead?5:3} as React.CSSProperties}>
+      <section className="bp-attention" aria-labelledby="bp-attention"><h2 id="bp-attention">Cần xem</h2>
+        <div className="bp-actions">
           <Action label="Đã báo / chờ xử lý" hint="Vấn đề đã ghi trên web, cần xử lý hoặc xác nhận lại." count={count('REPORTED')} tone="warn" selected={filter==='REPORTED'} onClick={()=>choose('REPORTED')}/>
           <Action label="Có lỗi" hint="Xem lỗi EarnApp, VM hoặc proxy và thời điểm kiểm tra." count={count('ERROR')} tone="error" selected={filter==='ERROR'} onClick={()=>choose('ERROR')}/>
-          <Action label="Chưa xác minh" hint="Chưa có kiểm tra đủ mới để biết VM có kiếm tiền." count={count('UNKNOWN')} tone="warn" selected={filter==='UNKNOWN'} onClick={()=>choose('UNKNOWN')}/>
+          <Action label="Chưa xác minh" hint="Chưa có kiểm tra đủ mới để biết VM có kiếm tiền." count={count('UNKNOWN')} selected={filter==='UNKNOWN'} onClick={()=>choose('UNKNOWN')}/>
           {pulse.moneyRead&&<>
-            <Action label="Chưa thấy tăng" hint="Các lần đọc hôm nay bằng nhau; chưa kết luận ngừng kiếm tiền." count={count('FLAT')} selected={filter==='FLAT'} onClick={()=>choose('FLAT')}/>
-            <Action label="Chưa đủ lần đọc" hint="Cần ít nhất hai lần đọc hợp lệ hôm nay để tính mức tăng." count={count('MONEY_UNKNOWN')} tone="warn" selected={filter==='MONEY_UNKNOWN'} onClick={()=>choose('MONEY_UNKNOWN')}/>
+            <Action label="Chưa thấy tăng" hint="Các lần đọc hôm nay bằng nhau; chưa kết luận ngừng kiếm tiền." count={count('FLAT')} tone="warn" selected={filter==='FLAT'} onClick={()=>choose('FLAT')}/>
+            <Action label="Chưa đủ lần đọc" hint="Cần ít nhất hai lần đọc hợp lệ hôm nay để tính mức tăng." count={count('MONEY_UNKNOWN')} selected={filter==='MONEY_UNKNOWN'} onClick={()=>choose('MONEY_UNKNOWN')}/>
           </>}
         </div>
       </section>
@@ -149,20 +151,16 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
         </ul>}
         {matched.length>limit&&<button type="button" className="pm-button bp-more" onClick={()=>setLimit(n=>n+12)}>Xem thêm {number(Math.min(12,matched.length-limit))} VM</button>}
       </section>}
-      <section className="bp-panel" aria-labelledby="bp-servers"><div className="bp-section-head"><h2 id="bp-servers">So sánh server</h2><span className="bp-note">Bấm số để xem đúng nhóm VM.</span></div>
-        <div className="bp-server-key"><span><i className="bp-dot bp-fill-good"/>Kiếm tiền</span><span><i className="bp-dot bp-fill-error"/>Có lỗi</span><span><i className="bp-dot bp-fill-unknown"/>Chưa xác minh</span></div>
-        <ul className="bp-servers">{comparison.map(({id,name,own,amount})=>{
+      <section className="bp-panel" aria-labelledby="bp-servers"><div className="bp-section-head"><div><h2 id="bp-servers">Tình hình từng server</h2><p className="bp-note">Ưu tiên server có lỗi hoặc chưa xác minh</p></div><span className="bp-note">{number(comparison.length)} server</span></div>
+        <table className="bp-server-table"><thead><tr><th>Server</th><th>VM đang kiếm tiền</th><th>Cần xem</th>{pulse.moneyRead&&<><th>Tăng hôm nay</th><th>Từ $10</th></>}<th><span className="bp-sr-only">Xem VM</span></th></tr></thead><tbody>{shownServers.map(({id,name,own,amount})=>{
           const cell=(key:Filter,value:React.ReactNode,label:string)=><button type="button" className="bp-server-cell" aria-label={`${name} · ${filters[key].label}: ${number(count(key,own))} VM`} aria-controls="bp-vm-list" onClick={()=>choose(key,id)}><span>{label}</span><strong>{value}</strong></button>;
-          return <li key={id} className={!pulse.moneyRead?'bp-server-no-money':undefined}><div className="bp-server-name"><button type="button" onClick={()=>choose('ALL',id)}>{name}<ChevronRight size={14} aria-hidden="true"/></button><small>{number(count('PAUSED',own))} tạm dừng · {number(count('NEW',own))} chưa cài</small></div>
-            <div className="bp-server-health"><SegmentBar parts={healthParts.map(([key,tone])=>({key,tone,value:count(key,own)}))} total={count('ACTIVE',own)}/>
-              <div className="bp-server-stats">{cell('GOOD',`${number(count('GOOD',own))} / ${number(count('ACTIVE',own))}`,'Kiếm tiền')}
-                {cell('ERROR',number(count('ERROR',own)),'Lỗi')}{cell('UNKNOWN',number(count('UNKNOWN',own)),'Chưa rõ')}</div>
-            </div>
-            {pulse.moneyRead&&<div className="bp-server-growth">{cell('COVERED',amount===null?'Chưa đủ dữ liệu':dollars(amount),`Tăng hôm nay · ${number(count('COVERED',own))}/${number(count('ACTIVE',own))} VM`)}
-              {amount!==null&&<div className="bp-level-track" aria-hidden="true"><i className="bp-fill-good" style={{width:`${maxGrowth?Number(units(amount)*BigInt(10000)/maxGrowth)/100:0}%`}}/></div>}
-            </div>}
-          </li>;
-        })}</ul>
+          return <tr key={id}><td><div className="bp-server-name"><button type="button" onClick={()=>choose('ALL',id)}><Server size={14} aria-hidden="true"/>{name}</button><small>{number(own.length)} VM · {number(count('PAUSED',own)+count('NEW',own))} tạm dừng / chưa cài</small></div></td>
+            <td className="bp-server-health">{cell('GOOD',`${number(count('GOOD',own))} / ${number(count('ACTIVE',own))}`,count('ACTIVE',own)?'Kiếm tiền':'Tạm dừng / chưa cài')}<SegmentBar parts={healthParts.map(([key,tone])=>({key,tone,value:count(key,own)}))} total={count('ACTIVE',own)}/></td>
+            <td><div className="bp-server-issues">{count('ERROR',own)>0&&cell('ERROR',<><i className="bp-dot bp-fill-error" aria-hidden="true"/>{number(count('ERROR',own))} lỗi</>,'')}{count('UNKNOWN',own)>0&&cell('UNKNOWN',<><i className="bp-dot bp-fill-unknown" aria-hidden="true"/>{number(count('UNKNOWN',own))} chưa rõ</>,'')}{!count('ERROR',own)&&!count('UNKNOWN',own)&&<span className="bp-note">—</span>}</div></td>
+            {pulse.moneyRead&&<><td className="bp-server-growth">{cell('COVERED',amount===null?'Chưa đủ dữ liệu':dollars(amount),'Tăng hôm nay')}<small>{number(count('COVERED',own))}/{number(count('ACTIVE',own))} VM đủ dữ liệu</small></td><td className="bp-server-enough">{cell('ENOUGH',`${number(count('ENOUGH',own))} VM`,'Từ $10')}</td></>}
+            <td className="bp-server-open"><button type="button" aria-label={`Xem VM ${name}`} aria-controls="bp-vm-list" onClick={()=>choose('ALL',id)}><ChevronRight size={16} aria-hidden="true"/></button></td>
+          </tr>;
+        })}</tbody></table><div className="bp-table-foot"><span>Thanh màu tính trong số VM đang hoạt động.</span>{comparison.length>5&&<button type="button" aria-label={allServers?'Thu gọn server':`Xem cả ${comparison.length} server`} aria-expanded={allServers} onClick={()=>setAllServers(v=>!v)}>{allServers?'Thu gọn':`Xem cả ${number(comparison.length)} server`}{allServers?<ChevronUp size={14}/>:<ChevronDown size={14}/>}</button>}</div>
       </section>
     </>}
     <section className="bp-panel" aria-labelledby="bp-packages"><div className="bp-section-head"><h2 id="bp-packages">Gói proxy đến hạn</h2><Link href={links.packages()} className="pm-link">Mở gói proxy</Link></div>
@@ -191,9 +189,9 @@ function HealthRing({parts,total}:{parts:Part[];total:number}){
   </div>;
 }
 function Action({label,hint,count,tone='neutral',selected,onClick}:{label:string;hint:string;count:number;tone?:string;selected:boolean;onClick:()=>void}){
-  const Icon=count===0?Check:tone==='error'?TriangleAlert:tone==='warn'?CircleHelp:Clock3;
+  const Icon=tone==='error'?TriangleAlert:tone==='warn'?Clock3:CircleHelp;
   return <button type="button" className={'bp-action bp-'+tone+(count===0?' bp-action-clear':'')} aria-label={`${label}: ${number(count)} VM`} aria-pressed={selected} aria-controls="bp-vm-list" title={hint} onClick={onClick}>
-    <span className="bp-action-top"><Icon size={18} aria-hidden="true"/><b>{number(count)}</b></span><strong>{label}</strong><small>{hint}</small>
+    <Icon size={14} aria-hidden="true"/><b>{number(count)}</b><span>{label}</span>
   </button>;
 }
 function VmRow({row:r,moneyRead}:{row:Row;moneyRead:boolean}){

@@ -1,0 +1,26 @@
+{
+  "light": {
+    "surface": "rgb(255, 255, 255)",
+    "themeSurface": "#ffffff",
+    "chart": "#398363",
+    "height": 271.59375
+  },
+  "dark": {
+    "surface": "rgb(21, 29, 48)",
+    "themeSurface": "#151d30",
+    "chart": "#69aa8b",
+    "height": 271.59375
+  },
+  "golden": {
+    "surface": "rgb(24, 24, 24)",
+    "themeSurface": "#181818",
+    "chart": "#94ad82",
+    "height": 271.59375
+  },
+  "bronze": {
+    "surface": "rgb(255, 253, 249)",
+    "themeSurface": "#FFFDF9",
+    "chart": "#718052",
+    "height": 271.59375
+  }
+}
