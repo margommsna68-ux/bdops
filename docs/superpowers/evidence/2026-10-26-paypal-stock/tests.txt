@@ -1,0 +1,8 @@
+ ✓ src/__tests__/proxy-management/account-store.integration.test.ts (13 tests) 1088ms
+ ✓ src/__tests__/proxy-management/account-url.test.ts (6 tests) 4ms
+
+ Test Files  3 passed (3)
+      Tests  27 passed (27)
+   Start at  10:55:40
+   Duration  2.91s (transform 329ms, setup 33ms, import 494ms, tests 2.13s, environment 0ms)
+

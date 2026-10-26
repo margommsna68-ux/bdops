@@ -47,7 +47,7 @@ const vmHref=(p:{serverId:string;vmId:string})=>links.vms({serverId:p.serverId,v
 // Everything a person can see here is in the URL (account-url.ts): tab and view changes are history entries, typing a search replaces.
 // The import panel, its preview and the row selection belong to one kind and are never carried to the other (drafts: ImportPanel).
 export function AccountStore({projectId,initialTab}:{projectId:string;initialTab?:Tab}){
-  const params=useSearchParams(),router=useRouter(),path=usePathname(),store=trpc.accountStore.store.useQuery({projectId,deleted:params.get('state')==='DELETED'},{keepPreviousData:true}),utils=trpc.useUtils();
+  const params=useSearchParams(),router=useRouter(),path=usePathname(),store=trpc.accountStore.store.useQuery({projectId,deleted:params.get('state')==='DELETED'},{keepPreviousData:true,refetchInterval:30000,refetchIntervalInBackground:false}),utils=trpc.useUtils();
   const initial:AccountKind=initialTab==='paypal'?'paypal':'login',requested=readAccountUrl(params,initial);
   // A member with only the PayPal right (no Server / VM module) works on the PayPal tab of the same store; the backend decides.
   const kind:AccountKind=store.data&&!(requested.tab==='login'?store.data.rights.logins:store.data.rights.paypals)?store.data.rights.logins?'login':'paypal':requested.tab,stock:StockKind=kind==='paypal'?'PAYPAL':'LOGIN';
@@ -72,7 +72,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   useEffect(()=>{if(wantImport.current&&store.data){wantImport.current=false;if(stock==='LOGIN'?store.data.rights.writeLogins:store.data.rights.writePaypals)setOpen(stock,true);}});
   const [selected,setSelected]=useState<Set<string>>(new Set()),[copy,setCopy]=useState<{row:Login;field?:CopyField}|null>(null);
   // A new kind, view or filter starts with nothing selected (selection never crosses from PayPal to Gmail or the other way).
-  const resultKey=JSON.stringify([kind,view,type,state,batch,q,loginStatus,loginSort,checkFilter,sourceFilter,sourceMissing]);useEffect(()=>{setSelected(new Set());setRowErrors({});},[resultKey]);
+  const resultKey=JSON.stringify([kind,view,type,state,batch,q,loginStatus,loginSort,checkFilter,sourceFilter,sourceMissing,url.daily]);useEffect(()=>{setSelected(new Set());setRowErrors({});},[resultKey]);
   // Xoá khỏi kho / Khôi phục (20/10/2026): ADMIN only, one click, Hoàn tác in the toast; refused rows keep their reason and stay selected.
   const [rowErrors,setRowErrors]=useState<Record<string,{message:string;href:string|null}>>({});
   const stockAction=useStockAction(projectId,stock,()=>void refresh());
@@ -93,7 +93,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   const checkOptionsReady=!!data&&!store.error&&checksReady;
   // Keep an empty selection visible after refresh or a source change; never silently reset the URL.
   const checkOptions=Object.entries(CHECK_STATE_LABEL).filter(([key])=>key===checkFilter||checkOptionsReady&&(checkCounts.get(key)??0)>0);
-  const paypals=useMemo(()=>(data?.paypals||[]).filter(p=>(!state||p.state===state)&&(!batch||p.batch===batch)&&(!needle||[p.code,p.notes,p.batch,...p.emails.flatMap(e=>[e.email,e.earnAppLogin,e.place?.server,e.place?.vm])].join(' ').toLowerCase().includes(needle))),[data,state,batch,needle]);
+  const paypals=useMemo(()=>(data?.paypals||[]).filter(p=>(url.daily!=='AVAILABLE'||p.canReceiveToday)&&(!state||p.state===state)&&(!batch||p.batch===batch)&&(!needle||[p.code,p.notes,p.batch,...p.emails.flatMap(e=>[e.email,e.earnAppLogin,e.place?.server,e.place?.vm])].join(' ').toLowerCase().includes(needle))),[data,state,batch,needle,url.daily]);
   const counts=(rows:{state:string}[])=>Object.fromEntries(['NEW','ASSIGNED','USED','BLOCKED'].map(s=>[s,rows.filter(r=>r.state===s).length]));
   // Pages over the whole filtered list (search and filters first, then the page); a page that no longer exists falls back to the last one.
   const list:{id:string}[]=kind==='paypal'?paypals:logins,pages=Math.max(1,Math.ceil(list.length/PAGE_SIZE)),pageRows=(rows:{id:string}[])=>rows.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
@@ -121,7 +121,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
   return <div className="proxy-workspace space-y-4">
     <div className="pm-heading"><div><h1>Kho tài khoản</h1><p className="pm-muted">Gmail / Apple ID NEW chưa dùng đăng ký EarnApp và PayPal nhận tiền. Gán cho VM ngay tại bảng <Link className="underline" href={links.vms()}>Server / VM</Link>; một VM một tài khoản EarnApp; mỗi EarnApp có một email PayPal nhận tiền, nhiều EarnApp có thể dùng cùng mã PP qua các email riêng.</p></div>
       <div className="flex gap-2 flex-wrap">{canWrite&&<button className="pm-button pm-button-primary" onClick={startImport}>{kind==='paypal'?'Nhập PayPal':'Nhập Gmail / Apple ID'}</button>}</div></div>
-    <div className="vm-kind-tabs" role="tablist" aria-label="Loại tài khoản">{([['login','Gmail / Apple ID',data?.logins.length],['paypal','PayPal',data?.paypals.length]] as [AccountKind,string,number|undefined][]).filter(([k])=>k==='login'?rights?.logins!==false:rights?.paypals!==false).map(([k,label,n])=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} onClick={()=>{if(k!==kind||view||q||type||state||batch||loginStatus||checkFilter||sourceFilter||sourceMissing||loginSort!=='CREATED')go(switchKind(url,k));}}>{label}{n!==undefined?` (${n})`:''}</button>)}</div>
+    <div className="vm-kind-tabs" role="tablist" aria-label="Loại tài khoản">{([['login','Gmail / Apple ID',data?.logins.length],['paypal','PayPal',data?.paypals.length]] as [AccountKind,string,number|undefined][]).filter(([k])=>k==='login'?rights?.logins!==false:rights?.paypals!==false).map(([k,label,n])=><button key={k} type="button" role="tab" aria-selected={kind===k} className={kind===k?'active':''} onClick={()=>{if(k!==kind||view||q||type||state||batch||loginStatus||checkFilter||sourceFilter||sourceMissing||loginSort!=='CREATED'||url.daily)go(switchKind(url,k));}}>{label}{n!==undefined?` (${n})`:''}</button>)}</div>
     <div className="acc-subnav">{view?<button type="button" className="pm-link inline-flex items-center gap-1" onClick={()=>go(openView(url,''))}><ArrowLeft size={14}/> Về danh sách {kindLabel}</button>
       :<>{historyAllowed&&<button type="button" className="pm-button pm-button-quiet" onClick={()=>go(openView(url,'history'))}><History size={14}/> Lịch sử nhập kho{data?` (${batches.length})`:''}</button>}
         {review.length>0&&<button type="button" className="acc-review-alert" onClick={()=>go(openView(url,'review'))}><AlertTriangle size={14}/> Cần đối chiếu ({review.length})</button>}</>}</div>
@@ -129,6 +129,7 @@ export function AccountStore({projectId,initialTab}:{projectId:string;initialTab
     {!view&&<div className="pm-surface">
       <div className="pm-actions flex-wrap gap-2">
         <label className="pm-search vm-search"><Search size={16}/><input aria-label="Tìm tài khoản" placeholder={kind==='paypal'?'Tìm mã PP, email, VM…':'Tìm email, nguồn mua, lô, VM…'} value={typed} onChange={e=>setTyped(e.target.value)}/></label>
+        {kind==='paypal'&&<label className="pm-label text-xs">Lượt rút hôm nay<select className="pm-input pm-input-sm w-auto" aria-label="Lọc lượt rút PayPal hôm nay" value={url.daily||''} onChange={e=>go(withFilter(url,{daily:e.target.value==='AVAILABLE'?'AVAILABLE':undefined}))}><option value="">Tất cả mã PayPal</option><option value="AVAILABLE">Còn lượt hôm nay</option></select></label>}
         {kind==='login'&&<div className="vm-chips">{['','GMAIL','APPLE_ID'].map(t=><button key={t} type="button" className={'vm-chip'+(type===t?' active':'')} onClick={()=>go(withFilter({...url,tab:kind},{type:t}))}>{t?TYPE[t]:'Tất cả loại'}</button>)}</div>}
         {kind==='login'&&<>
           <label className="pm-label text-xs">Tình trạng acc<select className="pm-input pm-input-sm w-auto" aria-label="Lọc tình trạng acc" value={checkFilter??''} disabled={!checkOptionsReady} onChange={e=>go(withFilter({...url,tab:kind},{check:(e.target.value||undefined) as CheckState|undefined}))}><option value="">{checkOptionsReady?'Tất cả kết quả check':checks.error||store.error?'Chưa tải được trạng thái':'Đang tải trạng thái…'}</option>{checkOptions.map(([value,label])=><option key={value} value={value}>{label} ({checkOptionsReady?checkCounts.get(value)??0:'…'})</option>)}</select></label>

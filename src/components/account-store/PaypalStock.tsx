@@ -41,7 +41,7 @@ export function PaypalStock({projectId,rows,store,url,go,write,status,selected,s
   // Opening the rows behind an amount keeps that amount's cut-off day in the URL (?asof, when no month), so reload / Back / Forward
   // show the same number and the same rows even on another day; closing returns to today.
   const open=(p:Paypal,show:PaypalShow)=>{const close=url.pp===p.code&&url.show===show,money=show==='in'||show==='out';go({...url,pp:close?'':p.code,show:close?'':show,asof:!close&&money&&!url.month?url.asof||l?.asOf||'':''});};
-  const showMoney=!!(r?.funds||r?.withdrawals),cols=4+(showMoney?3:0);
+  const showMoney=!!(r?.funds||r?.withdrawals),cols=5+(showMoney?3:0);
   const refresh=()=>{void ledger.refetch();onSaved();};
   return <>
     {showMoney&&<div className="pm-actions flex-wrap gap-2 pt-0">
@@ -52,12 +52,13 @@ export function PaypalStock({projectId,rows,store,url,go,write,status,selected,s
       {l?.totals?.earnApp&&Object.keys(l.totals.earnApp).length>0&&<span className="text-xs">Thu EarnApp{url.month?' trong tháng':''}: <strong>{Object.entries(l.totals.earnApp).map(([c,v])=>viAmount(v)+' '+c).join(' · ')}</strong>{l.totals.internal&&Object.keys(l.totals.internal).length?<span className="pm-muted"> (không gồm chuyển nội bộ)</span>:null}</span>}
     </div>}
     {ledger.error&&<p role="alert" className="pm-error text-sm mx-4">Chưa tải được tiền PayPal: {ledger.error.message}</p>}
-    <div className="pm-table-scroll"><table className="pm-table acc-pp-table"><thead><tr><th>Mã PP</th><th>Email đã dùng / còn dùng được</th>{showMoney&&<><th className="num">Tiền vào</th><th className="num">Tiền ra</th><th className="num">Còn lại theo sổ</th></>}<th>Tình trạng</th><th>Thao tác</th></tr></thead>
+    <div className="pm-table-scroll"><table className="pm-table acc-pp-table"><thead><tr><th>Mã PP</th><th>Email đã dùng / còn dùng được</th><th>Email hôm nay</th>{showMoney&&<><th className="num">Tiền vào</th><th className="num">Tiền ra</th><th className="num">Còn lại theo sổ</th></>}<th>Tình trạng</th><th>Thao tác</th></tr></thead>
       <tbody>{rows.map(p=>{const err=inventory?.errors[p.id];const m=money.get(p.id),cs=m?.currencies||[],isOpen=url.pp===p.code,canIn=!!r?.writeFunds,canOut=!!r?.writeWithdrawals;
         return <Fragment key={p.id}><tr data-pp={p.code} className={err?'pm-row-blocked':isOpen?'pm-row-focus':inventory?.deletedView?'pm-row-retired':undefined}>
           <td data-label="Mã PP" className="whitespace-nowrap">{selected&&<input type="checkbox" className="mr-2" aria-label={'Chọn '+p.code} checked={selected.has(p.id)} onChange={()=>toggle(p.id)}/>}<strong>{p.code}</strong>{p.batch&&<div className="text-xs pm-muted">Lô {p.batch}</div>}{p.deletedAt&&<div className="text-xs pm-muted">Xoá {viDate(p.deletedAt.slice(0,10))}</div>}{err&&<div className="pm-error text-xs mt-1" role="alert">{err.message}{err.href&&<> · <Link className="underline" href={err.href}>Mở</Link></>}</div>}</td>
           <td data-label="Email"><button type="button" className="pm-link acc-pp-emails" aria-expanded={isOpen&&url.show==='emails'} onClick={()=>open(p,'emails')}><strong>{p.counts.total-p.counts.NEW}</strong> đã dùng / <strong>{p.counts.NEW}</strong> còn dùng được</button>
             <div className="text-xs pm-muted">{p.counts.ASSIGNED} đang gán{p.counts.HOLD?` · ${p.counts.HOLD} tạm giữ`:''}{p.unknownLinks.length?` · ${p.unknownLinks.length} liên kết cũ chưa rõ email`:''}</div></td>
+          <td data-label="Email hôm nay"><strong className={'acc-state '+(p.daily.remaining===0?'BLOCKED':'NEW')} title={'Ngày '+p.daily.date+' · giờ Việt Nam'}>{p.daily.used+p.daily.reserved}/{p.daily.limit}</strong><div className="text-xs pm-muted">{p.daily.used} đã dùng · {p.daily.reserved} đang giữ</div><div className="text-xs pm-muted">{p.canReceiveToday?'Còn email có thể cấp mới':p.daily.remaining===0?'Hết lượt hôm nay':'Không có email cấp mới'}</div></td>
           {showMoney&&<>
             <td data-label="Tiền vào" className="num">{r?.funds||r?.withdrawals?<MoneyButtons lines={moneyLines(cs,c=>c.in??c.receipts)} onClick={()=>open(p,'in')} label={'Xem tiền vào '+p.code}/>:null}{m?.unknownEmail&&Object.keys(m.unknownEmail).length?<div className="text-xs pm-muted">gồm {Object.entries(m.unknownEmail).map(([c,v])=>viAmount(v)+' '+c).join(', ')} chưa xác định email</div>:null}{r&&!r.withdrawals&&<div className="text-xs pm-muted">chỉ tiền nhận</div>}</td>
             <td data-label="Tiền ra" className="num">{r?.withdrawals?<MoneyButtons lines={moneyLines(cs,c=>c.out)} onClick={()=>open(p,'out')} label={'Xem tiền ra '+p.code}/>:<span className="pm-muted text-xs">Không có quyền xem</span>}{m?.review?<div className="text-xs text-amber-600">{m.review} khoản cũ cần đối chiếu</div>:null}</td>

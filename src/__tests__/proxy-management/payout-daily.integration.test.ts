@@ -73,3 +73,20 @@ it('a resend on a new day also takes a slot, while a consumed email can retry at
  vi.setSystemTime(new Date('2026-10-28T12:00:00Z'));const second=await db.earnPayoutRequest.findUniqueOrThrow({where:{earnAppId:f.rows[1].account.id}});await f.update(second.id,'CANCELLED');await f.update(a.id,'RETRY');await f.update(a.id,'FAILED');await f.update(a.id,'RETRY');
  }finally{await f.cleanup();}
 });
+
+it('stock shows the shared 0/2, 1/2, 2/2 occupancy and only usable new-email capacity',async()=>{
+ const f=await setup();try{
+ await db.project.update({where:{id:f.scope.projectId},data:{settings:{businessMode:'PROXY_VM'}}});
+ const {readAccountStore}=await import('@/server/account-store/read');
+ const row=async()=>(await readAccountStore(f.scope,db)).paypals.find(p=>p.id===f.pp.id)!;
+ expect(await row()).toMatchObject({daily:{used:0,reserved:0,remaining:2},canReceiveToday:true});
+ const a=await createPayoutRequest(f.scope,f.input(0),db);
+ expect(await row()).toMatchObject({daily:{used:0,reserved:1,remaining:1},canReceiveToday:true});
+ await createPayoutRequest(f.scope,f.input(1),db);
+ expect(await row()).toMatchObject({daily:{used:0,reserved:2,remaining:0},canReceiveToday:false});
+ await f.update(a.id,'CANCELLED');
+ expect(await row()).toMatchObject({daily:{remaining:1},canReceiveToday:true});
+ await db.payPalAccount.update({where:{id:f.pp.id},data:{status:'LIMITED'}});
+ expect((await row()).canReceiveToday).toBe(false);
+ }finally{await f.cleanup();}
+});

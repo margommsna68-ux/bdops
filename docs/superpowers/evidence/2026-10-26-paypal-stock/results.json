@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "Local login",
+    "0/2 visible",
+    "1/2 visible",
+    "2/2 includes reservations",
+    "Full PP excluded",
+    "Both available PP retained",
+    "URL saved",
+    "Filter survives reload",
+    "Phone no page overflow",
+    "No JS error"
+  ],
+  "errors": []
+}

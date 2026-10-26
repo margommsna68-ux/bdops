@@ -52,3 +52,11 @@ describe('import drafts',()=>{
     b.values.text='x@example.invalid';discardDraft(a);expect(a.values).toEqual({});expect(b.values.text).toBe('x@example.invalid');
   });
 });
+
+it('PayPal available daily filter survives reload, ignores login and resets page',()=>{
+ const u=readAccountUrl(params('daily=AVAILABLE&page=3'),'paypal');
+ expect(u.daily).toBe('AVAILABLE');expect(writeAccountUrl(u,'paypal')).toContain('daily=AVAILABLE');
+ expect(withFilter(u,{daily:undefined}).page).toBe(1);
+ expect(readAccountUrl(params('daily=AVAILABLE'),'login').daily).toBeUndefined();
+ expect(writeAccountUrl(openView(u,'history'),'paypal')).not.toContain('daily=');
+});

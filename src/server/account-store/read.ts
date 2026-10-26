@@ -1,3 +1,4 @@
+import {readPayoutDaily} from '../vm-ops/payout-daily';
 import type {PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {CashDecimal,readPaypalCostRates} from '../business-management/usdt-money';
@@ -25,7 +26,7 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
   const money=canSeeMoney(current),projectId=scope.projectId;
   const [gm,pp,batches,legacyVms]=await Promise.all([
     logins?db.gmailAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,email:true,loginType:true,status:true,loginIssueNote:true,loginIssueAt:true,notes:true,recoveryEmail:true,phone:true,twoFaLink:true,smsLink:true,revision:true,createdAt:true,archivedAt:true,batchId:true,password:true,twoFaCurrent:true,token:true,_count:{select:{vms:true}},earnApp:{select:{id:true,registeredAt:true,revision:true,vm:vmSelect,paypal:{select:{id:true,code:true}},paypalEmail:{select:{id:true,email:true}}}}},orderBy:[{createdAt:'desc'},{email:'asc'}]}):Promise.resolve([]),
-    paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,archivedAt:true,_count:{select:{gmails:true}},emails:{select:{id:true,email:true,isPrimary:true,archivedAt:true,usedEarnAppId:true,reviewHold:true,reviewNote:true,createdAt:true,revision:true,earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{isPrimary:'desc'},{createdAt:'asc'},{email:'asc'}]},earnApps:{where:{paypalEmailId:null},select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
+    paypals||logins?db.payPalAccount.findMany({where:{projectId,archivedAt:archived},select:{id:true,code:true,primaryEmail:true,status:true,notes:true,revision:true,createdAt:true,batchId:true,archivedAt:true,_count:{select:{gmails:true}},emails:{select:{id:true,email:true,isPrimary:true,archivedAt:true,usedEarnAppId:true,holdEarnAppId:true,reviewHold:true,reviewNote:true,createdAt:true,revision:true,earnApp:{select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{isPrimary:'desc'},{createdAt:'asc'},{email:'asc'}]},earnApps:{where:{paypalEmailId:null},select:{id:true,login:{select:{email:true}},vm:vmSelect}}},orderBy:[{createdAt:'desc'},{code:'asc'}]}):Promise.resolve([]),
     db.accountPurchaseBatch.findMany({where:{projectId,archivedAt:null},include:{costRecord:{select:{id:true,voidedAt:true,date:true,amount:true,currency:true,usdtRate:true,usdtAmount:true,fxNote:true}},_count:{select:{logins:true,paypals:true}}},orderBy:[{purchasedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),// newest purchase date first; same day: the purchase created last first
    
     logins?db.virtualMachine.findMany({where:{gmailId:{not:null},managed:true,server:{projectId,managed:true}},select:{id:true,code:true,archivedAt:true,gmailId:true,server:{select:{id:true,code:true}},earnApp:{select:{loginId:true}},gmail:{select:{email:true,paypalId:true}}}}):Promise.resolve([]),
@@ -52,6 +53,7 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
   // PayPal: one row per code, its emails each with their own use. An email is NEW (never given to an EarnApp, not held), ASSIGNED
   // (receiving for an EarnApp account on a VM now), USED (given before; never offered again) or HOLD (old data to reconcile). The
   // PayPal is NEW while it still has a NEW email (one assigned email does not use up the PayPal), BLOCKED when locked / stopped.
+  const daily=await readPayoutDaily(db,projectId);
   const paypalRows=pp.map(p=>{
     const emails=p.emails.filter(e=>!e.archivedAt).map(e=>{const vm=e.earnApp?.vm&&!e.earnApp.vm.archivedAt?e.earnApp.vm:null,state:'NEW'|'ASSIGNED'|'USED'|'HOLD'=e.reviewHold&&!e.earnApp?'HOLD':vm?'ASSIGNED':e.earnApp||e.usedEarnAppId?'USED':'NEW';
       return {id:e.id,email:e.email,primary:e.isPrimary,state,earnAppLogin:e.earnApp?.login.email??null,place:place(vm),note:e.reviewHold?e.reviewNote:null,revision:e.revision};});
@@ -59,7 +61,7 @@ export async function readAccountStore(scope:ActorScope,db:PrismaClient=prisma,o
     const state:StockState=p.archivedAt?'DELETED':p.status!=='ACTIVE'?'BLOCKED':counts.NEW?'NEW':counts.ASSIGNED?'ASSIGNED':'USED';
     // Old links whose email is not known (before 18/10/2026): shown on the PayPal, never moved to an email by guessing.
     const unknown=p.earnApps.map(a=>({earnAppLogin:a.login.email,place:place(a.vm&&!a.vm.archivedAt?a.vm:null)}));
-    return {id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,deletedAt:p.archivedAt?.toISOString()??null,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),priceState:priceState(p.batchId),emails,counts,unknownLinks:unknown,legacyLoginCount:p._count.gmails};});
+    return {daily:daily.summary(p.id),canReceiveToday:!p.archivedAt&&p.status==='ACTIVE'&&daily.summary(p.id).remaining>0&&p.emails.some(e=>!e.archivedAt&&!e.reviewHold&&!e.usedEarnAppId&&!e.earnApp&&!e.holdEarnAppId),id:p.id,code:p.code,email:p.primaryEmail,status:p.status,state,deletedAt:p.archivedAt?.toISOString()??null,revision:p.revision,notes:p.notes,createdAt:p.createdAt.toISOString(),batch:p.batchId?batchOf.get(p.batchId)?.code??null:null,batchId:p.batchId,price:allocated(p.batchId),priceState:priceState(p.batchId),emails,counts,unknownLinks:unknown,legacyLoginCount:p._count.gmails};});
   // Lịch sử nhập kho counts what the purchase brought in: every email of its PayPals, deleted or not (review fix 20/10/2026).
   const ppBatchIds=batches.filter(b=>b.kind==='PAYPAL').map(b=>b.id),emailsInBatch=new Map<string,number>();
   if(ppBatchIds.length){const rows=await db.payPalEmail.findMany({where:{projectId,paypal:{batchId:{in:ppBatchIds}}},select:{paypal:{select:{batchId:true}}}});for(const r of rows){const b=r.paypal.batchId!;emailsInBatch.set(b,(emailsInBatch.get(b)||0)+1);}}

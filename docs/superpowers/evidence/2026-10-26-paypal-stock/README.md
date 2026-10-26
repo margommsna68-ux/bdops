@@ -1,0 +1,4 @@
+# Kho PayPal: lượt email hôm nay — 26/10/2026
+Hiện cột Email hôm nay (used+reserved)/2, tách đã dùng và đang giữ. Bộ lọc daily=AVAILABLE dùng canReceiveToday: PP ACTIVE chưa xóa, còn hạn mức, còn email chưa gán/chưa dùng/không hold hay review. Dùng readPayoutDaily chung với payout/API suggest; không thêm sổ đếm. Lọc trước chia trang, giữ URL, đổi lọc bỏ lựa chọn, tự làm mới30s khi tab mở. Màu dùng acc-state hiện có.
+27 test backend/URL/kho đạt, typecheck trong production build, lint file đổi đạt. Chrome production local10/10:0/2,1/2,2/2,lọc đúng,reload,390pxkhôngtràn,khônglỗiJS. Dữ liệu giả; không rút thật. Lượt screenshot phone thứ hai bấm nút desktop sau khi thu màn nên nút ngoài viewport; sửa kịch bản bấm trước khi đổi viewport và chạy sạch.
+AI tiếp tục đọc daily/dailyAllowed/dailyOccupied từ paypal/suggest hiện có; hạn mức backend luôn kiểm lại. Không thêm quyền hay đổi token. Không migration. Ghi nhận phát hành sau trong release.md.

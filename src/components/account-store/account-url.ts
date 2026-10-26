@@ -12,7 +12,7 @@ export type AccountKind='login'|'paypal';
 export type AccountView=''|'history'|'review';
 export type PaypalShow=''|'emails'|'in'|'out';
 export type LoginSort='CREATED'|'ERRORS_FIRST'|'LATEST_ISSUE'|'EMAIL'|'SOURCE'|'SOURCE_DESC'|'CHECK_STATUS'|'CHECK_STATUS_DESC';
-export interface AccountUrl {tab:AccountKind;view:AccountView;q:string;type:string;state:string;batch:string;page:number;status?:string;check?:CheckState;source?:string;sourceMissing?:boolean;sort?:LoginSort;pp?:string;show?:PaypalShow;month?:string;asof?:string}
+export interface AccountUrl {tab:AccountKind;view:AccountView;q:string;type:string;state:string;batch:string;page:number;daily?:'AVAILABLE';status?:string;check?:CheckState;source?:string;sourceMissing?:boolean;sort?:LoginSort;pp?:string;show?:PaypalShow;month?:string;asof?:string}
 const STATES=['NEW','ASSIGNED','USED','BLOCKED','DELETED'],TYPES=['GMAIL','APPLE_ID'];
 const LOGIN_STATUSES=Object.keys(LOGIN_STATUS_LABEL);
 const LOGIN_SORTS:LoginSort[]=['ERRORS_FIRST','LATEST_ISSUE','EMAIL','SOURCE','SOURCE_DESC','CHECK_STATUS','CHECK_STATUS_DESC'];
@@ -25,6 +25,7 @@ export function readAccountUrl(p:{get(name:string):string|null},initial:AccountK
   const page=Math.max(1,Math.floor(Number(p.get('page')||'1'))||1);
   const out:AccountUrl={tab,view,q:p.get('q')||'',type:tab==='login'&&TYPES.includes(type)?type:'',state:STATES.includes(state)?state:'',batch:p.get('batch')||'',page:view?1:page,pp,show:pp&&['emails','in','out'].includes(show)?show as PaypalShow:'',month:tab==='paypal'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(month)?month:'',asof:''};
   const asof=p.get('asof')||'';if(out.pp&&(out.show==='in'||out.show==='out')&&!out.month&&/^\d{4}-\d{2}-\d{2}$/.test(asof))out.asof=asof;
+  if(tab==='paypal'&&p.get('daily')==='AVAILABLE')out.daily='AVAILABLE';
   if(tab==='login'){
     const status=p.get('status')||'',sort=p.get('sort')||'';
     if(LOGIN_STATUSES.includes(status))out.status=status;
@@ -40,7 +41,7 @@ export function writeAccountUrl(u:AccountUrl,initial:AccountKind):string{
   if(u.q)p.set('q',u.q);if(u.type&&u.tab==='login')p.set('type',u.type);if(u.state)p.set('state',u.state);if(u.batch)p.set('batch',u.batch);if(!u.view&&u.page>1)p.set('page',String(u.page));
   if(u.tab==='login'){if(u.status&&LOGIN_STATUSES.includes(u.status))p.set('status',u.status);if(u.sort&&LOGIN_SORTS.includes(u.sort))p.set('sort',u.sort);}
   if(u.tab==='login'&&!u.view){if(u.check)p.set('check',u.check);if(u.sourceMissing)p.set('sourceMissing','1');else if(u.source)p.set('source',u.source);}
-  if(u.tab==='paypal'){if(u.month)p.set('month',u.month);if(u.pp&&u.show){p.set('pp',u.pp);p.set('show',u.show);if(u.asof&&!u.month&&(u.show==='in'||u.show==='out'))p.set('asof',u.asof);}}
+  if(u.tab==='paypal'){if(u.daily==='AVAILABLE'&&!u.view)p.set('daily',u.daily);if(u.month)p.set('month',u.month);if(u.pp&&u.show){p.set('pp',u.pp);p.set('show',u.show);if(u.asof&&!u.month&&(u.show==='in'||u.show==='out'))p.set('asof',u.asof);}}
   const s=p.toString();return s?'?'+s:'';
 }
 // A kind change starts clean (no filters of the other kind); a view change keeps the kind.
