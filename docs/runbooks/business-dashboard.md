@@ -2,6 +2,8 @@
 
 Trang Tổng quan có ba số chính. Bấm một số để xem đúng danh sách VM; chọn server để thu hẹp cả số và danh sách. Mỗi dòng mở đúng Server/VM. Kho và tài chính tháng nằm trong phần thu gọn bên dưới.
 
+Hình trực quan: vòng tròn là tỷ lệ VM kiếm tiền trong số đang hoạt động (xanh kiếm tiền, đỏ lỗi, xám chưa xác minh). Không có VM hoạt động thì hiện dấu gạch, không phải 0%; chỉ đủ toàn bộ mới hiện 100%. Thanh tiền hôm nay biểu diễn số VM tăng / chưa thấy tăng / giảm / thiếu dữ liệu, không phải đồ thị theo giờ. Ba thanh mức tiền biểu diễn số VM dưới $8 / từ $8 đến dưới $10 / từ $10, cùng mẫu số VM hoạt động; tiền cũ/lỗi/chưa kiểm tra nằm riêng ở Chưa rõ mức tiền. Bấm nhãn hoặc số để xem nhóm tương ứng. So sánh server dùng cùng màu trạng thái; thanh tăng tiền so theo mức lớn nhất trong các server đang xem. Mọi thanh có nhãn và số, không chỉ dựa vào màu. Giải thích chi tiết nằm trong “Cách tính”.
+
 - VM hoạt động: EarnApp có bằng chứng chạy và kiếm tiền từ kết quả GEN2 trong 24 giờ. Tình trạng OK ghi tay không đủ. Tạm dừng/Chưa cài tách riêng. Lỗi đã ghi trên web vẫn ở nhóm Đã báo/chờ xử lý, không bị kết quả tốt cũ che đi.
 - Tăng ghi nhận hôm nay: chênh lệch giữa các quan sát hợp lệ cùng VM/lượt/SDK trong ngày Việt Nam. Hiện số VM có đủ dữ liệu. Một lần đọc không đủ; không giả số dư đầu ngày. Có giảm tiền thì tách đối chiếu, không cộng thành thu nhập. Tiền vẫn giữ độ chính xác gốc, chỉ hiển thị tối đa hai số lẻ.
 - Sắp đủ: $8 đến dưới $10; Đủ tiền: từ $10. Đây là mức tiền quan sát, không phải lệnh rút hay bằng chứng EarnApp cho rút. Trong chi tiết thấy thiếu tài khoản/email PP hoặc yêu cầu đã có.

@@ -1,0 +1,25 @@
+{
+  "results": [
+    "admin sign-in",
+    "admin 3 primary cards",
+    "Healthy count uses 4 of 6 eligible VMs",
+    "Enough filter has exact 2 VM",
+    "No implicit withdrawal action",
+    "Server selection narrows same metric",
+    "VM links to exact scoped detail",
+    "Manual refresh retains selected group/server",
+    "Proxy auth is distinct from Blocked",
+    "Finance and stock begin collapsed",
+    "Actual light theme renders dashboard",
+    "Actual dark theme renders dashboard",
+    "Actual golden theme renders dashboard",
+    "Actual bronze theme renders dashboard",
+    "Phone no page overflow",
+    "nocopy sign-in",
+    "nocopy 3 primary cards",
+    "No-money reader sees no money totals",
+    "No-money drilldown never renders dollar cells",
+    "No page script errors"
+  ],
+  "errors": []
+}

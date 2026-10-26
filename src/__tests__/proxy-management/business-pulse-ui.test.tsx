@@ -42,6 +42,32 @@ const codes=()=>Array.from(list().querySelectorAll('a')).map(a=>a.textContent);
 const server=async(value:string)=>{const el=host.querySelector<HTMLSelectElement>('[aria-label="Chọn server"]')!;await act(async()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
 
 describe('business pulse drilldowns',()=>{
+  it('draws mutually exclusive health and money distributions from the same scoped rows',async()=>{
+    await render();
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('75%');
+    expect(host.querySelector('[aria-label="Phân bố tiền hôm nay"]')?.getAttribute('data-total')).toBe('8');
+    await click('Dưới $8: 3 VM');expect(codes()).toEqual(['VM-low','VM-flat','VM-decreased']);
+    await server('moon-2');
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('0%');
+    expect(host.querySelector('[aria-label="Phân bố tiền hôm nay"]')?.getAttribute('data-total')).toBe('1');
+    await click('Đủ tiền rút: 1 VM');expect(codes()).toEqual(['VM-error']);
+  });
+  it('does not draw a zero health rate for paused-only VMs, or financial charts for a restricted reader',async()=>{
+    await render([vm('VM-paused','30',{status:'OFF'}),vm('VM-new','40',{status:'NEW_VM'})]);
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).not.toContain('0%');
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('Chưa hoạt động');
+    await render(inputs,false);
+    expect(host.querySelector('[aria-label="Phân bố tiền hôm nay"]')).toBeNull();
+    expect(host.querySelector('.bp-thresholds')).toBeNull();
+    expect(host.querySelector('.bp-server-growth')).toBeNull();
+  });
+  it('never rounds incomplete verification up to 100 percent healthy',async()=>{
+    const many=Array.from({length:2000},(_,i)=>vm(`VM-${i}`,null));
+    many[0]={...many[0],health:null};
+    await render(many,false);
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('99,9%');
+    await click('Chưa xác minh: 1 VM');expect(codes()).toEqual(['VM-0']);
+  });
   it('keeps threshold boundaries and opens the exact VM/server detail',async()=>{
     await render();await click('Đủ tiền rút: 2 VM');expect(codes()).toEqual(['VM-enough','VM-error']);
     expect(list().querySelector('a')?.getAttribute('href')).toBe('/infrastructure/servers/moon-1?vm=VM-enough');
