@@ -1,0 +1,58 @@
+
+ RUN  v4.0.18 D:/MoneyToHome/dev-payout-panel-20261026
+
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx (7 tests | 3 failed) 54ms
+   × shows request identity, separate sent/received/open totals and historical VM drilldown 32ms
+   × opens one accessible panel with receipts and status actions directly, without expanding the table 5ms
+   × removes an open panel and its money on permission error 4ms
+   ✓ passes URL filters and changes server without dropping other conditions or retaining old page 6ms
+   ✓ hides cached financial data after permission error 1ms
+   ✓ empty report does not invent zero receipts or requests 3ms
+   ✓ invalid date filters can be cleared without exposing cached money 2ms
+ ✓ src/__tests__/proxy-management/payout-report-actions.test.tsx (6 tests) 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report-ui.test.tsx > shows request identity, separate sent/received/open totals and historical VM drilldown
+AssertionError: expected null to be truthy
+
+- Expected:
+true
+
++ Received:
+null
+
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx:16:487
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report-ui.test.tsx > opens one accessible panel with receipts and status actions directly, without expanding the table
+AssertionError: expected null to be truthy
+
+- Expected:
+true
+
++ Received:
+null
+
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx:17:296
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report-ui.test.tsx > removes an open panel and its money on permission error
+TypeError: Cannot read properties of null (reading 'click')
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx:18:175
+
+ ❯ Proxy.process.env.NODE_ENV.exports.act node_modules/react/cjs/react.development.js:890:22
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx:18:93
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  3 failed | 10 passed (13)
+   Start at  20:03:58
+   Duration  1.10s (transform 145ms, setup 24ms, import 224ms, tests 98ms, environment 581ms)
+
