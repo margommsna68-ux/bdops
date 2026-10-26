@@ -95,3 +95,18 @@ The exclusive `bridge.lock` prevents overlapping runs in the same state director
 Review fixes: faults retain their own source timestamps (old raw evidence cannot timestamp a newer fleet fault or be contaminated by an older one). Fault/recovery Telegram stays with the existing GEN2 incident system; no duplicate incident sender is installed.
 
 Existing GEN2 notifications remain owned by GEN2. Configuration/sender names only: machine-root `data/autoscan/settings.json`, `data/autoscan/telegram-token.bin`; application `engine/telegram.mjs`, `engine/earnapp-monitor.mjs`, `engine/earnapp-incidents.mjs`, `engine/earnapp-alerts.mjs`. Existing incident/outbox state is not read for sending or modified by this bridge. No Telegram secret or chat ID is needed for cache ingestion.
+
+
+## Fleet monitor canary transport — 26 October 2026
+
+Contract and enrollment: `docs/ops-api/fleet-monitor-v1.md`. Native source package: `integrations/gen2-monitor-canary/README.md` and `DEPLOYMENT-BLOCKER.md`.
+
+- Optional `--batch-size 25` uses existing generic `/batch`, maximum100 per batch, with durable original item keys/bodies and per-item ACK checks. No financial limit is raised. Default1 keeps legacy transport. `--server` filters exact web server ID and requires batch mode; when monitor config is present it must equal the enrolled server.
+- Optional `--monitor-config <file>` is nonsecret JSON: `{version:1,centralUuid,bindings:[{projectId,serverId,serverCode,serverUuid}]}`. Exactly one source server is allowed. Preserve existing state directory, token, pending command and reminder state. Do not run a second bridge over the same scope.
+- Native source pickup is fixed to `machine-root/data/native-monitor/inbox/<GEN2-server-UUID>.json`. Source identity, VM UUID/code and expected proxy address must match. Source times never become receipt times. Missing native source remains unverified.
+- Central/AGENT heartbeats are independent. Central reports only acknowledged per-axis coverage; AGENT uses the actual source snapshot's epoch/seq/time. A missing AGENT file does not produce an AGENT heartbeat. Independent pending bodies/keys persist in `monitor-heartbeats.json`; malformed/lost ACK remains UNKNOWN. Never reset a pending file to force progress.
+- Inventory expires at120s (two60s intervals); guest/app/network/proxy at1200s. Agent contact expires at180s. Coverage is evidence freshness, not proof of successful earning. Legacy earning/problem proof keeps its original clock and cannot outrank newer proof through a new inventory envelope.
+- Package layout must retain `scripts/gen2-dashboard/*` and `integrations/gen2-monitor-canary/engine/native-monitor-wire.mjs`, because the bridge imports that strict sanitizer. A flat legacy script-only copy is insufficient.
+- Production GEN23.1.18 has no verified safe external ingress for the initial native canary update. Do not use a separate headless `--update-live=now` process, GUI automation, forced app termination, shared feed publication or old evidence relabeling to bypass this. No native canary acceptance, measured resource claim or M2/M3 power/Telegram-control rollout follows merely from installing the web/bridge transport.
+
+Verification is split: native source uses its own `node verify.mjs` (39tests plus15 legacy groups before/after), bridge uses `node --test scripts/gen2-dashboard/test/*.node.mjs`; web uses Vitest. Downloaded/generated native fixtures and UI staging copies are excluded from web discovery, not deleted or treated as passing web suites.

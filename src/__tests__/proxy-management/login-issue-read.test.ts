@@ -7,7 +7,7 @@ vi.mock('@/server/permissions/server-scope',async importOriginal=>({...await imp
 const at=new Date('2026-10-24T01:02:03Z');
 const login={id:'login',email:'issue@example.invalid',loginType:'GMAIL',status:'GOOGLE_DISABLED',revision:7,loginIssueNote:'Disabled by Google',loginIssueAt:at,archivedAt:null,notes:'keep',createdAt:at,batchId:null,password:'cipher-secret',twoFaCurrent:null,token:null,twoFaLink:null,smsLink:null,phone:null,recoveryEmail:null,_count:{vms:0},earnApp:null};
 const gm=vi.fn(async(_input:{select:Record<string,unknown>})=>[login]);
-const db={gmailAccount:{findMany:gm},payPalAccount:{findMany:async()=>[]},accountPurchaseBatch:{findMany:async()=>[]},virtualMachine:{findMany:vi.fn(async()=>[])}};
+const db={gmailAccount:{findMany:gm},payPalAccount:{findMany:async()=>[]},payPalPayoutDayEmail:{findMany:async()=>[]},earnPayoutRequest:{findMany:async()=>[]},accountPurchaseBatch:{findMany:async()=>[]},virtualMachine:{findMany:vi.fn(async()=>[])}};
 it('account store exposes issue metadata as safe values while lifecycle and secret flags remain separate',async()=>{
  const r=(await readAccountStore(scope,db as unknown as PrismaClient)).logins[0];
  expect(r).toMatchObject({status:'GOOGLE_DISABLED',state:'BLOCKED',loginIssueNote:login.loginIssueNote,loginIssueAt:at.toISOString(),revision:7});expect(JSON.stringify(r)).not.toContain('cipher-secret');

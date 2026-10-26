@@ -1,11 +1,15 @@
-import {vmMoneyState,isStale} from './vm-money';
+import {vmMoneyState} from './vm-money';
+import {MONITOR_POLICY,monitorFreshness,monitorProjection,type MonitorObservationInput,type Freshness} from './monitor-policy';
+import type {MonitorHeartbeats} from '@/server/dashboard/monitor';
 
 export type ScanProblem='EARNAPP'|'PROXY_CONNECTION'|'PROXY_AUTH'|'PROXY_EXPIRED'|'PROXY_BLOCKED'|'VM_OFF';
-export interface ScanHealth {at:string;earning:boolean|null;problem:ScanProblem|null}
+export interface ScanHealth {at:string;earning:boolean|null;problem:ScanProblem|null;observedAt?:string;receivedAt?:string;monitor?:MonitorObservationInput}
 export interface PulseInput {
  id:string;serverId:string;server:string;code:string;cycle:number;status:string|null;
  hasAccount:boolean;hasPaypal:boolean;payout:boolean;health:ScanHealth|null;
  recordedIssue?:string|null;
+ /** Set by the authorized server projection, never inferred from a scan or Central contact. */
+ monitorCanary?:boolean;agentHeartbeatFreshness?:Freshness;
  money:{amount:string|null;observedAt:string|null;failedAt:string|null}|null;
  /** Caller has already checked exact SDK, VM and cycle binding. */
  points:{at:string;amount:string}[];
@@ -18,8 +22,12 @@ export function vietnamDay(now:Date){return new Date(now.getTime()+7*3600e3).toI
 export function businessPulse(input:PulseInput[],moneyRead:boolean,now:Date=new Date()){
  const day=vietnamDay(now),start=Date.parse(day+'T00:00:00+07:00');
  const rows=input.map(v=>{
-  const scan=v.health,validScan=!!scan&&Number.isFinite(Date.parse(scan.at))&&Date.parse(scan.at)<=now.getTime()&&!isStale(scan.at,now);
-  const health: keyof typeof HEALTH_LABEL=v.status==='OFF'?'PAUSED':v.status==='NEW_VM'?'NEW':validScan&&scan?.problem?'ERROR':validScan&&scan?.earning===true&&!v.recordedIssue?'GOOD':'UNKNOWN';
+  const scan=v.health,validScan=!!scan&&monitorFreshness(scan.at,now)==='FRESH'&&(!scan.monitor||scan.monitor.configVersion===MONITOR_POLICY.version);
+  const monitor=monitorProjection(scan?.monitor,now),nativeState=scan?.monitor?.vmState?.state;
+  const contradictsEarning=monitor.vmState==='FRESH'&&nativeState!==undefined&&nativeState!=='RUNNING'&&nativeState!=='UNKNOWN';
+  const canConfirmEarning=(!v.monitorCanary||v.agentHeartbeatFreshness==='FRESH')&&!contradictsEarning;
+  const earning=validScan&&scan?.earning!==undefined?(scan.earning===true&&!canConfirmEarning?null:scan.earning):null;
+  const health: keyof typeof HEALTH_LABEL=v.status==='OFF'?'PAUSED':v.status==='NEW_VM'?'NEW':validScan&&scan?.problem?'ERROR':earning===true&&!v.recordedIssue?'GOOD':'UNKNOWN';
   const state=vmMoneyState(moneyRead&&v.money?{...v.money,code:'current',moneyHidden:false}:null,now);
   const fresh=state.kind==='OK'&&!!state.at&&Date.parse(state.at)<=now.getTime();
   const amount=moneyRead&&'amount' in state?state.amount:null,observedAt=moneyRead&&'at' in state?state.at:null;
@@ -33,7 +41,7 @@ export function businessPulse(input:PulseInput[],moneyRead:boolean,now:Date=new 
    if(decreasing)trend='DECREASED';else {const d=micros(unique[unique.length-1].amount)!-micros(unique[0].amount)!;trend=d>BigInt(0)?'INCREASING':'FLAT';delta=text(d);}
   }
   const steps=moneyRead?[...(!v.hasAccount?['Chưa gán EarnApp']:[]),...(!v.hasPaypal?['Chưa có email PayPal']:[]),...(v.payout?['Đã có yêu cầu rút']:[])]:[];
-  return {id:v.id,serverId:v.serverId,server:v.server,code:v.code,health,checkedAt:scan?.at??null,problem:validScan?scan?.problem??null:null,recordedIssue:v.recordedIssue??null,
+  return {id:v.id,serverId:v.serverId,server:v.server,code:v.code,health,checkedAt:scan?.observedAt??scan?.at??null,earningCheckedAt:scan?.at??null,receivedAt:scan?.receivedAt??null,freshness:monitorFreshness(scan?.observedAt??scan?.at,now),monitor,earning,problem:validScan?scan?.problem??null:null,recordedIssue:v.recordedIssue??null,
    amount,observedAt,moneyState:moneyRead?state.kind:'HIDDEN',threshold,trend,delta,steps,
    decreaseNote:trend==='DECREASED'?(v.payout?'Có yêu cầu rút; đối chiếu lần giảm tiền':'Số dư giảm; cần đối chiếu') :null};
  });
@@ -44,4 +52,4 @@ export function businessPulse(input:PulseInput[],moneyRead:boolean,now:Date=new 
  return {day,generatedAt:now.toISOString(),moneyRead,health:{total:rows.length,active:rows.length-count('PAUSED')-count('NEW'),good:count('GOOD'),error:count('ERROR'),unknown:count('UNKNOWN'),paused:count('PAUSED'),new:count('NEW')},growth,
   withdrawal:moneyRead?{soon:rows.filter(r=>r.threshold==='SOON').length,enough:rows.filter(r=>r.threshold==='ENOUGH').length,amount:text(rows.filter(r=>r.threshold==='ENOUGH').reduce((s,r)=>s+micros(r.amount!)!,BigInt(0)))}:null,rows};
 }
-export type BusinessPulse=ReturnType<typeof businessPulse>;
+export type BusinessPulse=ReturnType<typeof businessPulse>&{heartbeats?:MonitorHeartbeats};

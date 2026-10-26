@@ -1,4 +1,10 @@
 /* App surfaces and accents follow the selected theme; semantic colours stay restrained. */
+.business-pulse .bp-monitor{padding:12px 16px;background:var(--ds-card);border:1px solid var(--ds-border);border-radius:var(--ds-radius);display:flex;flex-direction:column;gap:6px;min-width:0}
+.business-pulse .bp-monitor-coverage{display:flex;flex-wrap:wrap;gap:6px 18px;font-variant-numeric:tabular-nums}
+.business-pulse .bp-monitor summary{cursor:pointer;color:var(--ds-text-secondary);font-size:12px}
+.business-pulse .bp-monitor ul{list-style:none;padding:0;margin:8px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:12px}
+.business-pulse .bp-monitor li{min-width:0;overflow-wrap:anywhere}
+.business-pulse .bp-monitor li div{display:flex;flex-direction:column;margin-top:4px}
 .business-pulse{--bp-good:#28724f;--bp-error:#b4232c;--bp-warn:#885c15;--bp-unknown:#969eaa;--bp-chart-good:#398363;--bp-chart-error:#c95460;--bp-chart-warn:#b78938;--bp-track:color-mix(in srgb,var(--ds-text-secondary) 12%,var(--ds-card));display:flex;flex-direction:column;gap:18px;min-width:0;color:var(--ds-text-primary);font-size:13px;line-height:1.5}
 [data-theme="dark"] .business-pulse{--bp-good:#88cbaa;--bp-error:#f3a0a5;--bp-warn:#ddbd80;--bp-unknown:#6f7c91;--bp-chart-good:#69aa8b;--bp-chart-error:#cc7982;--bp-chart-warn:#bd9b5c}
 [data-theme="golden"] .business-pulse{--bp-good:#adc49e;--bp-error:#e8a491;--bp-warn:#dec27f;--bp-unknown:#827d70;--bp-chart-good:#94ad82;--bp-chart-error:#cd8c79;--bp-chart-warn:#c3a760}

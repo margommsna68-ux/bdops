@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {Activity,ArrowDownRight,ArrowRight,ArrowUpRight,ChartNoAxesCombined,ChevronDown,ChevronRight,ChevronUp,CircleHelp,Clock3,Pause,Server,TriangleAlert,Wallet} from 'lucide-react';
 import {HEALTH_LABEL,PROBLEM_LABEL,type BusinessPulse as Pulse} from '@/lib/business-pulse';
 import {links} from '@/lib/links';
+import type {Freshness} from '@/lib/monitor-policy';
 import './business-pulse.css';
 
 export interface PulsePackage {
@@ -93,6 +94,7 @@ export function BusinessPulse({pulse,packages,costsVisible}:{pulse:Pulse;package
       <option value="">Tất cả server được xem</option>{servers.map(([id,name])=><option key={id} value={id}>{name}</option>)}
       {serverId&&!servers.some(([id])=>id===serverId)&&<option value={serverId}>Server không còn trong phạm vi</option>}
     </select></label></div>
+    <MonitorSummary pulse={pulse} rows={rows} serverId={serverId}/>
     {!pulse.rows.length?<p className="bp-empty">Chưa có VM trong phạm vi được xem. <Link href={links.vms()} className="pm-link">Mở Server / VM</Link></p>:<>
       <div className="bp-cards" aria-label="Tổng quan điều hành">
         <section className="bp-card" aria-labelledby="bp-health"><div className="bp-card-title"><Activity size={17} aria-hidden="true"/><h2 id="bp-health">Hoạt động</h2></div>
@@ -200,7 +202,10 @@ function VmRow({row:r,moneyRead}:{row:Row;moneyRead:boolean}){
     <div className="bp-vm-name"><Link href={links.vms({serverId:r.serverId,vm:r.id})}>{r.code}</Link><small>{r.server}</small></div>
     <div className="bp-vm-health"><strong className={'bp-'+healthTone(r)}>{r.problem?PROBLEM_LABEL[r.problem]:HEALTH_LABEL[r.health]}</strong>
       {r.recordedIssue&&<small className="bp-warn">Đã ghi trên web: {r.recordedIssue}</small>}
-      <small>Kiểm tra VM: <Time at={r.checkedAt}/></small>{r.health==='UNKNOWN'&&<small>Chưa có bằng chứng kiếm tiền còn hiệu lực.</small>}
+      <small>Quan sát VM: <Time at={r.checkedAt}/> · {r.freshness==='STALE'?'Đã cũ':r.freshness==='FRESH'?'Còn mới':'Chưa rõ'}</small>
+      {r.receivedAt&&<small>Web nhận: <Time at={r.receivedAt}/></small>}
+      {r.earningCheckedAt!==r.checkedAt&&<small>Bằng chứng kiếm tiền: <Time at={r.earningCheckedAt}/></small>}
+      {r.health==='UNKNOWN'&&<small>Chưa xác minh kiếm tiền.</small>}
     </div>
     {moneyRead&&<div className="bp-vm-money">
       <strong>{r.amount===null?'Chưa kiểm tra tiền':dollars(r.amount)}</strong>{stateNote&&<small className="bp-warn">{stateNote}</small>}
@@ -210,4 +215,22 @@ function VmRow({row:r,moneyRead}:{row:Row;moneyRead:boolean}){
       {r.steps.length>0&&<small className="bp-warn">{r.steps.join(' · ')}</small>}
     </div>}
   </li>;
+}
+
+const contactLabel:Record<Freshness,string>={FRESH:'Còn liên lạc',STALE:'Đã cũ',UNKNOWN:'Chưa rõ',UNSUPPORTED:'Chưa hỗ trợ phiên bản'};
+function MonitorSummary({pulse,rows,serverId}:{pulse:Pulse;rows:Row[];serverId:string}){
+ const heartbeats=(pulse.heartbeats??Array.from(new Map(pulse.rows.map(r=>[r.serverId,{serverId:r.serverId,server:r.server}])).values()).map(s=>({...s,central:null,agent:null}))).filter(s=>!serverId||s.serverId===serverId);
+ const fresh=(axis:'vmState'|'guest'|'network'|'proxy'|'app')=>rows.filter(r=>r.monitor[axis]==='FRESH').length;
+ return <section className="bp-monitor" aria-label="Độ mới giám sát">
+    <div className="bp-section-head"><h2>Giám sát</h2><small>Độ phủ còn mới · VM: dưới 2 phút · Guest / ứng dụng: dưới 20 phút</small></div>
+  <div className="bp-monitor-coverage"><span>VM {fresh('vmState')}/{rows.length}</span><span>Guest {fresh('guest')}/{rows.length}</span><span>Mạng {fresh('network')}/{rows.length}</span><span>Proxy {fresh('proxy')}/{rows.length}</span><span>Ứng dụng {fresh('app')}/{rows.length}</span></div>
+  <small>Đang chạy: {rows.filter(r=>r.monitor.running).length} · Ứng dụng / SDK có kết nối: {rows.filter(r=>r.monitor.appConnectionVerified).length} · Chưa xác minh kiếm tiền: {rows.filter(r=>r.earning!==true).length}</small>
+  {heartbeats.length>0&&<details><summary>Liên lạc Central / agent · từ 3 phút là cũ</summary>
+   <ul>{heartbeats.map(s=><li key={s.serverId}><strong>{s.server}</strong>{(['central','agent'] as const).map(role=>{
+    const h=s[role],label=role==='central'?'Central':'Agent';
+    return <div key={role}><span>{label}: {contactLabel[h?.freshness??'UNKNOWN']}</span><small>Quan sát: <Time at={h?.observedAt}/> · Web nhận: <Time at={h?.receivedAt}/></small>
+     {h?.counts&&<small>Nguồn báo độ phủ: VM {h.counts.inventory}/{h.counts.managed} · Guest {h.counts.guest}/{h.counts.managed} · Proxy {h.counts.proxy}/{h.counts.managed} · Ứng dụng {h.counts.app}/{h.counts.managed}</small>}</div>;
+   })}</li>)}</ul>
+  </details>}
+ </section>;
 }

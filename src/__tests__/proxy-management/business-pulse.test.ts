@@ -4,11 +4,11 @@ const now=new Date('2026-10-26T10:00:00Z');
 const vm=(x:Partial<PulseInput>={}):PulseInput=>({id:'v1',serverId:'s1',server:'moon1',code:'VM_001',cycle:1,status:'OK',hasAccount:false,hasPaypal:false,payout:false,money:{amount:'10',observedAt:'2026-10-26T09:00:00Z',failedAt:null},points:[],health:null,...x});
 describe('business pulse evidence, not inferred machine success',()=>{
  it('does not turn a stored OK, proxy or amount into a healthy machine; separates deliberate pauses',()=>{
-  const p=businessPulse([vm(),vm({id:'off',status:'OFF'}),vm({id:'new',status:'NEW_VM'}),vm({id:'yes',health:{at:'2026-10-26T09:00:00Z',earning:true,problem:null}})],true,now);
+  const p=businessPulse([vm(),vm({id:'off',status:'OFF'}),vm({id:'new',status:'NEW_VM'}),vm({id:'yes',health:{at:'2026-10-26T09:50:00Z',earning:true,problem:null}})],true,now);
   expect(p.health).toEqual({total:4,active:2,good:1,error:0,unknown:1,paused:1,new:1});
  });
  it('requires fresh evidence and keeps proxy failures distinct from EarnApp blocked',()=>{
-  const p=businessPulse([vm({health:{at:'2026-10-24T09:00:00Z',earning:true,problem:null}}),vm({id:'e',health:{at:'2026-10-26T09:00:00Z',earning:false,problem:'PROXY_AUTH'}})],true,now);
+  const p=businessPulse([vm({health:{at:'2026-10-24T09:00:00Z',earning:true,problem:null}}),vm({id:'e',health:{at:'2026-10-26T09:50:00Z',earning:false,problem:'PROXY_AUTH'}})],true,now);
   expect(p.health).toMatchObject({good:0,error:1,unknown:1});expect(p.rows[1].problem).toBe('PROXY_AUTH');
  });
  it('uses $8 and $10 exactly, only current fresh money; failure and paused are separate',()=>{

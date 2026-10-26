@@ -1,0 +1,5 @@
+base/
+.work/
+output/
+__pycache__/
+*.zip

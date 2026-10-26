@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import './support.mjs';
+const {CANARY_POLICY,createCanaryLanes}=await import('../.work/engine/native-monitor-canary.mjs');
+const {createMonitorSourceWriter}=await import('../engine/native-monitor-source.mjs');
+const {sanitizeNativeSource,canarySourceAllowed}=await import('../engine/native-monitor-wire.mjs');
+const shared=new URL('../../../src/lib/monitor-policy.ts',import.meta.url);
+test('shared web policy v1 and actual strict MonitorObservation schema accept source monitor axes', {skip:!fs.existsSync(shared)},async()=>{const web=await import(shared);assert.deepEqual(CANARY_POLICY,web.MONITOR_POLICY);const now=()=>Date.now(),uuid='00000000-0000-4000-8000-000000000001',file=fileURLToPath(new URL('../.work/contract.json',import.meta.url));let source;const write=createMonitorSourceWriter({file,serverUuid:uuid,now});const lanes=createCanaryLanes({listVms:async()=>[{uuid,name:'VM_001',running:true,state:'RUNNING'}],acceptName:()=>true,now,setTimer:()=>({}),clearTimer:()=>{},onSnapshot:s=>{source=write(s);}});await lanes.start();lanes.core({uuid},{ok:true,guest:{earnapp_process_count:1,earnapp:{running:true},updater:{running:true},earnapp_conn:{established:0},updater_conn:{established:0}}},now());assert.ok(sanitizeNativeSource(source));for(const s of source.samples)web.MonitorObservation.parse(s.monitor);assert.equal(source.samples[0].monitor.proxy,undefined);assert.equal(source.samples[0].monitor.network.https,'UNKNOWN');assert.equal(source.samples[0].vmCode,'VM_001');await lanes.stop();});
+test('native environment allowlist fails closed; no embedded production host IDs',()=>{const id='00000000-0000-4000-8000-000000000001';for(const input of [null,'bad','[]','["wrong"]',JSON.stringify([id,id])])assert.equal(canarySourceAllowed(id,input),false);assert.equal(canarySourceAllowed(id,JSON.stringify([id])),true);});

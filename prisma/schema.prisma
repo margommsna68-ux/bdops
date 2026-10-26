@@ -176,6 +176,7 @@ model Server {
   project           Project            @relation(fields: [projectId], references: [id])
   projectId         String
   vms               VirtualMachine[]
+  monitorHeartbeats MonitorHeartbeat[]
   fundTransactions  FundTransaction[]
   earnWithdrawals   EarnWithdrawal[]
   businessWorkItems BusinessWorkItem[]
@@ -193,6 +194,29 @@ enum ServerStatus {
   SUSPENDED
   EXPIRED
   MAINTENANCE
+}
+
+// Bounded current telemetry only: at most two rows per server. Historical journals are untouched.
+model MonitorHeartbeat {
+  serverId      String
+  source        String // CENTRAL | AGENT (CHECK constraint in migration)
+  projectId     String
+  serverUuid    String
+  instanceUuid  String
+  startedAt     DateTime
+  seq           Int
+  configVersion Int
+  observedAt    DateTime
+  receivedAt    DateTime @default(now())
+  counts        Json
+  requestKey    String
+  requestHash   String
+  actorId       String
+  server        Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@id([serverId, source])
+  @@unique([projectId, requestKey])
+  @@index([projectId])
 }
 
 model VirtualMachine {

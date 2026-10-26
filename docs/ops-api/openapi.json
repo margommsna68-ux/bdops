@@ -2,7 +2,7 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Only withdrawal prepare/status/receipts retain approval. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
@@ -6470,6 +6470,19 @@
           "sdkRevision": {
            "type": "integer",
            "nullable": true
+          },
+          "endpointId": {
+           "type": "string",
+           "nullable": true,
+           "minLength": 1,
+           "maxLength": 64,
+           "description": "Desired endpoint ID only; not evidence of native installation."
+          },
+          "proxyAddressFingerprint": {
+           "type": "string",
+           "nullable": true,
+           "pattern": "^[a-f0-9]{64}$",
+           "description": "ADDRESS ONLY: lowercase hex SHA-256 of UTF-8 host.trim().toLowerCase()+\"|\"+port for the desired endpoint. Null when unknown/invalid. Excludes protocol and credentials, never configurationHash or proof of native application. Bridge compares the native address fingerprint before endpoint mapping; appliedConfigurationId stays null absent independent full configuration proof."
           }
          },
          "required": [
@@ -6719,6 +6732,602 @@
      "remaining"
     ],
     "description": "Max two distinct emails per PP per Vietnam day. Open preparations/unknowns reserve capacity across midnight; sent or uncertain attempts consume their server-date slot, even if cancelled later. Same email/key is not counted twice."
+   },
+   "MonitorObservation": {
+    "type": "object",
+    "properties": {
+     "configVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+     },
+     "vmState": {
+      "type": "object",
+      "properties": {
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+       },
+       "state": {
+        "type": "string",
+        "enum": [
+         "RUNNING",
+         "PAUSED",
+         "ABORTED",
+         "POWERED_OFF",
+         "STARTING",
+         "STOPPING",
+         "UNKNOWN"
+        ]
+       }
+      },
+      "required": [
+       "observedAt",
+       "state"
+      ],
+      "additionalProperties": false
+     },
+     "guest": {
+      "type": "object",
+      "properties": {
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+       },
+       "additions": {
+        "type": "string",
+        "enum": [
+         "PRESENT",
+         "ABSENT",
+         "UNKNOWN"
+        ]
+       },
+       "response": {
+        "type": "string",
+        "enum": [
+         "RESPONSIVE",
+         "AUTH_FAILED",
+         "TIMEOUT",
+         "UNAVAILABLE",
+         "UNKNOWN"
+        ]
+       }
+      },
+      "required": [
+       "observedAt",
+       "additions",
+       "response"
+      ],
+      "additionalProperties": false
+     },
+     "network": {
+      "type": "object",
+      "properties": {
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+       },
+       "provenance": {
+        "type": "string",
+        "enum": [
+         "HOST",
+         "GUEST"
+        ]
+       },
+       "ncsi": {
+        "type": "string",
+        "enum": [
+         "INTERNET",
+         "LIMITED",
+         "NONE",
+         "UNKNOWN"
+        ]
+       },
+       "https": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "FAILED",
+         "TIMEOUT",
+         "HTTP_403",
+         "HTTP_429",
+         "UNKNOWN"
+        ]
+       }
+      },
+      "required": [
+       "observedAt",
+       "provenance",
+       "ncsi",
+       "https"
+      ],
+      "additionalProperties": false
+     },
+     "proxy": {
+      "type": "object",
+      "properties": {
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+       },
+       "provenance": {
+        "type": "string",
+        "enum": [
+         "HOST",
+         "GUEST"
+        ]
+       },
+       "endpointId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+       },
+       "appliedConfigurationId": {
+        "nullable": true,
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+       },
+       "tcp": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "FAILED",
+         "TIMEOUT",
+         "HTTP_403",
+         "HTTP_429",
+         "UNKNOWN"
+        ]
+       },
+       "auth": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "FAILED",
+         "NOT_TESTED",
+         "UNKNOWN"
+        ]
+       },
+       "https": {
+        "type": "string",
+        "enum": [
+         "OK",
+         "FAILED",
+         "TIMEOUT",
+         "HTTP_403",
+         "HTTP_429",
+         "UNKNOWN"
+        ]
+       }
+      },
+      "required": [
+       "observedAt",
+       "provenance",
+       "endpointId",
+       "appliedConfigurationId",
+       "tcp",
+       "auth",
+       "https"
+      ],
+      "additionalProperties": false
+     },
+     "app": {
+      "type": "object",
+      "properties": {
+       "observedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+       },
+       "earnApp": {
+        "type": "string",
+        "enum": [
+         "RUNNING",
+         "STOPPED",
+         "UNKNOWN"
+        ]
+       },
+       "sdk": {
+        "type": "string",
+        "enum": [
+         "RUNNING",
+         "STOPPED",
+         "UNKNOWN"
+        ]
+       },
+       "connection": {
+        "type": "string",
+        "enum": [
+         "VERIFIED",
+         "NOT_OBSERVED",
+         "UNKNOWN"
+        ]
+       }
+      },
+      "required": [
+       "observedAt",
+       "earnApp",
+       "sdk",
+       "connection"
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "configVersion"
+    ],
+    "additionalProperties": false
+   },
+   "MonitorHeartbeatBody": {
+    "type": "object",
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "CENTRAL",
+       "AGENT"
+      ]
+     },
+     "serverUuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+     },
+     "instanceUuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+     },
+     "startedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+     },
+     "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+     },
+     "configVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+     },
+     "observedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+     },
+     "counts": {
+      "type": "object",
+      "properties": {
+       "managed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+       },
+       "inventory": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+       },
+       "guest": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+       },
+       "proxy": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+       },
+       "app": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+       }
+      },
+      "required": [
+       "managed",
+       "inventory",
+       "guest",
+       "proxy",
+       "app"
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "projectId",
+     "source",
+     "serverUuid",
+     "instanceUuid",
+     "startedAt",
+     "seq",
+     "configVersion",
+     "observedAt",
+     "counts"
+    ],
+    "additionalProperties": false,
+    "description": "Closed snapshot. startedAt <= observedAt <= receipt; coverage axes <= managed. Exact configured project/server/source/serverUuid enrollment required. Counts are reported coverage, never VM proof."
+   },
+   "MonitorPolicy": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "version": {
+      "type": "integer",
+      "enum": [
+       1
+      ]
+     },
+     "inventorySeconds": {
+      "type": "integer",
+      "enum": [
+       60
+      ]
+     },
+     "guestSeconds": {
+      "type": "integer",
+      "enum": [
+       600
+      ]
+     },
+     "proxySeconds": {
+      "type": "integer",
+      "enum": [
+       600
+      ]
+     },
+     "healthStaleSeconds": {
+      "type": "integer",
+      "enum": [
+       1200
+      ]
+     },
+     "heartbeatSeconds": {
+      "type": "integer",
+      "enum": [
+       60
+      ]
+     },
+     "heartbeatStaleSeconds": {
+      "type": "integer",
+      "enum": [
+       180
+      ]
+     },
+     "startupGraceSeconds": {
+      "type": "integer",
+      "enum": [
+       120
+      ]
+     },
+     "recheckSeconds": {
+      "type": "integer",
+      "enum": [
+       30
+      ]
+     },
+     "guestTimeoutSeconds": {
+      "type": "integer",
+      "enum": [
+       45
+      ]
+     },
+     "inventoryTimeoutSeconds": {
+      "type": "integer",
+      "enum": [
+       15
+      ]
+     },
+     "proxyTimeoutSeconds": {
+      "type": "integer",
+      "enum": [
+       8
+      ]
+     },
+     "guestConcurrency": {
+      "type": "integer",
+      "enum": [
+       1
+      ]
+     },
+     "proxyConcurrency": {
+      "type": "integer",
+      "enum": [
+       2
+      ]
+     },
+     "retryLimit": {
+      "type": "integer",
+      "enum": [
+       1
+      ]
+     },
+     "retryBackoffSeconds": {
+      "type": "integer",
+      "enum": [
+       30
+      ]
+     },
+     "telemetryFlushSeconds": {
+      "type": "integer",
+      "enum": [
+       30
+      ]
+     },
+     "queueMaxItems": {
+      "type": "integer",
+      "enum": [
+       1000
+      ]
+     },
+     "logMaxBytes": {
+      "type": "integer",
+      "enum": [
+       10485760
+      ]
+     },
+     "logRetentionDays": {
+      "type": "integer",
+      "enum": [
+       7
+      ]
+     },
+     "moneySeconds": {
+      "type": "integer",
+      "enum": [
+       86400
+      ]
+     }
+    },
+    "required": [
+     "version",
+     "inventorySeconds",
+     "guestSeconds",
+     "proxySeconds",
+     "healthStaleSeconds",
+     "heartbeatSeconds",
+     "heartbeatStaleSeconds",
+     "startupGraceSeconds",
+     "recheckSeconds",
+     "guestTimeoutSeconds",
+     "inventoryTimeoutSeconds",
+     "proxyTimeoutSeconds",
+     "guestConcurrency",
+     "proxyConcurrency",
+     "retryLimit",
+     "retryBackoffSeconds",
+     "telemetryFlushSeconds",
+     "queueMaxItems",
+     "logMaxBytes",
+     "logRetentionDays",
+     "moneySeconds"
+    ]
+   },
+   "OkMonitorPolicy": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "policy": {
+        "$ref": "#/components/schemas/MonitorPolicy"
+       }
+      },
+      "required": [
+       "policy"
+      ]
+     },
+     "error": {
+      "type": "object",
+      "nullable": true,
+      "enum": [
+       null
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkMonitorHeartbeat": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "replay": {
+        "type": "boolean"
+       },
+       "serverId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+       },
+       "source": {
+        "type": "string",
+        "enum": [
+         "CENTRAL",
+         "AGENT"
+        ]
+       },
+       "seq": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+       },
+       "observedAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "receivedAt": {
+        "type": "string",
+        "format": "date-time"
+       },
+       "configVersion": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100000
+       }
+      },
+      "required": [
+       "replay",
+       "serverId",
+       "source",
+       "seq",
+       "observedAt",
+       "receivedAt",
+       "configVersion"
+      ]
+     },
+     "error": {
+      "type": "object",
+      "nullable": true,
+      "enum": [
+       null
+      ],
+      "additionalProperties": false
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -11508,7 +12117,7 @@
   },
   "/vms/{id}/scan-observations": {
    "post": {
-    "summary": "Record existing GEN2 observation only (VM_OPS). Does not scan/fix/change VM status. UUID, cycle, VM revision and configuration must match. Optional current SDK money uses BALANCE_WRITE + EARN_BALANCE and its revision, observed AFTER capturedAt. Same idempotency key replays original recorded result. No approval/PIN.",
+    "summary": "Record existing GEN2 observation only (VM_OPS). Does not scan/fix/change VM status. UUID, cycle, VM revision and configuration must match. Optional current SDK money uses BALANCE_WRITE + EARN_BALANCE and its revision, observed AFTER capturedAt. Same idempotency key replays original recorded result. No approval/PIN. Optional closed monitor axes use canary enrollment, independent source times and freshness (1200s); HOST evidence and process status never imply GUEST connectivity or earning. Existing batch transport and financial scopes unchanged.",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -11588,6 +12197,14 @@
            "observedAt",
            "amount"
           ]
+         },
+         "monitor": {
+          "$ref": "#/components/schemas/MonitorObservation"
+         },
+         "earningObservedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional original source time for earning/legacy problem proof. Must be >= current VM/cycle/configuration barrier, <= observedAt and not future. Health freshness uses earningObservedAt ?? observedAt; native monitor axes keep their own clocks. Without valid earning proof send earning:null; native problem must be null unless actually observed at the same source time. Never redate cached proof to fresh inventory time."
          }
         },
         "required": [
@@ -11739,6 +12356,203 @@
      },
      "429": {
       "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/monitor-policy": {
+   "get": {
+    "summary": "Versioned conservative monitoring policy (VM_OPS and current infrastructure/project rights). Does not assert collector support.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/projectId"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkMonitorPolicy"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "IDEMPOTENCY_CONFLICT or REVISION_CONFLICT",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/servers/{id}/monitor-heartbeat": {
+   "post": {
+    "summary": "Canary-scoped bounded CENTRAL or AGENT snapshot (VM_OPS). Current token/user/server rights rechecked in transaction before replay or write. Exact current-key/hash replay preserves receipt; older/conflicting sequences or epochs refused. Central never proves agent liveness.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MonitorHeartbeatBody"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkMonitorHeartbeat"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "IDEMPOTENCY_CONFLICT or REVISION_CONFLICT",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL",
       "content": {
        "application/json": {
         "schema": {

@@ -13,10 +13,10 @@ vi.mock('@/lib/trpc',()=>({trpc:{useUtils:()=>({}),businessManagement:{
 vi.mock('@/components/dashboard/OverviewCharts',()=>({CashChart:()=>null,StockChart:()=>null,VmByServerChart:()=>null}));
 import {Overview} from '@/components/dashboard/Overview';
 
-const now=new Date('2026-10-26T05:00:00Z'),checked='2026-10-26T04:00:00Z';
+const now=new Date('2026-10-26T05:00:00Z'),checked='2026-10-26T04:00:00Z',healthChecked='2026-10-26T04:55:00Z';
 const vm=(id:string,amount:string|null,extra:Partial<PulseInput>={}):PulseInput=>({
   id,serverId:'moon-1',server:'MOON-01',code:id,cycle:1,status:'OK',hasAccount:true,hasPaypal:true,payout:false,
-  health:{at:checked,earning:true,problem:null},
+  health:{at:healthChecked,earning:true,problem:null},
   money:amount===null?null:{amount,observedAt:checked,failedAt:null},
   points:amount===null?[]:[{at:'2026-10-26T02:00:00Z',amount:'1'},{at:checked,amount}],...extra,
 });
@@ -26,7 +26,7 @@ const inputs=[
   vm('VM-flat','0',{points:[{at:'2026-10-26T02:00:00Z',amount:'0'},{at:checked,amount:'0'}]}),
   vm('VM-decreased','3',{payout:true,points:[{at:'2026-10-26T02:00:00Z',amount:'10'},{at:checked,amount:'3'}]}),
   vm('VM-unknown',null,{health:null}),
-  vm('VM-error','12.3456',{serverId:'moon-2',server:'MOON-02',health:{at:checked,earning:false,problem:'PROXY_AUTH'},points:[]}),
+  vm('VM-error','12.3456',{serverId:'moon-2',server:'MOON-02',health:{at:healthChecked,earning:false,problem:'PROXY_AUTH'},points:[]}),
   vm('VM-paused','30',{status:'OFF'}),vm('VM-new','40',{status:'NEW_VM'}),
 ];
 let host:HTMLDivElement,root:Root;
@@ -43,7 +43,7 @@ const server=async(value:string)=>{const el=host.querySelector<HTMLSelectElement
 
 describe('business pulse drilldowns',()=>{
   it('prioritizes servers needing attention, collapses to five and preserves expansion on refresh',async()=>{
-    const many=Array.from({length:7},(_,i)=>vm(`VM-server-${i}`,'10',{serverId:`s${i}`,server:`Server ${i}`,health:i===6?null:i===5?{at:checked,earning:false,problem:'PROXY_AUTH'}:{at:checked,earning:true,problem:null}}));
+    const many=Array.from({length:7},(_,i)=>vm(`VM-server-${i}`,'10',{serverId:`s${i}`,server:`Server ${i}`,health:i===6?null:i===5?{at:healthChecked,earning:false,problem:'PROXY_AUTH'}:{at:healthChecked,earning:true,problem:null}}));
     await render(many);
     const names=()=>Array.from(host.querySelectorAll('.bp-server-name button')).map(b=>b.textContent);
     expect(names()).toHaveLength(5);expect(names().slice(0,2)).toEqual(['Server 5','Server 6']);
@@ -109,7 +109,7 @@ describe('business pulse drilldowns',()=>{
   it('separates paused/new from active health and offers the actual observations',async()=>{
     await render();await click('Đang hoạt động: 8 VM');expect(codes()).toHaveLength(8);expect(codes()).not.toContain('VM-paused');
     await click('Đang kiếm tiền: 6 VM');expect(codes()).toHaveLength(6);
-    expect(list().querySelector('time')?.dateTime).toBe(checked);
+    expect(list().querySelector('time')?.dateTime).toBe(healthChecked);
     await click('Tạm dừng: 1 VM');expect(codes()).toEqual(['VM-paused']);
     await click('Chưa cài: 1 VM');expect(codes()).toEqual(['VM-new']);
   });
@@ -124,7 +124,7 @@ describe('business pulse drilldowns',()=>{
     await click('Chưa đủ lần đọc: 2 VM');expect(codes()).toEqual(['VM-unknown','VM-error']);
   });
   it('labels the latest actual health observation separately from page generation',async()=>{
-    await render();expect(host.querySelector<HTMLTimeElement>('[aria-labelledby="bp-health"] time')?.dateTime).toBe(checked);
+    await render();expect(host.querySelector<HTMLTimeElement>('[aria-labelledby="bp-health"] time')?.dateTime).toBe(healthChecked);
   });
   it('never turns missing or failed money into zero or withdrawal readiness',async()=>{
     await render([vm('VM-no-money',null,{health:null}),vm('VM-failed','20',{money:{amount:'20',observedAt:checked,failedAt:'2026-10-26T04:30:00Z'}})]);
@@ -145,7 +145,7 @@ describe('business pulse drilldowns',()=>{
   it('keeps reported web issues distinct from scan errors and unknowns, excludes paused/new, and follows server scope',async()=>{
     await render([
       vm('VM-reported',null,{recordedIssue:'Proxy đã báo Blocked'}),
-      vm('VM-both',null,{serverId:'moon-2',server:'MOON-02',recordedIssue:'EarnApp lỗi',health:{at:checked,earning:false,problem:'PROXY_AUTH'}}),
+      vm('VM-both',null,{serverId:'moon-2',server:'MOON-02',recordedIssue:'EarnApp lỗi',health:{at:healthChecked,earning:false,problem:'PROXY_AUTH'}}),
       vm('VM-unknown',null,{health:null}),
       vm('VM-paused',null,{status:'OFF',recordedIssue:'EarnApp lỗi'}),
       vm('VM-new',null,{status:'NEW_VM',recordedIssue:'Chưa có proxy'}),
@@ -202,7 +202,7 @@ describe('Overview integration',()=>{
     await server('moon-1');await click('Sắp đủ: 2 VM');
     overviewMock.ops={...overviewMock.ops,data:{...overviewData(),generatedAt:'2026-10-26T05:00:30Z'}};
     await overview();expect(codes()).toEqual(['VM-soon','VM-soon-edge']);
-    expect(host.textContent).toContain('Làm mới trang');expect(list().querySelector('time')?.dateTime).toBe(checked);
+    expect(host.textContent).toContain('Làm mới trang');expect(list().querySelector('time')?.dateTime).toBe(healthChecked);
     expect(overviewMock.push).not.toHaveBeenCalled();
   });
   it('places both errors above retained data and clearly labels the stale view',async()=>{

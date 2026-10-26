@@ -1,0 +1,73 @@
+{
+  "milestone": "SOURCE_PATCH_TEST_PACKAGE_ONLY",
+  "installed": false,
+  "committed": false,
+  "productionVmActions": 0,
+  "remoteCommands": 0,
+  "remoteWrites": 0,
+  "baseVersion": "3.1.18",
+  "baseMainSha256": "5800521fba2174c536a5b2362028a32b3d0200c83e018a1567166afac6edcd75",
+  "baseFilesVerified": 44,
+  "syntaxCheckedFiles": 10,
+  "packageTests": {
+    "passed": 39,
+    "failed": 0
+  },
+  "legacyRegressionGroups": {
+    "unchangedBase": 15,
+    "patched": 15
+  },
+  "actualWebPolicyV1SchemaCheck": true,
+  "sourceTransportHarnessVmRows": 91,
+  "liveCanaryAccepted": false,
+  "liveResourceMeasurements": null,
+  "limitations": [
+    "NCSI/service/GUEST HTTPS/applied-route/earning UNKNOWN",
+    "HOST network outage reader not bound; injected fixture only",
+    "CPU/RAM/probe p95/p99/coverage/delivery/24-48h not measured live",
+    "Guest child timeout cleanup unproven; persisted quarantine required",
+    "No helper binary upgrade/copy in canary path"
+  ],
+  "changedProductFiles": {
+    "main.mjs": {
+      "sha256": "48ffa24a91f16384acc2dd54285cf45e78f10a49e24606c12ea9f5b924b92924",
+      "bytes": 547839
+    },
+    "engine/earnapp-monitor.mjs": {
+      "sha256": "e6bfd99c25e27b4fb42836a1ce9558b4aff7c727e2915260d63f1e22fc3b4719",
+      "bytes": 22530
+    },
+    "engine/fleet-health.mjs": {
+      "sha256": "e71a4df09747f95fa5b153ce376be2dd8650b0ae915c41cea95252f35bcff392",
+      "bytes": 3172
+    },
+    "engine/guest-helper.mjs": {
+      "sha256": "26791305a4145cbeb248a65d6af11ce500b3b92c170f6fe8212b48b526f1268d",
+      "bytes": 13427
+    },
+    "engine/native-monitor-canary.mjs": {
+      "sha256": "bf6378b0d9836720236939afcf2b04f260330f743cb09d6c0d03a2728f88d928",
+      "bytes": 8856
+    },
+    "engine/native-monitor-guest-transport.mjs": {
+      "sha256": "aa8b9519b8ba8da3974502b70e783e564f94e4f340f6494641bf4e63f337c3a9",
+      "bytes": 735
+    },
+    "engine/native-monitor-readers.mjs": {
+      "sha256": "6319b5d56fc5df601e86c69441333ba1dce9cd01fb8c0af715a0207ac8ee2c4f",
+      "bytes": 2628
+    },
+    "engine/native-monitor-source.mjs": {
+      "sha256": "2eb59578594680f54bc70166872f6fa8c111b823cf99c25d9443de61a1211e5e",
+      "bytes": 5131
+    },
+    "engine/native-monitor-wire.mjs": {
+      "sha256": "f79c66a680ecd823eecab763403ff9fcd4d924d0c9f7bedbf7c167ae0699c7b6",
+      "bytes": 6425
+    },
+    "engine/vbox.mjs": {
+      "sha256": "c904f744ded1ccbe828a10a30b52397324f7b6ad2c0d4fc3e9dd83d8e5538293",
+      "bytes": 6543
+    }
+  }
+}
