@@ -1,0 +1,18 @@
+{
+  "host": "WIN-6CA4QAGDD2F",
+  "folder": "C:/Users/Administrator/Desktop/MoneyToHome",
+  "files": [
+    {
+      "file": "CAP_NHAT_GIOI_HAN_PAYPAL_20261026.md",
+      "sha256": "69842b0ec5e94ab2d67ec8e5367a80adb483549acc5ec6b0b1ed98ab9a0f7532",
+      "verified": true
+    },
+    {
+      "file": "openapi-paypal-1.5.1.json",
+      "sha256": "53119ed45a992505bcc6694d42159f7887bfbd1ca7bddcebf5a0182f0dde53f9",
+      "verified": true
+    }
+  ],
+  "containsSecrets": false,
+  "tokenOrConfigChanged": false
+}
