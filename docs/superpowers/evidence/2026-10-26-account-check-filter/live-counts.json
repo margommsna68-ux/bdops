@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-26T00:36:13.591Z",
+  "total": 149,
+  "options": [
+    {
+      "key": "APPLE_LOCKED",
+      "label": "Locked",
+      "count": 105
+    },
+    {
+      "key": "PROXY_ERROR",
+      "label": "Lỗi proxy",
+      "count": 6
+    },
+    {
+      "key": "LIVE_2FA",
+      "label": "Live · yêu cầu 2FA",
+      "count": 38
+    }
+  ],
+  "worker": {
+    "state": "IDLE",
+    "online": true
+  }
+}

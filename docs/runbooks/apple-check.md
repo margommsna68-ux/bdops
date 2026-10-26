@@ -9,9 +9,12 @@ Mở Kho tài khoản → Apple ID. Cột **Tình trạng acc** hiện kết qu�
 - **Đăng nhập Apple thành công:** chỉ khi worker xác nhận phiên Apple đúng email; không chứng minh dùng được trên EarnApp.
 - **Sai mật khẩu:** Apple từ chối thông tin đăng nhập; kiểm lại email/mật khẩu trong kho, không thử liên tục.
 - **Không kiểm tra được / Chưa rõ kết quả:** lỗi kỹ thuật không đổi tình trạng tài khoản thành Locked.
+- **Lỗi proxy:** lượt kiểm tra không hoàn tất bước tải trang Apple qua proxy. Chưa phải kết luận Locked/Live; xem lịch sử để phân biệt kết quả trước đó. Proxy đang gán VM vẫn có thể mất kết nối. Không tự đánh dấu proxy BLOCKED hay thay proxy trên VM chỉ từ lỗi này.
 - **Cần kiểm tra lại:** tài khoản đã thay phiên bản; kết quả cũ chỉ là lịch sử. Sửa thông tin không tự mở lại tài khoản Locked.
 
 Mỗi tài khoản đã bắt đầu đăng nhập phải nghỉ ít nhất 15 phút trước khi check lần nữa. Không có Check All. Không có thao tác VM hay rút tiền trong tính năng này.
+
+Bộ lọc **Tình trạng acc** chỉ hiện các trạng thái có tài khoản, kèm số lượng trên toàn bộ kết quả (trước phân trang), tính theo loại, nguồn mua và các bộ lọc khác. Nếu trạng thái đang chọn hết kết quả thì giữ mục `(0)` tới khi người dùng bỏ chọn; không tự đổi URL. Khi chưa tải được dữ liệu, bộ lọc bị khoá và không hiện số 0 giả.
 
 ## ADMIN
 Trong Kho tài khoản mở **Cấu hình Check Apple ID**. Chọn tên worker và nhóm proxy cho phép kiểm tra. TUT là kho proxy SELF của chủ: chọn ngẫu nhiên proxy NEW chưa gán hoặc LIVE đang gán VM (liên kết cũ hoặc giữ DESIRED/INSTALLED đang hiệu lực). Được dùng đồng thời với VM theo quyết định chủ 25/10; không thay liên kết, trạng thái hay cấu hình VM. Bỏ qua BLOCKED/đã replace, vị trí UNCERTAIN, đã ẩn hoặc của nhóm khác. Custom group phải chứa proxy SELF đủ điều kiện. Không có proxy thì việc giữ trong hàng chờ.

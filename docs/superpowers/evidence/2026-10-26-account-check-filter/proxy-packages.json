@@ -1,0 +1,74 @@
+[
+  {
+    "jobId": "cmvoijv6g0kskmbfk7matttyk",
+    "proxyId": "cmvkqqf9q07wlu6satm6zr831",
+    "package": "240292",
+    "maskedHost": "158.46.***.178",
+    "port": 5432,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  },
+  {
+    "jobId": "cmvoh7xn20jh4mbfkpymn72xw",
+    "proxyId": "cmvkqqf4y07dxu6saaby0jp8j",
+    "package": "240292",
+    "maskedHost": "158.46.***.115",
+    "port": 5432,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  },
+  {
+    "jobId": "cmvoh7xn80jhgmbfkhr7zd9pf",
+    "proxyId": "cmvkqqfl4097fu6sagmq6eegg",
+    "package": "GEN-22/10-100",
+    "maskedHost": "84.75.***.135",
+    "port": 11000,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  },
+  {
+    "jobId": "cmvoh7xnh0jhymbfkmupr01gi",
+    "proxyId": "cmvkqqf2w075lu6saawe17n1o",
+    "package": "240292",
+    "maskedHost": "158.46.***.183",
+    "port": 5432,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  },
+  {
+    "jobId": "cmvoh7xnk0ji4mbfku9tsmsxy",
+    "proxyId": "cmvkqqf6h07k3u6sa6vrvt970",
+    "package": "240292",
+    "maskedHost": "158.46.***.13",
+    "port": 5432,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  },
+  {
+    "jobId": "cmvoh7xnq0jigmbfkzp9n9lq8",
+    "proxyId": "cmvkqqf9d07v9u6sa0nd95p3v",
+    "package": "240292",
+    "maskedHost": "158.46.***.157",
+    "port": 5432,
+    "inventoryState": "LIVE",
+    "status": "AVAILABLE",
+    "retired": false,
+    "revisionChanged": false,
+    "submittedAt": null
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "at": "2026-10-26T00:30:21.618Z",
+  "results": [
+    {
+      "jobId": "cmvoh7xn20jh4mbfkpymn72xw",
+      "control": false,
+      "exit": 28,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0,
+      "tlsSeconds": 0,
+      "totalSeconds": 10.000396,
+      "elapsedMs": 10033
+    },
+    {
+      "jobId": "cmvoh7xn80jhgmbfkhr7zd9pf",
+      "control": false,
+      "exit": 56,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0.262391,
+      "tlsSeconds": 0,
+      "totalSeconds": 5.5264,
+      "elapsedMs": 5553
+    },
+    {
+      "jobId": "cmvoh7xnh0jhymbfkmupr01gi",
+      "control": false,
+      "exit": 28,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0,
+      "tlsSeconds": 0,
+      "totalSeconds": 10.001556,
+      "elapsedMs": 10024
+    },
+    {
+      "jobId": "cmvoh7xnk0ji4mbfku9tsmsxy",
+      "control": false,
+      "exit": 28,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0,
+      "tlsSeconds": 0,
+      "totalSeconds": 10.0006,
+      "elapsedMs": 10027
+    },
+    {
+      "jobId": "cmvoh7xnq0jigmbfkzp9n9lq8",
+      "control": false,
+      "exit": 28,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0,
+      "tlsSeconds": 0,
+      "totalSeconds": 10.000567,
+      "elapsedMs": 10025
+    },
+    {
+      "jobId": "cmvoijv6g0kskmbfk7matttyk",
+      "control": false,
+      "exit": 28,
+      "connectStatus": 0,
+      "httpStatus": 0,
+      "tcpSeconds": 0,
+      "tlsSeconds": 0,
+      "totalSeconds": 10.00078,
+      "elapsedMs": 10026
+    },
+    {
+      "jobId": "cmvoh7xnw0jismbfkzuig222p",
+      "control": true,
+      "exit": 0,
+      "connectStatus": 200,
+      "httpStatus": 403,
+      "tcpSeconds": 0.277358,
+      "tlsSeconds": 1.384891,
+      "totalSeconds": 1.710526,
+      "elapsedMs": 1737
+    }
+  ]
+}
