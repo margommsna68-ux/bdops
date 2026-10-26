@@ -1,0 +1,112 @@
+{
+  "ok": true,
+  "build": "ltvlbCnXG39YQ94CKWhRJ",
+  "commit": "458e862",
+  "previous": "D:\\MoneyToHome\\app-before-account-filter-options-20261026",
+  "at": "2026-10-26T07:38:10.8557401+07:00",
+  "noMigration": true,
+  "tests": {
+    "files": 205,
+    "passed": 1198,
+    "failed": 0,
+    "focused": 63,
+    "browser": 22,
+    "typecheck": true,
+    "build": true,
+    "lint": "existing warnings only"
+  },
+  "backup": "moneytohome-20261026-073539.dump",
+  "backupMoonEncryptedDecryptionVerified": true,
+  "host": {
+    "manifest": 200,
+    "health": 200,
+    "sourceMatches": true,
+    "businessBefore": {
+      "readOnly": true,
+      "counts": {
+        "requests": 0,
+        "vms": 678,
+        "logins": 149,
+        "proxies": 1465,
+        "batches": 4,
+        "costs": 4,
+        "funds": 0
+      },
+      "hash": "509b63d811b87135555dca5e684d631ebab99caffb7b6ac686b6342ee282039b"
+    },
+    "businessAfter": {
+      "readOnly": true,
+      "counts": {
+        "requests": 0,
+        "vms": 678,
+        "logins": 149,
+        "proxies": 1465,
+        "batches": 4,
+        "costs": 4,
+        "funds": 0
+      },
+      "hash": "509b63d811b87135555dca5e684d631ebab99caffb7b6ac686b6342ee282039b"
+    }
+  },
+  "worker": {
+    "state": {
+      "state": "IDLE",
+      "activeCount": 0,
+      "slots": [
+        {
+          "slot": 1,
+          "state": "IDLE"
+        },
+        {
+          "slot": 2,
+          "state": "IDLE"
+        },
+        {
+          "slot": 3,
+          "state": "IDLE"
+        },
+        {
+          "slot": 4,
+          "state": "IDLE"
+        },
+        {
+          "slot": 5,
+          "state": "IDLE"
+        }
+      ],
+      "at": "2026-10-26T00:38:15.482Z"
+    },
+    "task": "Running",
+    "ownedChromeRoots": 0,
+    "ownedRootMemoryMb": 0,
+    "profiles": 0,
+    "pending": 0,
+    "quarantines": 0,
+    "freeMb": 16339
+  },
+  "latestCounts": {
+    "at": "2026-10-26T00:38:21.810Z",
+    "total": 149,
+    "options": [
+      {
+        "key": "APPLE_LOCKED",
+        "label": "Locked",
+        "count": 105
+      },
+      {
+        "key": "PROXY_ERROR",
+        "label": "Lỗi proxy",
+        "count": 6
+      },
+      {
+        "key": "LIVE_2FA",
+        "label": "Live · yêu cầu 2FA",
+        "count": 38
+      }
+    ],
+    "worker": {
+      "state": "IDLE",
+      "online": true
+    }
+  }
+}
