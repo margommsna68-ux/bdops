@@ -11,3 +11,11 @@ Verification:
 - No backend, database, API, permission, GEN2 bridge/scan configuration or real VM behavior changes. Full 1238-test backend suite was not rerun for this presentation-only change; relevant 32 tests run.
 
 Deployment: pending final host verification (see release record).
+
+## Phát hành
+- Commit 64597fb; build Ljxej_M4sGYzNOxsfDnf0, live 26/10/2026 09:07 Bangkok.
+- Backup 09:06:20 local + encrypted/decryption-verified copy on moon-01.
+- No migration (41 applied unchanged). Web/Tunnel both Running, exact public build manifest HTTP200; deployed component/CSS match tested source.
+- Read-only business snapshot before/after identical: 678VM /149accounts /1465proxies /4batches /4costs /0requests /0funds; hash 509b63d811b87135555dca5e684d631ebab99caffb7b6ac686b6342ee282039b. Existing GEN2 health ingestion may run independently; not frozen or changed.
+- Rollback: D:/MoneyToHome/app-before-dashboard-visuals-20261026.
+- Production authenticated UI not re-driven; visual verification was on the local app with synthetic users/data, all four themes and mobile. No production example records or operational commands sent.
