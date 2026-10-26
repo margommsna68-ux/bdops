@@ -1,0 +1,16 @@
+# EarnApp → PayPal payout management — 26 October 2026
+
+Code 644f074; deployed self-hosted wow.lalamail.sbs at 19:31 Bangkok, build GVKRDvdrog3dduf6MnYXH. No migration. Backup moneytohome-20261026-193015.dump, encrypted moon-01 copy verified including decryption (SHA256 7aee0006279c36e3d80e88a56f10353567d6688c0165d426e27a3c61b40808f8). Rollback app-before-payout-report-20261026; deployment script D:/MoneyToHome/tools/deploy-payout-report.ps1. Only Web restarted; Postgres/Tunnel kept running.
+
+## Scope
+Read-only report /earnapp-withdrawals; sidebar Tài chính, Server/VM header Lịch sử rút, Tiền vào PayPal shortcut. All historical requests retain their own VM/cycle/EarnApp/PP/email. Filters in URL, 50-row paging, all-filtered totals by currency, actual receipt detail. No VM/payout/receipt/token/permission changes.
+
+## Verified
+- 201 official files / 1271 tests passed, including seven new backend and six UI tests. Eighteen focused tests pass (including menu). Typecheck and targeted lint clean. Production Next build passes. The first combined npm build/test attempt hit Windows Prisma DLL EPERM during regeneration; no schema change, generated client retained and Next production build rerun successfully. No success claim for the failed regeneration.
+- Initial broad test discovery: intentional menu expectation needed the new report entry; old .runtime/fleet-round-repro/repro.test.mjs is node:test, not a Vitest suite. Official src suite above passes; no old assertion was weakened except adding the authorized menu entry.
+- Review corrected sent total to retain SENT requests later failed/cancelled (two test cases red then green). Preparing/unknown rows no longer show money as pending (red then green). Invalid date filter error can be cleared without exposing cached financial data (red then green). Independent review found these points and no other scoped issues.
+- 27 browser assertions passed using synthetic local trial data: partial receipt $6 of $10, $4 open, server/PayPal/status/date intersection, reload, old closed account, invalid-filter reset, real theme chooser across four themes, desktop 1280 and phone 390, receipt expansion, user without money rights refused, no JS errors. Screenshots contain only synthetic data. The first script mistakenly opened the newest row instead of VM_001 and expected light data-theme=light (light has no attribute); script corrected, final clean run passes. No real-login Apple/EarnApp/PayPal or withdrawal operation was executed.
+- Host read-only report: 3 SENT requests totaling $54.77; 1 PREPARING $16.94; no receipts. Financial/business snapshot hashes before/after identical, 678 VM, 149 login accounts,1465 proxies,4batches,4costs,4requests,0fund transactions. Public exact build and route/health return200; deployed sources equal. A public route response can redirect to login: not claimed as an authenticated production browser test.
+
+## Limits
+Report reflects records in MoneyToHome, not an external EarnApp/PayPal verification. Sent is not receipt. No production authenticated browser flow was run; browser flows used local synthetic accounts. Existing payout permissions remain, server-scoped users do not gain project financial access. No other host or Central worker change.

@@ -1,0 +1,8 @@
+{
+  "normalizedDeployedSourcesEqual": [
+    "src/server/vm-ops/payout-report.ts",
+    "src/components/business-management/PayoutReportWorkspace.tsx",
+    "src/server/routers/vmOps.ts",
+    "src/components/layout/nav.ts"
+  ]
+}

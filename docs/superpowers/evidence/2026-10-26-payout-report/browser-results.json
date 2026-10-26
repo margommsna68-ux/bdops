@@ -1,0 +1,32 @@
+{
+  "checks": [
+    "admin signed in",
+    "all six historical requests visible",
+    "actual $6 and open $31 kept separate",
+    "receipt detail has transaction",
+    "VM drilldown exact server and VM",
+    "server filter all rows",
+    "URL server survives reload",
+    "status intersects server",
+    "paypal filter includes old closed account",
+    "date excludes requests before range",
+    "invalid date filter recovers with reset",
+    "light desktop report in actual chosen theme",
+    "light phone page fits",
+    "light phone detail opens",
+    "dark desktop report in actual chosen theme",
+    "dark phone page fits",
+    "dark phone detail opens",
+    "golden desktop report in actual chosen theme",
+    "golden phone page fits",
+    "golden phone detail opens",
+    "bronze desktop report in actual chosen theme",
+    "bronze phone page fits",
+    "bronze phone detail opens",
+    "nocopy signed in",
+    "reader without money rights refused",
+    "denied reader no money summary",
+    "no javascript errors"
+  ],
+  "errors": []
+}

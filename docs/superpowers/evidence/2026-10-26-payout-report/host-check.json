@@ -1,0 +1,30 @@
+{
+  "checks": [
+    {
+      "url": "https://wow.lalamail.sbs/_next/static/GVKRDvdrog3dduf6MnYXH/_buildManifest.js",
+      "status": 200
+    },
+    {
+      "url": "https://wow.lalamail.sbs/earnapp-withdrawals",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:3000/health",
+      "status": 200
+    }
+  ],
+  "services": [
+    {
+      "Name": "MoneyToHome-Postgres",
+      "Status": "Running"
+    },
+    {
+      "Name": "MoneyToHome-Tunnel",
+      "Status": "Running"
+    },
+    {
+      "Name": "MoneyToHome-Web",
+      "Status": "Running"
+    }
+  ]
+}

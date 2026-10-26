@@ -1,0 +1,36 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/proxy-management/payout-report.integration.test.ts (7 tests | 1 failed) 690ms
+   ✓ reports partial receipts with void/failed/pending precedence and sums only actual confirmed money 90ms
+   ✓ keeps closed account, recreated/deleted VM history on request.vmId rather than current account position 47ms
+   × derives submission/phase states and keeps each currency separate including shortfall settlement and review 71ms
+   ✓ filters before 50-row paging and totals; sorts timestamp/create/id stably without truncating history 243ms
+   ✓ totals confirmed receipts in their own currency even on mismatched, failed or cancelled requests 50ms
+   ✓ searches server, VM, login, PayPal, receiving email and reference; validates filters and calendar days 101ms
+   ✓ reloads rights, denies server-scoped money, and isolates rows, totals and options by project 82ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report.integration.test.ts > derives submission/phase states and keeps each currency separate including shortfall settlement and review
+AssertionError: expected '10.00' to be '0.00' // Object.is equality
+
+Expected: "0.00"
+Received: "10.00"
+
+ ❯ src/__tests__/proxy-management/payout-report.integration.test.ts:72:45
+     70|    expect(byId.get(r.id)?.status).toBe(status);
+     71|   expect(byId.get(paid.id)).toMatchObject({shortfall:'2.00',remaining:…
+     72|   expect(byId.get(preparing.id)?.remaining).toBe('0.00');
+       |                                             ^
+     73|   expect(byId.get(unknown.id)?.remaining).toBe('0.00');
+     74|   expect(report.summary).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  19:25:57
+   Duration  1.09s (transform 239ms, setup 21ms, import 288ms, tests 690ms, environment 0ms)
+

@@ -1,0 +1,80 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/proxy-management/payout-report.integration.test.ts (7 tests | 2 failed) 691ms
+   ✓ reports partial receipts with void/failed/pending precedence and sums only actual confirmed money 91ms
+   ✓ keeps closed account, recreated/deleted VM history on request.vmId rather than current account position 48ms
+   × derives submission/phase states and keeps each currency separate including shortfall settlement and review 73ms
+   ✓ filters before 50-row paging and totals; sorts timestamp/create/id stably without truncating history 231ms
+   × totals confirmed receipts in their own currency even on mismatched, failed or cancelled requests 42ms
+   ✓ searches server, VM, login, PayPal, receiving email and reference; validates filters and calendar days 110ms
+   ✓ reloads rights, denies server-scoped money, and isolates rows, totals and options by project 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report.integration.test.ts > derives submission/phase states and keeps each currency separate including shortfall settlement and review
+AssertionError: expected [ { currency: 'USD', …(5) }, …(1) ] to deeply equal [ { currency: 'USD', …(5) }, …(1) ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "currency": "USD",
+      "prepared": "10.00",
+      "received": "20.00",
+-     "sent": "50.00",
++     "sent": "30.00",
+      "unknown": "10.00",
+      "waiting": "10.00",
+    },
+    {
+      "currency": "VND",
+
+ ❯ src/__tests__/proxy-management/payout-report.integration.test.ts:72:26
+     70|    expect(byId.get(r.id)?.status).toBe(status);
+     71|   expect(byId.get(paid.id)).toMatchObject({shortfall:'2.00',remaining:…
+     72|   expect(report.summary).toEqual([
+       |                          ^
+     73|    {currency:'USD',prepared:'10.00',sent:'50.00',waiting:'10.00',recei…
+     74|    {currency:'VND',prepared:'0.00',sent:'5.00',waiting:'0.00',received…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report.integration.test.ts > totals confirmed receipts in their own currency even on mismatched, failed or cancelled requests
+AssertionError: expected [ { currency: 'USD', …(5) }, …(1) ] to deeply equal [ { currency: 'USD', …(5) }, …(1) ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "currency": "USD",
+      "prepared": "0.00",
+      "received": "0.00",
+-     "sent": "30.00",
++     "sent": "10.00",
+      "unknown": "0.00",
+      "waiting": "0.00",
+    },
+    {
+      "currency": "VND",
+
+ ❯ src/__tests__/proxy-management/payout-report.integration.test.ts:118:26
+    116|   expect(report.rows.find(r=>r.id===failed.id)?.status).toBe('FAILED');
+    117|   expect(report.rows.find(r=>r.id===cancelled.id)?.status).toBe('CANCE…
+    118|   expect(report.summary).toEqual([
+       |                          ^
+    119|    {currency:'USD',prepared:'0.00',sent:'30.00',waiting:'0.00',receive…
+    120|    {currency:'VND',prepared:'0.00',sent:'0.00',waiting:'0.00',received…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 passed (7)
+   Start at  19:24:46
+   Duration  1.10s (transform 244ms, setup 20ms, import 294ms, tests 691ms, environment 0ms)
+

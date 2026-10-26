@@ -1,0 +1,33 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx (6 tests | 1 failed) 55ms
+   ✓ shows request identity, separate sent/received/open totals and historical VM drilldown 32ms
+   ✓ details expose actual receipt transaction rather than marking the requested amount as received 10ms
+   ✓ passes URL filters and changes server without dropping other conditions or retaining old page 6ms
+   ✓ hides cached financial data after permission error 1ms
+   ✓ empty report does not invent zero receipts or requests 3ms
+   × invalid date filters can be cleared without exposing cached money 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report-ui.test.tsx > invalid date filters can be cleared without exposing cached money
+AssertionError: expected undefined to be truthy
+
+- Expected: 
+true
+
++ Received: 
+undefined
+
+ ❯ src/__tests__/proxy-management/payout-report-ui.test.tsx:21:384
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  19:27:14
+   Duration  638ms (transform 132ms, setup 22ms, import 168ms, tests 55ms, environment 304ms)
+

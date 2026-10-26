@@ -1,0 +1,12 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ✓ src/__tests__/proxy-management/payout-report.integration.test.ts (7 tests) 759ms
+ ✓ src/__tests__/proxy-management/payout-report-ui.test.tsx (6 tests) 52ms
+ ✓ src/__tests__/proxy-management/menu-modules.test.ts (5 tests) 4ms
+
+ Test Files  3 passed (3)
+      Tests  18 passed (18)
+   Start at  19:27:22
+   Duration  1.95s (transform 373ms, setup 35ms, import 522ms, tests 815ms, environment 312ms)
+

@@ -1,0 +1,15 @@
+ ✓ src/__tests__/layout/sidebar-identity.test.ts (4 tests) 2ms
+ ✓ src/__tests__/proxy-management/login-issue-label.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/batch-format.test.ts (3 tests) 2ms
+ ✓ src/__tests__/proxy-management/usdt-cost-workflow.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/proxy-search.test.ts (1 test) 2ms
+ ✓ src/__tests__/proxy-management/team-cash-workflow.test.ts (1 test) 2ms
+ ✓ src/__tests__/ops-api/stock-token-controls.test.ts (1 test) 1ms
+ ✓ src/__tests__/proxy-management/seed-guard.test.ts (1 test) 1ms
+ ✓ src/__tests__/proxy-management/catalog.test.ts (1 test) 1ms
+
+ Test Files  201 passed (201)
+      Tests  1271 passed (1271)
+   Start at  19:26:07
+   Duration  149.79s (transform 2.56s, setup 1.24s, import 25.21s, tests 104.51s, environment 924ms)
+

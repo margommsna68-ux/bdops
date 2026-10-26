@@ -1,0 +1,61 @@
+{
+  "readOnly": true,
+  "total": 4,
+  "summary": [
+    {
+      "currency": "USD",
+      "prepared": "16.94",
+      "sent": "54.77",
+      "waiting": "54.77",
+      "received": "0.00",
+      "unknown": "0.00"
+    }
+  ],
+  "rows": [
+    {
+      "server": "MOON-01",
+      "vm": "VM_005",
+      "paypal": "pp-tut69",
+      "amount": "16.94",
+      "currency": "USD",
+      "received": "0.00",
+      "remaining": "0.00",
+      "status": "PREPARING",
+      "cycle": 1
+    },
+    {
+      "server": "MOON-01",
+      "vm": "VM_004",
+      "paypal": "pp-tut68",
+      "amount": "19.21",
+      "currency": "USD",
+      "received": "0.00",
+      "remaining": "19.21",
+      "status": "WAITING",
+      "cycle": 1
+    },
+    {
+      "server": "MOON-01",
+      "vm": "VM_003",
+      "paypal": "pp-tut67",
+      "amount": "16.23",
+      "currency": "USD",
+      "received": "0.00",
+      "remaining": "16.23",
+      "status": "WAITING",
+      "cycle": 1
+    },
+    {
+      "server": "MOON-01",
+      "vm": "VM_001",
+      "paypal": "pp-tut66",
+      "amount": "19.33",
+      "currency": "USD",
+      "received": "0.00",
+      "remaining": "19.33",
+      "status": "WAITING",
+      "cycle": 1
+    }
+  ],
+  "at": "2026-10-26T12:31:10.806Z"
+}

@@ -1,0 +1,29 @@
+{
+  "before": {
+    "readOnly": true,
+    "counts": {
+      "requests": 4,
+      "vms": 678,
+      "logins": 149,
+      "proxies": 1465,
+      "batches": 4,
+      "costs": 4,
+      "funds": 0
+    },
+    "hash": "6302d9d7a2eb0d1d8d33489721e5ab42be840163a7bb1c0ddc7d0f6e51bcb4f6"
+  },
+  "after": {
+    "readOnly": true,
+    "counts": {
+      "requests": 4,
+      "vms": 678,
+      "logins": 149,
+      "proxies": 1465,
+      "batches": 4,
+      "costs": 4,
+      "funds": 0
+    },
+    "hash": "6302d9d7a2eb0d1d8d33489721e5ab42be840163a7bb1c0ddc7d0f6e51bcb4f6"
+  },
+  "same": true
+}
