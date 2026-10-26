@@ -28,9 +28,9 @@ export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,
   db.earnPayoutRequest.findMany({where:{projectId,earnApp:{projectId},paypal:{projectId},paypalEmail:{projectId},
    ...(input.paypalId?{paypalId:input.paypalId}:{}),
    ...(from||to?{requestedAt:{...(from?{gte:from}:{}),...(to?{lt:new Date(to.getTime()+86400_000)}:{})}}:{})},
-   select:{id:true,vmId:true,cycle:true,paypalId:true,amount:true,currency:true,requestedAt:true,submittedAt:true,reference:true,
+   select:{id:true,revision:true,earnAppId:true,vmId:true,cycle:true,paypalId:true,amount:true,currency:true,requestedAt:true,submittedAt:true,reference:true,
     state:true,submission:true,shortfall:true,settledAt:true,consumedAt:true,
-    earnApp:{select:{login:{select:{email:true}}}},paypal:{select:{code:true}},paypalEmail:{select:{email:true}},
+    earnApp:{select:{vmId:true,closedAt:true,login:{select:{email:true}}}},paypal:{select:{code:true}},paypalEmail:{select:{email:true}},
     receipts:{where:{projectId},select:{id:true,date:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,transactionId:true},orderBy:[{date:'desc'},{id:'desc'}]}},
    orderBy:[{requestedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),
   db.server.findMany({where:{projectId},select:{id:true,code:true},orderBy:[{code:'asc'},{id:'asc'}]}),
@@ -39,14 +39,19 @@ export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,
  // EarnPayoutRequest.vmId is a historical scalar, not a Prisma relation.
  // Archived/deleted operating states remain visible; a missing VM retains its ID.
  const vms=await db.virtualMachine.findMany({where:{id:{in:[...new Set(requests.map(r=>r.vmId))]},server:{projectId}},
-  select:{id:true,code:true,serverId:true,server:{select:{code:true}}}});
+  select:{id:true,code:true,serverId:true,managed:true,archivedAt:true,operation:{select:{cycle:true}},server:{select:{code:true,managed:true,archivedAt:true}}}});
  const vmById=new Map(vms.map(v=>[v.id,v]));
  const filtered=requests.map(r=>{
   const vm=vmById.get(r.vmId),money=moneyOfRequest(r);
   const status:PayoutReportStatus=money.phase==='CANCELLED'?'CANCELLED':money.phase==='FAILED'?'FAILED':
    money.phase==='REVIEW'||money.reviewAfterRecreate?'REVIEW':r.submission==='PREPARING'?'PREPARING':r.submission==='UNKNOWN'?'UNKNOWN':
    money.phase==='RECEIVED'?'RECEIVED':toCents(money.received)>0?'PARTIAL':'WAITING';
-  const row={id:r.id,vmId:r.vmId,serverId:vm?.serverId??null,server:vm?.server.code??null,vm:vm?.code??null,cycle:r.cycle,
+  // Match updatePayout's activeVM + account/cycle test. A consumed request can
+  // still be current; its consumed flag separately prevents status mutation.
+  const isCurrent=!!vm&&vm.managed&&!vm.archivedAt&&vm.server.managed&&!vm.server.archivedAt
+   &&r.earnApp.vmId===r.vmId&&!r.earnApp.closedAt&&(vm.operation?.cycle??1)===r.cycle;
+  const row={id:r.id,revision:r.revision,earnAppId:r.earnAppId,consumed:!!r.consumedAt,current:isCurrent,
+   vmId:r.vmId,serverId:vm?.serverId??null,server:vm?.server.code??null,vm:vm?.code??null,cycle:r.cycle,
    login:r.earnApp.login.email,paypalId:r.paypalId,paypal:r.paypal.code,email:r.paypalEmail.email,
    requestedAt:r.requestedAt.toISOString(),submittedAt:r.submittedAt?.toISOString()??null,
    amount:r.amount.toFixed(2),currency:r.currency,received:money.received,remaining:r.submission==='SENT'&&money.phase==='WAITING'?money.remaining:'0.00',shortfall:r.shortfall?.toFixed(2)??'0.00',status,reference:r.reference,
@@ -77,5 +82,6 @@ export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,
   waiting:fromCents(s.waiting),received:fromCents(s.received),unknown:fromCents(s.unknown)}));
  const pages=Math.max(1,Math.ceil(filtered.length/50)),currentPage=Math.min(page,pages);
  return {rows:filtered.slice((currentPage-1)*50,currentPage*50).map(x=>x.row),total:filtered.length,page:currentPage,pages,
-  updatedAt:new Date().toISOString(),summary,servers,paypals};
+  updatedAt:new Date().toISOString(),summary,servers,paypals,
+  rights:{manage:rights.writeMoney,markSubmission:rights.writeMoney||rights.payout,userId:current.userId}};
 }

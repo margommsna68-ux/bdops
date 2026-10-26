@@ -57,6 +57,64 @@ it('keeps closed account, recreated/deleted VM history on request.vmId rather th
  }finally{await f.cleanup();}
 });
 
+it('exposes exact request revision/account and active identity without borrowing a replacement account',async()=>{
+ const f=await fixture();try{
+  const r=await f.request({revision:7});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:f.vm.id}});
+  const row=async()=>{const report=await readPayoutReport(f.scope,{},db);return report.rows.find(x=>x.id===r.id);};
+  // Like updatePayout, an absent operation row denotes the initial cycle 1.
+  expect(await row()).toMatchObject({revision:7,earnAppId:r.earnAppId,consumed:false,current:true});
+  await db.earnPayoutRequest.update({where:{id:r.id},data:{revision:8,consumedAt:new Date()}});
+  expect(await row()).toMatchObject({revision:8,earnAppId:r.earnAppId,consumed:true,current:true});
+  const moved=await db.virtualMachine.create({data:{serverId:f.server.id,code:'MOVED',managed:true}});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:moved.id}});
+  expect(await row()).toMatchObject({earnAppId:r.earnAppId,vmId:f.vm.id,current:false});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:f.vm.id}});
+  await db.vmOperation.create({data:{projectId:f.scope.projectId,vmId:f.vm.id,cycle:2,status:'NEW_VM'}});
+  expect(await row()).toMatchObject({cycle:1,current:false});
+  await db.vmOperation.update({where:{vmId:f.vm.id},data:{cycle:1}});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:null,closedAt:new Date()}});
+  const login=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@fixture.invalid'}});
+  const replacement=await db.earnAppAccount.create({data:{projectId:f.scope.projectId,loginId:login.id,vmId:f.vm.id}});
+  expect(await row()).toMatchObject({earnAppId:r.earnAppId,current:false,consumed:true});
+  expect((await row())?.earnAppId).not.toBe(replacement.id);
+ }finally{await f.cleanup();}
+});
+
+it('current requires managed, nonarchived VM and server plus an open original account',async()=>{
+ const f=await fixture();try{
+  const r=await f.request();await db.earnAppAccount.update({where:{id:r.earnAppId},data:{vmId:f.vm.id}});
+  const row=async()=>(await readPayoutReport(f.scope,{},db)).rows[0];
+  for(const data of [{managed:false},{archivedAt:new Date()}]){
+   await db.virtualMachine.update({where:{id:f.vm.id},data});expect(await row()).toMatchObject({current:false});
+   await db.virtualMachine.update({where:{id:f.vm.id},data:{managed:true,archivedAt:null}});
+  }
+  for(const data of [{managed:false},{archivedAt:new Date()}]){
+   await db.server.update({where:{id:f.server.id},data});expect(await row()).toMatchObject({current:false});
+   await db.server.update({where:{id:f.server.id},data:{managed:true,archivedAt:null}});
+  }
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{closedAt:new Date()}});
+  expect(await row()).toMatchObject({current:false});
+  await db.earnAppAccount.update({where:{id:r.earnAppId},data:{closedAt:null}});
+  expect(await row()).toMatchObject({current:true});
+ }finally{await f.cleanup();}
+});
+
+it('returns freshly loaded management/submission rights without widening narrow receipt-only access',async()=>{
+ const f=await fixture();try{
+  await f.request();
+  expect((await readPayoutReport(f.scope,{},db)).rights).toEqual({manage:true,markSubmission:true,userId:f.scope.userId});
+  const where={userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}};
+  await db.projectMember.update({where,data:{capabilities:['EARN_PAYOUT']}});
+  expect((await readPayoutReport(f.worker,{},db)).rights).toEqual({manage:false,markSubmission:true,userId:f.worker.userId});
+  await db.projectMember.update({where,data:{capabilities:['PAYPAL_RECEIPT_RECORD']}});
+  const receiptReader=await readPayoutReport({...f.worker,role:'ADMIN',capabilities:['EARN_PAYOUT']},{},db);
+  expect(receiptReader.total).toBe(1);expect(receiptReader.rights).toEqual({manage:false,markSubmission:false,userId:f.worker.userId});
+  await db.projectMember.update({where,data:{capabilities:[]}});
+  await expect(readPayoutReport(f.worker,{},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+ }finally{await f.cleanup();}
+});
+
 it('derives submission/phase states and keeps each currency separate including shortfall settlement and review',async()=>{
  const f=await fixture();try{
   const preparing=await f.request({submission:'PREPARING',submittedAt:null}),unknown=await f.request({submission:'UNKNOWN',submittedAt:null}),

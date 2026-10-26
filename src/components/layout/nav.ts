@@ -30,7 +30,7 @@ export const personalItems=(cashMode:boolean):NavItem[]=>[
   {href:links.vms(),labelKey:'Server / VM',icon:'S',module:'INFRASTRUCTURE'},
   {href:'/work',labelKey:'Giao việc',icon:'W',module:'INFRASTRUCTURE',optional:'WORK'},
   {type:'separator',labelKey:'Tài chính'},
-  {href:'/earnapp-withdrawals',labelKey:'Rút EarnApp → PayPal',label:'Rút EarnApp → PayPal',icon:'R',module:'FUNDS'},
+  {href:'/earnapp-withdrawals',labelKey:'Rút EarnAp',label:'Rút EarnAp',icon:'R',module:'FUNDS'},
   ...moneyItems(cashMode),
   {href:'/costs',labelKey:'Chi phí',icon:'C',module:'COSTS'},
   {href:'/profit',labelKey:'Lợi nhuận',icon:'%',module:'PROFIT'},

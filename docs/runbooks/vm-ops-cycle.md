@@ -264,3 +264,8 @@ Mở **Tài chính → Rút EarnApp → PayPal** (`/earnapp-withdrawals`), hoặ
 - Chi tiết có tài khoản EarnApp, giờ đã gửi, tham chiếu, chốt thiếu và từng khoản nhận/mã giao dịch; khoản chờ/không về/thu hồi vẫn hiện để đối chiếu nhưng không tính thực nhận. Bấm tên VM mở lịch sử đúng VM.
 - Dùng chung payoutRights.requestMoney; không mở rộng quyền tiền hay phạm vi server. Người thiếu quyền bị từ chối ở endpoint và không thấy số cache. Không trả mật khẩu, link 2FA hay proxy.
 - Trang tự tải lại 30 giây; bốn theme, bảng desktop và thẻ trên điện thoại. Không migration; không thay yêu cầu hoặc sổ tiền để dựng báo cáo.
+
+
+### Cập nhật trạng thái tại Rút EarnAp — 26/10/2026
+Tên menu/tiêu đề rút gọn theo chủ: **Rút EarnAp**, URL vẫn `/earnapp-withdrawals`. Chọn **Chi tiết → Cập nhật trạng thái** tại yêu cầu hiện hành. Chuẩn bị/chưa rõ có **Đã gửi trên EarnApp → Chờ về PayPal**, bắt xác nhận đã kiểm lịch sử đúng email. Quản lý có Thất bại/Huỷ, bắt ghi căn cứ. Dùng chung `vmOps.updatePayout`, không tự rút hay tạo khoản thu. Yêu cầu cũ/đã dùng tạo lại VM chỉ đối chiếu ở Lịch sử. Muốn ghi đã nhận phải dùng **Ghi tiền về PP tại VM**, nhập số thực nhận; không có chọn trạng thái “Đã nhận” để tự sinh tiền.
+Nháp giữ request/lượt/EarnApp/revision lúc mở; dữ liệu nền đổi khoá lệnh mới. Lệnh chưa rõ kết quả giữ body+key trong sessionStorage riêng user/dự án/yêu cầu, đóng mở khung vẫn thử lại đúng lệnh; retry bị từ chối không xóa lệnh ban đầu chưa rõ. Không áp cho account mới.
