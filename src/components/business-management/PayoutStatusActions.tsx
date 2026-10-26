@@ -32,11 +32,11 @@ export function PayoutStatusActions({projectId,userId,row,manage,markSubmission,
  }
  if((!snapshot.current||snapshot.consumed||!options.length)&&!pending)return <p className="pm-muted">Yêu cầu cũ hoặc đã chốt: mở Lịch sử của VM để đối chiếu.</p>;
  return <div className="pr-status-editor">
-  <h2>Cập nhật trạng thái yêu cầu</h2>
+  <h2>Cập nhật trạng thái</h2>
   <label>Trạng thái<select className="pm-input" aria-label="Đổi trạng thái yêu cầu" value={action} disabled={busy||!!pending} onChange={e=>{setAction(e.target.value as Action);setError('');}}><option value="">Chọn thao tác</option>{options.map(k=><option key={k} value={k}>{actions[k]}</option>)}{pending&&!options.includes(pending.action as Action)&&<option value={pending.action}>{actions[pending.action as Action]}</option>}</select></label>
   {action==='SENT'&&<label className="pr-status-confirm"><input type="checkbox" checked={confirmed||!!pending} disabled={busy||!!pending} onChange={e=>setConfirmed(e.target.checked)}/>Tôi đã kiểm tra lịch sử EarnApp: yêu cầu đã gửi tới đúng email PayPal của dòng này.</label>}
   <label>{reason?'Căn cứ / lý do (bắt buộc)':'Ghi chú (nếu có)'}<textarea className="pm-input" rows={2} maxLength={500} disabled={busy||!!pending} value={note} onChange={e=>setNote(e.target.value)}/></label>
-  <p className="pm-muted">“Chờ về” chỉ ghi nhận đã gửi. Muốn ghi đã nhận tiền, dùng “Ghi tiền về PP” tại ô TIỀN TRONG VM và nhập số thực nhận.</p>
+  <p className="pm-muted">Chờ về = đã gửi trên EarnApp. Tiền về PayPal phải ghi bằng số thực nhận.</p>
   {changed&&!pending&&<p role="alert" className="pm-error">Yêu cầu vừa thay đổi. Đóng rồi mở lại phần cập nhật để xem bản mới.</p>}
   {pending&&<p className="pm-muted">Lệnh đã lưu trong phiên. Thử lại giữ đúng yêu cầu và nội dung cũ, không tạo lượt rút mới.</p>}
   {error&&<p role="alert" className="pm-error">{error}</p>}

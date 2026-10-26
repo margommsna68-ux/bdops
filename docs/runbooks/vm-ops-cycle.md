@@ -256,16 +256,16 @@ Tick một hoặc nhiều VM trong Server/VM → **Rút về PayPal** trên than
 
 ## Quản lý toàn bộ lượt rút EarnApp → PayPal — 26/10/2026
 
-Mở **Tài chính → Rút EarnApp → PayPal** (`/earnapp-withdrawals`), hoặc **Lịch sử rút** trên đầu bảng Server/VM. Trang Tiền vào PayPal cũng có lối mở. Đây là báo cáo đọc dữ liệu đã ghi; tạo/xác nhận yêu cầu và ghi thực nhận vẫn dùng các thao tác VM/sổ hiện có.
+Mở **Tài chính → Rút EarnAp** (`/earnapp-withdrawals`), hoặc **Lịch sử rút** trên đầu bảng Server/VM. Trang Tiền vào PayPal cũng có lối mở. Đây là báo cáo đọc dữ liệu đã ghi; tạo/xác nhận yêu cầu và ghi thực nhận vẫn dùng các thao tác VM/sổ hiện có.
 
 - Một dòng là một yêu cầu rút: ngày yêu cầu, server/VM, lượt, mã PP/email nhận, số yêu cầu, thực nhận, còn chờ và trạng thái. Bao gồm tài khoản đã đóng và VM đã tạo lại/ẩn; luôn dùng VM/lượt trên chính yêu cầu cũ.
 - Lọc server, mã PP, trạng thái, ngày yêu cầu từ–đến; tìm theo server/VM, tài khoản đăng nhập, PP/email hoặc tham chiếu. Bộ lọc nằm trong URL, Back/tải lại giữ nguyên; lỗi bộ lọc có nút Xoá bộ lọc.
 - Tổng áp dụng mọi kết quả trước phân trang (50 dòng), mỗi đồng tiền riêng. Đã gửi là mọi yêu cầu có submission SENT, kể cả về sau thất bại/huỷ: đó là lịch sử gửi, không phải thu nhập. Chuẩn bị và chưa rõ không tính đã gửi hoặc chờ về. Còn chờ chỉ là phần còn thiếu của SENT/WAITING. Thực nhận chỉ cộng giao dịch confirmed, không failed/void, theo đúng đồng tiền của giao dịch, kể cả tiền về cho yêu cầu thất bại/cũ. Không tự đổi tỷ giá.
-- Chi tiết có tài khoản EarnApp, giờ đã gửi, tham chiếu, chốt thiếu và từng khoản nhận/mã giao dịch; khoản chờ/không về/thu hồi vẫn hiện để đối chiếu nhưng không tính thực nhận. Bấm tên VM mở lịch sử đúng VM.
+- Chi tiết có tài khoản EarnApp, giờ đã gửi, tham chiếu, chốt thiếu và từng khoản nhận/mã giao dịch; khoản chờ/không về/thu hồi vẫn hiện để đối chiếu nhưng không tính thực nhận. Bấm dòng hoặc mã VM mở khung bên phải; Lịch sử VM trong khung mở lịch sử đúng VM.
 - Dùng chung payoutRights.requestMoney; không mở rộng quyền tiền hay phạm vi server. Người thiếu quyền bị từ chối ở endpoint và không thấy số cache. Không trả mật khẩu, link 2FA hay proxy.
 - Trang tự tải lại 30 giây; bốn theme, bảng desktop và thẻ trên điện thoại. Không migration; không thay yêu cầu hoặc sổ tiền để dựng báo cáo.
 
 
 ### Cập nhật trạng thái tại Rút EarnAp — 26/10/2026
-Tên menu/tiêu đề rút gọn theo chủ: **Rút EarnAp**, URL vẫn `/earnapp-withdrawals`. Chọn **Chi tiết → Cập nhật trạng thái** tại yêu cầu hiện hành. Chuẩn bị/chưa rõ có **Đã gửi trên EarnApp → Chờ về PayPal**, bắt xác nhận đã kiểm lịch sử đúng email. Quản lý có Thất bại/Huỷ, bắt ghi căn cứ. Dùng chung `vmOps.updatePayout`, không tự rút hay tạo khoản thu. Yêu cầu cũ/đã dùng tạo lại VM chỉ đối chiếu ở Lịch sử. Muốn ghi đã nhận phải dùng **Ghi tiền về PP tại VM**, nhập số thực nhận; không có chọn trạng thái “Đã nhận” để tự sinh tiền.
+Tên menu/tiêu đề rút gọn theo chủ: **Rút EarnAp**, URL vẫn `/earnapp-withdrawals`. Bấm dòng hoặc mã VM để mở khung bên phải; **Cập nhật trạng thái** hiện ngay trong khung, không có bước Chi tiết/Thu gọn. Điện thoại dùng khung toàn màn hình; Esc/nút Đóng đưa về đúng dòng. Khi dòng rời bộ lọc do tải lại, trả focus về tiêu đề trang. Chuẩn bị/chưa rõ có **Đã gửi trên EarnApp → Chờ về PayPal**, bắt xác nhận đã kiểm lịch sử đúng email. Quản lý có Thất bại/Huỷ, bắt ghi căn cứ. Dùng chung `vmOps.updatePayout`, không tự rút hay tạo khoản thu. Yêu cầu cũ/đã dùng tạo lại VM chỉ đối chiếu ở Lịch sử. Muốn ghi đã nhận phải dùng **Ghi tiền về PP tại VM**, nhập số thực nhận; không có chọn trạng thái “Đã nhận” để tự sinh tiền.
 Nháp giữ request/lượt/EarnApp/revision lúc mở; dữ liệu nền đổi khoá lệnh mới. Lệnh chưa rõ kết quả giữ body+key trong sessionStorage riêng user/dự án/yêu cầu, đóng mở khung vẫn thử lại đúng lệnh; retry bị từ chối không xóa lệnh ban đầu chưa rõ. Không áp cho account mới.
