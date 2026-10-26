@@ -1,0 +1,13 @@
+{
+  "verified": true,
+  "encrypted": true,
+  "folder": "D:/MoneyToHome-Backups/SERVER-01",
+  "file": "moneytohome-20261026-110936.mthbk",
+  "sha256": "b1a8daa293bed01aa1cefe69f63b5cb35e0d2d0a6d717283a0d85c56063f5de4",
+  "decryptionVerified": true,
+  "retentionRemoved": 0,
+  "verifiedAt": "2026-10-26T04:09:51.666Z",
+  "databaseArchive": "moneytohome-20261026-110936.dump",
+  "copiedBytes": 43099791,
+  "retentionDays": 14
+}
