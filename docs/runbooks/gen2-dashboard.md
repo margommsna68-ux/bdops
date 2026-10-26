@@ -16,13 +16,15 @@ Run tests from the repository:
 node --test scripts/gen2-dashboard/test/*.node.mjs
 ```
 
-For later approved deployment on Central, run under the existing Administrator profile that owns GEN2 and the existing ops secret. Replace the example project ID with its actual ID, not the project code:
+Installed 26/10/2026 on Central as `MoneyToHome-GEN2-Dashboard`, password/batch logon for existing meo3 profile (Administrator folder), Limited, no interactive desktop. Web d57cde3; bridge 06808b4, release `Gen2Dashboard/releases/20261026-v1` under the shared MoneyToHome desktop folder. Existing token reused, no new grants. The startup/5-minute trigger restarts only when the long-running task is not already running; the inner loop reads cache every minute after each pass. It does NOT schedule a GEN2 scan.
+
+For manual maintenance only, after stopping the installed task and checking its process/lock, run under that same profile. Replace the example project ID with its actual ID, not the project code:
 
 ```powershell
 node scripts/gen2-dashboard/run.mjs --project ACTUAL_PROJECT_ID
 ```
 
-Optional arguments: `--machine-root`, `--state-dir`, `--secret-file`, `--interval-ms` (minimum 30000, default 60000), `--once`. **`--once` performs real observation writes; it is not a dry run.** This task has not executed either command against the live API. The continuous runner is suitable for a future single-instance scheduled task; no task/service is installed here.
+Optional arguments: `--machine-root`, `--state-dir`, `--secret-file`, `--interval-ms` (minimum 30000, default 60000), `--once`. **`--once` performs real observation writes; it is not a dry run.** Canary recorded one genuine cached observation, read back through the dashboard, before enabling the background task. First pass is rate-limited and the verified count increases progressively.
 
 Defaults on Central:
 

@@ -103,3 +103,6 @@ Mục chạy tuần tự, scope/audit/replay riêng. Route không có, thiếu s
 Schema: `bdops-proxy-app/docs/ops-api/openapi.json` **1.4.0**. Hướng dẫn: `docs/runbooks/ai-stock-batch.md`, `ops-api.md`, `ai-vm-ops.md`, `vm-sdk.md`, `vm-ops-cycle.md`. Tài liệu mới không chứng minh đã phát hành: dùng lệnh client mới sau khi gói tích hợp được kiểm và chủ chuyển giao.
 
 Trên Central, hợp đồng cập nhật nằm cùng thư mục MoneyToHome ở OPENAPI_WEB_HIEN_TAI.json (1.4.0); đọc tệp này thay hợp đồng cũ trong gói 0abd6ac/b9b6a87 khi dùng login-issue. Client hiện tại dùng generic post được, không cần init hoặc đổi token.
+
+
+Dashboard GEN2 26/10/2026: đọc docs/runbooks/central-dashboard-update-20261026.md. Central đã có bridge chạy nền; không chạy thêm bản khác hay tạo lịch quét.  sắp đủ,  đủ mức tiền. OpenAPI 1.5.0; tác vụ máy thật và rút tiền vẫn cần phạm vi chủ giao.
