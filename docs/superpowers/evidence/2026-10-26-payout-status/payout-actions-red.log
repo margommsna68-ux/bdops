@@ -1,0 +1,33 @@
+
+ RUN  v4.0.18 C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app
+
+ ❯ src/__tests__/proxy-management/payout-report-actions.test.tsx (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/proxy-management/payout-report-actions.test.tsx [ src/__tests__/proxy-management/payout-report-actions.test.tsx ]
+Error: Failed to resolve import "@/components/business-management/PayoutStatusActions" from "src/__tests__/proxy-management/payout-report-actions.test.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: C:/Users/TUNTUN/Desktop/project web new/bdops-proxy-app/src/__tests__/proxy-management/payout-report-actions.test.tsx:6:0
+  4  |  const __vi_import_0__ = await import("react");
+  5  |  const __vi_import_1__ = await import("react-dom/client");
+  6  |  const __vi_import_2__ = await import("@/components/business-management/PayoutStatusActions");
+     |                                       ^
+  7  |  
+  8  |  
+ ❯ TransformPluginContext._formatLog ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:28999:43
+ ❯ TransformPluginContext.error ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:28996:14
+ ❯ normalizeUrl ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:27119:18
+ ❯ ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:27177:32
+ ❯ TransformPluginContext.transform ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:27145:4
+ ❯ EnvironmentPluginContainer.transform ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:28797:14
+ ❯ loadAndTransform ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:22670:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  19:42:16
+   Duration  426ms (transform 14ms, setup 20ms, import 0ms, tests 0ms, environment 303ms)
+

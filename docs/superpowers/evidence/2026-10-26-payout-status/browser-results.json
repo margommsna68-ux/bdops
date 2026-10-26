@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "synthetic admin authenticated",
+    "renamed report and sidebar",
+    "sent save requires evidence confirmation",
+    "sent status updates totals without PP receipt",
+    "same six requests retained",
+    "sent status persisted after reload",
+    "failure requires reason",
+    "dark phone fits with status editor",
+    "bronze phone fits with status editor",
+    "no javascript errors"
+  ],
+  "errors": []
+}

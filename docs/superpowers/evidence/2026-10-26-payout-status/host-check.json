@@ -1,0 +1,19 @@
+{
+  "build": "6oiUfPsGSdidJbs-9f7i8",
+  "public": 200,
+  "health": 200,
+  "services": [
+    {
+      "Name": "MoneyToHome-Postgres",
+      "Status": "Running"
+    },
+    {
+      "Name": "MoneyToHome-Tunnel",
+      "Status": "Running"
+    },
+    {
+      "Name": "MoneyToHome-Web",
+      "Status": "Running"
+    }
+  ]
+}
