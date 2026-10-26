@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 const mod=await import('../engine/native-monitor-source.mjs').catch(()=>({}));
+test('source failure diagnostics retain phase/code but never filesystem messages or snapshot payloads',()=>{
+ assert.deepEqual(mod.sourceWriteError({sourcePhase:'RENAME',code:'EPERM',message:'private credentials and path',snapshot:{password:'private'}}),{phase:'RENAME',code:'EPERM'});
+ assert.deepEqual(mod.sourceWriteError({sourcePhase:'arbitrary secret',code:'secret',message:'private'}),{phase:'UNKNOWN',code:'SOURCE_WRITE_FAILED'});
+});
 test('source snapshot bounded atomic JSON: instance sequence source time, no mutable references',()=>{assert.equal(typeof mod.createMonitorSourceWriter,'function');const file=path.resolve(import.meta.dirname,'../.work/source.json');let t=1800000000000;const writer=mod.createMonitorSourceWriter({file,serverUuid:'577be21b-18b5-4c7d-b897-3e5c0093c4aa',instanceUuid:'00000000-0000-4000-8000-000000000001',now:()=>t});writer({sourceAt:new Date(t).toISOString(),samples:[],policy:{version:1},configVersion:1});const a=JSON.parse(fs.readFileSync(file));assert.equal(a.instanceUuid,'00000000-0000-4000-8000-000000000001');assert.equal(a.seq,1);assert.equal(a.sourceAt,new Date(t).toISOString());writer({samples:[],configVersion:1});assert.equal(JSON.parse(fs.readFileSync(file)).seq,2);assert.ok(fs.statSync(file).size<1048576);});
 test('source writer rejects raw guest/secrets/money and oversized samples without replacing good snapshot',()=>{assert.equal(typeof mod.createMonitorSourceWriter,'function');const file=path.resolve(import.meta.dirname,'../.work/source-bad.json');const w=mod.createMonitorSourceWriter({file,serverUuid:'577be21b-18b5-4c7d-b897-3e5c0093c4aa',instanceUuid:'00000000-0000-4000-8000-000000000001'});w({samples:[],configVersion:1});const before=fs.readFileSync(file,'utf8');for(const input of [{guest:{password:'secret'}},{money:0},{samples:Array(1001).fill({})}])assert.throws(()=>w(input));assert.equal(fs.readFileSync(file,'utf8'),before);});
 

@@ -1,1 +1,1 @@
-{"name":"gen2-native-monitor-canary-patch","private":true,"type":"module","engines":{"node":">=22.13"},"scripts":{"build":"node build.mjs","test":"node --test --test-concurrency=1 test/*.test.mjs","verify":"node verify.mjs"}}
+{"name":"gen2-native-monitor-canary-patch","private":true,"type":"module","engines":{"node":">=22.13"},"scripts":{"build":"node build.mjs","test":"node --test --test-concurrency=1 test/*.test.mjs reconcile-preflight.test.mjs","verify":"node verify.mjs"}}

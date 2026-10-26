@@ -26,5 +26,6 @@ for(const mode of ['baseline','patched']){
  for(const name of fs.readdirSync(path.join(dir,'test')).filter(n=>n.endsWith('.mjs')))run([path.join(dir,'test',name)]);
 }
 console.log('PACKAGE');
-run(['--test','--test-concurrency=1',...fs.readdirSync(path.join(root,'test')).filter(n=>n.endsWith('.test.mjs')).map(n=>path.join(root,'test',n))]);
+run(['--check',path.join(root,'reconcile-preflight.mjs')]);
+run(['--test','--test-concurrency=1',...fs.readdirSync(path.join(root,'test')).filter(n=>n.endsWith('.test.mjs')).map(n=>path.join(root,'test',n)),path.join(root,'reconcile-preflight.test.mjs')]);
 process.exitCode=failures?1:0;

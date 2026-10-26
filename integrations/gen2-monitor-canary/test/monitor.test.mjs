@@ -45,6 +45,18 @@ test('slow probe does not add 50 percent rest; reentrant step cannot overlap gue
 test('native evidence is UUID/time bound, detached, unknown network/service/applied proxy, SDK zero TCP not dead',async()=>{const {c,m}=setup();m.start();await c.advance(1001);let h=m.status().health;assert.equal(h.samples[0].uuid,uuid(1));assert.equal(h.samples[0].app.sdk,'RUNNING');assert.equal(h.samples[0].app.connection,'NOT_OBSERVED');assert.equal(h.samples[0].network.https,'UNKNOWN');assert.equal(h.samples[0].network.ncsi,'UNKNOWN');assert.equal(h.samples[0].service,'UNKNOWN');assert.equal(h.samples[0].appliedProxy,'UNKNOWN');assert.ok(h.samples[0].app.observedAt);h.samples[0].app.sdk='STOPPED';assert.equal(m.status().health.samples[0].app.sdk,'RUNNING');await m.stop();});
 test('auth failure is response unknown app, never absent GA or BLOCKED',async()=>{const {c,m}=setup({readCore:async()=>({ok:false,reason:'GUEST_AUTH_FAILED'})});m.start();await c.advance(1001);let s=m.status().health.samples[0];assert.equal(s.guest.response,'AUTH_FAILED');assert.equal(s.guest.additions,'UNKNOWN');assert.equal(s.app.earnApp,'UNKNOWN');assert.ok(!JSON.stringify(s).includes('BLOCKED'));await m.stop();});
 test('legacy default target and behavior retained',async()=>{const {m}=setup({canaryPolicyVersion:undefined});assert.equal(m.status().targetSec,120);assert.equal(m.status().health,undefined);await m.stop();});
+test('a preflight source-write failure never starts a guest or permanently quarantines a clean lane',async()=>{
+ let failed=false;const {c,m,calls}=setup({onSnapshot:s=>{if(s.guestSlot.state==='RUNNING'&&!failed){failed=true;return false;}return true;}});
+ m.start();await c.advance(1001);assert.equal(calls.length,0);assert.equal(m.status().health.guestSlot.state,'IDLE');
+ await c.advance(650000);assert.ok(calls.includes(uuid(1)),'failed target returns on its ordinary due time');assert.ok(calls.includes(uuid(2)),'other targets continue');
+ assert.notEqual(m.status().health.guestSlot.state,'QUARANTINED');await m.stop();
+});
+test('storage failure on a recheck waits for a new ordinary due time rather than retrying the same target early',async()=>{
+ let c,attempts=0,failedAt=null,reads=[];
+ const fixture=setup({listVms:async()=>[row(1)],readCore:async()=>{reads.push(c.now());return good(0);},onSnapshot:s=>{if(s.guestSlot.state==='RUNNING'&&++attempts===3){failedAt=c.now();return false;}return true;}});c=fixture.c;const m=fixture.m;
+ m.start();await c.advance(1200000);assert.notEqual(failedAt,null);assert.equal(reads.length,2);
+ await c.advance(50000);assert.ok(reads.length>=3);assert.ok(reads[2]-failedAt>=600000);await m.stop();
+});
 
 
 test('timeout transport completion does not prove guest child exit: guest lane remains quarantined',async()=>{let resolve,calls=0;const {c,m}=setup({listVms:async()=>Array.from({length:100},(_,i)=>row(i+1)),readCore:()=>{calls++;return new Promise(r=>{resolve=r;});}});m.start();await c.advance(46001);assert.equal(calls,1);resolve(good());await flush();await c.advance(120000);assert.equal(calls,1);assert.equal(m.status().health.guestSlot.state,'QUARANTINED');await m.stop();});

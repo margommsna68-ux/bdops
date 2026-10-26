@@ -293,7 +293,11 @@ export function createEarnAppMonitor({
     if (busy.busy) { defer(target, MAINTENANCE.GUARD_BUSY); schedule(o.minGapMs); return; }
 
     if (canary && !lanes.setGuestSlot('RUNNING')) {
-      guestQuarantined = true; lanes.setGuestSlot('QUARANTINED','SOURCE_PERSIST_FAILED'); schedule(60000); return;
+      // No guest call has started. Preserve that distinction from an unknown
+      // guest exit: defer this target, then let its ordinary due time retry.
+      lanes.setGuestSlot('IDLE','SOURCE_PERSIST_FAILED');
+      due.set(target.uuid,now()+targetMs());
+      defer(target,'SOURCE_PERSIST_FAILED'); schedule(CANARY_POLICY.retryBackoffSeconds*1000); return;
     }
     const { result, durationMs, at } = await probe(target);
     if (canary && running) lanes.core(target, result, at);

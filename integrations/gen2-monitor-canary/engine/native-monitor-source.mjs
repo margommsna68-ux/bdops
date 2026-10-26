@@ -2,6 +2,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {validatePreflightProof} from './native-monitor-preflight.mjs';
+export function sourceWriteError(error){
+  const allowed=new Set(['EPERM','EACCES','EBUSY','ENOENT','ENOSPC','EROFS','EIO']);
+  const code=allowed.has(error?.code)?error.code:/^SOURCE_[A-Z_0-9]+$/.test(error?.message||'')?error.message:'SOURCE_WRITE_FAILED';
+  const phase=['VALIDATE','CLOCK','MKDIR','TEMP_WRITE','RENAME'].includes(error?.sourcePhase)?error.sourcePhase:'UNKNOWN';
+  const out={code,phase};for(const key of ['sourceObservedAt','writerStartedAt','nowAt'])if(typeof error?.[key]==='string'&&Number.isFinite(Date.parse(error[key])))out[key]=error[key];return out;
+}
 const fields=new Set(['configVersion','serverId','sequence','sourceAt','inventoryAt','inventoryReason','inventoryFreshness','guestSlot',
   'policy','proxyInFlight','samples','uuid','vmCode','vmState','observedAt','state','guest','additions','response','app','earnApp','sdk','connection',
   'network','provenance','ncsi','https','service','appliedProxy','proxy','probeReason','vmStateFreshness','healthFreshness','monitoringGap',
@@ -28,10 +35,10 @@ export function createMonitorSourceWriter({file,serverUuid,instanceUuid=crypto.r
   if(!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(serverUuid||'')
     ||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(instanceUuid))throw Error('SOURCE_IDENTITY');
   return snapshot=>{
-    validate(snapshot);
+    try{validate(snapshot);}catch(error){error.sourcePhase='VALIDATE';throw error;}
     if(seq>=2147483647)throw Error('SOURCE_SEQUENCE_EXHAUSTED');
     const observedAt=snapshot.sourceAt||new Date(now()).toISOString(),at=Date.parse(observedAt);
-    if(at<Date.parse(startedAt)||at>now())throw Error('SOURCE_CLOCK');
+    if(at<Date.parse(startedAt)||at>now())throw Object.assign(Error('SOURCE_CLOCK'),{sourcePhase:'CLOCK',sourceObservedAt:observedAt,writerStartedAt:startedAt,nowAt:new Date(now()).toISOString()});
     const fresh=(axis,seconds)=>axis&&Number.isFinite(Date.parse(axis.observedAt))&&at>=Date.parse(axis.observedAt)&&at-Date.parse(axis.observedAt)<seconds*1000;
     const samples=(snapshot.samples||[]).map(s=>{
       const monitor={configVersion:1};if(s.vmState)monitor.vmState=s.vmState;
@@ -51,14 +58,21 @@ export function createMonitorSourceWriter({file,serverUuid,instanceUuid=crypto.r
       counts,policy:snapshot.policy,guestSlot:snapshot.guestSlot??{state:'IDLE',observedAt,reason:null},inventoryAt:snapshot.inventoryAt??null,inventoryReason:snapshot.inventoryReason??null,samples};
     const bytes=JSON.stringify(value);
     if(Buffer.byteLength(bytes)>1048576)throw Error('SOURCE_TOO_LARGE');
-    fs.mkdirSync(path.dirname(file),{recursive:true});
     const temporary=file+'.tmp';
-    try{fs.writeFileSync(temporary,bytes,{mode:0o600});fs.renameSync(temporary,file);seq++;return JSON.parse(bytes);}
+    let phase='MKDIR';
+    try{fs.mkdirSync(path.dirname(file),{recursive:true});phase='TEMP_WRITE';fs.writeFileSync(temporary,bytes,{mode:0o600});phase='RENAME';fs.renameSync(temporary,file);seq++;return JSON.parse(bytes);}
+    catch(error){error.sourcePhase=phase;throw error;}
     finally{try{fs.unlinkSync(temporary);}catch{/* successfully renamed or absent */}}
   };
 }
-export function readGuestQuarantine(file,serverUuid){
-  try{if(fs.statSync(file).size>1048576)return true;const s=JSON.parse(fs.readFileSync(file,'utf8'));
+export function readGuestQuarantine(file,serverUuid,{reconcilePreflight=false,previousBuildFingerprint=null,onPreflightRecovered=()=>{}}={}){
+  try{if(fs.statSync(file).size>1048576)return true;const bytes=fs.readFileSync(file),s=JSON.parse(bytes.toString('utf8'));
+    if(reconcilePreflight){
+      const audit=path.join(path.dirname(file),'preflight-reconciliation.json');
+      try{const st=fs.lstatSync(audit);if(st.isFile()&&!st.isSymbolicLink()&&st.size<=8192){const proof=JSON.parse(fs.readFileSync(audit,'utf8'));
+        if(validatePreflightProof(bytes,serverUuid,previousBuildFingerprint,proof)){onPreflightRecovered(proof);return false;}
+      }}catch{/* Missing or conflicting audit never relaxes quarantine. */}
+    }
     return s.serverUuid!==serverUuid||!['IDLE'].includes(s.guestSlot?.state);
   }catch(e){return e.code!=='ENOENT';}
 }

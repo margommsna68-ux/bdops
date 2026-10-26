@@ -9,7 +9,7 @@ export function transformMain(bytes){
   let source=bytes.toString('utf8').replace(/\r\n/g,'\n');
   function replace(old,value){if(source.split(old).length!==2)throw Error('MAIN_ANCHOR_MISMATCH');source=source.replace(old,value);}
   replace("import { createEarnAppMonitor } from './engine/earnapp-monitor.mjs';",
-    "import { createEarnAppMonitor } from './engine/earnapp-monitor.mjs';\nimport { readNativeInventory, readNativeAppliedProxy } from './engine/native-monitor-readers.mjs';\nimport { createMonitorSourceWriter, readGuestQuarantine } from './engine/native-monitor-source.mjs';\nimport { persistNativeSource, canarySourceAllowed } from './engine/native-monitor-wire.mjs';\nimport { createCanaryGuestTransport } from './engine/native-monitor-guest-transport.mjs';");
+    "import { createEarnAppMonitor } from './engine/earnapp-monitor.mjs';\nimport { readNativeInventory, readNativeAppliedProxy } from './engine/native-monitor-readers.mjs';\nimport { createMonitorSourceWriter, readGuestQuarantine, sourceWriteError } from './engine/native-monitor-source.mjs';\nimport { persistNativeSource, canarySourceAllowed } from './engine/native-monitor-wire.mjs';\nimport { createCanaryGuestTransport } from './engine/native-monitor-guest-transport.mjs';");
   replace('let earnappMonitor = null;', `let earnappMonitor = null;
 let nativeMonitorSourceLatest = null;
 let nativeMonitorSourceWriter = null;
@@ -55,9 +55,13 @@ function retireNativeMonitor(m, resync = false) {
     earnappMonitor = createEarnAppMonitor({
       ...(nativeCanary ? {
         canaryPolicyVersion: 1,
-        initialGuestQuarantine: readGuestQuarantine(path.join(MACHINE_DATA_DIR, 'native-monitor', 'latest.json'), SERVER_ID),
+        initialGuestQuarantine: readGuestQuarantine(path.join(MACHINE_DATA_DIR, 'native-monitor', 'latest.json'), SERVER_ID, {
+          reconcilePreflight: process.argv.includes('--native-monitor-reconcile-preflight'),
+          previousBuildFingerprint: (()=>{try{return JSON.parse(fs.readFileSync(path.join(INSTALL.home,'active.json'),'utf8')).transaction?.previousBuild?.codeFingerprint;}catch{return null;}})(),
+          onPreflightRecovered: p=>LOG('native-monitor-preflight-reconciled',{code:p.kind,instanceUuid:p.instanceUuid,sourceSeq:p.sourceSeq,sourceHash:p.sourceHash})
+        }),
         readAppliedProxy: (vm, opts) => readNativeAppliedProxy(nativeMonitorVbox, vm, opts),
-        onSnapshot: (snapshot) => { try { nativeMonitorSourceLatest = nativeMonitorSourceWriter(snapshot); return true; } catch { LOG('native-monitor-source-unavailable', { code: 'SOURCE_WRITE_FAILED' }); return false; } }
+        onSnapshot: (snapshot) => { try { nativeMonitorSourceLatest = nativeMonitorSourceWriter(snapshot); return true; } catch(error) { LOG('native-monitor-source-unavailable', sourceWriteError(error)); return false; } }
       } : {}),`);
   replace('listVms: async () => { await discover(); return LAST_VM_LISTING; },',
     'listVms: async () => { if (nativeCanary) return readNativeInventory(nativeMonitorVbox); await discover(); return LAST_VM_LISTING; },');

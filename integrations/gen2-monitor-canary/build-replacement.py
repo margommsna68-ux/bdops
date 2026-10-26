@@ -99,7 +99,11 @@ m=m.replace('let stepping = false, activeStep = null;', 'let stepping = false, a
 m=m.replace('readAppliedProxy: options.readAppliedProxy,', 'initialGuestQuarantine: guestQuarantined, readAppliedProxy: options.readAppliedProxy,',1)
 m=m.replace('    let target = null, isRecheck = false;', '    if (canary && guestQuarantined) { schedule(60000); return; }\n    let target = null, isRecheck = false;',1)
 m=m.replace('    const { result, durationMs, at } = await probe(target);', '''    if (canary && !lanes.setGuestSlot('RUNNING')) {
-      guestQuarantined = true; lanes.setGuestSlot('QUARANTINED','SOURCE_PERSIST_FAILED'); schedule(60000); return;
+      // No guest call has started. Preserve that distinction from an unknown
+      // guest exit: defer this target, then let its ordinary due time retry.
+      lanes.setGuestSlot('IDLE','SOURCE_PERSIST_FAILED');
+      due.set(target.uuid,now()+targetMs());
+      defer(target,'SOURCE_PERSIST_FAILED'); schedule(CANARY_POLICY.retryBackoffSeconds*1000); return;
     }
     const { result, durationMs, at } = await probe(target);''',1)
 m=m.replace("      counters.timeouts++;", "      counters.timeouts++;\n      if (canary) { guestQuarantined = true; lanes.core(target,{ok:false,reason:'MONITOR_TIMEOUT'},started); lanes.setGuestSlot('QUARANTINED','GUEST_CLEANUP_UNVERIFIED'); }",1)
