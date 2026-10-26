@@ -13,8 +13,8 @@ Error: Failed to resolve import "@/components/business-management/PayoutStatusAc
   5  |  const __vi_import_1__ = await import("react-dom/client");
   6  |  const __vi_import_2__ = await import("@/components/business-management/PayoutStatusActions");
      |                                       ^
-  7  |  
-  8  |  
+  7  |
+  8  |
  ❯ TransformPluginContext._formatLog ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:28999:43
  ❯ TransformPluginContext.error ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:28996:14
  ❯ normalizeUrl ../../project%20web%20new/bdops-proxy-app/node_modules/vite/dist/node/chunks/config.js:27119:18
@@ -30,4 +30,3 @@ Error: Failed to resolve import "@/components/business-management/PayoutStatusAc
       Tests  no tests
    Start at  19:42:16
    Duration  426ms (transform 14ms, setup 20ms, import 0ms, tests 0ms, environment 303ms)
-
