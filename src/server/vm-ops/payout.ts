@@ -14,6 +14,7 @@ import {authorizeVM} from '../vm-management/repository';
 import {activeVM,checkLink,writeLink} from '../account-store/links';
 import {moneyOfRequest,staleCycle} from './ops';
 import {balanceRights,currentBalances} from './balance';
+import {assertPayoutDailySlot,consumePayoutDailySlot,readPayoutDaily} from './payout-daily';
 // EarnApp payout requests (owner decision 18/10/2026: one EarnApp account, one withdrawal).
 // - One request per EarnApp (unique earnAppId): a retry, a lost answer or a status correction stays on the same row; a new command
 //   key never creates a second one.
@@ -82,18 +83,21 @@ export async function readPayoutPick(scope:ActorScope,input:{vmId:string;amount?
   const earnApp=await db.earnAppAccount.findUnique({where:{vmId:vm.id},include:{login:{select:{email:true}},paypalEmail:{select:{id:true,email:true,paypalId:true}}}});
   const pps=await db.payPalAccount.findMany({where:{projectId:scope.projectId,archivedAt:null},select:{id:true,code:true,status:true,emails:{where:{archivedAt:null},select:{id:true,email:true,usedEarnAppId:true,reviewHold:true,holdEarnAppId:true,earnApp:{select:{id:true}}}}}});
   const gather=money?await readPaypalGather(current,db):null,g=new Map((gather?.paypals||[]).map(p=>[p.paypalId,p])),held=money||payout?await heldByPaypal(db,scope.projectId,earnApp?.id):new Map<string,number>();
+  const daily=await readPayoutDaily(db,scope.projectId);
   const rows=pps.map(p=>{
     // own = the EarnApp's receiving email, or an email held for this EarnApp's payout being prepared; an email held for another
     // EarnApp is never offered (two people / AI cannot take the same email).
     const own=p.emails.filter(e=>earnApp&&(e.id===earnApp.paypalEmailId||e.holdEarnAppId===earnApp.id)).map(e=>({id:e.id,email:e.email,own:true}));
     const free=p.emails.filter(e=>!e.usedEarnAppId&&!e.reviewHold&&!e.earnApp&&!e.holdEarnAppId).map(e=>({id:e.id,email:e.email,own:false})).sort((a,b)=>a.email.localeCompare(b.email));
     const x=g.get(p.id);
-    return {id:p.id,code:p.code,status:p.status,usable:p.status==='ACTIVE',emails:[...own,...(p.status==='ACTIVE'?free:[])],unused:p.status==='ACTIVE'?free.length:0,balanceUsd:balance?x?.balanceUsd??'0.00':null,pendingUsd:money?x?.pendingUsd??'0.00':null,heldUsd:money?fromCents(held.get(p.id)||0):'0.00'};
+    const emails=[...own,...(p.status==='ACTIVE'?free:[])].map(e=>({...e,dailyAllowed:daily.allowed(p.id,e.id),dailyOccupied:daily.occupied(p.id,e.id)}));
+    return {id:p.id,code:p.code,status:p.status,usable:p.status==='ACTIVE'&&emails.some(e=>e.dailyAllowed),emails,daily:daily.summary(p.id),unused:p.status==='ACTIVE'?free.length:0,balanceUsd:balance?x?.balanceUsd??'0.00':null,pendingUsd:money?x?.pendingUsd??'0.00':null,heldUsd:money?fromCents(held.get(p.id)||0):'0.00'};
   }).filter(p=>p.emails.length).sort((a,b)=>a.code.localeCompare(b.code,'en',{numeric:true}));
   // Suggested PP (owner brief 20/10/2026): the EarnApp's own email, else the PP this amount brings closest to $100 (see suggestPaypal).
   // A member with EARN_PAYOUT but without the book gets the same suggestion, computed from the book here; the figures stay hidden.
   const inner=!balance&&payout?{book:await bookUsdBalances(db,scope.projectId),pending:await pendingByPaypal(db,scope.projectId)}:null;
-  const suggestion=suggestPaypal(rows.map(p=>({id:p.id,code:p.code,usable:p.usable,freeEmails:p.unused,own:p.emails.some(e=>e.own),balanceUsd:inner?inner.book.get(p.id)??'0.00':p.balanceUsd,pendingUsd:inner?fromCents(inner.pending.get(p.id)?.USD||0):p.pendingUsd,heldUsd:inner?fromCents(held.get(p.id)||0):p.heldUsd})),input.amount||'0');
+  const ownBlocked=rows.some(p=>p.emails.some(e=>e.own&&!e.dailyAllowed));
+  const suggestion=ownBlocked?null:suggestPaypal(rows.map(p=>({id:p.id,code:p.code,usable:p.usable,freeEmails:p.emails.filter(e=>!e.own&&e.dailyAllowed).length,own:p.emails.some(e=>e.own&&e.dailyAllowed),balanceUsd:inner?inner.book.get(p.id)??'0.00':p.balanceUsd,pendingUsd:inner?fromCents(inner.pending.get(p.id)?.USD||0):p.pendingUsd,heldUsd:inner?fromCents(held.get(p.id)||0):p.heldUsd})),input.amount||'0');
   return {vm:{id:vm.id,where:vm.server.code+' / '+vm.code},earnApp:earnApp?{id:earnApp.id,login:earnApp.login.email,emailId:earnApp.paypalEmailId,email:earnApp.paypalEmail?.email??null}:null,paypals:rows,suggestion,rights:{money,balance,prepareOnly:!writeMoney}};
 }
 // Suggestion for one EarnApp account and one amount (ops API, 21/10/2026): the same rule as the VM cell (suggestPaypal: the EarnApp's own
@@ -108,16 +112,19 @@ export async function suggestPayout(scope:ActorScope,input:{earnAppId:string;amo
   const vm=earnApp?.vmId?await activeVM(db,scope.projectId,earnApp.vmId):null;if(!earnApp||!vm)throw new ProxyDomainError('NOT_FOUND','Tài khoản EarnApp không đang gán VM hoạt động','NOT_FOUND');
   const [pps,pending,held,book]=await Promise.all([db.payPalAccount.findMany({where:{projectId:scope.projectId,archivedAt:null},select:{id:true,code:true,status:true,emails:{where:{archivedAt:null},select:{id:true,email:true,usedEarnAppId:true,reviewHold:true,holdEarnAppId:true,earnApp:{select:{id:true}}},orderBy:{email:'asc'}}}}),
     pendingByPaypal(db,scope.projectId),heldByPaypal(db,scope.projectId,earnApp.id),bookUsdBalances(db,scope.projectId)]);
+  const daily=await readPayoutDaily(db,scope.projectId);
   const rows=pps.map(p=>{
     const own=p.emails.filter(e=>e.id===earnApp.paypalEmailId||e.holdEarnAppId===earnApp.id).map(e=>({id:e.id,email:e.email,own:true}));
     const free=p.status==='ACTIVE'?p.emails.filter(e=>!e.usedEarnAppId&&!e.reviewHold&&!e.earnApp&&!e.holdEarnAppId).map(e=>({id:e.id,email:e.email,own:false})):[];
     const b=book.get(p.id)??'0.00',pend=fromCents(pending.get(p.id)?.USD||0),h=fromCents(held.get(p.id)||0),proj=toCents(b)+toCents(pend)+toCents(h);
-    return {id:p.id,code:p.code,status:p.status,usable:p.status==='ACTIVE',emails:[...own,...free],free:free.length,balanceUsd:b,pendingUsd:pend,heldUsd:h,projectedUsd:fromCents(proj),afterUsd:usd&&amount?fromCents(proj+toCents(amount)):null};
+    const emails=[...own,...free].map(e=>({...e,dailyAllowed:daily.allowed(p.id,e.id),dailyOccupied:daily.occupied(p.id,e.id)}));
+    return {id:p.id,code:p.code,status:p.status,usable:p.status==='ACTIVE'&&emails.some(e=>e.dailyAllowed),emails,daily:daily.summary(p.id),free:emails.filter(e=>!e.own&&e.dailyAllowed).length,balanceUsd:b,pendingUsd:pend,heldUsd:h,projectedUsd:fromCents(proj),afterUsd:usd&&amount?fromCents(proj+toCents(amount)):null};
   }).filter(p=>p.emails.length).sort((a,b)=>a.code.localeCompare(b.code,'en',{numeric:true}));
-  const cand=rows.map(p=>({id:p.id,code:p.code,usable:p.usable,freeEmails:p.free,own:p.emails.some(e=>e.own),balanceUsd:p.balanceUsd,pendingUsd:p.pendingUsd,heldUsd:p.heldUsd}));
-  const pick=usd?suggestPaypal(cand,amount||'0'):(()=>{const mine=cand.find(c=>c.own);return mine?{paypalId:mine.id,why:'EarnApp đã có email nhận ở '+mine.code+'; giữ nguyên'}:null;})();
-  const chosen=pick?rows.find(p=>p.id===pick.paypalId)!:null,email=chosen?chosen.emails.find(e=>e.own)??chosen.emails[0]:null;
-  const shown=(p:typeof rows[number])=>({paypalId:p.id,code:p.code,status:p.status,usable:p.usable,emails:p.emails.map(e=>({paypalEmailId:e.id,email:e.email,own:e.own})),projectedUsd:p.projectedUsd,afterUsd:p.afterUsd,...(balance?{balanceUsd:p.balanceUsd,pendingUsd:p.pendingUsd,heldUsd:p.heldUsd}:{})});
+  const cand=rows.map(p=>({id:p.id,code:p.code,usable:p.usable,freeEmails:p.free,own:p.emails.some(e=>e.own&&e.dailyAllowed),balanceUsd:p.balanceUsd,pendingUsd:p.pendingUsd,heldUsd:p.heldUsd}));
+  const ownBlocked=rows.some(p=>p.emails.some(e=>e.own&&!e.dailyAllowed));
+  const pick=ownBlocked?null:usd?suggestPaypal(cand,amount||'0'):(()=>{const mine=cand.find(c=>c.own);return mine?{paypalId:mine.id,why:'EarnApp đã có email nhận ở '+mine.code+'; giữ nguyên'}:null;})();
+  const chosen=pick?rows.find(p=>p.id===pick.paypalId)!:null,email=chosen?chosen.emails.find(e=>e.own&&e.dailyAllowed)??chosen.emails.find(e=>e.dailyAllowed):null;
+  const shown=(p:typeof rows[number])=>({paypalId:p.id,code:p.code,status:p.status,usable:p.usable,daily:p.daily,emails:p.emails.map(e=>({paypalEmailId:e.id,email:e.email,own:e.own,dailyAllowed:e.dailyAllowed,dailyOccupied:e.dailyOccupied})),projectedUsd:p.projectedUsd,afterUsd:p.afterUsd,...(balance?{balanceUsd:p.balanceUsd,pendingUsd:p.pendingUsd,heldUsd:p.heldUsd}:{})});
   return {earnAppAccountId:earnApp.id,vmId:vm.id,amount,currency,exact:!!amount&&usd,existingWithdrawalId:earnApp.payoutRequest?.id??null,
     note:!usd?'Mục tiêu gom 100 USD chỉ áp cho USD; không tự quy đổi '+currency+'. Chọn PP / email theo đối chiếu của người vận hành':!amount?'Chưa có số tiền: gợi ý chưa phải cho lần rút này':null,
     suggestion:pick&&chosen&&email?{paypalId:chosen.id,code:chosen.code,paypalEmailId:email.id,email:email.email,why:pick.why,afterUsd:chosen.afterUsd}:null,candidates:rows.map(shown)};
@@ -203,9 +210,11 @@ export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestIn
     }
     if(!emailId)throw new ProxyDomainError('INVALID_INPUT','Chọn Mã PP → Email nhận tiền');
     const email=await tx.payPalEmail.findFirstOrThrow({where:{id:emailId,projectId:scope.projectId}});
+    await assertPayoutDailySlot(tx,scope.projectId,email.paypalId,email.id);
     let row;
     try{row=await tx.earnPayoutRequest.create({data:{projectId:scope.projectId,earnAppId:earnApp.id,vmId:vm.id,cycle,paypalId:email.paypalId,paypalEmailId:email.id,currency,amount,reference:input.reference?.trim().slice(0,200)||null,requestedAt:date,requestedById:current.userId,submission,submittedAt:submission==='SENT'?new Date():null,history:[historyEntry(current.userId,submission==='PREPARING'?'PREPARED':'REQUESTED',(submission==='PREPARING'?'Chuẩn bị rút ':'Ghi yêu cầu rút ')+amount.toFixed(2)+' '+currency)]}});}
     catch(e){if((e as {code?:string}).code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','EarnApp này vừa được ghi yêu cầu rút; tải lại','DUPLICATE');throw e;}
+    if(submission==='SENT')await consumePayoutDailySlot(tx,row);
     await images.remember('PAYOUT_REQUEST',row.id,true);
     // What was recorded (kept with the command key): a retry acknowledges this request as it was created.
     return {id:row.id,where:vm.server.code+' / '+vm.code,cycle,vmId:vm.id,earnAppId:earnApp.id,paypalEmailId:email.id,amount:amount.toFixed(2),currency,submission,requestedOn:dayText(date)};
@@ -246,9 +255,11 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
       // the held email becomes this EarnApp's receiving email for good (same checked assignment). UNKNOWN = clicked but not
       // confirmed: stays held, needs reconciling against EarnApp's history before anything else is done (no second click).
       if(r.state!=='REQUESTED')throw new ProxyDomainError('INVALID_INPUT','Yêu cầu không còn mở; gửi lại trước');
-      if(input.action==='UNKNOWN'){if(r.submission!=='PREPARING')return {id:r.id,changed:false};Object.assign(data,{submission:'UNKNOWN'});what='Chưa xác định kết quả gửi trên EarnApp'+(note?': '+note:'');}
+      if(input.action==='UNKNOWN'){if(r.submission!=='PREPARING')return {id:r.id,changed:false};await assertPayoutDailySlot(tx,scope.projectId,r.paypalId,r.paypalEmailId);await consumePayoutDailySlot(tx,r);Object.assign(data,{submission:'UNKNOWN'});what='Chưa xác định kết quả gửi trên EarnApp'+(note?': '+note:'');}
       else{
         if(r.submission==='SENT')return {id:r.id,changed:false};
+        await assertPayoutDailySlot(tx,scope.projectId,r.paypalId,r.paypalEmailId);
+        await consumePayoutDailySlot(tx,r);
         if(!live&&earnApp.paypalEmailId!==r.paypalEmailId){
           // Old account (history): the email becomes ITS receiving email; the VM and the account now on it are not touched.
           await authorizeVM(current,'ASSIGN',tx);
@@ -275,6 +286,8 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
       Object.assign(data,{state:input.action,stateNote:note});what=(input.action==='FAILED'?'Thất bại':'Huỷ')+': '+note;
     }else if(input.action==='RETRY'){
       if(r.state==='REQUESTED')return {id:r.id,changed:false};
+      await assertPayoutDailySlot(tx,scope.projectId,r.paypalId,r.paypalEmailId);
+      if(r.submission==='SENT'||r.submission==='UNKNOWN')await consumePayoutDailySlot(tx,r);
       // A preparation sent again holds its email again (conditional: it may have been taken meanwhile).
       if(r.submission!=='SENT'&&earnApp.paypalEmailId!==r.paypalEmailId){await images.remember('PAYPAL_EMAIL',r.paypalEmailId);const n=await tx.payPalEmail.updateMany({where:{id:r.paypalEmailId,holdEarnAppId:null,usedEarnAppId:null,earnApp:null},data:{holdEarnAppId:r.earnAppId,holdAt:new Date(),revision:{increment:1}}});if(n.count!==1)throw new ProxyDomainError('STALE_PREVIEW','Email của yêu cầu này đã được giữ / cấp cho EarnApp khác; huỷ và chuẩn bị lại với email khác');}
       Object.assign(data,{state:'REQUESTED',stateNote:note});what='Gửi lại (cùng lượt rút)'+(note?': '+note:'');

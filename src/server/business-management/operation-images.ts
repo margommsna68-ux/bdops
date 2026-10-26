@@ -5,6 +5,7 @@ import {assertPeriodOpen,assertCollectorSourceOpen} from './period-lock';
 import {dayText} from './money';
 import {formatSdkAmount,SDK_STATE_LABEL,type SdkLinkState} from '@/lib/sdk-money';
 import {restoreSdkImage} from '../vm-management/sdk-undo';
+import {assertPayoutDailySlot} from '../vm-ops/payout-daily';
 const fields:Record<BusinessResource,string[]>={
  GMAIL:['email','password','twoFaCurrent','twoFaOld','recoveryEmail','token','status','notes','paypalId','businessManaged','archivedAt','revision','loginType','batchId','twoFaLink','smsLink','phone','loginIssueNote','loginIssueAt'],
  PAYPAL:['code','primaryEmail','holder','status','notes','businessManaged','archivedAt','revision','batchId','firstEarnAppId'],
@@ -97,7 +98,10 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='EARNAPP')await tx.earnAppAccount.update({where:{id:image.id},data:data as Prisma.EarnAppAccountUncheckedUpdateInput});
  if(image.resource==='PAYOUT')await tx.earnAppPayout.update({where:{id:image.id},data:data as Prisma.EarnAppPayoutUncheckedUpdateInput});
  if(image.resource==='VM_OPS'){await tx.vmOperation.update({where:{id:image.id},data:data as Prisma.VmOperationUncheckedUpdateInput});await tx.vmOpsEvent.create({data:{projectId,vmId:String(before!.vmId),cycle:Number(before!.cycle),kind:'UNDO',fromStatus:(image.after.status as never)??null,toStatus:(before!.status as never)??null,note:'Hoàn tác ghi nhận trên web',actorId:actorId||''}});}
- if(image.resource==='PAYOUT_REQUEST')await tx.earnPayoutRequest.update({where:{id:image.id},data:data as Prisma.EarnPayoutRequestUncheckedUpdateInput});
+ if(image.resource==='PAYOUT_REQUEST'){
+  if(data.state==='REQUESTED'&&(data.submission==='PREPARING'||data.submission==='UNKNOWN'))await assertPayoutDailySlot(tx,projectId,String(data.paypalId),String(data.paypalEmailId));
+  await tx.earnPayoutRequest.update({where:{id:image.id},data:data as Prisma.EarnPayoutRequestUncheckedUpdateInput});
+ }
  if(image.resource==='VM_CYCLE')throw new ProxyDomainError('INVALID_INPUT');
  if(image.resource==='ACCOUNT_BATCH')await tx.accountPurchaseBatch.update({where:{id:image.id},data:data as Prisma.AccountPurchaseBatchUncheckedUpdateInput});
  if(image.resource==='PACKAGE')await tx.proxyProviderAccount.update({where:{id:image.id},data:data as Prisma.ProxyProviderAccountUncheckedUpdateInput});

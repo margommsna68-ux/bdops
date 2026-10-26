@@ -727,6 +727,7 @@ model PayPalAccount {
   earnApps             EarnAppAccount[]
   payouts              EarnAppPayout[]
   payoutRequests       EarnPayoutRequest[]
+  payoutDayEmails      PayPalPayoutDayEmail[]
   createdById          String? // user who created this PP
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
@@ -1575,6 +1576,21 @@ model VmCycle {
 // The one payout request of an EarnApp account (owner decision 18/10/2026: one EarnApp, one withdrawal). Retries, lost answers and
 // status corrections stay on this row. Money received is the confirmed FundTransaction rows linked to it (the PayPal book); this
 // row only says what was asked for. state is the person's record: REQUESTED, FAILED or CANCELLED (with a note).
+// Distinct emails whose payout was sent/attempted during a Vietnam calendar day.
+// Independent of ordinary undo and request state: failure/cancellation never erases a consumed daily slot.
+model PayPalPayoutDayEmail {
+  projectId     String
+  paypalId      String
+  paypal        PayPalAccount @relation(fields: [paypalId], references: [id], onDelete: Cascade)
+  day           String        @db.VarChar(10)
+  paypalEmailId String
+  requestId     String
+  usedAt        DateTime       @default(now())
+
+  @@id([projectId, paypalId, day, paypalEmailId])
+  @@index([projectId, day])
+}
+
 model EarnPayoutRequest {
   id            String            @id @default(cuid())
   projectId     String

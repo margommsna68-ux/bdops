@@ -1,5 +1,5 @@
 import {saveVmSdk} from '@/server/vm-management/sdk-store';
-import {afterAll,describe,expect,it} from 'vitest';
+import {afterAll,afterEach,describe,expect,it,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {encrypt} from '@/lib/encryption';
 import {businessDB as db,businessFixture} from './business-fixture';
@@ -14,6 +14,7 @@ import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readP
 import {undoOperation} from '@/server/operation-history/undo';
 import {readAccountStore} from '@/server/account-store/read';
 afterAll(()=>db.$disconnect());
+afterEach(()=>vi.useRealTimers());
 // VM operation cycle (owner brief 18/10/2026). Synthetic data only (example.invalid, 203.x test IPs), test database only.
 const today='2026-10-18';
 async function setup(vmCount=4){
@@ -74,10 +75,12 @@ describe('Tình trạng vận hành',()=>{
   });
 });
 describe('PayPal gom tiền và yêu cầu rút',()=>{
-  it('pp-13 receives 24 + 10 + 12 through three emails of three EarnApps = 46 USD, keeps gathering with the unused emails',async()=>{
+  it('pp-13 receives 24 + 10 + 12 through three emails across two days = 46 USD, keeps gathering with the unused emails',async()=>{
     const f=await setup();try{
       for(const i of [0,1,2])await f.link(i,i,f.emails[i].id);
-      await f.request(0,f.emails[0].id,'24');await f.request(1,f.emails[1].id,'10');await f.request(2,f.emails[2].id,'12');
+      await f.request(0,f.emails[0].id,'24');await f.request(1,f.emails[1].id,'10');
+      // Owner 26/10: only two distinct receiving emails per PP/day; the third request is on the next day.
+      vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(Date.now()+86400_000));await f.request(2,f.emails[2].id,'12');
       let g=(await readPaypalGather(f.scope,db)).paypals.find(p=>p.paypalId===f.pp13.id)!;
       expect(g).toMatchObject({balanceUsd:'0.00',pendingUsd:'46.00'});expect(g.gather!.state).toBe('GATHERING');
       await f.receive(f.pp13.id,f.emails[0].email,'24');await f.receive(f.pp13.id,f.emails[1].email,'10');await f.receive(f.pp13.id,f.emails[2].email,'12');
@@ -139,6 +142,8 @@ describe('PayPal gom tiền và yêu cầu rút',()=>{
       await f.link(2,2,null);await f.link(3,3,null);
       const res=await Promise.allSettled([f.request(2,f.emails[2].id,'5'),f.request(3,f.emails[2].id,'5')]);
       expect(res.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+      // Two emails already used today. Keep the original competing-command assertion on the next day's capacity.
+      vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(Date.now()+86400_000));
       const both=await Promise.allSettled([f.request(2,f.emails[3].id,'5'),f.request(2,f.emails[3].id,'5')]);// same EarnApp, two keys
       expect(both.filter(r=>r.status==='fulfilled').length).toBeLessThanOrEqual(1);
       expect(await db.earnPayoutRequest.count({where:{earnApp:{vmId:f.vms[2].id}}})).toBe(1);

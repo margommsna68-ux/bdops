@@ -5,12 +5,14 @@ API cho Claude vận hành (hoặc script khác) đọc MoneyToHome và ghi nh�
 
 **API này chỉ đọc / ghi MoneyToHome. Nó chưa tạo kết nối tới VM, không đăng nhập EarnApp và không tự rút tiền trên EarnApp.**
 
-Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.3.0). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
+Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.5.1). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
 và [2026-10-23-totp-ai-approval-design.md](../superpowers/specs/2026-10-23-totp-ai-approval-design.md).
 
 **Bổ sung 1.3.0 (23/10 tối):** [Kho / batch / CLI TOTP](ai-stock-batch.md) là hướng dẫn hiện hành cho ACCOUNT_OPS, proxy / SDK từ kho, duyệt CLI hoặc web và lô có kết quả từng phần. Chủ tạo token **90 ngày** trong UI: READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; **không PAYOUT / RECEIPT**. Các ví dụ payout bên dưới chỉ mô tả API cho người đã được cấp quyền tương ứng, không phải quyền của token vận hành này.
 
 ## Quy tắc hiện hành — quyết định chủ 24/10/2026
+
+**Bổ sung 26/10/2026 — hạn mức PayPal:** mỗi mã PP tối đa 2 email khác nhau/ngày Việt Nam. `paypal/suggest` trả `candidates[].daily` (date, timeZone, limit, used, reserved, remaining) và `emails[].dailyAllowed` / `dailyOccupied` (đã chiếm suất, không thay cho kiểm tra được phép chọn). Chuẩn bị giữ suất, SENT/UNKNOWN tiêu thụ suất ngày máy chủ; gửi lặp cùng key/email không tính thêm. Hủy chuẩn bị trả suất; hủy/thất bại/hoàn tác sau SENT/UNKNOWN không xóa suất đã dùng. Chuẩn bị/chưa rõ còn mở giữ chỗ qua nửa đêm; xử lý xong mới nhả phần giữ. POST prepare/status và gửi lại qua web dùng cùng kiểm tra giao dịch. `409 PAYPAL_DAILY_LIMIT` trả mã PP và số suất, không có thay đổi dữ liệu. AI giữ nháp, dùng mã khác chỉ khi EarnApp chưa có email cố định; không tự đổi email đã gán. Không rút thật trước khi lệnh chuẩn bị được web chấp nhận. Khoản nhận tiền không bị giới hạn này.
 
 - AI lấy bí mật kho trực tiếp bằng Bearer token + Idempotency-Key: `POST earnapp-accounts/{id}/credentials` (ACCOUNT_OPS), `POST sdks/{id}/reveal` (VM_OPS), và `POST vms/{id}/proxy-credentials` (PROXY_CREDENTIALS + VM_PROXY_FOR_OPS). Không approval, không PIN/TOTP, không cần ADMIN có mặt cho các lần đọc này.
 - Không nới quyền: vẫn kiểm token còn hiệu lực, scope, quyền user và dự án/server hiện tại. Account credentials cần tài khoản hiện hành và job ACTIVE của chính user/token đúng VM/lượt; proxy credentials cũng cần job hiện hành đúng VM/lượt. SDK reveal kiểm SDK trong phạm vi hiện tại, không thêm jobId vào body `{projectId}`. User SELECTED không được dùng kho chung hoặc đọc SDK/proxy ngoài server được giao; bỏ duyệt không mở các route đang bị giới hạn server từ chối.

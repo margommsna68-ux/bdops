@@ -1,0 +1,12 @@
+{
+  "localOnly": true,
+  "preparedRequests": 2,
+  "distinctEmails": 2,
+  "amounts": [
+    "10",
+    "12"
+  ],
+  "heldEmails": 2,
+  "consumedEmails": 0,
+  "financialTransactions": 0
+}

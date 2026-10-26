@@ -2,6 +2,19 @@
 
 Luồng: **Theo dõi VM → chọn PayPal nhận tiền → ghi yêu cầu rút EarnApp → xác nhận tiền thực về PayPal → ghi nhận tạo lại VM** (giữ mã VM, giữ proxy còn hợp lệ).
 
+## Giới hạn email rút mỗi ngày — 26/10/2026
+
+Mỗi mã PayPal dùng tối đa **2 email khác nhau/ngày**, tính chung mọi server và người/AI vận hành trong dự án. Ngày tính từ 00:00 theo giờ Việt Nam, bằng đồng hồ máy chủ; ngày yêu cầu hoặc giờ quan sát do người dùng nhập không đổi hạn mức.
+
+- Khung chọn PP hiển thị **Hôm nay N/2 email**. Email đang chuẩn bị được giữ một suất; không phải tiền đã về và chưa đánh dấu email đã dùng vĩnh viễn.
+- Mã đủ suất không được gợi ý cho email mới. Email đã gán cho EarnApp được giữ nguyên; nếu hết suất thì chờ hoặc người vận hành xử lý, AI không tự đổi liên kết.
+- Hai người/AI thao tác đồng thời vẫn chỉ giữ được hai email. Gửi lại cùng lệnh hoặc cùng email không tăng số suất.
+- Hủy/thất bại khi còn **Chuẩn bị** trả suất. Đã gửi hoặc **Chưa xác định kết quả** vẫn tính email đã dùng trong ngày, kể cả sau khi ghi thất bại/hủy/hoàn tác. Khoản nhận về sau không chiếm thêm suất.
+- Các email đang chuẩn bị/chưa rõ kết quả giữ chỗ sang ngày kế tiếp cho tới khi xử lý, để tránh cấp thêm rồi gửi trùng ba email. Chỉ phần đã gửi xong mới hết hạn mức cũ lúc 00:00. Gửi lại một yêu cầu cũ vào ngày mới kiểm hạn mức của ngày mới.
+- Hoàn tác hủy để mở lại chuẩn bị cũng phải còn suất. Lệnh vượt mức bị từ chối, giữ nháp; không gán email hay tạo yêu cầu thứ ba.
+
+Không thay đổi quy tắc mỗi EarnApp chỉ một yêu cầu rút và mỗi email gắn một EarnApp vĩnh viễn sau khi cấp dùng.
+
 Web chỉ quản trị và ghi nhận. Web không tự gửi yêu cầu rút, không xoá máy, không cài máy thật. Người và AI dùng cùng các endpoint `vmOps.*` (router `src/server/routers/vmOps.ts`); chưa có token/API riêng.
 
 ## Quy tắc mới thay quy tắc cũ

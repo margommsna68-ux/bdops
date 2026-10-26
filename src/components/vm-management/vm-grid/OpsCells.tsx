@@ -139,13 +139,23 @@ function RequestSummary({request:r,milestone}:{request:NonNullable<OpsRow['reque
     {milestone==='MONEY_REVIEW'&&<p className="text-amber-600">Tiền về khác số yêu cầu hoặc khác đồng tiền; cần đối chiếu ở Kho tài khoản.</p>}
   </div>;
 }
-type PickPaypal=inferRouterOutputs<AppRouter>['vmOps']['payoutPick']['paypals'][number];
+type PickPaypalRow=inferRouterOutputs<AppRouter>['vmOps']['payoutPick']['paypals'][number];
+type PayoutDaily={date:string;timeZone:string;limit:number;used:number;reserved:number;remaining:number};
+// Optional only for older cached picker responses; a supplied allowance is always authoritative.
+export type PickPaypal=Omit<PickPaypalRow,'daily'|'emails'>&{daily?:PayoutDaily;emails:(Omit<PickPaypalRow['emails'][number],'dailyAllowed'|'dailyOccupied'>&{dailyAllowed?:boolean;dailyOccupied?:boolean})[]};
+export function payoutEmailAllowed(pp:PickPaypal,email:PickPaypal['emails'][number]){
+  return email.dailyAllowed??(!pp.daily||pp.daily.remaining>0);
+}
+export function PayoutDailyInfo({paypal}:{paypal:PickPaypal}){
+  const d=paypal.daily;
+  return d?<span title={d.date+' · '+d.timeZone}>Hôm nay {d.used+d.reserved}/{d.limit} email · còn {d.remaining} · đang giữ {d.reserved}</span>:null;
+}
 type Sort='NEAR'|'REACHED'|'BALANCE';
 function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:string;vm:ManagedVM;cycle:number;earnAppId:string|null|undefined;lock:React.MutableRefObject<boolean>;onDone:()=>Promise<void>}){
   const [ppId,setPp]=useState(''),[emailId,setEmail]=useState(''),[amount,setAmount]=useState(''),[prepare,setPrepare]=useState(false),[date,setDate]=useState(today()),[reference,setRef]=useState(''),[onlyUsable,setOnlyUsable]=useState(true),[sort,setSort]=useState<Sort>('NEAR'),[error,setError]=useState('');
   const amountReady=/^\d+([.,]\d{1,2})?$/.test(amount.trim())?amount.trim().replace(',','.'):null;
   const pick=trpc.vmOps.payoutPick.useQuery({projectId,vmId:vm.id,amount:amountReady},{retry:false,keepPreviousData:true}),save=trpc.vmOps.requestPayout.useMutation(),keyOf=useCommandKey();
-  const data=pick.data,own=data?.earnApp?.emailId??null;
+  const data=pick.data,own=data?.earnApp?.emailId??data?.paypals.flatMap(p=>p.emails).find(e=>e.own)?.id??null;
   // The form belongs to the round and EarnApp it opened with (review fix 20/10/2026): a reload showing another account or round
   // keeps the draft, says so and locks Lưu; it never sends the draft for the new account.
   const [bound,setBound]=useState<{cycle:number;earnAppId:string}|null>(null);
@@ -153,15 +163,18 @@ function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:strin
   const moved=!!bound&&(bound.cycle!==cycle||(earnAppId!==undefined&&earnAppId!==bound.earnAppId)||(!!data&&data.earnApp?.id!==bound.earnAppId));
   const list=useMemo(()=>{
     const g=(x:PickPaypal)=>x.balanceUsd===null?null:gatherOf(x.balanceUsd,x.pendingUsd);
-    const rows=(data?.paypals||[]).filter(x=>!onlyUsable||x.emails.some(e=>e.own)||x.usable&&x.unused>0);
+    const rows=(data?.paypals||[]).filter(x=>!onlyUsable||x.id===ppId||x.emails.some(e=>e.own)||x.usable&&x.emails.some(e=>payoutEmailAllowed(x,e)));
     const key=(x:PickPaypal)=>{const s=g(x);if(!s)return 0;const b=Number(x.balanceUsd);return sort==='BALANCE'?-b:sort==='REACHED'?(s.state==='REACHED'?0:1)*1e9-b:(s.state==='REACHED'?1e9:Number(s.missingAfterPending));};
     return [...rows].sort((a,b)=>Number(b.emails.some(e=>e.own))-Number(a.emails.some(e=>e.own))||key(a)-key(b)||a.code.localeCompare(b.code,'en',{numeric:true}));
-  },[data,onlyUsable,sort]);
+  },[data,onlyUsable,sort,ppId]);
   useEffect(()=>{if(!data||ppId)return;const mine=data.paypals.find(x=>x.emails.some(e=>e.own));if(mine){setPp(mine.id);setEmail(mine.emails.find(e=>e.own)!.id);}},[data,ppId]);
   const pp=list.find(x=>x.id===ppId)||data?.paypals.find(x=>x.id===ppId),amountOk=/^\d+([.,]\d{1,2})?$/.test(amount.trim())&&Number(amount.replace(',','.'))>0;
+  const selectedEmail=pp?.emails.find(e=>e.id===emailId);
+  const emailOk=!!pp&&pp.usable&&!!selectedEmail&&payoutEmailAllowed(pp,selectedEmail)&&(!own||emailId===own);
+  const defaultEmail=(x:PickPaypal|undefined)=>x?.emails.find(e=>e.own)?.id||x?.emails.find(e=>payoutEmailAllowed(x,e))?.id||'';
   const g=pp&&pp.balanceUsd!==null?gatherOf(pp.balanceUsd,pp.pendingUsd,amountOk?amount.replace(',','.'):'0'):null;
   async function submit(){
-    if(lock.current||!bound||moved)return;setError('');
+    if(lock.current||!bound||moved||!emailOk||!amountOk||!date)return;setError('');
     const input={projectId,vmId:vm.id,expectedCycle:bound.cycle,earnAppId:bound.earnAppId,paypalEmailId:emailId,amount:amount.trim().replace(',','.'),currency:'USD',reference:reference.trim()||null,date,submission:prepare||data?.rights.prepareOnly?'PREPARING' as const:'SENT' as const};
     lock.current=true;try{const r=await save.mutateAsync({...input,key:keyOf(input)});toast.success((r.replay?'Đã có yêu cầu rút ':prepare?'Đã chuẩn bị rút (giữ email) ':'Đã ghi yêu cầu rút ')+vm.code);await onDone();}catch(e){setError(message(e));}finally{lock.current=false;}
   }
@@ -171,23 +184,25 @@ function RequestForm({projectId,vm,cycle,earnAppId,lock,onDone}:{projectId:strin
   return <div className="space-y-2 text-sm">
     <div className="flex gap-2 items-center flex-wrap"><label className="text-xs flex items-center gap-1"><input type="checkbox" checked={onlyUsable} onChange={e=>setOnlyUsable(e.target.checked)}/>PP dùng được, còn email</label>
       {data.rights.balance&&<select aria-label="Sắp xếp PP" className="pm-input w-auto text-xs" value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="NEAR">Gần đạt $100 trước</option><option value="REACHED">Đã đạt $100 trước</option><option value="BALANCE">Số dư cao trước</option></select>}</div>
-    {data.suggestion&&<div className="vm-pp-info text-xs" aria-live="polite"><span>Gợi ý: <strong>{data.paypals.find(x=>x.id===data.suggestion!.paypalId)?.code}</strong> — {data.suggestion.why}</span>{ppId!==data.suggestion.paypalId&&<button type="button" className="pm-link" onClick={()=>{const x=data.paypals.find(y=>y.id===data.suggestion!.paypalId);setPp(data.suggestion!.paypalId);setEmail(x?.emails.find(m=>m.own)?.id||x?.emails[0]?.id||'');}}>Dùng gợi ý</button>}</div>}
-    <label className="pm-label text-xs">Mã PP<select className="pm-input" value={ppId} disabled={save.isLoading} onChange={e=>{setPp(e.target.value);const x=data.paypals.find(y=>y.id===e.target.value);setEmail(x?.emails.find(m=>m.own)?.id||x?.emails[0]?.id||'');}}>
+    {data.suggestion&&!own&&<div className="vm-pp-info text-xs" aria-live="polite"><span>Gợi ý: <strong>{data.paypals.find(x=>x.id===data.suggestion!.paypalId)?.code}</strong> — {data.suggestion.why}</span>{ppId!==data.suggestion.paypalId&&<button type="button" className="pm-link" disabled={!data.paypals.find(x=>x.id===data.suggestion!.paypalId)?.usable} onClick={()=>{const x=data.paypals.find(y=>y.id===data.suggestion!.paypalId);setPp(data.suggestion!.paypalId);setEmail(defaultEmail(x));}}>Dùng gợi ý</button>}</div>}
+    <label className="pm-label text-xs">Mã PP<select className="pm-input" value={ppId} disabled={save.isLoading||!!own} onChange={e=>{setPp(e.target.value);const x=data.paypals.find(y=>y.id===e.target.value);setEmail(defaultEmail(x));}}>
       <option value="">Chọn mã PP</option>{list.map(x=><option key={x.id} value={x.id}>{x.code} · {PP_STATUS_LABEL[x.status]||x.status}{x.balanceUsd!==null?' · số dư '+formatUsd(x.balanceUsd):''} · {x.unused} email trống{x.emails.some(e=>e.own)?' · đang dùng':''}</option>)}</select></label>
     {pp&&<div className="vm-pp-info text-xs" aria-live="polite">
       <span>Tình trạng <strong className={pp.usable?'':'text-amber-600'}>{PP_STATUS_LABEL[pp.status]||pp.status}</strong></span>
       {g?<><span>Số dư USD <strong>{formatUsd(pp.balanceUsd!)}</strong></span><span>Chờ về <strong>{formatUsd(pp.pendingUsd!)}</strong></span><span>Thiếu đến $100,00 <strong>{formatUsd(g.missing)}</strong></span><span>Sau khoản này <strong>{formatUsd(g.projectedWith)}</strong></span><span className="vm-gather">{gatherText(g)}</span></>:<span className="pm-muted">Số dư cần quyền xem tiền vào và tiền ra</span>}
-      <span>Email chưa dùng còn <strong>{pp.unused}</strong></span></div>}
-    {pp&&<label className="pm-label text-xs">Email nhận<select className="pm-input" value={emailId} disabled={save.isLoading} onChange={e=>setEmail(e.target.value)}>{pp.emails.map(e=><option key={e.id} value={e.id}>{e.email}{e.own?' (đang giữ cho EarnApp này)':''}</option>)}</select>
+      <span>Email chưa dùng còn <strong>{pp.unused}</strong></span><PayoutDailyInfo paypal={pp}/></div>}
+    {pp&&<label className="pm-label text-xs">Email nhận<select className="pm-input" value={emailId} disabled={save.isLoading||!!own} onChange={e=>setEmail(e.target.value)}><option value="">Chọn email nhận</option>{pp.emails.map(e=><option key={e.id} value={e.id} disabled={!pp.usable||!payoutEmailAllowed(pp,e)}>{e.email}{e.own?' (đang giữ cho EarnApp này)':''}{!payoutEmailAllowed(pp,e)?' · hết lượt email hôm nay':''}</option>)}</select>
       {emailId&&emailId!==own&&data.earnApp&&<span className="text-xs pm-muted">Email mới sẽ được giữ riêng cho {data.earnApp.login} khi lưu; email đã gán không cấp cho EarnApp khác.</span>}</label>}
     <div className="grid grid-cols-2 gap-2"><label className="pm-label text-xs">Số tiền (USD)<input className="pm-input" inputMode="decimal" value={amount} disabled={save.isLoading} aria-invalid={!!amount&&!amountOk} onChange={e=>setAmount(e.target.value)}/></label><label className="pm-label text-xs">Ngày yêu cầu<input type="date" className="pm-input" value={date} disabled={save.isLoading} onChange={e=>setDate(e.target.value)}/></label></div>
     {amount&&!amountOk&&<span className="text-xs text-red-600" role="alert">Số tiền là số dương, tối đa 2 chữ số thập phân</span>}
     <label className="pm-label text-xs">Mã tham chiếu (nếu có)<input className="pm-input" value={reference} maxLength={200} disabled={save.isLoading} onChange={e=>setRef(e.target.value)}/></label>
     {data.rights.prepareOnly?<p className="text-xs pm-muted">Chuẩn bị: giữ email, chưa bấm rút trên EarnApp (quyền «Chuẩn bị rút EarnApp»).</p>:<label className="text-xs flex items-center gap-1"><input type="checkbox" checked={prepare} onChange={e=>setPrepare(e.target.checked)}/>Chỉ chuẩn bị (giữ email, chưa bấm rút trên EarnApp)</label>}
     <p className="text-xs pm-muted">Mỗi EarnApp chỉ một lượt rút. Yêu cầu chưa phải tiền về; tiền về ghi ở bước sau. Ghi yêu cầu trên web không chứng minh EarnApp đã nhận.</p>
+    <p className="text-xs pm-muted">Mỗi PP tối đa 2 email khác nhau mỗi ngày theo giờ Việt Nam (00:00–24:00). Chuẩn bị và chưa rõ kết quả vẫn giữ lượt; đổi ngày yêu cầu không tăng hạn mức. Máy chủ kiểm tra lại khi lưu.</p>
+    {emailId&&!emailOk&&<p role="alert" className="vm-status-error">Email đã chọn không dùng được hôm nay hoặc PayPal không hoạt động. Nháp được giữ nguyên.{own?' Email đã gắn với EarnApp này được giữ cố định, không tự đổi email.':''}</p>}
     {moved&&<p role="alert" className="vm-status-error">VM đã đổi tài khoản EarnApp hoặc sang lượt mới từ khi mở form. Nháp giữ nguyên, không lưu cho tài khoản mới; kiểm tra lại thực tế rồi đóng khung và ghi lần mới.</p>}
     {error&&<p role="alert" className="vm-status-error">{error}</p>}
-    <button type="button" className="pm-button pm-button-primary w-full" disabled={save.isLoading||!emailId||!amountOk||moved||!bound} onClick={()=>void submit()}>{save.isLoading?'Đang lưu…':prepare||data.rights.prepareOnly?'Lưu chuẩn bị rút (giữ email)':'Lưu yêu cầu rút (đã gửi trên EarnApp)'}</button>
+    <button type="button" className="pm-button pm-button-primary w-full" disabled={save.isLoading||!emailOk||!amountOk||!date||moved||!bound} onClick={()=>void submit()}>{save.isLoading?'Đang lưu…':prepare||data.rights.prepareOnly?'Lưu chuẩn bị rút (giữ email)':'Lưu yêu cầu rút (đã gửi trên EarnApp)'}</button>
   </div>;
 }
 // narrow: the member records money with PAYPAL_RECEIPT_RECORD only — recordPayoutReceipt (confirmed, this request, no "khoản riêng").
