@@ -60,8 +60,11 @@ lâu dài. Số VM gộp tuỳ tình hình (2 hoặc nhiều hơn). Cả chủ (
   lệnh rút của tài khoản VM chính + danh sách thành viên. Nếu tài khoản đó đã có lệnh (PREPARING / SENT / UNKNOWN, chưa về đủ, chưa
   dùng), được **gắn thêm thành viên** để đối chiếu thực tế đã gộp trên EarnApp, mỗi lần gắn ghi lịch sử. Gỡ thành viên chỉ khi PREPARING.
   Lệnh đã về đủ / đã dùng / huỷ / thất bại thì không gắn thêm.
-- **VM phụ có tài khoản riêng** *(lựa chọn của người thiết kế)*: khi tạo lại VM phụ đó, tài khoản riêng đóng như tạo lại thường
-  (`closedReason` RECREATED).
+- **VM phụ có tài khoản riêng** (chủ 27/10): SDK của VM phụ đã nối vào tài khoản VM chính, nên tài khoản riêng của VM phụ chưa thực
+  sự dùng. Khi tạo lại VM phụ qua lệnh gộp, tài khoản riêng **không đóng** và **ở lại đúng VM đó sang vòng mới** (chủ đăng nhập lại
+  trên máy mới). Không trả về kho, không gán VM khác, PayPal / email nhận / lệnh rút (chưa có) của nó giữ nguyên. Nếu Gmail / Apple ID
+  đó đã ghi lỗi đăng nhập (Locked / Verify / Disabled) thì vẫn giữ trên VM và xử lý bằng luồng báo lỗi đăng nhập hiện có (thay tài khoản
+  mới), không tự thay khi tạo lại. Chỉ áp dụng cho thành viên phụ; VM chính đóng tài khoản như tạo lại thường.
 - **Tài khoản VM chính bị SUS** (chủ 27/10: "không nhận được tiền và xem như chưa về"): tiền của lệnh gộp không bao giờ tính là đã về /
   thu nhập, lệnh giữ nguyên lịch sử. Giống SUS thường, VM chính được tạo lại lý do SUSPENDED; **mọi thành viên** của lệnh gộp đó cũng
   được tạo lại lý do SUSPENDED (thành viên ghi `consumedAt`, vòng đóng ghi lý do SUSPENDED). Không cần huỷ lệnh trước.
