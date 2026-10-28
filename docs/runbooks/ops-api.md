@@ -5,10 +5,46 @@ API cho Claude vận hành (hoặc script khác) đọc MoneyToHome và ghi nh�
 
 **API này chỉ đọc / ghi MoneyToHome. Nó chưa tạo kết nối tới VM, không đăng nhập EarnApp và không tự rút tiền trên EarnApp.**
 
-Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.5.1). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
+Hợp đồng đầy đủ: [docs/ops-api/openapi.json](../ops-api/openapi.json) (bản 1.9.0). Thiết kế: [docs/superpowers/specs/2026-10-21-ops-api-design.md](../superpowers/specs/2026-10-21-ops-api-design.md)
 và [2026-10-23-totp-ai-approval-design.md](../superpowers/specs/2026-10-23-totp-ai-approval-design.md).
 
 **Bổ sung 1.3.0 (23/10 tối):** [Kho / batch / CLI TOTP](ai-stock-batch.md) là hướng dẫn hiện hành cho ACCOUNT_OPS, proxy / SDK từ kho, duyệt CLI hoặc web và lô có kết quả từng phần. Chủ tạo token **90 ngày** trong UI: READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; **không PAYOUT / RECEIPT**. Các ví dụ payout bên dưới chỉ mô tả API cho người đã được cấp quyền tương ứng, không phải quyền của token vận hành này.
+
+## Rút gọn + phiên duyệt 15 phút — quyết định chủ 28/10/2026 (OpenAPI 1.9.0; thay phần duyệt status / receipts / members bên dưới)
+
+- **Lệnh nào còn cần duyệt:**
+  - Chỉ **`withdrawals/prepare`** (WITHDRAWAL_PREPARE) còn cần ADMIN duyệt.
+  - `withdrawals/{id}/status`, `withdrawals/{id}/receipts`, `withdrawals/{id}/members` và các lệnh mới chạy thẳng.
+  - Vẫn kiểm token, scope, quyền user / server, revision / lượt và ghi `OpsAudit`.
+  - Lệnh cũ của các route này đang PENDING: `retry <key>` cùng key / body thì chạy thẳng.
+- **Phiên duyệt 15 phút** (`OpsApprovalSession`):
+  - **Mở từ AI:** chủ gõ mã TOTP trong chat, AI chạy `node scripts/ops-client.mjs session-open --admin <username> --totp-stdin` và đưa mã qua stdin. Lệnh gọi `POST approval-sessions {projectId, admin, totp}`.
+    - Không ghi mã vào journal, log, đối số hay màn hình. `--totp <mã>` cũng được nhưng lộ mã trong danh sách tiến trình.
+    - Kiểm tra như confirm: ADMIN của dự án, đã bật 2FA, chống dùng lại cùng bước mã, sai 3 lần thì khoá ADMIN 30 phút.
+  - **Mở từ web:** trang Phê duyệt có "Mở phiên 15 phút" (chọn token, nhập mã của mình) và "Khóa phiên ngay".
+  - **Trong phiên:** `prepare` của đúng token + dự án được duyệt ngay. Dòng `OpsApproval` vẫn được tạo (APPROVED → CONSUMED, `sessionId`).
+    - Mở phiên cũng duyệt luôn các lệnh PENDING còn hạn của token đó.
+    - Mở phiên mới thì phiên cũ của token đóng, 15 phút tính lại.
+  - **Phiên mất hiệu lực ngay** khi người mở mất ADMIN / 2FA / bị vô hiệu hoá / đặt lại 2FA, hoặc token bị thu hồi.
+  - **Đóng phiên:** `session-close` (`POST approval-sessions/close`) hoặc "Khóa phiên ngay". Duyệt theo phiên mà chưa dùng thì hết hiệu lực.
+  - `session` / `GET me` trả `approvalSession {open, expiresAt, approvedBy}`.
+  - Trang Phê duyệt có "Duyệt tất cả đang chờ" bằng một mã.
+- **Ghi tiền về** `POST withdrawals/{id}/receipts`:
+  - `amount` = đúng số thấy trong PayPal; số này thường thấp hơn số rút vì phí.
+  - `settleRemainder: true` chốt phần còn lại là phí / thiếu trong cùng lệnh. Chỉ gửi khi đã đọc đúng số trong PayPal; mặc định false.
+  - Ai có RECEIPT (+ PAYPAL_RECEIPT_RECORD) dùng được; SETTLE riêng vẫn chỉ người có quyền ghi tiền trên web.
+- **Sửa sai** (PAYOUT, không duyệt; body có `projectId, vmId, expectedCycle, earnAppAccountId, expectedRequestRevision`):
+  - `POST withdrawals/{id}/edit`: `paypalEmailId` / `amount` / `requestedAt` / `reference` / `note`. Yêu cầu đã gửi thì cần `note`.
+  - `POST withdrawals/{id}/unsend`: bỏ "Đã rút", về PREPARING.
+  - `POST withdrawals/{id}/void {reason}`: xoá ghi nhầm. Ảnh chụp lưu trong `EarnPayoutRequestVoid`; email trả kho.
+  - Đã có tiền về (kể cả khoản đã thu hồi) → **409 `EMAIL_HAS_MONEY`**, không đổi gì.
+- **EarnApp bị SUS:** `POST vms/{id}/suspended {projectId, expectedCycle, expectedVmRevision?, note}` (VM_OPS, không duyệt).
+  - `vms/{id}/status` SUSPENDED chạy cùng lệnh.
+  - Yêu cầu đã gửi chưa về đủ → `LOST_SUS` + `lostAmount`; yêu cầu chưa gửi → xoá ghi nhầm.
+  - Email PP của EarnApp rời kho. VM vào Chờ tạo lại.
+  - Tiền về muộn vẫn ghi `receipts` được.
+- **Đọc theo email nhận:** `GET withdrawals?projectId=…&email=<email>` lọc yêu cầu theo email nhận. Dùng cho việc quét mail PayPal về sau; việc quét mail chưa được xây.
+- **Tạo lại hàng loạt** nằm trên web (Chờ tạo lại → Tạo lại N VM / Ghi nhận đã tạo lại N VM). Fleet `RECREATE_VM` vẫn ghi nhận qua `POST vms/{id}/recreated`.
 
 ## Quy tắc hiện hành — quyết định chủ 24/10/2026
 

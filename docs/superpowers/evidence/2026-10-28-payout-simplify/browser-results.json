@@ -1,0 +1,505 @@
+{
+  "date": "2026-10-28",
+  "server": "next start (production build) on 127.0.0.1:3037",
+  "database": "local 127.0.0.1:55432/payout_simple_ui_20261028 (dedicated, dropped after the run)",
+  "browser": "Chrome (playwright-core, headless)",
+  "total": 89,
+  "passed": 89,
+  "failed": 0,
+  "jsErrors": [],
+  "harnessCorrections": [
+    "B: getByLabel(\"Đổi email\") does not match a <label> wrapping a <select> (accessible name includes the selected option); selector changed to label:has-text, flow rerun from the SENT state",
+    "Bulk: suggested PayPal had one slot left today, the panel flagged two rows over the 2-email limit; script now picks PP-thử-3 for those rows by hand",
+    "Report panel selector .pr-detail is from the older panel; uses the dialog role now",
+    "Phone: the Tiền VM cell sits behind the sticky columns of the sideways-scrolling table; the frame is opened from the VM panel (Tổng quan) on 390px",
+    "First C run counted the always-present \"Đã xoá do ghi nhầm\" heading before any void; replaced by the explicit (1) count check after B"
+  ],
+  "checks": [
+    {
+      "name": "A Rút holds one email in one click (PREPARING, hold set)",
+      "pass": true,
+      "detail": {
+        "submission": "PREPARING"
+      }
+    },
+    {
+      "name": "A Đã rút → SENT",
+      "pass": true
+    },
+    {
+      "name": "A receipt amount field starts empty",
+      "pass": true
+    },
+    {
+      "name": "A fee shown = 1.60",
+      "pass": true,
+      "detail": "Phí (rút − thực nhận): $1,60"
+    },
+    {
+      "name": "A \"Chốt luôn, phần thiếu là phí\" ticked by default",
+      "pass": true
+    },
+    {
+      "name": "A receipt recorded once with exact amount 18.40",
+      "pass": true,
+      "detail": "18.40"
+    },
+    {
+      "name": "A VM appears in Chờ tạo lại filter",
+      "pass": true
+    },
+    {
+      "name": "C SUS: request LOST_SUS with lostAmount 12",
+      "pass": true,
+      "detail": {
+        "id": "cmvsb2cip001h18xm4dneo6s5",
+        "submission": "SENT",
+        "state": "LOST_SUS",
+        "paypalEmailId": "cmvsaz3l9000tei9yorlioopj",
+        "amount": "12.00",
+        "lostAmount": "12.00"
+      }
+    },
+    {
+      "name": "C SUS: email archived (gone from stock)",
+      "pass": true
+    },
+    {
+      "name": "C SUS: VM status SUSPENDED",
+      "pass": true
+    },
+    {
+      "name": "C SUS VM in Chờ tạo lại",
+      "pass": true
+    },
+    {
+      "name": "C \"Mất do SUS\" filter lists the VM",
+      "pass": true
+    },
+    {
+      "name": "C report shows Mất do SUS total $12",
+      "pass": true,
+      "detail": "Mất do SUS\n$12.00\nKhông tính vào tiền chờ về hay thực nhận."
+    },
+    {
+      "name": "B Sửa đổi email: request on new email, still SENT",
+      "pass": true,
+      "detail": {
+        "state": "REQUESTED",
+        "submission": "SENT"
+      }
+    },
+    {
+      "name": "B Sửa: old email back to stock (no hold, not used)",
+      "pass": true,
+      "detail": {
+        "id": "cmvsaz3l6000nei9y6q0nvjql",
+        "holdEarnAppId": null,
+        "usedEarnAppId": null,
+        "archivedAt": null
+      }
+    },
+    {
+      "name": "B Sửa: new email bound",
+      "pass": true
+    },
+    {
+      "name": "B Bỏ \"Đã rút\" → PREPARING",
+      "pass": true
+    },
+    {
+      "name": "B Bỏ on PREPARING: request removed, void snapshot kept",
+      "pass": true,
+      "detail": {
+        "voided": "1"
+      }
+    },
+    {
+      "name": "B Bỏ: email back to stock",
+      "pass": true,
+      "detail": {
+        "id": "cmvsaz3la000vei9yxrjf9ec7",
+        "holdEarnAppId": null,
+        "usedEarnAppId": null,
+        "archivedAt": null
+      }
+    },
+    {
+      "name": "Bulk Rút: daily limit 2 emails/PP enforced in the draft (rows over the limit flagged)",
+      "pass": true,
+      "detail": 2
+    },
+    {
+      "name": "Bulk Rút: three different emails held (two picked by hand after the daily-limit flag)",
+      "pass": true,
+      "detail": 3
+    },
+    {
+      "name": "Bulk Rút 3 VM → 3 PREPARING requests",
+      "pass": true,
+      "detail": [
+        "PREPARING",
+        "PREPARING",
+        "PREPARING"
+      ]
+    },
+    {
+      "name": "Bulk \"Đã rút N dòng\" label shows 3",
+      "pass": true
+    },
+    {
+      "name": "Bulk Đã rút 3 dòng → SENT",
+      "pass": true
+    },
+    {
+      "name": "Bulk receipt field empty for Moon-thử / VM_004",
+      "pass": true
+    },
+    {
+      "name": "Bulk receipt field empty for An-thử / VM_001",
+      "pass": true
+    },
+    {
+      "name": "Bulk receipt field empty for An-thử / VM_002",
+      "pass": true
+    },
+    {
+      "name": "Bulk per-row fee (11 − 10.20 = 0.80)",
+      "pass": true,
+      "detail": "$0,80"
+    },
+    {
+      "name": "Bulk Tiền đã về 3 dòng: each exact amount recorded once",
+      "pass": true,
+      "detail": [
+        "10.20",
+        "12.10",
+        "13.05"
+      ]
+    },
+    {
+      "name": "Chờ tạo lại lists A, C (SUS) and the 3 bulk VMs",
+      "pass": true,
+      "detail": [
+        "Chọn An-thử / VM_001",
+        "Chọn An-thử / VM_002",
+        "Chọn Moon-thử / VM_001",
+        "Chọn Moon-thử / VM_003",
+        "Chọn Moon-thử / VM_004"
+      ]
+    },
+    {
+      "name": "No enrolled server: fleet \"Tạo lại\" sends nothing, 5 VMs listed to recreate by hand",
+      "pass": true
+    },
+    {
+      "name": "Confirmation dialog lists VM counts per server",
+      "pass": true,
+      "detail": "Ghi nhận đã tạo lại 5 VM? Ghi nhận không hoàn tác được.\n\nAn-thử: 2 VM\nMoon-thử: 3 VM\nQuay lại\nXác nhận ghi nhận đã tạo lại 5 VM"
+    },
+    {
+      "name": "Ghi nhận đã tạo lại 5 VM: 5 VMs now round 2",
+      "pass": true
+    },
+    {
+      "name": "No fleet command created",
+      "pass": true,
+      "detail": "0"
+    },
+    {
+      "name": "Report lists \"Đã xoá do ghi nhầm (1)\"",
+      "pass": true
+    },
+    {
+      "name": "Approvals: \"Duyệt tất cả đang chờ\" approves 2 with one code",
+      "pass": true
+    },
+    {
+      "name": "Approvals: \"Mở phiên 15 phút\" opens one WEB session of 900 s",
+      "pass": true,
+      "detail": {
+        "via": "WEB",
+        "closedAt": null,
+        "secs": 900
+      }
+    },
+    {
+      "name": "Approvals: \"Khóa phiên ngay\" closes the session",
+      "pass": true
+    },
+    {
+      "name": "Approvals: no session listed after closing",
+      "pass": true
+    },
+    {
+      "name": "light theme chosen in Thiết lập → Giao diện",
+      "pass": true
+    },
+    {
+      "name": "light desktop report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        1280,
+        1280
+      ]
+    },
+    {
+      "name": "light desktop report panel opens",
+      "pass": true
+    },
+    {
+      "name": "light desktop report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "light desktop payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 701,
+        "w": 380
+      }
+    },
+    {
+      "name": "light desktop servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "light phone report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        390,
+        390
+      ]
+    },
+    {
+      "name": "light phone report panel opens",
+      "pass": true
+    },
+    {
+      "name": "light phone report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "light phone payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 28,
+        "w": 334
+      }
+    },
+    {
+      "name": "light phone servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "dark theme chosen in Thiết lập → Giao diện",
+      "pass": true
+    },
+    {
+      "name": "dark desktop report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        1280,
+        1280
+      ]
+    },
+    {
+      "name": "dark desktop report panel opens",
+      "pass": true
+    },
+    {
+      "name": "dark desktop report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "dark desktop payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 701,
+        "w": 380
+      }
+    },
+    {
+      "name": "dark desktop servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "dark phone report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        390,
+        390
+      ]
+    },
+    {
+      "name": "dark phone report panel opens",
+      "pass": true
+    },
+    {
+      "name": "dark phone report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "dark phone payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 28,
+        "w": 334
+      }
+    },
+    {
+      "name": "dark phone servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "golden theme chosen in Thiết lập → Giao diện",
+      "pass": true
+    },
+    {
+      "name": "golden desktop report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        1280,
+        1280
+      ]
+    },
+    {
+      "name": "golden desktop report panel opens",
+      "pass": true
+    },
+    {
+      "name": "golden desktop report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "golden desktop payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 701,
+        "w": 380
+      }
+    },
+    {
+      "name": "golden desktop servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "golden phone report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        390,
+        390
+      ]
+    },
+    {
+      "name": "golden phone report panel opens",
+      "pass": true
+    },
+    {
+      "name": "golden phone report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "golden phone payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 28,
+        "w": 334
+      }
+    },
+    {
+      "name": "golden phone servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "bronze theme chosen in Thiết lập → Giao diện",
+      "pass": true
+    },
+    {
+      "name": "bronze desktop report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        1280,
+        1280
+      ]
+    },
+    {
+      "name": "bronze desktop report panel opens",
+      "pass": true
+    },
+    {
+      "name": "bronze desktop report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "bronze desktop payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 701,
+        "w": 380
+      }
+    },
+    {
+      "name": "bronze desktop servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "bronze phone report: no horizontal overflow",
+      "pass": true,
+      "detail": [
+        390,
+        390
+      ]
+    },
+    {
+      "name": "bronze phone report panel opens",
+      "pass": true
+    },
+    {
+      "name": "bronze phone report panel: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "bronze phone payout frame inside viewport",
+      "pass": true,
+      "detail": {
+        "x": 28,
+        "w": 334
+      }
+    },
+    {
+      "name": "bronze phone servers page with frame: no horizontal page overflow",
+      "pass": true
+    },
+    {
+      "name": "Report bulk setup: Rút again on a VM whose mistaken request was voided",
+      "pass": true
+    },
+    {
+      "name": "Report page: \"Đã rút 1 dòng\" → SENT",
+      "pass": true
+    },
+    {
+      "name": "Report page receipt field empty",
+      "pass": true
+    },
+    {
+      "name": "Report page receipt: settle ticked by default",
+      "pass": true
+    },
+    {
+      "name": "Report page: \"Tiền đã về 1 dòng\" records 9.55 once",
+      "pass": true,
+      "detail": {
+        "id": "cmvsbbetd007f18xmp6657akr",
+        "submission": "SENT",
+        "state": "REQUESTED",
+        "received": "9.55"
+      }
+    },
+    {
+      "name": "Report page receipt (settled) → VM in Chờ tạo lại",
+      "pass": true
+    }
+  ]
+}

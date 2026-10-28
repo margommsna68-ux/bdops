@@ -2,6 +2,64 @@
 
 Luồng: **Theo dõi VM → chọn PayPal nhận tiền → ghi yêu cầu rút EarnApp → xác nhận tiền thực về PayPal → ghi nhận tạo lại VM** (giữ mã VM, giữ proxy còn hợp lệ).
 
+## Rút gọn, sửa được, SUS, Chờ tạo lại — 28/10/2026 (thay các mục rút bên dưới khi khác)
+
+Thiết kế `docs/superpowers/specs/2026-10-28-payout-simplify-design.md`; kiểm `docs/superpowers/evidence/2026-10-28-payout-simplify/`.
+
+**Một khung Rút về PayPal** dùng chung cho ô Tiền VM, khung VM (Tổng quan) và trang Rút EarnAp. Khung này thay `PayoutStatusActions` và các form rút cũ.
+
+**Rút → Đã rút → Tiền đã về**
+- **Rút** giữ ngay một email theo gợi ý trong cùng lệnh: yêu cầu `PREPARING`, email bị giữ và tính suất ngày.
+  - Số tiền mặc định = Tiền VM của SDK hiện tại, sửa được.
+  - Đóng khung mà chưa bấm gì thì email vẫn giữ, yêu cầu hiện "Đang rút, chưa xác nhận". Không tự nhả theo thời gian.
+- **Đã rút** chuyển yêu cầu sang `SENT` ngay. Bấm nút chính là lời xác nhận; không còn ô tick "đã thấy trong lịch sử".
+- **Tiền đã về**:
+  - Ô **"Số tiền chính xác trong PayPal"** để trống và bắt buộc nhập: ghi đúng số thấy trong PayPal. Số này thường thấp hơn số đã rút vì phí.
+  - Bên cạnh hiện phí = số rút − số thực nhận. Ngày mặc định là hôm nay (giờ Bangkok); mã giao dịch không bắt buộc.
+  - **"Chốt luôn, phần thiếu là phí"** tick sẵn: cùng lệnh ghi khoản về và chốt phần thiếu là phí, ai có quyền ghi tiền về đều dùng được.
+  - Lệnh "Chốt nhận thiếu" riêng sau đó vẫn cần quyền ghi tiền.
+  - Sổ PayPal và luật chống trùng khoản về không đổi.
+- **Nhãn trạng thái:** Đang rút, chưa xác nhận → Đã rút, chờ tiền → Đã về / Về thiếu (đã chốt) / **Mất do SUS** / Thất bại. `UNKNOWN` hiện "Chưa rõ đã rút chưa".
+
+**Sửa sai** (trước khi có khoản tiền về; mỗi lệnh kiểm revision / VM / lượt / EarnApp, có history và journal)
+- **Sửa** đổi email nhận (kéo theo mã PP), số tiền, ngày rút, mã tham chiếu.
+  - Yêu cầu đã rút thì bắt buộc lý do.
+  - Email mới phải còn dùng được và còn suất ngày, tính theo ngày ghi "Đã rút".
+  - Email cũ chưa nhận tiền thì về kho: bỏ giữ, bỏ đánh dấu đã dùng, bỏ suất ngày.
+  - Email đã có tiền về thì không đổi được (`EMAIL_HAS_MONEY`).
+  - Số tiền vẫn sửa được sau khi đã về một phần, kèm lý do.
+- **Bỏ "Đã rút"**: `SENT` / `UNKNOWN` → `PREPARING`. Email vẫn giữ; binding và suất của lần gửi được gỡ nếu chưa có tiền.
+- **Bỏ** (trên yêu cầu chưa gửi) = **Xoá ghi nhầm**:
+  - Yêu cầu bị xoá; toàn bộ ảnh chụp lưu ở `EarnPayoutRequestVoid` và hiện ở mục "Đã xoá do ghi nhầm".
+  - Email trả kho, suất ngày được trả. VM tạo yêu cầu mới được.
+  - Không xoá được khi đã có receipt (kể cả đã thu hồi), còn thành viên gộp, hoặc đã dùng để tạo lại.
+- Đây là quyết định mới của chủ, thay luật 18/10 "email đã cấp không bao giờ nhả": email chỉ nhả khi là ghi nhầm và chưa nhận tiền.
+
+**EarnApp bị SUS** (nút trong khung; chọn SUS ở ô Tình trạng, ghi hàng loạt hay AI `vms/{id}/status` SUSPENDED đều chạy cùng lệnh; cần quyền ghi tình trạng)
+- VM chuyển SUS. Yêu cầu đã gửi chưa về đủ thành `LOST_SUS` ("Mất do SUS"):
+  - `lostAmount` = phần còn chờ.
+  - Không tính vào chờ về / thực nhận ở Tổng quan, trang Rút EarnAp hay báo cáo.
+  - Có bộ lọc và tổng "Mất do SUS".
+- Yêu cầu chưa gửi bị xoá ghi nhầm.
+- Email PayPal của EarnApp đó rời kho (`archivedAt`) và không cấp lại.
+- Tiền về muộn vẫn ghi "Tiền đã về" được trên yêu cầu `LOST_SUS`.
+- VM SUS từ trước bản này mà còn lệnh chờ hiện ở bộ lọc **"SUS còn chờ tiền"**; bấm "EarnApp bị SUS" một lần để đóng.
+
+**Chờ tạo lại** (bộ lọc tiền `money=RECREATE`, đổi tên từ "Cần tạo lại VM") = tiền lượt này về đủ hoặc đã chốt, hoặc VM SUS (kể cả thành viên gộp).
+- Chọn dòng rồi bấm **"Tạo lại N VM"**:
+  - VM thuộc server nối điều khiển (`FLEET_CONTROL_SERVERS`): mỗi VM một lệnh `RECREATE_VM`.
+  - VM khác được liệt kê "Tạo tay"; tạo lại trên máy thật rồi bấm **"Ghi nhận đã tạo lại N VM"** (mỗi VM một lệnh `recordRecreated`, kết quả từng dòng).
+  - Luôn có một hộp xác nhận ghi số VM theo từng server; không giới hạn số VM / server.
+  - Chưa đọc được danh sách server nối điều khiển thì không mở phần nào (đóng an toàn).
+- Sau tạo lại: lượt mới, Chưa cài, proxy tốt giữ lại, EarnApp cũ đóng. Tài khoản và email mới lấy theo luồng làm VM, không tự gán.
+
+**Hàng loạt.** Server/VM → chọn dòng → **Rút về PayPal** có ba tab:
+- **Rút N VM**: mỗi dòng giữ một email khác nhau. Các dòng vượt 2 email/PP/ngày bị đánh dấu; chọn PP khác.
+- **Đã rút N dòng.**
+- **Tiền đã về N dòng**: mỗi dòng một ô số thực nhận, phí từng dòng, ô chốt chung.
+
+Trang Rút EarnAp cũng có chọn dòng → "Đã rút N dòng" / "Tiền đã về N dòng". Mỗi dòng một lệnh riêng; lệnh mất phản hồi được gửi lại đúng key / body cũ.
+
 ## Giới hạn email rút mỗi ngày — 26/10/2026
 
 Mỗi mã PayPal dùng tối đa **2 email khác nhau/ngày**, tính chung mọi server và người/AI vận hành trong dự án. Ngày tính từ 00:00 theo giờ Việt Nam, bằng đồng hồ máy chủ; ngày yêu cầu hoặc giờ quan sát do người dùng nhập không đổi hạn mức.

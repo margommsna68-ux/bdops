@@ -80,6 +80,32 @@ APPROVED → client tự retry key gốc đã liên kết; nếu cần `retry <k
 
 Sai 3 mã khoá ADMIN 30 phút; 5 lần confirm sai khoá approval LOCKED; không thử mã tự động. Gate lệnh gốc: REJECTED/LOCKED → 403 APPROVAL_REJECTED (details.status LOCKED); hết hạn → 410 APPROVAL_EXPIRED, cùng key vẫn hết hạn. Chỉ xin lại bằng key mới khi chủ còn yêu cầu, đã đối chiếu phần đã ghi. Đổi lượt/mất job lúc chờ vẫn bị service từ chối sau duyệt.
 
+## 5a. Rút tiền gọn và phiên duyệt — chủ quyết định 28/10/2026 (OpenAPI 1.9.0; thay mục 5 khi khác)
+
+Phần này chỉ áp dụng khi token được chủ cấp PAYOUT / RECEIPT. Token vận hành thường vẫn không gọi lệnh tiền.
+
+- **Chỉ `withdrawals/prepare` cần duyệt.** `status`, `receipts`, `members`, `edit`, `unsend`, `void`, `vms/{id}/suspended` chạy thẳng theo quyền hiện tại. Lệnh cũ đang chờ duyệt của các route này: `retry <key>` cùng key / body.
+- **Phiên duyệt 15 phút:**
+  - Chủ gõ mã Google Authenticator trong chat. AI chạy ngay `node scripts/ops-client.mjs session-open --admin <username> --totp-stdin` và đưa mã qua stdin.
+  - Không ghi mã vào tệp, log, journal, đối số hay báo cáo; không dùng lại mã. Mã sai: báo chủ, không thử lại tự động (sai 3 lần khoá ADMIN 30 phút).
+  - Trong phiên, `prepare` của token này chạy ngay. `session` hoặc `me` cho biết `approvalSession.open/expiresAt`.
+  - Xong việc hoặc khi chủ bảo dừng: `session-close`. Hết phiên thì `prepare` lại trả 202 như cũ.
+- **Luồng:**
+  - `prepare` (giữ email) → rút thật trên EarnApp → `status SUBMITTED_ON_EARNAPP`.
+  - Khi thấy tiền trong PayPal: `receipts` với **đúng số thực nhận** (thường thấp hơn số rút vì phí) và mã giao dịch.
+  - Kèm `settleRemainder:true` chỉ khi đã đọc đúng số trong PayPal, để chốt phần thiếu là phí. Không ghi tiền về khi chưa thấy tiền thật.
+- **Sửa sai trước khi có tiền về:**
+  - `edit` đổi email / số tiền / ngày / tham chiếu; yêu cầu đã gửi thì cần `note`.
+  - `unsend` bỏ "Đã rút". `void {reason}` xoá yêu cầu ghi nhầm, email trả kho.
+  - Đã có tiền về → 409 `EMAIL_HAS_MONEY`: dừng và báo chủ, không ép bằng key mới.
+- **EarnApp bị SUS:** `POST vms/{id}/suspended {projectId, expectedCycle, note}` hoặc status SUSPENDED.
+  - Phần chưa về thành "Mất do SUS", email PP rời kho, VM vào **Chờ tạo lại**.
+  - Tiền về muộn vẫn ghi `receipts`.
+- **Tạo lại VM:**
+  - Chỉ khi chủ giao. Người bấm "Tạo lại N VM" / "Ghi nhận đã tạo lại N VM" trên web; fleet `RECREATE_VM` ghi qua `vms/{id}/recreated`.
+  - Không tự tạo lại khi tiền về hay khi SUS.
+- **Quét mail PayPal (sau này):** `GET withdrawals?projectId=…&email=<email nhận>` tìm yêu cầu theo email. Việc quét mail chưa được giao.
+
 ## 6. Lô lệnh
 
 `batch <file.json>` gửi POST batch, outer key và `{projectId,items:[{method:"POST",path,body,idempotencyKey}]}`. 1–100 mục, item key khác nhau, path tương đối API; không batch lồng/confirm trong lô. Không ghép lệnh phụ thuộc ID/revision chưa biết: hold trước, đọc lại rồi dùng kết quả.
