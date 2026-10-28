@@ -1,0 +1,46 @@
+[
+ {
+  "name": "hint shown on CURRENT search",
+  "pass": true,
+  "detail": "IP này không còn ở tab Đang quản lý, chỉ còn trong lịch sử: 192.0.2.103:5432 · Đã replace bằng 198.51.100.123 Xem lịch sử Mở tab Lịch sử IP"
+ },
+ {
+  "name": "no data rows on CURRENT",
+  "pass": true
+ },
+ {
+  "name": "url switched to history view with query kept",
+  "pass": true,
+  "detail": "http://localhost:3010/infrastructure/proxies?q=192.0.2.103&tab=history"
+ },
+ {
+  "name": "history tab selected",
+  "pass": true
+ },
+ {
+  "name": "replaced row listed",
+  "pass": true
+ },
+ {
+  "name": "no hint on HISTORY view",
+  "pass": true
+ },
+ {
+  "name": "full proxy paste gives hint without credentials",
+  "pass": true
+ },
+ {
+  "name": "unknown IP: no hint",
+  "pass": true
+ },
+ {
+  "name": "phone width: hint fits",
+  "pass": true,
+  "detail": "{\"x\":37,\"y\":1433,\"width\":318,\"height\":162}"
+ },
+ {
+  "name": "no page errors",
+  "pass": true,
+  "detail": ""
+ }
+]
