@@ -66,6 +66,13 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(['COST','FUND','WITHDRAWAL'].includes(image.resource))for(const state of [image.after,image.before])if(state?.date)await assertPeriodOpen(tx,projectId,new Date(String(state.date)),String(state.currency));
  if(['TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))for(const state of [image.after,image.before]){const date=state?.receivedAt||state?.date;if(date)await assertPeriodOpen(tx,projectId,new Date(String(date)),'USDT');}
  if(image.resource==='PROFIT'&&image.after.settled)throw new ProxyDomainError('INVALID_INPUT','Kỳ đã chốt; không hoàn tác thông thường');
+ // Removed by the undone operation (28/10/2026): a mistaken payout request comes back from its void snapshot; a receiving-email period
+ // of a mistaken email is recreated from its image.
+ if((image.after as unknown)===null&&image.before){
+  if(image.resource==='PAYOUT_REQUEST'){const {restoreVoidedRequest}=await import('../vm-ops/payout-fix');await restoreVoidedRequest(tx,projectId,image.id);return;}
+  if(image.resource==='PAYOUT'){const b=image.before;await tx.earnAppPayout.create({data:{id:image.id,projectId,earnAppId:String(b.earnAppId),paypalId:(b.paypalId as string|null)??null,paypalEmailId:(b.paypalEmailId as string|null)??null,vmId:(b.vmId as string|null)??null,startedAt:new Date(String(b.startedAt)),endedAt:b.endedAt?new Date(String(b.endedAt)):null}});return;}
+  throw new ProxyDomainError('INVALID_INPUT');
+ }
  // Facts that never go back (19/10/2026): an email given to its first EarnApp stays used forever, with or without money on it; a
  // recorded recreation keeps its closed round, its closed EarnApp and the used receipt (see operation-history/undo-rules.ts).
  if(image.resource==='PAYPAL_EMAIL'&&image.after.usedEarnAppId&&!image.before?.usedEarnAppId)throw new ProxyDomainError('INVALID_INPUT','Email PayPal đã cấp cho EarnApp giữ dấu đã dùng vĩnh viễn; dùng Bỏ gán thay vì hoàn tác');

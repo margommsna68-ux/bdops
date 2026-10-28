@@ -26,12 +26,12 @@ import {assertMembersFree,attachMembers,linkMergedSdks,type MemberInput} from '.
 type Tx=Prisma.TransactionClient;
 const D=(v:Prisma.Decimal.Value)=>new Prisma.Decimal(v);
 const currencyOf=(c:string)=>{const v=c.trim().toUpperCase();if(!LEDGER_CURRENCY.test(v))throw new ProxyDomainError('INVALID_INPUT','Đồng tiền là mã 3–5 chữ cái (USD, USDT, VND…)');return v;};
-const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
+export const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
 // A history line keeps its kind next to the full text: the full text (amounts, corrections, shortfall, notes) is shown only with the
 // money rights; everyone else gets the operating milestone of the kind.
-export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED'|'PREPARED'|'SENT'|'UNKNOWN'|'RECEIPT'|'MEMBERS';
+export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED'|'PREPARED'|'SENT'|'UNKNOWN'|'RECEIPT'|'MEMBERS'|'EDIT'|'UNSEND'|'VOID';
 export const historyEntry=(by:string,kind:PayoutHistoryKind,what:string)=>({at:new Date().toISOString(),by,kind,what});
-const NEUTRAL:Record<PayoutHistoryKind,string>={REQUESTED:'Ghi yêu cầu rút',CORRECT:'Sửa yêu cầu rút',FAILED:'Đánh dấu thất bại',CANCELLED:'Đánh dấu huỷ',RETRY:'Gửi lại (cùng lượt rút)',SETTLE:'Chốt nhận thiếu',CONSUMED:'Dùng để ghi tạo lại VM',PREPARED:'Chuẩn bị rút (giữ email)',SENT:'Đã gửi trên EarnApp',UNKNOWN:'Chưa xác định kết quả gửi',RECEIPT:'Ghi tiền về PP',MEMBERS:'Cập nhật VM gộp'};
+const NEUTRAL:Record<PayoutHistoryKind,string>={REQUESTED:'Ghi yêu cầu rút',CORRECT:'Sửa yêu cầu rút',FAILED:'Đánh dấu thất bại',CANCELLED:'Đánh dấu huỷ',RETRY:'Gửi lại (cùng lượt rút)',SETTLE:'Chốt nhận thiếu',CONSUMED:'Dùng để ghi tạo lại VM',PREPARED:'Chuẩn bị rút (giữ email)',SENT:'Đã gửi trên EarnApp',UNKNOWN:'Chưa xác định kết quả gửi',RECEIPT:'Ghi tiền về PP',MEMBERS:'Cập nhật VM gộp',EDIT:'Sửa yêu cầu rút',UNSEND:'Bỏ "Đã rút"',VOID:'Đã xoá do ghi nhầm'};
 // Lines written before 19/10/2026 carry no kind: it is read from the fixed start of the text (never from the amounts).
 const LEGACY:[string,PayoutHistoryKind][]=[['Ghi yêu cầu rút','REQUESTED'],['Sửa','CORRECT'],['Thất bại','FAILED'],['Huỷ','CANCELLED'],['Gửi lại','RETRY'],['Chốt nhận','SETTLE'],['Dùng để ghi tạo lại VM','CONSUMED']];
 export function neutralHistory(h:{kind?:string;what:string}){const kind=(h.kind&&h.kind in NEUTRAL?h.kind:LEGACY.find(([p])=>h.what.startsWith(p))?.[1]) as PayoutHistoryKind|undefined;return kind?NEUTRAL[kind]:'Cập nhật yêu cầu rút';}
@@ -353,7 +353,11 @@ export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:P
   const logins=await db.gmailAccount.findMany({where:{id:{in:cycles.map(c=>c.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
   // Merged payout (27/10/2026): a request this VM was merged into is listed with its primary VM; it is acted on from the primary only.
   const primaries=new Map((await db.virtualMachine.findMany({where:{id:{in:requests.filter(r=>r.vmId!==vm.id).map(r=>r.vmId)}},select:{id:true,code:true,server:{select:{code:true}}}})).map(v=>[v.id,v.server.code+' / '+v.code]));
+  // Requests removed as mistaken (28/10/2026): kept as a full snapshot; the VM history still shows "Đã xoá do ghi nhầm".
+  const voids=await db.earnPayoutRequestVoid.findMany({where:{projectId:scope.projectId,vmId:vm.id},orderBy:{voidedAt:'desc'}});
   return {
+    voided:voids.map(v=>{const s=v.snapshot as {amount?:string;currency?:string;paypalCode?:string;email?:string};
+      return {id:v.id,requestId:v.requestId,cycle:v.cycle,at:v.voidedAt.toISOString(),by:who(v.voidedById),reason:v.reason,paypal:s.paypalCode??null,email:s.email??null,amount:money?s.amount??null:null,currency:money?s.currency??null:null};}),
     events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:hasServerScope(current)?null:e.note,detail:hasServerScope(current)?null:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
     cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:hasServerScope(current)?null:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
     // old = the request's account has left this VM or round: only reconciling it is offered (never on the account now on the VM).
