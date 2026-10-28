@@ -26,3 +26,9 @@ Owner: "bổ sung lại lịch sử trên sheet vào site, ví dụ proxy đó �
 - UI: the timeline previously printed only the event label (e.g. "Dùng cho VM") without the VM. Commit d78cb5a/02f2414 adds the
   event `reason` to the timeline API and panel (the existing "Vị trí đang ghi nhận" section stays). Typecheck/lint clean, history
   tests green, local Chrome check on the synthetic project (`ui-timeline.png`).
+
+## Release (timeline reasons)
+- Stage built from a copy of the live app (XgZG7S0KR9H2Ee-L97I4k, the fleet-ops release) + 3 files → BUILD_ID `sMeg0XBUQACAlFGkIiTGc`,
+  deployed 28/10/2026 14:18 Bangkok by `tools\deploy-proxy-timeline.ps1` (no migration, 47 up to date); manifest + login 200;
+  rollback `D:\MoneyToHome\app-before-proxy-timeline-20261028`. Proxy / replacement counts unchanged by the deploy (payout count moved
+  16 → 19 from concurrent owner/operator activity, not this work).
