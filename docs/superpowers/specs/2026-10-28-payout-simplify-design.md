@@ -98,5 +98,13 @@ Nút **"EarnApp bị SUS"** ở khung tiền / khung VM (và lệnh AI tương �
 - Quyền giữ nguyên: ai làm được gì hôm nay (writeMoney / EARN_PAYOUT / PAYPAL_RECEIPT_RECORD / ASSIGN / MANAGE) vẫn vậy; SUS cần quyền ghi trạng thái VM; sửa / xoá ghi nhầm theo quyền như `CORRECT` hiện có cho người, `EARN_PAYOUT` cho AI. Người dùng giới hạn server chỉ thấy / làm VM trong phạm vi.
 - Chạy test bằng PowerShell (Git Bash làm hỏng 10 test CLI). Không quay video.
 
+## Bổ sung sau khi soát độc lập (28/10) — quyết định của người viết [builder]
+1. **SUS là một sự kiện, mọi đường đều đóng như nhau**: chọn SUS ở ô Tình trạng, ghi hàng loạt, hay AI `POST vms/{id}/status` SUSPENDED đều chạy cùng lệnh đóng SUS của mục 3 (cùng quyền ghi trạng thái VM). VM đã SUS từ trước bản này mà lệnh rút còn chờ: không tự chuyển; hiện ở bộ lọc "SUS còn chờ tiền" để bấm "EarnApp bị SUS" một lần.
+2. **Thất bại / Gửi lại giữ như hiện có** (EarnApp trả lệnh về / từ chối mà không SUS): khung có "Thất bại" và "Gửi lại" cho người có quyền ghi tiền; "Huỷ" trên lệnh chưa gửi = "Bỏ" (xoá ghi nhầm). Email / slot ngày khi Thất bại một lệnh đã gửi: giữ như hiện có.
+3. **Gỡ email khi sửa / bỏ / xoá không phân biệt ai đã gán**: email của yêu cầu được trả kho nếu chưa từng có khoản tiền nào về email đó cho EarnApp này, kể cả khi email đã gán qua "PayPal nhận" từ trước.
+4. **Số tiền yêu cầu vẫn sửa được sau khi đã có tiền về một phần** (như `CORRECT` hiện có, bắt buộc lý do); email / PP thì không.
+5. **Chốt thiếu giữ quyền như cũ**: chỉ người có quyền ghi tiền (writeMoney) thấy ô "Chốt luôn, phần thiếu là phí" (tick sẵn); AI và người chỉ có quyền ghi khoản nhận không chốt; API mặc định `settleRemainder=false`.
+6. **Ngày tính hạn mức 2 email khi sửa email**: ngày của lần ghi "Đã rút" (`submittedAt`, giờ server), không phải ngày rút người dùng sửa; sửa "ngày rút" chỉ đổi `requestedAt`.
+
 ## Để builder quyết
 Tên endpoint / action, bố cục khung, cách tách component, thứ tự migration, cách hiển thị số tiền mất do SUS trên Tổng quan, cách kiểm thử trình duyệt (dữ liệu giả, không đụng dữ liệu thật).
