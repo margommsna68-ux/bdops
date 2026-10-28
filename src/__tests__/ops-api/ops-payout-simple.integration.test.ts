@@ -121,6 +121,18 @@ describe('ops API: fix and SUS routes',()=>{
       expect((await db.earnPayoutRequest.findUniqueOrThrow({where:{id:a}})).settleNote).toBe('Nhận dư $0.06');
     }finally{await cleanupAll(f);}
   });
+  it('a surplus above max($1, 5%) answers 409 SURPLUS_CONFIRM; the same body with acceptSurplus:true records it (review 29/10/2026)',async()=>{
+    const f=await setup();try{
+      const t=await f.token(f.ai,ALL),email=(await f.pp('pp-82')).emails[0].id,a=await request(f,t,0,email,true,{amount:'20.04'});
+      const body=async(o:Record<string,unknown>={})=>({projectId:f.projectId,expectedRequestRevision:await reqRev(a),amount:'21.50',currency:'USD',receivedAt:new Date().toISOString(),transactionId:'TX-S-'+a.slice(-6),...o});
+      const r=await call('POST','withdrawals/'+a+'/receipts',{token:t,autoApprove:false,body:await body()});
+      expect(r.status).toBe(409);expect(r.json.error?.code).toBe('SURPLUS_CONFIRM');expect(r.json.error?.details).toMatchObject({surplus:'1.46',current:{phase:'WAITING'}});
+      expect(await db.fundTransaction.count({where:{payoutRequestId:a}})).toBe(0);
+      const ok=await call('POST','withdrawals/'+a+'/receipts',{token:t,autoApprove:false,body:await body({acceptSurplus:true})});
+      expect(ok.status,JSON.stringify(ok.json.error)).toBe(200);expect(ok.json.data.recorded).toMatchObject({amount:'21.50',settled:true,shortfall:'-1.46'});
+      expect((await db.earnPayoutRequest.findUniqueOrThrow({where:{id:a}})).settleNote).toBe('Nhận dư $1.46');
+    }finally{await cleanupAll(f);}
+  });
   it('web router: editPayout, unsendPayout, voidPayout, suspendEarnApp and payoutReceipt settleRemainder',async()=>{
     const f=await setup();try{
       const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'}} as unknown as Context);

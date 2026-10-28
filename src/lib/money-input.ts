@@ -9,16 +9,33 @@
 export type ParsedNumber={value:string|null;error:string|null};
 const UNIT=/^(\$|₫|đ|vnd|usdt|usd)|(\$|₫|đ|vnd|usdt|usd)$/i;
 export const US_DECIMAL_HINT='Dùng dấu . cho phần thập phân, ví dụ 12.18; dấu , chỉ để tách hàng nghìn (1,234.56)';
-export function parseMoneyNumber(text:string,opts:{fraction?:number;integer?:boolean}={}):ParsedNumber{
+/** Old Vietnamese-style VND ("420.000" = four hundred twenty thousand) typed after the switch to the US format (review 29/10/2026). */
+export const vndHint=(int:string,frac:string)=>'VND không có phần lẻ — '+int+'.'+frac+' là '+group(int.replace(/,/g,'')+frac)+'?';
+export const ambiguousCommaHint=(a:string,b:string)=>'Ghi rõ: '+a+b+' hoặc '+a+'.'+b;
+/**
+ * Options (review 29/10/2026):
+ * - `vnd`: a VND amount is whole đồng; any decimal part is refused, exactly 3 decimals ("420.000") with vndHint (old thousands dot).
+ * - `vndRate`: a VND rate (1 USDT = N VND, 1 USD PayPal = N VND) may have decimals but never exactly 3 (same old thousands dot).
+ * - `strictComma`: fields that allow more than 2 decimals (SDK money, unit prices, USDT): a lone "12,345" without a dot used to mean
+ *   12.345, so it is refused as ambiguous; "12,345.5" and "1,234,567" (several groups) stay valid.
+ */
+export interface MoneyParseOptions {fraction?:number;integer?:boolean;vnd?:boolean;vndRate?:boolean;strictComma?:boolean}
+/** Parse options of an amount in this currency for fields that allow more than 2 decimals (purchase totals / unit prices, costs). */
+export const amountOptions=(currency:string|null|undefined,fraction=8):MoneyParseOptions=>currency?.toUpperCase()==='VND'?{fraction,vnd:true}:{fraction,strictComma:true};
+export function parseMoneyNumber(text:string,opts:MoneyParseOptions={}):ParsedNumber{
   const fraction=opts.fraction??8;let t=text.trim().replace(/\s+/g,'');
   for(let i=0;i<2;i++)t=t.replace(UNIT,'');
   if(!t)return {value:null,error:null};
   if(t.startsWith('-'))return {value:null,error:'Không nhập số âm'};
   if(!/^[\d.,]+$/.test(t))return {value:null,error:'Chỉ nhập chữ số, dấu chấm (phần thập phân) và dấu phẩy (hàng nghìn)'};
   const dots=t.split('.').length-1;
+  if(dots>1&&(opts.vnd||opts.vndRate)&&/^\d{1,3}(\.\d{3})+$/.test(t))return {value:null,error:'VND không có phần lẻ — '+t+' là '+t.replace(/\./g,',')+'?'};
   if(dots>1)return {value:null,error:'Chỉ một dấu chấm, đứng trước phần thập phân (ví dụ 12.18)'};
   const [int,frac='']=t.split('.');
   if(frac.includes(',')||(int.includes(',')&&!/^[1-9]\d{0,2}(,\d{3})+$/.test(int)))return {value:null,error:US_DECIMAL_HINT};
+  if((opts.vnd||opts.vndRate)&&dots&&frac.length===3)return {value:null,error:vndHint(int,frac)};
+  if(opts.vnd&&dots)return {value:null,error:'VND không có phần lẻ; nhập số đồng nguyên (ví dụ 420,000)'};
+  if(opts.strictComma&&!dots&&/^\d{1,3},\d{3}$/.test(int)){const [a,b]=int.split(',');return {value:null,error:ambiguousCommaHint(a,b)};}
   if(opts.integer&&dots)return {value:null,error:'Nhập số nguyên, không có phần thập phân'};
   if(!int)return {value:null,error:'Thiếu phần nguyên trước dấu chấm (ví dụ 0.5)'};
   if(dots&&!frac)return {value:null,error:'Thiếu phần thập phân sau dấu chấm'};

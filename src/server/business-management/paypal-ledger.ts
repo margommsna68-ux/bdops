@@ -10,6 +10,7 @@ import {LEDGER_CURRENCY} from './types';
 import {isEmail} from '../account-store/parse';
 import {checkTransfer,moneyCents,centsText} from '@/lib/paypal-transfer';
 import {parseMoneyNumber} from '@/lib/money-input';
+import {requestPhase,settleLinkedSurplus} from '../vm-ops/payout-surplus';
 // PayPal ledger (18/10/2026). One book for money on the PayPal accounts, the same rows as Tiền vào PayPal (FundTransaction) and
 // Rút / chuyển (Withdrawal); Kho tài khoản reads it, nothing is copied into a second book.
 // - Money in = money actually received from outside (RECEIPT, status "đã nhận") + internal transfers in (the amount the receiving
@@ -103,8 +104,12 @@ export async function recordReceipts(scope:ActorScope,input:ReceiptInput&{key:st
       // Money for the payout request of that EarnApp through this same email, on or after the request day, belongs to it (that is
       // the evidence: same EarnApp, same email). Anything else stays unlinked; nothing is matched later by guessing.
       const req=e.earnApp?.payoutRequest,payoutRequestId=req&&req.paypalEmailId===e.id&&req.state!=='CANCELLED'&&req.submission==='SENT'&&r.date>=dayDate(dayText(req.requestedAt))?req.id:null; // only a request really sent on EarnApp takes money (20/10/2026)
+      const wasWaiting=payoutRequestId&&input.status==='RECEIVED'?await requestPhase(tx,payoutRequestId)==='WAITING':false;
       const f=await tx.fundTransaction.create({data:{payoutRequestId,projectId:scope.projectId,date:r.date,amount:D(row.amount!),currency:r.currency,transactionId:row.transactionId||'WEB-'+input.key+'-'+row.line,noTxId:!row.transactionId,confirmed:input.status==='RECEIVED',failed:false,company:'',paypalId:r.pp.id,paypalEmailId:e.id,earnAppId:e.earnApp?.id??null,vmId:e.earnApp?.vmId??null,serverId:e.earnApp?.vm?.serverId??null,entryKind:'RECEIPT',distinctConfirmed:(input.distinct||[]).includes(row.line),businessManaged:true,createdById:scope.userId}});
       await images.remember('FUND',f.id,true);
+      // Review 29/10/2026: a confirmed linked receipt that takes a waiting request a little above its amount (≤ max(1.00, 5%)) closes it
+      // as received with the surplus, like recordPayoutReceipt; a larger surplus stays "Cần đối chiếu" (REVIEW) for a person.
+      if(payoutRequestId&&wasWaiting)await settleLinkedSurplus(tx,images,payoutRequestId,current.userId,true);
       // A payment on an email is a use that later undo of its first assignment must not erase.
       if(!bumped.has(e.id)){bumped.add(e.id);await images.remember('PAYPAL_EMAIL',e.id);await tx.payPalEmail.update({where:{id:e.id},data:{revision:{increment:1}}});}
     }

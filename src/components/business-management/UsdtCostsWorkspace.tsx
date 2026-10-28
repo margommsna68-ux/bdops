@@ -1,5 +1,5 @@
 "use client";
-import {displayMoney,parseMoneyNumber,moneyInput,moneyNumber} from '@/lib/money-input';
+import {displayMoney,parseMoneyNumber,moneyInput,moneyNumber,amountOptions} from '@/lib/money-input';
 import {nextDueAfterPayment} from '@/server/proxy-management/package-terms';
 import {useEffect,useState} from 'react';
 import Link from 'next/link';
@@ -35,7 +35,7 @@ export function CostForm({projectId,row,source,preset,onClose,onSaved}:{projectI
  const packageDue=!row&&category==='IP_PROXY'&&pkgInfo&&advance?{proxyAccountId:pkgInfo.id,expectedRevision:pkgInfo.revision,nextDueDate:(dueDate||suggestedDue)||null}:null;
  const keyFor=useBusinessKey(),last=trpc.businessManagement.lastCashRate.useQuery({projectId,currency:form.currency},{enabled:form.currency.length>=3&&form.currency!=='USDT'&&form.currency!=='PPUSD'}),p2p=trpc.businessManagement.p2pQuote.useQuery({projectId,currency:form.currency==='PPUSD'?'VND':form.currency,side:form.currency==='PPUSD'?'BUY':side||'BUY'},{enabled:false,retry:false}),receipts=trpc.businessManagement.nettedChoices.useQuery({projectId},{enabled:treatment==='ALREADY_NETTED'});
  // US text in the fields ("420,000", "25,820", "16.27"; owner decision 28/10/2026), canonical numbers to the API: parsed once here (src/lib/money-input.ts).
- const pp=form.currency==='PPUSD',amountIn=parseMoneyNumber(form.amount),rateIn=parseMoneyNumber(form.rate,{fraction:12}),paypalIn=parseMoneyNumber(form.paypalVndRate,{fraction:12}),vndIn=parseMoneyNumber(form.vndUsdtRate,{fraction:12});
+ const pp=form.currency==='PPUSD',amountIn=parseMoneyNumber(form.amount,amountOptions(form.currency)),rateIn=parseMoneyNumber(form.rate,{fraction:12,vndRate:form.currency==='VND'}),paypalIn=parseMoneyNumber(form.paypalVndRate,{fraction:12,vndRate:true}),vndIn=parseMoneyNumber(form.vndUsdtRate,{fraction:12,vndRate:true});
  const canon={amount:amountIn.value||'',currency:form.currency,rate:pp?undefined:rateIn.value||undefined,...(pp?{paypalVndRate:paypalIn.value||undefined,vndUsdtRate:vndIn.value||undefined}:{})};
  const preview=(()=>{try{return normalizeCostMoney(canon).usdt;}catch{return null;}})();
  const save=trpc.businessManagement.saveCashCost.useMutation({onSuccess:r=>{if(!r.undone){onSaved();onClose();}}});

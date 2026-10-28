@@ -1,4 +1,4 @@
-import {parseMoneyNumber} from './money-input';
+import {parseMoneyNumber,type MoneyParseOptions} from './money-input';
 // One rule for a PayPal transfer / withdrawal (review 18/10/2026), used by TransferForm while typing and by recordTransfer before
 // writing, so the screen and the server never disagree:
 // - "Tổng PP bị trừ" (debited) is what the source PayPal lost, in the source currency. The source fee is in that currency and
@@ -12,16 +12,17 @@ export type TransferErrors=Partial<Record<'debited'|'fee'|'received'|'rate'|'rec
 export interface TransferCheckInput {type:'EXCHANGE'|'MIXING';currency:string;receivedCurrency?:string|null;debited?:string|null;fee?:string|null;received?:string|null;rate?:string|null;receiverFee?:string|null}
 const RATE_SCALE=BigInt('1000000000000');
 // US number format (owner decision 28/10/2026): "." decimal point, "," optional thousands separator; a decimal comma is refused.
-const norm=(raw:string):{value:string}|{error:string}=>{const t=raw.trim().replace(/\s/g,'');if(/^[\d.,]+$/.test(t)){const p=parseMoneyNumber(t,{fraction:14});if(p.error)return {error:p.error};}return {value:t.replace(/,/g,'')};};
+// VND (review 29/10/2026): whole đồng, and an old-style "24.000" (thousands dot) is refused with a hint instead of read as 24.
+const norm=(raw:string,opts:MoneyParseOptions={}):{value:string}|{error:string}=>{const t=raw.trim().replace(/\s/g,'');if(/^[\d.,]+$/.test(t)){const p=parseMoneyNumber(t,{fraction:14,...opts});if(p.error)return {error:p.error};}return {value:t.replace(/,/g,'')};};
 // Money with at most 2 decimals → cents; null = empty; a string = what is wrong.
-export function moneyCents(raw:string|null|undefined,label:string,allowZero=false):bigint|null|string{
-  if(raw==null||!raw.trim())return null;const m=norm(raw);if('error' in m)return label+': '+m.error;const n=m.value;
+export function moneyCents(raw:string|null|undefined,label:string,allowZero=false,currency?:string|null):bigint|null|string{
+  if(raw==null||!raw.trim())return null;const m=norm(raw,currency?.trim().toUpperCase()==='VND'?{vnd:true}:{});if('error' in m)return label+': '+m.error;const n=m.value;
   if(!/^(0|[1-9]\d{0,13})(\.\d{1,2})?$/.test(n))return label+' phải là số, tối đa 2 chữ số thập phân';
   const [i,d='']=n.split('.'),c=BigInt(i)*BigInt(100)+BigInt((d+'00').slice(0,2));
   if(!allowZero&&c<=BigInt(0))return label+' phải lớn hơn 0';return c;
 }
-function rateScaled(raw:string|null|undefined):bigint|null|string{
-  if(raw==null||!raw.trim())return null;const m=norm(raw);if('error' in m)return 'Tỷ giá: '+m.error;const n=m.value;
+function rateScaled(raw:string|null|undefined,vndRate=false):bigint|null|string{
+  if(raw==null||!raw.trim())return null;const m=norm(raw,{vndRate});if('error' in m)return 'Tỷ giá: '+m.error;const n=m.value;
   if(!/^\d{1,12}(\.\d{1,12})?$/.test(n))return 'Tỷ giá là số dương, tối đa 12 chữ số thập phân';
   const [i,d='']=n.split('.'),v=BigInt(i)*RATE_SCALE+BigInt((d+'000000000000').slice(0,12));return v>BigInt(0)?v:'Tỷ giá phải lớn hơn 0';
 }
@@ -30,7 +31,7 @@ export const centsText=(c:bigint)=>{const neg=c<BigInt(0),a=neg?-c:c,s=a.toStrin
 export const centsLabel=(c:bigint)=>{const [i,d]=centsText(c).split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,',')+'.'+d;};
 export function checkTransfer(input:TransferCheckInput){
   const errors:TransferErrors={},cur=input.currency.trim().toUpperCase(),rc=(input.receivedCurrency||cur).trim().toUpperCase(),same=rc===cur;
-  const debited=moneyCents(input.debited,'Tổng PP bị trừ'),fee=moneyCents(input.fee,'Phí',true),received=moneyCents(input.received,'Số bên nhận thực nhận'),rfee=moneyCents(input.receiverFee,'Phí bên nhận',true),rate=rateScaled(input.rate);
+  const debited=moneyCents(input.debited,'Tổng PP bị trừ',false,cur),fee=moneyCents(input.fee,'Phí',true,cur),received=moneyCents(input.received,'Số bên nhận thực nhận',false,rc),rfee=moneyCents(input.receiverFee,'Phí bên nhận',true,rc),rate=rateScaled(input.rate,rc==='VND'||cur==='VND');
   if(debited===null)errors.debited='Nhập tổng PP bị trừ (gồm phí)';else if(typeof debited==='string')errors.debited=debited;
   if(typeof fee==='string')errors.fee=fee;else if(fee!==null&&typeof debited==='bigint'&&fee>=debited)errors.fee='Phí nằm trong tổng PP bị trừ: phải nhỏ hơn '+centsLabel(debited)+' '+cur;
   if(typeof received==='string')errors.received=received;

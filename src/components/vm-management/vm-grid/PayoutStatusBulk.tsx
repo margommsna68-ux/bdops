@@ -10,7 +10,7 @@ import {bulkPlan,runSequential,runJournaled,readJournal,receiptBody,type BulkRow
 export type StatusBulkKind='SEND'|'RECEIVE';
 export interface StatusBulkRow extends BulkRow {label:string;ops:{cycle:number;milestone?:string|null;merge?:{role:string}|null;request:VmOpsRequestView|null}|undefined}
 type Command={projectId:string;key:string}&Record<string,unknown>;
-type Line={row:StatusBulkRow;req:VmOpsRequestView;entered:string;txid:string;status:''|'done'|'unknown'|'stuck';error:string;command?:Command};
+type Line={row:StatusBulkRow;req:VmOpsRequestView;entered:string;txid:string;acceptSurplus?:boolean;status:''|'done'|'unknown'|'stuck';error:string;command?:Command};
 const message=(e:unknown)=>e instanceof Error?e.message:'Không nhận được phản hồi hợp lệ';
 const store=()=>{try{return window.sessionStorage;}catch{return null;}};
 export const statusJournalKey=(projectId:string,userId:string,kind:StatusBulkKind,requestId:string)=>'mth-payout-bulk:'+JSON.stringify([projectId,userId,kind,requestId]);
@@ -31,12 +31,12 @@ function Queue({projectId,userId,kind,rows,liveOf,onSaved,onBusy}:{projectId:str
   const today=bangkokDay();
   const stale=(l:Line)=>{if(!liveOf)return false;const o=liveOf(l.row.vmId),q=o?.request;return !q||q.id!==l.req.id||q.revision!==l.req.revision;};
   const check=(l:Line)=>l.req.money?receiptCheck({...l.req.money,phase:l.req.phase},l.entered):null;
-  const sendable=(l:Line)=>!l.status&&!stale(l)&&(kind==='SEND'||!!check(l)?.valid&&!!date);
+  const sendable=(l:Line)=>{if(l.status||stale(l))return false;if(kind==='SEND')return true;const c=check(l);return !!c?.valid&&!!date&&(!c.surplusConfirm||!!l.acceptSurplus);};
   const ready=lines.filter(sendable),pending=lines.filter(l=>l.status==='unknown'||l.status==='stuck');
   function build(l:Line):Command|null{
     const key=crypto.randomUUID();
     if(kind==='SEND')return {projectId,key,requestId:l.req.id,expectedRevision:l.req.revision,vmId:l.row.vmId,expectedCycle:l.req.cycle,earnAppId:l.req.earnAppId,action:'SENT',note:null};
-    const c=check(l),b=c&&l.req.money?receiptBody(c,{currency:l.req.money.currency,date,today,txid:l.txid,settle}):null;
+    const c=check(l),b=c&&l.req.money?receiptBody(c,{currency:l.req.money.currency,date,today,txid:l.txid,settle,acceptSurplus:!!l.acceptSurplus}):null;
     return b?{projectId,key,requestId:l.req.id,expectedRequestRevision:l.req.revision,...b}:null;
   }
   async function run(retry:boolean){
@@ -76,7 +76,8 @@ function Queue({projectId,userId,kind,rows,liveOf,onSaved,onBusy}:{projectId:str
       {kind==='RECEIVE'&&<><th className="text-left">Số tiền chính xác trong PayPal</th><th className="text-right">Phí</th><th className="text-left">Mã giao dịch</th></>}<th className="text-left">Kết quả</th></tr></thead>
       <tbody>{lines.map(l=>{const m=l.req.money,c=kind==='RECEIVE'?check(l):null,locked=busy||!!l.status||stale(l);return <tr key={l.req.id} aria-label={l.row.label}>
         <td><strong>{l.row.label}</strong></td><td>{l.req.paypal} · <span className="break-all">{l.req.email}</span></td><td className="text-right">{m?formatLedger(m.amount,m.currency):'—'}</td>
-        {kind==='RECEIVE'&&<><td><input className="pm-input" inputMode="decimal" required aria-required aria-label={'Số tiền chính xác trong PayPal '+l.row.label} aria-invalid={!!c?.error} value={l.entered} disabled={locked} onChange={e=>patch(l.req.id,{entered:e.target.value,error:''})}/>{c?.error&&<span className="pm-error block">{c.error}</span>}</td>
+        {kind==='RECEIVE'&&<><td><input className="pm-input" inputMode="decimal" required aria-required aria-label={'Số tiền chính xác trong PayPal '+l.row.label} aria-invalid={!!c?.error} value={l.entered} disabled={locked} onChange={e=>patch(l.req.id,{entered:e.target.value,error:'',acceptSurplus:false})}/>{c?.error&&<span className="pm-error block">{c.error}</span>}
+            {c?.surplusConfirm&&c.surplus&&m&&<label className="flex items-center gap-1 mt-1"><input type="checkbox" aria-label={'Xác nhận nhận dư '+formatLedger(c.surplus,m.currency)+' (lớn hơn mức thường) '+l.row.label} checked={!!l.acceptSurplus} disabled={locked} onChange={e=>patch(l.req.id,{acceptSurplus:e.target.checked})}/>{'Xác nhận nhận dư '+formatLedger(c.surplus,m.currency)+' (lớn hơn mức thường)'}</label>}</td>
           <td className="text-right" aria-label={'Phí '+l.row.label}>{c?.fee!==null&&c?.fee!==undefined&&m?formatLedger(c.fee,m.currency):c?.surplus&&m?'Dư '+formatLedger(c.surplus,m.currency):'—'}</td>
           <td><input className="pm-input" maxLength={100} aria-label={'Mã giao dịch '+l.row.label} value={l.txid} disabled={locked} onChange={e=>patch(l.req.id,{txid:e.target.value})}/></td></>}
         <td className="space-y-1">{result(l)}</td></tr>;})}</tbody></table></div>}

@@ -43,13 +43,13 @@ import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory'
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
 // Nothing here logs headers or bodies; the audit (OpsAudit) keeps only the allowed fields.
 // 23/10/2026: no PIN for the AI any more (PIN_* kept in the type for old clients' documentation); critical commands answer APPROVAL_*.
-export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'APPROVAL_REQUIRED'|'APPROVAL_REJECTED'|'APPROVAL_EXPIRED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'PAYPAL_DAILY_LIMIT'|'EMAIL_HAS_MONEY'|'VALIDATION'|'INTERNAL';
-const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,APPROVAL_REQUIRED:202,APPROVAL_REJECTED:403,APPROVAL_EXPIRED:410,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,PAYPAL_DAILY_LIMIT:409,EMAIL_HAS_MONEY:409,VALIDATION:422,INTERNAL:500};
+export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'APPROVAL_REQUIRED'|'APPROVAL_REJECTED'|'APPROVAL_EXPIRED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'PAYPAL_DAILY_LIMIT'|'EMAIL_HAS_MONEY'|'SURPLUS_CONFIRM'|'VALIDATION'|'INTERNAL';
+const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,APPROVAL_REQUIRED:202,APPROVAL_REJECTED:403,APPROVAL_EXPIRED:410,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,PAYPAL_DAILY_LIMIT:409,EMAIL_HAS_MONEY:409,SURPLUS_CONFIRM:409,VALIDATION:422,INTERNAL:500};
 export class OpsError extends Error{constructor(public readonly code:OpsCode,message:string,public readonly details?:Record<string,unknown>,public readonly retryAfter?:number){super(message);}}
 const fail=(code:OpsCode,message:string,details?:Record<string,unknown>,retryAfter?:number)=>new OpsError(code,message,details,retryAfter);
 const json=(status:number,body:unknown,headers:Record<string,string>={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 function fromDomain(e:ProxyDomainError):OpsError{
-  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED',SDK_CONFLICT:'SDK_CONFLICT',PAYPAL_DAILY_LIMIT:'PAYPAL_DAILY_LIMIT',EMAIL_HAS_MONEY:'EMAIL_HAS_MONEY'};
+  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED',SDK_CONFLICT:'SDK_CONFLICT',PAYPAL_DAILY_LIMIT:'PAYPAL_DAILY_LIMIT',EMAIL_HAS_MONEY:'EMAIL_HAS_MONEY',SURPLUS_CONFIRM:'SURPLUS_CONFIRM'};
   const code:OpsCode=e.reason?byReason[e.reason]:e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'?'VALIDATION':e.code==='KEY_PAYLOAD_MISMATCH'?'IDEMPOTENCY_CONFLICT':'REVISION_CONFLICT';
   const message=e.code==='KEY_PAYLOAD_MISMATCH'?'Idempotency-Key này đã dùng cho một nội dung khác; dùng key mới cho lệnh mới':redactSecrets(userMessage(e))!;
   return fail(code,message,e.details);
@@ -483,7 +483,7 @@ async function withCurrentVm(c:Ctx,projectId:string,vmId:string,e:unknown){
 }
 async function withCurrentRequest(c:Ctx,projectId:string,requestId:string,e:unknown){
   const err=e instanceof ProxyDomainError?fromDomain(e):e;
-  if(err instanceof OpsError&&['REVISION_CONFLICT','CYCLE_CHANGED','ACCOUNT_CHANGED','DUPLICATE','VALIDATION','EMAIL_HAS_MONEY'].includes(err.code)){
+  if(err instanceof OpsError&&['REVISION_CONFLICT','CYCLE_CHANGED','ACCOUNT_CHANGED','DUPLICATE','VALIDATION','EMAIL_HAS_MONEY','SURPLUS_CONFIRM'].includes(err.code)){
     const r=await c.db.earnPayoutRequest.findFirst({where:{id:requestId,projectId},select:requestSelect});
     if(r){const ops=await c.db.vmOperation.findUnique({where:{vmId:r.vmId},select:{cycle:true}});return fail(err.code,err.message,{...err.details,current:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:ops?.cycle??1})});}
   }
@@ -532,12 +532,12 @@ async function members(c:Ctx,[id]:string[]){
   const {r,cycle}=await loadRequest(c,projectId,id);
   return {replay:!!c.audit.replay,recorded:{withdrawalId:id,added:rec.added.map(a=>a.vmId),revisionAfter:rec.revision},current:{withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})}};
 }
-const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note,settleRemainder:z.boolean().optional()}).strict();
+const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note,settleRemainder:z.boolean().optional(),acceptSurplus:z.boolean().optional()}).strict();
 async function receipt(c:Ctx,[id]:string[]){
   const b=ReceiptBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
   let rec:{receiptId:string;requestId:string;amount:string;currency:string;receivedOn:string;receivedAt:string;transactionId:string|null;earnAppId:string;paypalEmailId:string;settled?:boolean;shortfall?:string|null};
   try{
-    const r=await recordPayoutReceipt(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRequestRevision:b.expectedRequestRevision,amount:b.amount,currency:b.currency.toUpperCase(),receivedAt:b.receivedAt,transactionId:b.transactionId?.trim()||null,evidence:redactSecrets(b.evidenceNote?.trim()||null),settleRemainder:b.settleRemainder},c.db);
+    const r=await recordPayoutReceipt(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRequestRevision:b.expectedRequestRevision,amount:b.amount,currency:b.currency.toUpperCase(),receivedAt:b.receivedAt,transactionId:b.transactionId?.trim()||null,evidence:redactSecrets(b.evidenceNote?.trim()||null),settleRemainder:b.settleRemainder,acceptSurplus:b.acceptSurplus},c.db);
     rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;
   }catch(e){throw await withCurrentRequest(c,projectId,id,e);}
   const {r,cycle}=await loadRequest(c,projectId,id),rights=await rightsOf(c,projectId);c.audit.objectId=rec.receiptId;

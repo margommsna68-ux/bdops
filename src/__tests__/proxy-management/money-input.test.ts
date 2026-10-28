@@ -69,9 +69,10 @@ describe('Purchase money: total paid or price per account',()=>{
     // 16,125 USDT typed as a total or a unit price is a valid decimal.
     expect(readPurchase(pp({total:'16.125'}),'PP')).toMatchObject({errors:{},payload:{amount:'16.125'}});
     const u=pp({mode:'UNIT',unit:'16.125',quantity:'2'});expect(readPurchase(u,'PP').payload).toMatchObject({amount:'16.125',quantity:2});expect(switchMode(u,'TOTAL').total).toBe('32.25');
-    // VND: 62,500 ₫ / 4 = 15,625 ₫ (fifteen thousand) and 62.5 ₫ / 4 = 15.625 ₫, both written by the web and read back unchanged.
+    // VND: 62,500 ₫ / 4 = 15,625 ₫ (fifteen thousand), written by the web and read back unchanged. VND is whole đồng (review
+    // 29/10/2026): "62.5" ₫ is refused, "15.625" would be the old thousands dot.
     const v=switchMode(pp({total:'62,500',quantity:'4',currency:'VND',rate:'25,820'}),'UNIT');expect(v.unit).toBe('15,625');expect(readPurchase(v,'PP')).toMatchObject({errors:{},payload:{amount:'15625'}});
-    const w=switchMode(pp({total:'62.5',quantity:'4',currency:'VND',rate:'25,820'}),'UNIT');expect(w.unit).toBe('15.625');expect(readPurchase(w,'PP')).toMatchObject({errors:{},payload:{amount:'15.625'}});
+    expect(readPurchase(pp({total:'62.5',quantity:'4',currency:'VND',rate:'25,820'}),'PP').errors.total).toMatch(/VND không có phần lẻ/);
     // A decimal comma is refused with the US hint.
     expect(readPurchase(pp({mode:'UNIT',unit:'15,62',quantity:'4',currency:'VND',rate:'25,820'}),'PP').errors.unit).toMatch(/12\.18/);
     // An inexact division keeps the total for the way back and says why the unit price is empty.

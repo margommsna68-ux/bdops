@@ -6,6 +6,9 @@ import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal,readVmOps} from 
 import {readPayoutReport,readPayoutDashboard} from '@/server/vm-ops/payout-report';
 import {recreateRule} from '@/server/vm-ops/ops';
 import {markEarnAppSuspended} from '@/server/vm-ops/suspend';
+import {undoOperation} from '@/server/operation-history/undo';
+import {voidFinance} from '@/server/business-management/finance';
+import {recordReceipts} from '@/server/business-management/paypal-ledger';
 
 // Owner decision 28/10/2026: "khi nhập paypal là con số chính xác nhất và là cuối cùng, nếu số đó có lớn hơn xí không sao vẫn cho nhập."
 // A receipt above what is open is recorded exactly and closes the request as received with the surplus stated (negative shortfall).
@@ -69,4 +72,58 @@ it('late money after SUS above the lost part reopens as RECEIVED with the surplu
   const row=await f.req(r.id);expect(row).toMatchObject({state:'REQUESTED',lostAmount:null,settleNote:'Nhận dư $0.05'});
   expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.row.vm.id)!.request?.phase).toBe('RECEIVED');
  }finally{await f.cleanup();}
+});
+// Review 29/10/2026: a surplus up to max($1.00, 5% of the request) is accepted silently; above that it needs acceptSurplus:true.
+it('surplus threshold: $104.99 on $100 accepted; $105.01 refused SURPLUS_CONFIRM until acceptSurplus; $1.00 on $5 accepted, $1.01 not',async()=>{
+ const one=async(asked:string,got:string,o:Record<string,unknown>={})=>{const f=await setup();try{const r=await f.create(asked);
+   try{return await f.receipt(r.id,got,o);}catch(e){expect(await db.fundTransaction.count({where:{payoutRequestId:r.id}})).toBe(0);throw e;}}finally{await f.cleanup();}};
+ await expect(one('100.00','105.01')).rejects.toMatchObject({reason:'SURPLUS_CONFIRM'});
+ expect(await one('100.00','105.01',{acceptSurplus:true})).toMatchObject({settled:true,shortfall:'-5.01'});
+ expect(await one('100.00','104.99')).toMatchObject({settled:true,shortfall:'-4.99'});
+ expect(await one('5.00','6.00')).toMatchObject({settled:true,shortfall:'-1.00'});
+ await expect(one('5.00','6.01')).rejects.toMatchObject({reason:'SURPLUS_CONFIRM'});
+});
+it('settle note of a fee uses the US format with $: "Phí / thiếu $1.50"',async()=>{
+ const f=await setup();try{
+  const r=await f.create('10.00');await f.receipt(r.id,'8.50',{settleRemainder:true});
+  expect((await f.req(r.id)).settleNote).toBe('Phí / thiếu $1.50');
+ }finally{await f.cleanup();}
+});
+it('undo of an over-receipt voids the receipt and restores the request unsettled and waiting',async()=>{
+ const f=await setup();try{
+  const r=await f.create('20.04'),key=randomUUID();
+  await recordPayoutReceipt(f.scope,{key,requestId:r.id,expectedRequestRevision:(await f.req(r.id)).revision,amount:'20.10',currency:'USD',receivedAt:new Date().toISOString()},db);
+  const op=await db.operationJournal.findUniqueOrThrow({where:{projectId_commandKey:{projectId:f.scope.projectId,commandKey:key}}});
+  await undoOperation(f.scope,op.id,'Ghi nhầm',db);
+  const row=await f.req(r.id);expect(row).toMatchObject({settledAt:null,settledById:null,settleNote:null,shortfall:null});
+  expect((await db.fundTransaction.findFirstOrThrow({where:{payoutRequestId:r.id}})).voidedAt).not.toBeNull();
+  expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.row.vm.id)!.request?.phase).toBe('WAITING');
+ }finally{await f.cleanup();}
+});
+it('voiding the receipt of a surplus settle clears the settle (shortfall, note, who / when): the request waits again',async()=>{
+ const f=await setup();try{
+  const r=await f.create('20.04');await f.receipt(r.id,'20.10');
+  const fund=await db.fundTransaction.findFirstOrThrow({where:{payoutRequestId:r.id}});
+  await voidFinance(f.scope,{kind:'FUND',id:fund.id,expectedRevision:fund.revision,reason:'ghi nhầm',key:randomUUID()},db);
+  const row=await f.req(r.id);expect(row).toMatchObject({settledAt:null,settledById:null,settleNote:null,shortfall:null});
+  expect((row.history as {what:string}[]).some(h=>/Bỏ chốt nhận dư/.test(h.what))).toBe(true);
+  expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.row.vm.id)!.request?.phase).toBe('WAITING');
+ }finally{await f.cleanup();}
+});
+it('Tiền vào PayPal (Kho tài khoản) receipt linked by email: a small surplus settles the request as received; a large one stays REVIEW',async()=>{
+ const f=await setup();try{
+  const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);
+  const r=await f.create('10.00');
+  await recordReceipts(f.scope,{paypalId:f.pp.id,date:today,currency:'USD',status:'RECEIVED',text:f.row.email.email+' | 10.40 | TX-L-'+randomUUID().slice(0,8),key:randomUUID()},db);
+  const row=await f.req(r.id);expect(row.shortfall?.toFixed(2)).toBe('-0.40');expect(row.settleNote).toBe('Nhận dư $0.40');expect(row.settledAt).not.toBeNull();
+  expect((row.history as {kind?:string}[]).some(h=>h.kind==='SETTLE')).toBe(true);
+  expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.row.vm.id)!.request?.phase).toBe('RECEIVED');
+ }finally{await f.cleanup();}
+ const g=await setup();try{
+  const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);
+  const r=await g.create('10.00');
+  await recordReceipts(g.scope,{paypalId:g.pp.id,date:today,currency:'USD',status:'RECEIVED',text:g.row.email.email+' | 12.00 | TX-L-'+randomUUID().slice(0,8),key:randomUUID()},db);
+  const row=await g.req(r.id);expect(row.settledAt).toBeNull();expect(row.shortfall).toBeNull();
+  expect((await readVmOps(g.scope,db)).vms.find(v=>v.vmId===g.row.vm.id)!.request?.phase).toBe('REVIEW');
+ }finally{await g.cleanup();}
 });

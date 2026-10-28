@@ -138,3 +138,11 @@ it('the "Rút" amount follows the latest Tiền VM until the person edits it',as
   expect(input().value).toBe('5.00');await render(null,all,{vmMoney:'7.129'});expect(input().value).toBe('7.12');
   await type(input(),'6');await render(null,all,{vmMoney:'9'});expect(input().value).toBe('6');
 });
+it('"Tiền đã về" with a surplus above the usual (review 29/10/2026): confirmation box, Ghi blocked until ticked, acceptSurplus sent',async()=>{
+  await render(request({submission:'SENT'}));await click('Tiền đã về');
+  await type(Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác trong PayPal'))!.querySelector('input')!,'11.50');
+  const box=Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Xác nhận nhận dư $1.50 (lớn hơn mức thường)')?.querySelector('input') as HTMLInputElement;
+  expect(box).toBeTruthy();expect(box.checked).toBe(false);expect(button('Ghi tiền đã về')!.disabled).toBe(true);
+  await act(async()=>box.click());expect(button('Ghi tiền đã về')!.disabled).toBe(false);await click('Ghi tiền đã về');
+  expect(mock.receipt.mock.calls[0][0]).toMatchObject({requestId:'req',amount:'11.50',acceptSurplus:true});
+});

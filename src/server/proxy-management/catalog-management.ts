@@ -14,6 +14,8 @@ export function packageTerms(input:PackageTermsInput,old?:{cycleMonths:number}|n
   const price=input.price===undefined?undefined:input.price===null||input.price.trim()===''?null:input.price.trim();
   if(price&&!/^\d{1,15}(\.\d{1,8})?$/.test(price))throw new ProxyDomainError('INVALID_INPUT','Giá gói không hợp lệ');
   const currency=input.priceCurrency===undefined?undefined:text(input.priceCurrency?.toUpperCase(),8);
+  // VND package prices are whole đồng (review 29/10/2026).
+  if(price&&currency==='VND'&&/\.\d*[1-9]/.test(price))throw new ProxyDomainError('INVALID_INPUT','Giá gói VND là số đồng nguyên, không có phần lẻ');
   if(currency&&!/^[A-Z]{3,8}$/.test(currency))throw new ProxyDomainError('INVALID_INPUT','Đồng tiền không hợp lệ');
   const cycle=input.cycleMonths===undefined||input.cycleMonths===null?old?.cycleMonths??1:input.cycleMonths;
   if(!Number.isInteger(cycle)||cycle<1||cycle>60)throw new ProxyDomainError('INVALID_INPUT','Chu kỳ tính theo tháng (1–60)');

@@ -1,6 +1,6 @@
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
-import {toCents,fromCents} from '@/lib/vm-ops';
+import {toCents,fromCents,surplusNeedsConfirm} from '@/lib/vm-ops';
 import {parseMoneyNumber} from '@/lib/money-input';
 // One payout frame (owner 28/10/2026) for the Tiền VM cell, the VM panel and the "Rút EarnApp" report: pure rules, no React.
 type RouterOutputs=inferRouterOutputs<AppRouter>;
@@ -60,14 +60,15 @@ export function defaultPayoutAmount(v:string|null|undefined){
  */
 export function receiptCheck(m:{amount:string;received:string;remaining:string;pendingLinked:string;lost:string|null;phase?:string},entered:string){
   const base=m.phase==='LOST'&&m.lost?toCents(m.lost):toCents(m.remaining),open=Math.max(0,base-toCents(m.pendingLinked)),t=entered.trim();
-  const none={valid:false,amount:null as string|null,fee:null as string|null,surplus:null as string|null,showSettle:false,open:fromCents(open),error:''};
+  const none={valid:false,amount:null as string|null,fee:null as string|null,surplus:null as string|null,surplusConfirm:false,showSettle:false,open:fromCents(open),error:''};
   if(!t)return none;
   // US number format (owner decision 28/10/2026): "12.18", "1,234.56"; a decimal comma is refused at the field.
   const p=parseMoneyNumber(t,{fraction:2});if(p.error||p.value===null)return {...none,error:p.error||'Số tiền là số dương, tối đa 2 chữ số thập phân'};
   const c=toCents(p.value);if(c<=0)return {...none,error:'Số tiền phải lớn hơn 0'};
   if(c>open&&toCents(m.pendingLinked)>0)return {...none,error:'Còn khoản về chưa xác nhận; đối chiếu ở Kho tài khoản trước khi ghi số lớn hơn phần còn chờ ('+fromCents(open)+')'};
-  if(c>open)return {valid:true,amount:fromCents(c),fee:null,surplus:fromCents(c-open),showSettle:false,open:fromCents(open),error:''};
-  return {valid:true,amount:fromCents(c),fee:fromCents(open-c),surplus:null,showSettle:c<open,open:fromCents(open),error:''};
+  // Review 29/10/2026: more than max(1.00, 5% of the request) above what is open needs "Xác nhận nhận dư $X (lớn hơn mức thường)".
+  if(c>open)return {valid:true,amount:fromCents(c),fee:null,surplus:fromCents(c-open),surplusConfirm:surplusNeedsConfirm(toCents(m.amount),c-open),showSettle:false,open:fromCents(open),error:''};
+  return {valid:true,amount:fromCents(c),fee:fromCents(open-c),surplus:null,surplusConfirm:false,showSettle:c<open,open:fromCents(open),error:''};
 }
 // Lost answers (pattern of PayoutBulkPanel): the command (key + exact body) is written to this tab before sending; a retry sends it again.
 export const FRAME_ACTIONS=['REQUEST','SEND','DROP','EDIT','UNSEND','RECEIPT','SETTLE','SUS','FAIL','RETRY','VOID'] as const;

@@ -143,22 +143,23 @@ function NoteForm({title,label,submit,required,busy,onSubmit,onCancel}:{title:st
 // default, an optional PayPal transaction id, and "Chốt luôn, phần thiếu là phí" ticked while the amount is below what is open. A
 // figure above what is open is accepted (owner 28/10/2026) and shown as "Dư"; the server closes the request with that surplus.
 function ReceiptForm({request:r,busy,onSubmit,onCancel}:{request:VmOpsRequestView;busy:boolean;onSubmit:(b:Record<string,unknown>)=>Promise<boolean>;onCancel:()=>void}){
-  const [entered,setEntered]=useState(''),[date,setDate]=useState(bangkokDay),[txid,setTx]=useState(''),[settle,setSettle]=useState(true);
+  const [entered,setEntered]=useState(''),[date,setDate]=useState(bangkokDay),[txid,setTx]=useState(''),[settle,setSettle]=useState(true),[accept,setAccept]=useState(false);
   const m=r.money;
   if(!m)return <p className="pm-muted">Ghi tiền về cần quyền xem số tiền của yêu cầu.</p>;
   const c=receiptCheck({...m,phase:r.phase},entered),cur=m.currency,today=bangkokDay();
-  const submit=()=>{const b=receiptBody(c,{currency:cur,date,today,txid,settle});if(b)void onSubmit(b);};
+  const submit=()=>{const b=receiptBody(c,{currency:cur,date,today,txid,settle,acceptSurplus:accept});if(b)void onSubmit(b);};
   return <div className="space-y-2">
     <p>Tiền về <strong>{r.paypal}</strong> qua <strong>{r.email}</strong>. Đã rút <strong>{formatLedger(m.amount,cur)}</strong>{m.received!=='0.00'?' · đã về '+formatLedger(m.received,cur):''} · còn chờ {formatLedger(c.open,cur)}</p>
     <div className="grid grid-cols-2 gap-2">
-      <label className="pm-label text-xs">Số tiền chính xác trong PayPal<input className="pm-input" inputMode="decimal" required aria-required value={entered} disabled={busy} aria-invalid={!!c.error} onChange={e=>setEntered(e.target.value)}/></label>
+      <label className="pm-label text-xs">Số tiền chính xác trong PayPal<input className="pm-input" inputMode="decimal" required aria-required value={entered} disabled={busy} aria-invalid={!!c.error} onChange={e=>{setEntered(e.target.value);setAccept(false);}}/></label>
       <label className="pm-label text-xs">Ngày<input type="date" className="pm-input" value={date} max={today} disabled={busy} onChange={e=>setDate(e.target.value)}/></label></div>
     <p aria-live="polite">{c.fee!==null?<>Phí (rút − thực nhận): <strong>{formatLedger(c.fee,cur)}</strong></>:c.surplus!==null?<>Dư (thực nhận − còn chờ): <strong>{formatLedger(c.surplus,cur)}</strong> · ghi đúng số này và chốt đã về</>:<span className="pm-muted">Nhập đúng số tiền thấy trong PayPal; phí tự tính.</span>}</p>
     <label className="pm-label text-xs">Mã giao dịch PayPal (nếu có)<input className="pm-input" maxLength={100} value={txid} disabled={busy} onChange={e=>setTx(e.target.value)}/></label>
     {c.showSettle&&<label className="flex items-center gap-1"><input type="checkbox" checked={settle} disabled={busy} onChange={e=>setSettle(e.target.checked)}/>Chốt luôn, phần thiếu là phí</label>}
+    {c.surplusConfirm&&c.surplus&&<label className="flex items-center gap-1"><input type="checkbox" checked={accept} disabled={busy} onChange={e=>setAccept(e.target.checked)}/>{'Xác nhận nhận dư '+formatLedger(c.surplus,cur)+' (lớn hơn mức thường)'}</label>}
     {c.error&&<p role="alert" className="vm-status-error">{c.error}</p>}
     <div className="flex gap-2 justify-end"><button type="button" className="pm-button pm-button-quiet pm-button-sm" disabled={busy} onClick={onCancel}>Quay lại</button>
-      <button type="button" className="pm-button pm-button-primary pm-button-sm" disabled={busy||!c.valid||!date} onClick={submit}>{busy?'Đang lưu…':'Ghi tiền đã về'}</button></div>
+      <button type="button" className="pm-button pm-button-primary pm-button-sm" disabled={busy||!c.valid||!date||c.surplusConfirm&&!accept} onClick={submit}>{busy?'Đang lưu…':'Ghi tiền đã về'}</button></div>
   </div>;
 }
 // "Sửa": email (Đổi email), amount, withdrawal day, reference; only changed fields are sent. A reason is required once sent or with money.

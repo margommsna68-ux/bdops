@@ -89,6 +89,14 @@ describe('receiptBody',()=>{
     expect(receiptBody({valid:false,amount:null,showSettle:false},{currency:'USD',date:today,today,txid:'',settle:true})).toBeNull();
   });
 });
+describe('receiptBody with a large surplus (review 29/10/2026)',()=>{
+  it('no body until the surplus is confirmed; then acceptSurplus:true is sent, never otherwise',()=>{
+    const today='2026-10-28',o={currency:'USD',date:'2026-10-27',today,txid:'',settle:true};
+    expect(receiptBody({valid:true,amount:'11.50',showSettle:false,surplusConfirm:true},o)).toBeNull();
+    expect(receiptBody({valid:true,amount:'11.50',showSettle:false,surplusConfirm:true},{...o,acceptSurplus:true})).toMatchObject({amount:'11.50',acceptSurplus:true});
+    expect(receiptBody({valid:true,amount:'10.50',showSettle:false,surplusConfirm:false},{...o,acceptSurplus:true})).not.toHaveProperty('acceptSurplus');
+  });
+});
 describe('enrolledServerIds (fleet control read, no secrets)',()=>{
   afterEach(()=>vi.unstubAllEnvs());
   it('lists enrolled servers of the project only when M1 is ready; broken config = none',()=>{

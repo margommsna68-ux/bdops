@@ -52,6 +52,10 @@ export const recreateReady=(i:RecreateInput):boolean=>recreateReason(i)!==null;
 // ─── Money (cents) ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 export const toCents=(v:string|number)=>{const t=String(v).trim(),neg=t.startsWith('-'),[i,d='']=(neg?t.slice(1):t).split('.');return (neg?-1:1)*(Number(i)*100+Number((d+'00').slice(0,2)));};
 export const fromCents=(c:number)=>{const neg=c<0,a=Math.abs(c);return (neg?'-':'')+Math.floor(a/100)+'.'+String(a%100).padStart(2,'0');};
+/** Review 29/10/2026: a receipt above the request ("lớn hơn xí", owner 28/10/2026) is accepted silently while the surplus is at most
+ *  max(1.00, 5% of the requested amount); above that it needs an explicit confirmation (acceptSurplus) at the web or the ops API, and a
+ *  receipt linked by email in Tiền vào PayPal stays "Cần đối chiếu". Cents in, no floats. */
+export const surplusNeedsConfirm=(requestedCents:number,surplusCents:number)=>surplusCents>100&&surplusCents*100>requestedCents*5;
 export interface RequestMoneyInput {amount:string;currency:string;state:string;settledAt:string|null;shortfall:string|null;consumedAt:string|null;receipts:{amount:string;currency:string;confirmed:boolean;failed:boolean;voided:boolean}[]}
 export type RequestPhase='WAITING'|'RECEIVED'|'REVIEW'|'FAILED'|'CANCELLED'|'LOST';
 // One payout request against the PayPal book: received = confirmed linked receipts; a linked pending receipt is part of what is

@@ -84,6 +84,13 @@ describe('receiptCheck: "Số tiền chính xác trong PayPal"',()=>{
     expect(receiptCheck({...base,amount:'20.04',remaining:'20.04'},'20.10')).toMatchObject({valid:true,amount:'20.10',fee:null,surplus:'0.06',showSettle:false,error:''});
     expect(receiptCheck(base,'9.62').surplus).toBeNull();
   });
+  it('a surplus above max($1, 5% of the request) needs the explicit confirmation (review 29/10/2026)',()=>{
+    expect(receiptCheck(base,'11.00')).toMatchObject({valid:true,surplus:'1.00',surplusConfirm:false});
+    expect(receiptCheck(base,'11.50')).toMatchObject({valid:true,surplus:'1.50',surplusConfirm:true});
+    expect(receiptCheck({...base,amount:'100.00',remaining:'100.00'},'104.99')).toMatchObject({surplusConfirm:false});
+    expect(receiptCheck({...base,amount:'100.00',remaining:'100.00'},'105.01')).toMatchObject({surplusConfirm:true});
+    expect(receiptCheck(base,'9.00').surplusConfirm).toBe(false);
+  });
   it('more than the open part while a linked pending receipt exists: reconcile first',()=>{
     expect(receiptCheck({...base,received:'4.00',remaining:'6.00',pendingLinked:'1.00'},'5.50')).toMatchObject({valid:false});
   });

@@ -85,7 +85,9 @@ export function readJournal<T>(store:Store|null,storageKey:string):T|null{try{co
  * Body of "Tiền đã về" from a checked entry (receiptCheck): the exact PayPal amount, today's moment or noon (Bangkok) of the chosen
  * day, an optional transaction id, and settleRemainder ("Chốt luôn, phần thiếu là phí") only while the amount is below what is open.
  */
-export function receiptBody(c:{valid:boolean;amount:string|null;showSettle:boolean},o:{currency:string;date:string;today:string;txid:string;settle:boolean;now?:Date}){
+export function receiptBody(c:{valid:boolean;amount:string|null;showSettle:boolean;surplusConfirm?:boolean},o:{currency:string;date:string;today:string;txid:string;settle:boolean;acceptSurplus?:boolean;now?:Date}){
   if(!c.valid||!c.amount||!o.date)return null;
-  return {amount:c.amount,currency:o.currency,receivedAt:o.date===o.today?(o.now??new Date()).toISOString():o.date+'T12:00:00+07:00',transactionId:o.txid.trim()||null,...(c.showSettle?{settleRemainder:o.settle}:{})};
+  // A surplus above max(1.00, 5%) is sent only once the person ticked "Xác nhận nhận dư" (review 29/10/2026).
+  if(c.surplusConfirm&&!o.acceptSurplus)return null;
+  return {amount:c.amount,currency:o.currency,receivedAt:o.date===o.today?(o.now??new Date()).toISOString():o.date+'T12:00:00+07:00',transactionId:o.txid.trim()||null,...(c.showSettle?{settleRemainder:o.settle}:{}),...(c.surplusConfirm?{acceptSurplus:true}:{})};
 }

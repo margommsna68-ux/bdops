@@ -5,6 +5,7 @@ import {runBusinessCommand} from './idempotency';
 import {money,dayDate} from './money';
 import {assertPeriodOpen} from './period-lock';
 import {LEDGER_CURRENCY,type Currency,type FinanceKind} from './types';
+import {clearSurplusSettle} from '../vm-ops/payout-surplus';
 export interface FinanceInput {kind:FinanceKind;id?:string;expectedRevision?:number;key:string;date:string;currency:Currency|string;amount:string;notes?:string;transactionId?:string;paypalId?:string;paypalEmailId?:string|null;serverId?:string|null;vmId?:string|null;proxyAccountId?:string|null;category?:string;confirmed?:boolean;failed?:boolean;company?:string;type?:'EXCHANGE'|'MIXING';destPaypalId?:string|null;paidToTeam?:boolean;paypalFee?:string|null;isPrepaid?:boolean}
 export async function saveFinance(scope:ActorScope,input:FinanceInput,db:PrismaClient=prisma,deps:{afterWrite?:(tx:Prisma.TransactionClient)=>void|Promise<void>}={}){
  const amount=money(input.amount),date=dayDate(input.date);if(amount.lte(0)||!LEDGER_CURRENCY.test(input.currency)||input.notes&&input.notes.length>2000||input.transactionId&&input.transactionId.length>160)throw new ProxyDomainError('INVALID_INPUT');
@@ -46,6 +47,6 @@ export async function voidFinance(scope:ActorScope,input:{kind:FinanceKind;id:st
  if(!input.reason.trim()||input.reason.length>300)throw new ProxyDomainError('INVALID_INPUT');return runBusinessCommand(scope,{key:input.key,payload:input,kind:'BUSINESS_FINANCE_VOID',module:input.kind==='COST'?'COSTS':input.kind==='WITHDRAWAL'?'WITHDRAWALS':'FUNDS'},async(tx,images,current)=>{
   if(input.kind==='COST'&&current.teamCashEnabled)throw new ProxyDomainError('INVALID_INPUT','Dùng chi phí USDT để giữ tỷ giá và lịch sử');
   const old=input.kind==='COST'?await tx.costRecord.findFirst({where:{id:input.id,projectId:scope.projectId}}):input.kind==='FUND'?await tx.fundTransaction.findFirst({where:{id:input.id,projectId:scope.projectId}}):await tx.withdrawal.findFirst({where:{id:input.id,projectId:scope.projectId}});if(!old)throw new ProxyDomainError('NOT_FOUND');if(old.revision!==input.expectedRevision||old.voidedAt)throw new ProxyDomainError('STALE_PREVIEW');await assertPeriodOpen(tx,scope.projectId,old.date,old.currency);await images.remember(input.kind,old.id);
-  const data={voidedAt:new Date(),revision:{increment:1}};if(input.kind==='COST')await tx.costRecord.update({where:{id:old.id},data});else if(input.kind==='FUND')await tx.fundTransaction.update({where:{id:old.id},data});else await tx.withdrawal.update({where:{id:old.id},data});return {id:old.id};
+  const data={voidedAt:new Date(),revision:{increment:1}};if(input.kind==='COST')await tx.costRecord.update({where:{id:old.id},data});else if(input.kind==='FUND'){await tx.fundTransaction.update({where:{id:old.id},data});const req=(old as {payoutRequestId?:string|null}).payoutRequestId;if(req)await clearSurplusSettle(tx,images,req,current.userId);}else await tx.withdrawal.update({where:{id:old.id},data});return {id:old.id};
  },db);
 }

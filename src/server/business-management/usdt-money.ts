@@ -12,6 +12,8 @@ export function parseUsdt(text:string){return positive(text,18,6).toFixed(6);}
 export type PaypalCostRates={paypalVndRate?:string;vndUsdtRate?:string};
 export function normalizeCostMoney(input:{amount:string;currency:string;rate?:string}&PaypalCostRates){
  const currency=cashCurrency(input.currency),amount=parseOriginalMoney(input.amount);
+ // VND is whole đồng (review 29/10/2026): "420.000" read as 420 must never reach the books.
+ if(currency==='VND'&&!new CashDecimal(amount).isInteger())throw new ProxyDomainError('INVALID_INPUT','Số tiền VND là số đồng nguyên, không có phần lẻ');
  if(currency==='PPUSD'){
   if(!input.paypalVndRate||!input.vndUsdtRate)throw new ProxyDomainError('INVALID_INPUT','Nhập hai tỷ giá: VND / USD PayPal và VND / USDT');
   const pp=positive(input.paypalVndRate,12,12),vnd=positive(input.vndUsdtRate,12,12),rate=vnd.div(pp).toFixed(12);positive(rate,12,12);

@@ -1,7 +1,7 @@
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {vmWhere,assertScopedVmIds,hasServerScope} from '../permissions/server-scope';
-import {fromCents,gatherOf,milestoneOf,recreateReady,suggestPaypal,toCents} from '@/lib/vm-ops';
+import {fromCents,gatherOf,milestoneOf,recreateReady,suggestPaypal,surplusNeedsConfirm,toCents} from '@/lib/vm-ops';
 import {formatMoney} from '@/lib/money-input';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
@@ -142,7 +142,7 @@ export async function suggestPayout(scope:ActorScope,input:{earnAppId:string;amo
 //   from the book;
 // - a payment id is recorded once (any key); without one, a receipt with the same email, day and amount is a possible duplicate and
 //   is refused (a person decides "khoản riêng" in Kho tài khoản); the period lock applies.
-export interface PayoutReceiptInput {key:string;requestId:string;expectedRequestRevision:number;amount:string;currency:string;receivedAt:string;transactionId?:string|null;evidence?:string|null;/** Owner 28/10/2026: the real PayPal amount is usually below the withdrawn one (fees); true settles the rest as a fee in this same command. A receipt above the open part is always settled as a surplus. */settleRemainder?:boolean}
+export interface PayoutReceiptInput {key:string;requestId:string;expectedRequestRevision:number;amount:string;currency:string;receivedAt:string;transactionId?:string|null;evidence?:string|null;/** Owner 28/10/2026: the real PayPal amount is usually below the withdrawn one (fees); true settles the rest as a fee in this same command. A receipt above the open part is settled as a surplus. */settleRemainder?:boolean;/** Review 29/10/2026: a surplus above max(1.00, 5% of the request) is refused with reason SURPLUS_CONFIRM unless this is true (the person / AI confirmed the larger amount). */acceptSurplus?:boolean}
 export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptInput,db:PrismaClient=prisma){
   const authorize=async(tx:Tx)=>{const r=await payoutRights(scope,tx);if(!r.receipt)throw new ProxyDomainError('FORBIDDEN','Ghi tiền về PP cần quyền ghi Tiền vào PayPal hoặc quyền "Ghi khoản nhận PP của yêu cầu rút"');return r.current;};
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'EARN_PAYOUT_RECEIPT',module:'FUNDS',authorize},async(tx,images,current)=>{
@@ -170,6 +170,10 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     // Owner 28/10/2026: the PayPal figure is exact and final, even a little above what is open; the surplus is settled below. Only a
     // linked pending receipt (older data) makes "above" ambiguous: reconcile that first.
     if(toCents(amount.toFixed(2))>open&&toCents(m.pendingLinked)>0)refuse('Yêu cầu còn khoản về chưa xác nhận ('+m.pendingLinked+' '+r.currency+'); đối chiếu ở Kho tài khoản trước khi ghi khoản lớn hơn phần còn chờ ('+fromCents(open)+')');
+    // Review 29/10/2026: "lớn hơn xí" is up to max(1.00, 5% of the request); a larger surplus is recorded only when confirmed explicitly.
+    const over=toCents(amount.toFixed(2))-open;
+    if(over>0&&surplusNeedsConfirm(toCents(r.amount.toFixed(2)),over)&&!input.acceptSurplus)
+      throw new ProxyDomainError('INVALID_INPUT','Số tiền lớn hơn phần còn chờ '+formatMoney(fromCents(over),currency)+' (hơn mức thường: tối đa '+formatMoney(fromCents(Math.max(100,Math.floor(toCents(r.amount.toFixed(2))*5/100))),currency)+'); kiểm tra lại số trong PayPal rồi xác nhận nhận dư','SURPLUS_CONFIRM',{submission:r.submission,state:r.state,surplus:fromCents(over),open:fromCents(open)});
     await assertPeriodOpen(tx,scope.projectId,date,currency);
     const vm=await tx.virtualMachine.findUnique({where:{id:r.vmId},select:{serverId:true}});
     await images.remember('PAYOUT_REQUEST',r.id);await images.remember('PAYPAL',r.paypalId);await images.remember('PAYPAL_EMAIL',r.paypalEmailId);
@@ -187,7 +191,7 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     history.push({...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()});
     // Settle the rest as a fee in the same command (anyone who may record the receipt; a standalone SETTLE still needs writeMoney).
     if(input.settleRemainder&&gap>0){
-      shortfall=fromCents(gap);const note='Phí / thiếu '+shortfall+' '+currency;
+      shortfall=fromCents(gap);const note='Phí / thiếu '+formatMoney(shortfall,currency);
       Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall:D(shortfall)});
       history.push(historyEntry(current.userId,'SETTLE','Chốt nhận '+fromCents(toCents(m.received)+toCents(amount.toFixed(2)))+' '+currency+', thiếu '+shortfall+': '+note));
     }

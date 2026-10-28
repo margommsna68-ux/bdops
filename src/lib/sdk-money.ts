@@ -12,8 +12,9 @@ export function parseSdkAmount(text:string):{value:string}|{error:string}{
   if(!t)return {error:'Chưa nhập số tiền'};
   if(t.startsWith('-'))return {error:'Tiền tích luỹ không âm'};
   if(!/^[\d.,]+$/.test(t))return {error:'Số tiền không hợp lệ (ví dụ 12.40)'};
-  const p=parseMoneyNumber(t,{fraction:6});
-  if(p.error||p.value===null)return {error:p.error===US_DECIMAL_HINT?p.error:p.error&&/^Tối đa/.test(p.error)?'Tối đa 6 chữ số thập phân':p.error==='Số quá lớn'?'Số tiền quá lớn':'Số tiền không hợp lệ (ví dụ 12.40)'};
+  // A lone "12,345" (old meaning 12.345) is ambiguous with 6 decimals allowed: refused with "Ghi rõ: 12345 hoặc 12.345" (review 29/10/2026).
+  const p=parseMoneyNumber(t,{fraction:6,strictComma:true});
+  if(p.error||p.value===null)return {error:p.error===US_DECIMAL_HINT||p.error?.startsWith('Ghi rõ')?p.error:p.error&&/^Tối đa/.test(p.error)?'Tối đa 6 chữ số thập phân':p.error==='Số quá lớn'?'Số tiền quá lớn':'Số tiền không hợp lệ (ví dụ 12.40)'};
   if(Number(p.value)>=MAX)return {error:'Số tiền quá lớn'};
   return {value:p.value};
 }

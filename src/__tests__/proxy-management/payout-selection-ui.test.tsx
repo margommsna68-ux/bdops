@@ -84,3 +84,13 @@ it('a lost receipt answer keeps the exact command; reopening retries it unchange
   expect((host.querySelector('[aria-label="Số tiền chính xác trong PayPal An-01 / VM_1"]') as HTMLInputElement).value).toBe('6.00');
   await click('Thử lại lệnh chưa rõ');expect(mock.receipt.mock.calls[1][0]).toEqual(first);expect(window.sessionStorage.length).toBe(0);
 });
+it('"Tiền đã về N dòng" with a large surplus (review 29/10/2026): the row asks for confirmation and sends acceptSurplus only when ticked',async()=>{
+  props.opsOf=(id:string)=>({...ops(id),request:request({id:'r'+id,earnAppId:'acc'+id,email:id+'@example.invalid'})});
+  await render();await click('Tiền đã về');
+  await change('Số tiền chính xác trong PayPal An-01 / VM_1','11.50');
+  const box=host.querySelector('[aria-label="Xác nhận nhận dư $1.50 (lớn hơn mức thường) An-01 / VM_1"]') as HTMLInputElement;expect(box).toBeTruthy();
+  expect(button('Tiền đã về 0 dòng')).toBeTruthy();
+  await act(async()=>box.click());
+  await click('Tiền đã về 1 dòng');
+  expect(mock.receipt).toHaveBeenCalledTimes(1);expect(mock.receipt.mock.calls[0][0]).toMatchObject({requestId:'r1',amount:'11.50',acceptSurplus:true});
+});

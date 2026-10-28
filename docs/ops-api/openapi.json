@@ -2,7 +2,7 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Owner decision 28/10/2026: only withdrawals/prepare retains ADMIN approval; status, receipts, members, edit, unsend, void and vms/{id}/suspended run directly with current rights. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money. Owner decision 28/10/2026: an ADMIN (2FA on) may open a 15-minute approval session for one token + project with one TOTP code (POST approval-sessions; the owner types the code in chat, ops-client session-open passes it once and never stores it); inside the window withdrawals/prepare of that token is approved at once (OpsApproval APPROVED → CONSUMED with sessionId); opening also approves the token's pending held requests. The session ends at expiry, on close, or at once when the approver loses ADMIN / 2FA / is disabled / TOTP-locked or the token is revoked. GET me shows approvalSession."
  },
  "servers": [
@@ -108,7 +108,8 @@
          "VALIDATION",
          "INTERNAL",
          "PAYPAL_DAILY_LIMIT",
-         "EMAIL_HAS_MONEY"
+         "EMAIL_HAS_MONEY",
+         "SURPLUS_CONFIRM"
         ]
        },
        "message": {
@@ -116,7 +117,7 @@
        },
        "details": {
         "type": "object",
-        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored). APPROVAL_REJECTED (403): approvalId, status \"REJECTED\". APPROVAL_EXPIRED (410): approvalId, expiredAt. (The 202 APPROVAL_REQUIRED hold has its own schema ApprovalRequired.) EMAIL_HAS_MONEY (409): the request / its receiving email already has money recorded (a receipt, voided ones included); it cannot be unsent, voided or moved to another email."
+        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored). APPROVAL_REJECTED (403): approvalId, status \"REJECTED\". APPROVAL_EXPIRED (410): approvalId, expiredAt. (The 202 APPROVAL_REQUIRED hold has its own schema ApprovalRequired.) EMAIL_HAS_MONEY (409): the request / its receiving email already has money recorded (a receipt, voided ones included); it cannot be unsent, voided or moved to another email. SURPLUS_CONFIRM (409, review 29/10/2026): the receipt is above what is open by more than max(1.00, 5% of the requested amount); details surplus, open and `current` = the withdrawal. Check the PayPal figure, then send the same body with acceptSurplus: true."
        }
       },
       "required": [
@@ -9531,7 +9532,7 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY / SURPLUS_CONFIRM",
       "content": {
        "application/json": {
         "schema": {
@@ -9614,6 +9615,10 @@
          "settleRemainder": {
           "type": "boolean",
           "description": "Owner 28/10/2026: the real PayPal amount is usually below the withdrawn one (a receipt above what is open is accepted and settled as a surplus). true = record this exact PayPal amount and close the request, the rest being the PayPal fee (shortfall). Allowed to anyone who may record the receipt."
+         },
+         "acceptSurplus": {
+          "type": "boolean",
+          "description": "Review 29/10/2026: a receipt above what is open by at most max(1.00, 5% of the requested amount) is accepted without it; a larger surplus answers 409 SURPLUS_CONFIRM unless this is true (the exact PayPal figure was checked)."
          }
         },
         "required": [
@@ -9669,7 +9674,7 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY / SURPLUS_CONFIRM",
       "content": {
        "application/json": {
         "schema": {
@@ -13449,7 +13454,7 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY / SURPLUS_CONFIRM",
       "content": {
        "application/json": {
         "schema": {

@@ -1,4 +1,4 @@
-# Cập nhật 28/10/2026 — Rút EarnApp gọn lại (web build 2RHnkRVDs2G_mKoGCWyTd, OpenAPI 1.9.0)
+# Cập nhật 28/10/2026 — Rút EarnApp gọn lại (web build 2RHnkRVDs2G_mKoGCWyTd, OpenAPI 1.9.0; bổ sung 1.9.1 ngày 29/10/2026)
 
 Đọc kèm PROMPT_CLAUDE_VAN_HANH_WEB.md (đã cập nhật) và OPENAPI_WEB_HIEN_TAI.json.
 
@@ -18,6 +18,9 @@
 
 ## Tiền về
 - Luôn ghi ĐÚNG số tiền thấy trong PayPal kèm mã giao dịch PayPal (`transactionId`). Số PayPal là con số chính xác và cuối cùng (chủ quyết định 28/10/2026).
-- Thường thấp hơn số rút vì phí: kèm `settleRemainder:true` để chốt phần thiếu là phí.
+- Thường thấp hơn số rút vì phí: kèm `settleRemainder:true` để chốt phần thiếu là phí (ghi chú "Phí / thiếu $1.50").
 - Có thể cao hơn một chút: vẫn ghi đúng số đó (không bị từ chối). Lệnh tự đóng là đã về (VM vào Chờ tạo lại), phần dư ghi `shortfall` âm (ví dụ `-0.06`) với ghi chú "Nhận dư $0.06"; `recorded.settled:true`. Cùng mã giao dịch ghi lần hai → bị từ chối (DUPLICATE).
+- Mức "cao hơn một chút" (rà soát 29/10/2026, OpenAPI 1.9.1): phần dư tối đa **max($1.00, 5% số rút)** thì ghi luôn. Dư nhiều hơn → 409 `SURPLUS_CONFIRM` (chưa ghi gì; `details.surplus`, `details.open`, `details.current` = yêu cầu). Kiểm tra lại đúng số trong PayPal; nếu đúng thì gửi lại cùng body kèm `acceptSurplus:true`. Trên web: khung "Tiền đã về" và "Tiền đã về N dòng" hiện ô "Xác nhận nhận dư $X (lớn hơn mức thường)", chỉ ghi được khi đã tích.
+- Khoản về ghi ở Kho tài khoản → Tiền vào PayPal (dán theo email, đã nhận) tự gắn vào yêu cầu rút của email đó: nếu làm yêu cầu đang chờ vượt số rút trong mức trên thì yêu cầu tự đóng là đã về với "Nhận dư $X" như lệnh `receipts`; vượt quá mức thì để "Cần đối chiếu" cho người xem lại (không tự chốt).
+- Thu hồi khoản về (ghi nhầm) của yêu cầu đã chốt "Nhận dư" thì bỏ luôn phần chốt dư (yêu cầu quay lại chờ tiền); hoàn tác lệnh ghi tiền về cũng trả yêu cầu về như trước.
 - Tiền về muộn sau SUS: vẫn ghi được; về một phần thì phần còn lại vẫn là "Mất do SUS"; về đủ hoặc dư thì mở lại thành đã về (dư ghi như trên).
