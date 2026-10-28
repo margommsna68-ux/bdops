@@ -191,12 +191,14 @@ it('LOST_SUS is neither waiting nor received',()=>{
   - `POST vms/{id}/suspended` VM_OPS `VM_SUSPENDED`
   - `WITHDRAWAL_STATUS`, `WITHDRAWAL_RECEIPT` (body thêm `settleRemainder`), `WITHDRAWAL_MEMBERS` bỏ `approval:true`.
   - `APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE']`; `me.approvalRequired` = `['WITHDRAWAL_PREPARE']`.
+  - `GET withdrawals` nhận thêm `email=<email PayPal nhận>` (khớp chính xác, không phân biệt hoa thường) để AI quét thư báo tiền PayPal tìm đúng lệnh đang chờ (chủ 28/10: "AI sau này sẽ quét mail và tự điền vào phần đó cho chính xác"); mỗi dòng trả `remaining`.
 
 - [ ] **Step 1: Test hỏng:**
   - `status and receipt run without approval` (fixture `api({autoApprove:false})`: SENT → 200, receipt → 200).
   - `prepare still answers 202 APPROVAL_REQUIRED`.
   - `an old pending STATUS approval: retry with the same key runs directly` (tạo `OpsApproval` PENDING action WITHDRAWAL_STATUS rồi gửi lại cùng key → 200).
   - `edit / unsend / void / suspended answer 200 with {replay, recorded, current}` và replay cùng key trả nguyên `recorded`.
+  - `GET withdrawals?email= finds the waiting request of that receiving email; a receipt with settleRemainder and a PayPal transactionId closes it; the same transactionId again is refused DUPLICATE`.
 - [ ] **Step 2:** FAIL. **Step 3:** cài đặt; envelope / idempotency / `OpsAudit` như các route hiện có. **Step 4:** PASS + `ops-api.integration.test.ts`, `ops-merged-payout.integration.test.ts` PASS (sửa kỳ vọng 202 cũ của STATUS/RECEIPT/MEMBERS thành 200 — đúng quyết định chủ). **Step 5:** Commit `feat(ops-api): only withdrawal prepare needs approval; fix/SUS routes`.
 
 ### Task 8: Phiên duyệt 15 phút
