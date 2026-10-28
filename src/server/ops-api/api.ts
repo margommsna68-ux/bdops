@@ -35,6 +35,7 @@ import {packageReminders} from '../proxy-management/reminders';
 import {assertBusinessArea} from '../business-management/scope';
 import {readMoneyReport} from '../dashboard/money-report';
 import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
+import {closeApprovalSession,openApprovalSession,sessionForToken} from './approval-session';
 import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount,reportAiLoginIssue} from './ai-accounts';
 import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory';
 // /api/ops/v1 (owner brief 21/10/2026). A thin layer: authenticate the token, check what the token allows, then call the same services
@@ -74,6 +75,9 @@ const routes:Route[]=[
   // 23/10/2026 evening: the AI's own approvals — read, and confirm with the ADMIN's TOTP typed at the CLI; a batch of commands.
   {method:'GET',path:new RegExp('^approvals/'+ID+'$'),scope:'READ',action:'APPROVAL',run:approvalDetail},
   {method:'POST',path:new RegExp('^approvals/'+ID+'/confirm$'),scope:null,action:'APPROVAL_CONFIRM',run:approvalConfirm},
+  // 28/10/2026: a 15-minute approval session opened with one ADMIN code (the code is used once, never kept), and its early close.
+  {method:'POST',path:/^approval-sessions$/,scope:'READ',action:'APPROVAL_SESSION_OPEN',run:sessionOpen},
+  {method:'POST',path:/^approval-sessions\/close$/,scope:'READ',action:'APPROVAL_SESSION_CLOSE',run:sessionClose},
   {method:'POST',path:/^batch$/,scope:null,action:'BATCH',run:async()=>{throw fail('INTERNAL','batch runs through runBatch');}},
   {method:'GET',path:/^projects$/,scope:'READ',action:'PROJECTS',run:projects},
   {method:'GET',path:/^servers$/,scope:'READ',action:'SERVERS',run:servers},
@@ -259,7 +263,7 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
   if(binding.payloadHash!==hash)throw fail('IDEMPOTENCY_CONFLICT','Idempotency-Key lô đã dùng cho nội dung khác');
   const resolved=b.items.map((it,index)=>{
     const path=it.path.replace(/^\//,''),route=routes.find(r=>r.method==='POST'&&r.path.test(path));
-    const problem=!route||route.action==='BATCH'||route.action==='APPROVAL_CONFIRM'?fail('VALIDATION','Không có lệnh ghi '+it.path+' trong lô'):route.scope&&!caller.row.scopes.includes(route.scope)?fail('FORBIDDEN','Token không được cấp '+route.scope):null;
+    const problem=!route||['BATCH','APPROVAL_CONFIRM','APPROVAL_SESSION_OPEN','APPROVAL_SESSION_CLOSE'].includes(route.action)?fail('VALIDATION','Không có lệnh ghi '+it.path+' trong lô'):route.scope&&!caller.row.scopes.includes(route.scope)?fail('FORBIDDEN','Token không được cấp '+route.scope):null;
     if(it.body.projectId!==undefined&&it.body.projectId!==b.projectId)return {index,it,path,route,params:[],body:it.body,problem:fail('VALIDATION','Dự án của mục khác dự án của lô')};
     return {index,it,path,route,params:route?path.match(route.path)!.slice(1):[],body:{...it.body,projectId:b.projectId},problem};
   });
@@ -344,7 +348,8 @@ async function me(c:Ctx){
     return {projectId:p.id,code:p.code,name:p.name,role:m.role,serverIds:scope.serverIds??null,capabilities:m.capabilities.filter(x=>['EARN_BALANCE','EARN_PAYOUT','PAYPAL_RECEIPT_RECORD','VM_PROXY_FOR_OPS'].includes(x)),
       effective:Object.fromEntries((OPS_SCOPES).map(s=>[s,can[s]&&c.token.scopes.includes(s)]))};}));
   return {user:{id:u.id,username:u.username,name:u.name},token:{id:c.token.id,prefix:c.token.prefix,name:c.token.name,expiresAt:c.token.expiresAt.toISOString(),scopes:c.token.scopes},projects:list,
-    limits:{readPerMinute:LIMITS.read.max,writePerMinute:LIMITS.write.max,batchPerMinute:LIMITS.batch.max,batchMaxItems:100},approvalRequired:routes.filter(r=>r.approval).map(r=>r.action),pinRequired:false};
+    limits:{readPerMinute:LIMITS.read.max,writePerMinute:LIMITS.write.max,batchPerMinute:LIMITS.batch.max,batchMaxItems:100},approvalRequired:routes.filter(r=>r.approval).map(r=>r.action),pinRequired:false,
+    approvalSession:await sessionForToken(c.db,c.token.id,projects.map(p=>p.id))};
 }
 async function projects(c:Ctx){
   const rows=await c.db.project.findMany({where:{id:{in:c.token.projectIds},members:{some:{userId:c.token.userId}}},select:{id:true,code:true,name:true},orderBy:{name:'asc'}});
@@ -604,6 +609,21 @@ async function approvalConfirm(c:Ctx,[id]:string[]){
   if(!c.token.projectIds.includes(b.projectId))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
   // The code is used here once and never kept: not in the audit, not in the answer.
   return confirmApprovalByToken(c.db,{approvalId:id,tokenId:c.token.id,projectId:b.projectId,admin:b.admin,totp:b.totp});
+}
+const SessionOpenBody=z.object({projectId:id64,admin:z.string().min(1).max(254),totp:z.string().min(6).max(12)}).strict();
+async function sessionOpen(c:Ctx){
+  const b=SessionOpenBody.parse(c.body);
+  if(!c.token.projectIds.includes(b.projectId))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
+  // The code is used here once and never kept: not in the audit, not in the answer, not in a journal.
+  const r=await openApprovalSession(c.db,{projectId:b.projectId,tokenId:c.token.id,admin:b.admin,totp:b.totp,via:'CLI'});
+  c.audit.objectId=r.sessionId;return r;
+}
+const SessionCloseBody=z.object({projectId:id64}).strict();
+async function sessionClose(c:Ctx){
+  const b=SessionCloseBody.parse(c.body);
+  if(!c.token.projectIds.includes(b.projectId))throw fail('NOT_FOUND','Không có dự án này trong phạm vi token');
+  // A token closes only its own sessions.
+  return closeApprovalSession(c.db,{projectId:b.projectId,tokenId:c.token.id,actorId:c.token.userId});
 }
 async function approvalDetail(c:Ctx,[id]:string[]){
   const {projectId}=await projectOf(c,q(c,'projectId'));c.audit.objectId=id;

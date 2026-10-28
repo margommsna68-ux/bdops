@@ -2011,6 +2011,8 @@ model OpsApprovalSession {
   expiresAt    DateTime
   closedAt     DateTime?
   closedById   String?
+  // The approver's User.totpVersion proved at opening; a different version (2FA reset) ends the session. Null = never active.
+  totpVersion  Int?
 
   @@index([projectId, tokenId, expiresAt])
 }

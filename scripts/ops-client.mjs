@@ -16,6 +16,12 @@
 //   node scripts/ops-client.mjs approve <approvalId> --admin <username> [--totp-stdin]
 //       # hidden TTY by default; --totp-stdin reads ONE code from stdin. Never pass a code as an argument.
 //       # Sends confirm ONCE, outside the journal, then retries its local command on APPROVED only.
+//   node scripts/ops-client.mjs session-open --admin <username> [--totp <code>|--totp-stdin] [--project P]
+//       # 28/10/2026 (owner decision): a 15-minute approval session for this token; withdrawals/prepare then runs at once.
+//       # The owner types the code in the chat; it is sent ONCE, outside the journal, never printed or written to a file.
+//       # Default project = the token's only project. Lost answer: read `session` before sending another code.
+//   node scripts/ops-client.mjs session-close [--project P]   # close this token's session now
+//   node scripts/ops-client.mjs session                       # GET me → approvalSession {open, expiresAt, approvedBy}
 // Stock uses generic get/post (bodies are captured facts; never refresh revisions automatically):
 //   get 'earnapp-accounts?projectId=P&state=UNUSED&type=GMAIL&limit=50'
 //   get 'proxies?projectId=P&state=FREE&group=TUT' | get 'sdks?projectId=P'
@@ -202,6 +208,8 @@ const RUNTIME_DIR=process.env.MTH_RUNTIME_DIR||join(homedir(),'.mth','runtime');
 const ACCOUNT_PATH=/^earnapp-accounts\/[A-Za-z0-9_-]{1,64}\/credentials$/;
 const REVEAL_PATH=/^sdks\/[A-Za-z0-9_-]{1,64}\/reveal$/;
 const CONFIRM_PATH=/^approvals\/[^/]+\/confirm$/;
+// The session open carries an ADMIN code: only session-open sends it, never call()/the journal/a batch.
+const SESSION_PATH=/^approval-sessions(\/close)?$/,SESSION_OPEN_PATH=/^approval-sessions$/;
 const routePath=path=>opsUrl(path).pathname.slice(PREFIX.length);
 /** Set a private ACL BEFORE any secret bytes are written. Fail closed on Windows ACL errors. */
 function privateJson(target,value){
@@ -246,7 +254,7 @@ function validateBatch(body){
   const keys=new Set();
   for(const it of body.items){
     if(it?.method!=='POST'||typeof it.path!=='string'||!it.body||typeof it.body!=='object'||Array.isArray(it.body)||typeof it.idempotencyKey!=='string'||!KEY.test(it.idempotencyKey)||keys.has(it.idempotencyKey))throw new Error('Mỗi mục cần POST, path, body và idempotencyKey riêng (8–100 ký tự)');
-    const p=routePath(it.path);if(p==='batch'||CONFIRM_PATH.test(p))throw new Error('Không cho batch lồng hoặc confirm trong lô; dùng approve');
+    const p=routePath(it.path);if(p==='batch'||CONFIRM_PATH.test(p)||SESSION_PATH.test(p))throw new Error('Không cho batch lồng, confirm hoặc phiên duyệt trong lô; dùng approve / session-open');
     keys.add(it.idempotencyKey);
   }
 }
@@ -286,11 +294,34 @@ async function approve(id,admin,stdin){
   }
   await call('POST',e.path,e.body,e.key);
 }
+/** The project of a session command: --project, else the token's only project. */
+async function sessionProject(project){
+  if(project){if(!/^[A-Za-z0-9_-]{1,64}$/.test(project))throw new Error('projectId không hợp lệ');return project;}
+  const me=await getJson('me');if(me.projects?.length!==1)throw new Error('Token có '+(me.projects?.length??0)+' dự án; thêm --project <projectId>');
+  return me.projects[0].projectId;
+}
+/** Session open is deliberately outside call()/the journal: the code is sent once and only whitelisted fields are printed. */
+async function sessionOpen(admin,source,project){
+  let code=source.stdin?readFileSync(0,'utf8').trim():source.code!=null?String(source.code).trim():await hidden('Mã 2FA của ADMIN (ẩn): ');
+  if(!/^\d{6}$/.test(code)){code='';throw new Error('Mã 2FA phải có 6 chữ số');}
+  const projectId=await sessionProject(project),s=secrets(),hideCode=v=>String(v??'').split(code).join('******');
+  let res,out;
+  try{
+    res=await fetch(opsUrl('approval-sessions'),{method:'POST',redirect:'manual',headers:{authorization:'Bearer '+s.token,'content-type':'application/json',accept:'application/json','idempotency-key':randomUUID()},body:JSON.stringify({projectId,admin,totp:code})});
+    out=await res.json();
+  }catch{code='';die('Chưa xác định kết quả mở phiên; chạy `session` để xem trước khi gửi mã khác.',3);}
+  const ok=res.status===200&&out?.ok===true&&out.error===null&&typeof out.data?.sessionId==='string';
+  const message=ok?null:hideCode(out?.error?.message).slice(0,300);code='';
+  if(ok){console.log(JSON.stringify({ok:true,projectId,sessionId:out.data.sessionId,expiresAt:out.data.expiresAt,approvedPending:out.data.approvedPending}));return;}
+  console.log(JSON.stringify({ok:false,status:res.status,error:{code:res.status>=300&&res.status<400?'REDIRECT_REFUSED':typeof out?.error?.code==='string'?out.error.code:'SESSION_NOT_OPENED',message:message||'Phiên chưa mở; không tự gửi lại mã.'}}));
+  process.exitCode=res.status>=500?3:1;
+}
 let proxyOut=null;
 async function call(method,path,body,key){
   const url=opsUrl(path),s=secrets(),headers={authorization:'Bearer '+s.token,accept:'application/json'};
   const p=routePath(path);
   if(CONFIRM_PATH.test(p))throw new Error('Dùng approve để gửi mã trực tiếp, không qua nhật ký');
+  if(SESSION_OPEN_PATH.test(p))throw new Error('Dùng session-open để gửi mã trực tiếp, không qua nhật ký');
   if(method==='POST'&&p==='batch')validateBatch(body);
   let entry=null,before=null,batchBefore=[];
   const settle=(attempt,{status=null,why=null,out=null}={})=>{
@@ -523,6 +554,13 @@ if(isMain){
     else if(cmd==='post'){const key=flag('--key')||randomUUID();if(args.length!==2)die('post <path> <body.json> [--key K]');await call('POST',args[0],JSON.parse(readFileSync(args[1],'utf8')),key);}
     else if(cmd==='batch'){const key=flag('--key');if(args.length!==1)die('batch <file.json> [--key K]');await batchCommand(args[0],key);}
     else if(cmd==='approve'){const admin=flag('--admin'),at=args.indexOf('--totp-stdin'),stdin=at>=0;if(stdin)args.splice(at,1);if(args.length!==1||!admin)die('approve <approvalId> --admin <username> [--totp-stdin]');await approve(args[0],admin,stdin);}
+    else if(cmd==='session-open'){
+      const at=args.indexOf('--totp-stdin'),stdin=at>=0;if(stdin)args.splice(at,1);
+      const ti=args.indexOf('--totp'),code=ti>=0?args.splice(ti,2)[1]:null;const admin=flag('--admin'),project=flag('--project');
+      if(args.length||!admin||(ti>=0&&(code==null||stdin)))die('session-open --admin <username> [--totp <mã>|--totp-stdin] [--project P]');
+      await sessionOpen(admin,{stdin,code},project);}
+    else if(cmd==='session-close'){const project=flag('--project');if(args.length)die('session-close [--project P]');await call('POST','approval-sessions/close',{projectId:await sessionProject(project)},randomUUID());}
+    else if(cmd==='session'){if(args.length)die('session');const me=await getJson('me');console.log(JSON.stringify({approvalSession:me.approvalSession??null}));}
     else if(cmd==='proxy'){const out=flag('--out'),pkey=flag('--key')||randomUUID();if(args.length!==4||!/^\d+$/.test(args[3]))die('proxy <projectId> <vmId> <jobId> <cycle> [--out <file>]');proxyOut=out;
       await call('POST','vms/'+encodeURIComponent(args[1])+'/proxy-credentials',{projectId:args[0],jobId:args[2],expectedCycle:Number(args[3])},pkey);}
     else if(cmd==='sdk-check'&&args.length===1){const r=checkSdkSurvey(JSON.parse(readFileSync(args[0],'utf8')));console.log(JSON.stringify({ok:!r.problems.length,vms:r.vms.length,codes:r.codes,problems:r.problems},null,2));if(r.problems.length)process.exitCode=1;}
@@ -540,7 +578,7 @@ if(isMain){
       console.log(JSON.stringify(list.map(e=>({key:e.key,path:e.path,state:e.state,approvalId:e.approvalId??null,expiresAt:e.approvalExpiresAt??null,expired:!!e.approvalExpiresAt&&Date.parse(e.approvalExpiresAt)<Date.now(),waitingSince:e.waitingSince??null,attempts:e.attempts,next:WAITING_MSG(e.key)})),null,2));}
     else if(cmd==='pending'){const list=allEntries().filter(e=>e.state==='SENDING'||e.state==='UNKNOWN'||e.state==='UNREADABLE');
       console.log(JSON.stringify(list.map(e=>e.state==='UNREADABLE'?{key:null,file:e.file,state:e.state,error:e.error}:{key:e.key,path:e.path,state:e.state,attempts:e.attempts,lastTryAt:e.lastTryAt,...(e.httpStatus?{httpStatus:e.httpStatus}:{})}),null,2));}
-    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | batch <file.json> [--key K] | approve <approvalId> --admin <username> [--totp-stdin] | retry <key> | pending | approvals | sdk-reveal <projectId> <sdkId> [--key K] | proxy <projectId> <vmId> <jobId> <cycle> [--out F] | sdk-prepare <projectId> <vm>... [--code C] [--out F] | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K] | sdk-survey <survey.json> [--state F] [--redo vmId]\n'
+    else die('Lệnh: init | me | projects | resolve <projectId> <server> <vm> | vm <projectId> <vmId> | get <path> | post <path> <body.json> [--key K] | batch <file.json> [--key K] | approve <approvalId> --admin <username> [--totp-stdin] | session-open --admin <username> [--totp <mã>|--totp-stdin] [--project P] | session-close [--project P] | session | retry <key> | pending | approvals | sdk-reveal <projectId> <sdkId> [--key K] | proxy <projectId> <vmId> <jobId> <cycle> [--out F] | sdk-prepare <projectId> <vm>... [--code C] [--out F] | sdk-check <survey.json> | sdk-observe <one-vm.json> [--key K] | sdk-survey <survey.json> [--state F] [--redo vmId]\n'
       +'Mã thoát: 0 DONE · 1 ANSWERED / REJECTED / EXPIRED · 2 lỗi dùng lệnh · 3 UNKNOWN (retry <key>) · 4 WAITING_APPROVAL (ADMIN duyệt trên web rồi retry <key>). Không còn PIN (23/10/2026); lệnh quan trọng chờ ADMIN duyệt.');
   }catch(e){die(String(e.message||e),e.exitCode===130?130:2);}
 }

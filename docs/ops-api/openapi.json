@@ -2,8 +2,8 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.8.0",
-  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Owner decision 28/10/2026: only withdrawals/prepare retains ADMIN approval; status, receipts, members, edit, unsend, void and vms/{id}/suspended run directly with current rights. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
+  "version": "1.9.0",
+  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Owner decision 28/10/2026: only withdrawals/prepare retains ADMIN approval; status, receipts, members, edit, unsend, void and vms/{id}/suspended run directly with current rights. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money. Owner decision 28/10/2026: an ADMIN (2FA on) may open a 15-minute approval session for one token + project with one TOTP code (POST approval-sessions; the owner types the code in chat, ops-client session-open passes it once and never stores it); inside the window withdrawals/prepare of that token is approved at once (OpsApproval APPROVED → CONSUMED with sessionId); opening also approves the token's pending held requests. The session ends at expiry, on close, or at once when the approver loses ADMIN / 2FA / is disabled / TOTP-locked or the token is revoked. GET me shows approvalSession."
  },
  "servers": [
   {
@@ -1768,6 +1768,30 @@
       "enum": [
        false
       ]
+     },
+     "approvalSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The token's approval session in force (re-validated at read), or open:false.",
+      "properties": {
+       "open": {
+        "type": "boolean"
+       },
+       "expiresAt": {
+        "type": "string",
+        "format": "date-time",
+        "nullable": true
+       },
+       "approvedBy": {
+        "type": "string",
+        "nullable": true
+       }
+      },
+      "required": [
+       "open",
+       "expiresAt",
+       "approvedBy"
+      ]
      }
     },
     "required": [
@@ -1776,7 +1800,8 @@
      "projects",
      "limits",
      "approvalRequired",
-     "pinRequired"
+     "pinRequired",
+     "approvalSession"
     ]
    },
    "Health": {
@@ -7909,6 +7934,136 @@
      "data",
      "error"
     ]
+   },
+   "ApprovalSessionOpenBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "admin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 254,
+      "description": "Username or email of an ADMIN of the project with 2FA on."
+     },
+     "totp": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 12,
+      "writeOnly": true,
+      "description": "ADMIN TOTP (owner decision 28/10/2026: may be typed in chat and passed by ops-client session-open --totp / --totp-stdin). Used once by checkTotp (step replay refused; 3 wrong → the ADMIN is locked 30 minutes); never stored in journals, audit, logs, files or answers."
+     }
+    },
+    "required": [
+     "projectId",
+     "admin",
+     "totp"
+    ]
+   },
+   "ApprovalSessionOpenAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "sessionId": {
+      "type": "string"
+     },
+     "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "approvedPending": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "sessionId",
+     "expiresAt",
+     "approvedPending"
+    ]
+   },
+   "OkApprovalSessionOpenAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ApprovalSessionOpenAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "ApprovalSessionCloseBody": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     }
+    },
+    "required": [
+     "projectId"
+    ]
+   },
+   "ApprovalSessionCloseAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "closed": {
+      "type": "integer",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "closed"
+    ]
+   },
+   "OkApprovalSessionCloseAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/ApprovalSessionCloseAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -13871,6 +14026,194 @@
      },
      "500": {
       "description": "INTERNAL: outcome may be unknown; retry original command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/approval-sessions": {
+   "post": {
+    "summary": "Open a 15-minute approval session for this token with one ADMIN TOTP",
+    "description": "Scope READ. The named ADMIN must be an ADMIN of the project with 2FA on; checked again inside the transaction. Closes the token's earlier session in this project and approves every pending, unexpired held request (withdrawals/prepare, batches holding it) of the token. Idempotency-Key required by the HTTP layer only; there is no business journal and the code is never kept: do not resend the same code (a used TOTP step is refused) — on a lost answer read GET me (approvalSession) first. Not allowed inside a batch.",
+    "x-required-scope": "READ",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApprovalSessionOpenBody"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkApprovalSessionOpenAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/approval-sessions/close": {
+   "post": {
+    "summary": "Close this token's approval session now",
+    "description": "Scope READ. Closes the calling token's open session(s) in the project at once; withdrawals/prepare is held again (202). closed = number of sessions closed (0 when none was open). Not allowed inside a batch.",
+    "x-required-scope": "READ",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApprovalSessionCloseBody"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkApprovalSessionCloseAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN; privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key (confirm: read approval first)",
       "content": {
        "application/json": {
         "schema": {

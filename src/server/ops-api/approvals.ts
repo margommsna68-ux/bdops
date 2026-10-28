@@ -1,9 +1,10 @@
 import {createHash} from 'node:crypto';
-import type {PrismaClient} from '@prisma/client';
+import type {OpsApproval,PrismaClient} from '@prisma/client';
 import {ProxyDomainError} from '../proxy-management/types';
 import {checkTotp,totpMessage} from '../users/totp';
 import {maskSdk} from '@/lib/sdk-mask';
 import {assertOpsToken} from './context';
+import {activeSession,approveUnderSession,assertApprover} from './approval-session';
 // Critical ops-API commands wait for an ADMIN's 2FA approval (owner decision 23/10/2026): the AI never holds a code. The request is held
 // with the hash of exactly what the AI sent and an allowed summary (names, amounts, masked emails / SDK codes; never credentials). The
 // ADMIN of that project, with 2FA on, approves with a TOTP code; the AI's retry with the same Idempotency-Key then runs once (CONSUMED);
@@ -12,6 +13,10 @@ export const APPROVAL_TTL_MS=15*60000;
 export type ApprovalStatus='PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'|'CONSUMED'|'LOCKED';
 // Owner decision 28/10/2026: only withdrawal prepare waits for an ADMIN (status / receipt / members run directly; old held rows stay as history).
 export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE'] as const;
+// The rows an ADMIN may still decide: held actions + batches holding them. Rows held before 28/10 for other actions stay as history
+// (their route now runs directly on retry): they are not listed, counted or approved.
+export const HELD_ACTIONS=[...APPROVAL_ACTIONS,'BATCH'] as const;
+const isHeld=(action:string)=>(HELD_ACTIONS as readonly string[]).includes(action);
 export const ACTION_LABEL:Record<string,string>={BATCH:'Lô lệnh (nhiều mục cần duyệt)',ACCOUNT_CREDENTIALS:'Lấy thông tin đăng nhập tài khoản EarnApp',WITHDRAWAL_PREPARE:'Chuẩn bị rút tiền (giữ email PayPal)',WITHDRAWAL_MEMBERS:'Gộp thêm VM vào lệnh rút',WITHDRAWAL_STATUS:'Ghi trạng thái yêu cầu rút',WITHDRAWAL_RECEIPT:'Ghi tiền về PayPal',VM_PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM',SDK_REVEAL:'Xem mã SDK đầy đủ'};
 export function canonical(x:unknown):string{
   if(Array.isArray(x))return '['+x.map(canonical).join(',')+']';
@@ -37,9 +42,10 @@ export async function approvalSummary(db:PrismaClient,projectId:string,action:st
   return out;
 }
 export interface GateInput {projectId:string;tokenId:string;userId:string;action:string;method:string;path:string;objectId:string|null;requestKey:string;payloadHash:string;summary:Record<string,unknown>}
+type GateResult={approval:OpsApproval;replay:boolean;pending?:undefined;expired?:undefined}|{pending:OpsApproval;approval?:undefined;replay?:undefined;expired?:undefined}|{expired:OpsApproval;approval?:undefined;replay?:undefined;pending?:undefined};
 /** Before a critical command runs: throws ApprovalHold (202 / 403 / 410) or returns the approval to consume after success. */
 export async function gateApproval(db:PrismaClient,g:GateInput){
- return db.$transaction(async tx=>{
+ return db.$transaction(async (tx):Promise<GateResult>=>{
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${g.requestKey},0))`;
   const now=new Date(),rows=await tx.opsApproval.findMany({where:{requestKey:g.requestKey},orderBy:{requestedAt:'desc'}}),row=rows[0];
   if(row){
@@ -47,12 +53,18 @@ export async function gateApproval(db:PrismaClient,g:GateInput){
     if(row.tokenId!==g.tokenId)throw new ApprovalHold('APPROVAL_REJECTED','Yêu cầu duyệt thuộc token cũ; chỉ kết quả đã ghi được phát lại, mục chưa chạy phải xin duyệt mới',{approvalId:row.id,status:'REJECTED'});
     if(row.status==='CONSUMED')return {approval:row,replay:true};
     if(row.status==='REJECTED'||row.status==='LOCKED')throw new ApprovalHold('APPROVAL_REJECTED',row.status==='LOCKED'?'Yêu cầu đã khoá sau 5 lần sai mã; xin lại bằng key mới':'ADMIN đã từ chối lệnh này',{approvalId:row.id,status:row.status});
-    if(row.status==='EXPIRED'||row.expiresAt<now){await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED'}});return {expired:row} as const;}
+    if(row.status==='EXPIRED'||row.expiresAt<now){await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED'}});return {expired:row};}
     if(row.status==='APPROVED')return {approval:row,replay:false};
-    return {pending:row} as const;
+    return underSession(row);
   }
   const created=await tx.opsApproval.create({data:{projectId:g.projectId,tokenId:g.tokenId,userId:g.userId,action:g.action,method:g.method,path:g.path,objectId:g.objectId,requestKey:g.requestKey,payloadHash:g.payloadHash,summary:g.summary as object,expiresAt:new Date(now.getTime()+APPROVAL_TTL_MS)}});
-  return {pending:created} as const;
+  return underSession(created);
+  // A 15-minute approval session of this token + project (re-checked here, FOR SHARE) approves the row at once; otherwise it waits.
+  async function underSession(r:OpsApproval):Promise<GateResult>{
+    const s=isHeld(r.action)&&r.tokenId===g.tokenId&&r.projectId===g.projectId?await activeSession(tx,{projectId:g.projectId,tokenId:g.tokenId}):null;
+    if(!s)return {pending:r};
+    return {approval:await approveUnderSession(tx,s,r),replay:false};
+  }
  }).then(result=>{
   if(result.expired)throw new ApprovalHold('APPROVAL_EXPIRED','Yêu cầu đã hết hạn; gửi lại với Idempotency-Key mới',{approvalId:result.expired.id,status:'EXPIRED',expiresAt:result.expired.expiresAt.toISOString()});
   if(result.pending)throw new ApprovalHold('APPROVAL_REQUIRED','Chờ ADMIN duyệt trên web hoặc nhập mã 2FA tại CLI, rồi gửi lại cùng key trong 15 phút',{approvalId:result.pending.id,status:'PENDING',expiresAt:result.pending.expiresAt.toISOString()});
@@ -66,7 +78,7 @@ export async function consumeApproval(db:PrismaClient,approvalId:string,requestI
 export async function listApprovals(db:PrismaClient,projectId:string,o:{status?:ApprovalStatus|'OPEN';limit?:number}={}){
   const now=new Date();
   await db.opsApproval.updateMany({where:{projectId,status:'PENDING',expiresAt:{lt:now}},data:{status:'EXPIRED'}});
-  const where=o.status==='OPEN'||!o.status?{projectId,status:'PENDING'}:{projectId,status:o.status};
+  const where=o.status==='OPEN'||!o.status||o.status==='PENDING'?{projectId,status:'PENDING',action:{in:[...HELD_ACTIONS]}}:{projectId,status:o.status};
   const rows=await db.opsApproval.findMany({where,orderBy:{requestedAt:'desc'},take:o.limit??100});
   const users=await db.user.findMany({where:{id:{in:[...new Set(rows.flatMap(r=>[r.userId,r.decidedById].filter((x):x is string=>!!x)))]}},select:{id:true,username:true,name:true}});
   const tokens=await db.opsToken.findMany({where:{id:{in:[...new Set(rows.map(r=>r.tokenId))]}},select:{id:true,name:true,prefix:true}});
@@ -84,6 +96,7 @@ export async function decideApproval(db:PrismaClient,input:{approvalId:string;ac
   if(!row)throw new ProxyDomainError('NOT_FOUND','Không có yêu cầu này');
   if(row.status!=='PENDING')throw new ProxyDomainError('STALE_PREVIEW','Yêu cầu đã '+(row.status==='APPROVED'?'được duyệt':row.status==='REJECTED'?'bị từ chối':row.status==='CONSUMED'?'được AI thực hiện':'hết hạn'));
   if(row.expiresAt<new Date()){await db.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED'}});throw new ProxyDomainError('STALE_PREVIEW','Yêu cầu đã hết hạn; AI phải gửi lại');}
+  if(input.approve&&!isHeld(row.action))throw new ProxyDomainError('STALE_PREVIEW','Lệnh này không còn cần duyệt; AI gửi lại cùng key sẽ chạy thẳng');
   const t=await checkTotp(db,input.actorId,input.code);
   if(t.result!=='OK')throw new ProxyDomainError('FORBIDDEN',totpMessage(t.result,u.totpLockedAt));
   const status:ApprovalStatus=input.approve?'APPROVED':'REJECTED',now=new Date();
@@ -92,7 +105,7 @@ export async function decideApproval(db:PrismaClient,input:{approvalId:string;ac
   await db.auditLog.create({data:{projectId:input.projectId,userId:input.actorId,action:input.approve?'OPS_APPROVE':'OPS_REJECT',entity:'OpsApproval',entityId:row.id,changes:{action:row.action,objectId:row.objectId,tokenId:row.tokenId,via:t.via}}});
   return {id:row.id,status};
 }
-export async function pendingApprovalCount(db:PrismaClient,projectId:string){return db.opsApproval.count({where:{projectId,status:'PENDING',expiresAt:{gt:new Date()}}});}
+export async function pendingApprovalCount(db:PrismaClient,projectId:string){return db.opsApproval.count({where:{projectId,status:'PENDING',expiresAt:{gt:new Date()},action:{in:[...HELD_ACTIONS]}}});}
 // ─── CLI side (owner decision 23/10 evening): the AI's token confirms with the ADMIN's TOTP typed at the CLI ───────────────────
 export const CONFIRM_MAX_FAILED=5;
 export function approvalView(r:{id:string;action:string;status:string;summary:unknown;requestedAt:Date;expiresAt:Date;decidedAt:Date|null;consumedAt:Date|null;confirmFailed:number;decisionNote:string|null}){
@@ -127,16 +140,14 @@ export async function confirmApprovalByToken(db:PrismaClient,input:{approvalId:s
     const fresh=await tx.opsApproval.findUniqueOrThrow({where:{id:row.id}});
     if(fresh.status!=='PENDING'||fresh.confirmFailed>=CONFIRM_MAX_FAILED)throw new ProxyDomainError('FORBIDDEN','Yêu cầu vừa được quyết định hoặc đã bị khoá');
     if(fresh.expiresAt<=new Date())return {expired:true} as const;
-    const [u]=await tx.$queryRaw<{disabledAt:Date|null;totpEnabledAt:Date|null;totpVersion:number;totpLockedAt:Date|null}[]>`SELECT "disabledAt","totpEnabledAt","totpVersion","totpLockedAt" FROM "User" WHERE "id"=${admin.id} FOR SHARE`;
-    const [membership]=await tx.$queryRaw<{role:string}[]>`SELECT "role" FROM "ProjectMember" WHERE "userId"=${admin.id} AND "projectId"=${input.projectId} FOR SHARE`;
-    if(!u||u.disabledAt||membership?.role!=='ADMIN'||!u.totpEnabledAt||u.totpVersion!==t.totpVersion)throw new ProxyDomainError('FORBIDDEN','Quyền ADMIN hoặc 2FA vừa thay đổi; kiểm tra lại');
+    const approver=await assertApprover(tx,admin.id,input.projectId,t);
     if(t.result!=='OK'){
       const failed=fresh.confirmFailed+1,locked=failed>=CONFIRM_MAX_FAILED;
       await tx.opsApproval.update({where:{id:row.id},data:{confirmFailed:failed,...(locked?{status:'LOCKED',decisionNote:'Khoá sau '+CONFIRM_MAX_FAILED+' lần sai mã'}:{})}});
       await tx.auditLog.create({data:{projectId:input.projectId,userId:admin.id,action:'OPS_APPROVE_FAIL',entity:'OpsApproval',entityId:row.id,changes:{tokenId:row.tokenId,result:t.result,failed,locked}}});
       return {failed,locked} as const;
     }
-    if(u.totpLockedAt&&new Date(u.totpLockedAt).getTime()+30*60000>Date.now())throw new ProxyDomainError('FORBIDDEN','Mã 2FA đang bị khoá');
+    if(approver.locked)throw new ProxyDomainError('FORBIDDEN','Mã 2FA đang bị khoá');
     const approved=await tx.opsApproval.update({where:{id:row.id},data:{status:'APPROVED',decidedById:admin.id,decidedAt:new Date(),decisionNote:'Duyệt tại CLI bằng mã 2FA'}});
     await tx.auditLog.create({data:{projectId:input.projectId,userId:admin.id,action:'OPS_APPROVE',entity:'OpsApproval',entityId:row.id,changes:{action:row.action,objectId:row.objectId,tokenId:row.tokenId,via:'CLI:'+t.via}}});
     return {approved} as const;
