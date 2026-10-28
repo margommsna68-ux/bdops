@@ -1,12 +1,18 @@
+import {createHash} from 'node:crypto';
 import type {Prisma,PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
+import {encrypt,decrypt} from '@/lib/encryption';
 import {assertInfrastructureAction,loadInfrastructureScope} from '../permissions/infrastructure';
 import {assertUnrestrictedServers} from '../permissions/server-scope';
 import {runBusinessCommand} from '../business-management/idempotency';
+import {currentProxyOf,loadChangeVM,reissueProxyConfig} from '../vm-management/proxy-change';
+import {loadCatalog} from './repository';
+import {matchPackage} from './catalog';
 import {ProxyDomainError,type ActorScope} from './types';
 type Reader=PrismaClient|Prisma.TransactionClient;
-// Proxy package maintenance commands (owner 29/10/2026). Both are checked, journaled business commands (key + replay,
-// undo through the operation journal). 
+// Proxy package / credential maintenance commands (owner 29/10/2026). Both are checked, journaled business commands (key + replay,
+// undo through the operation journal). Credentials never appear in the journal summary, the request hash or the audit log: only
+// sha256 digests (like ACCOUNT_STOCK_EDIT); images keep the encrypted cipher only.
 async function authorizeManage(tx:Reader,scope:ActorScope){
   const current=await loadInfrastructureScope(tx,scope.userId,scope.projectId);assertInfrastructureAction(current,'MANAGE');
   if(current.businessMode!=='PROXY_VM')throw new ProxyDomainError('FORBIDDEN');
@@ -39,3 +45,68 @@ export async function renamePackage(scope:ActorScope,input:{key:string;code:stri
   },db);
 }
 
+export interface CredentialChangeInput {key:string;endpointIds?:string[];ip?:string;username:string;password:string;updatePackageCredentials?:boolean;preview?:boolean}
+const digest=(s:string)=>'sha256:'+createHash('sha256').update(s).digest('hex');
+const CRED=/^[^\s:|]{1,200}$/;
+/** Parse "user:pass" (the owner pastes it like that); credentials must not contain spaces, ':' or '|'. */
+export function parseCredentialPair(text:string){const t=text.trim(),i=t.indexOf(':');if(i<=0)return null;const username=t.slice(0,i),password=t.slice(i+1);return CRED.test(username)&&CRED.test(password)?{username,password}:null;}
+async function planCredentials(tx:Reader,scope:ActorScope,input:CredentialChangeInput){
+  const username=input.username.trim(),password=input.password.trim();
+  if(!CRED.test(username)||!CRED.test(password))throw new ProxyDomainError('INVALID_INPUT','User/pass mới không hợp lệ (không để trống, không có khoảng trắng, dấu : hoặc |)');
+  const ids=input.endpointIds?.length?Array.from(new Set(input.endpointIds)):null,ip=input.ip?.trim()||null;
+  if(!ids&&!ip)throw new ProxyDomainError('INVALID_INPUT','Chọn proxy hoặc nhập IP');
+  if(ids&&ids.length>2000)throw new ProxyDomainError('INVALID_INPUT','Tối đa 2000 proxy mỗi lần');
+  const rows=await tx.proxyIP.findMany({where:{projectId:scope.projectId,retiredAt:null,inventoryState:{notIn:['RETIRED','VOID']},...(ids?{id:{in:ids}}:{host:ip!})},orderBy:[{host:'asc'},{port:'asc'}]});
+  if(ids&&rows.length!==ids.length)throw new ProxyDomainError('NOT_FOUND','Có proxy không còn trong kho (đã xoá hoặc không thuộc dự án)');
+  if(!rows.length)throw new ProxyDomainError('NOT_FOUND','Không có proxy nào của IP '+ip+' trong kho');
+  if(rows.some(r=>!r.credentialCipher||!r.host||!r.port))throw new ProxyDomainError('INVALID_INPUT','Có proxy chưa đủ IP:port:user:pass; sửa từng dòng');
+  const changing=rows.filter(r=>{const c=JSON.parse(decrypt(r.credentialCipher!)) as {username:string;password:string};return c.username!==username||c.password!==password;});
+  const catalog=await loadCatalog(scope.projectId,tx,true),before=Array.from(new Set(rows.map(r=>r.packageCode)));
+  let refusal:string|null=null,packageAfter:string|null,packageAccount:{id:string;code:string}|null=null;
+  if(input.updatePackageCredentials){
+    // The whole package moves to the new user/pass: every current proxy of it must be in this change, otherwise the rest would fall out.
+    if(before.length!==1||!before[0])refusal='Cập nhật user/pass của gói chỉ khi tất cả proxy chọn cùng một gói';
+    else{
+      const code=before[0],all=await tx.proxyIP.count({where:{projectId:scope.projectId,packageCode:code,retiredAt:null,inventoryState:{notIn:['RETIRED','VOID']}}});
+      const owner=catalog.find(c=>c.username===username&&c.password===password&&c.code!==code);
+      if(all!==rows.length)refusal='Gói '+code+' còn '+(all-rows.length)+' proxy khác chưa chọn; chọn đủ cả gói hoặc bỏ cập nhật user/pass của gói';
+      else if(owner)refusal='User/pass mới đã thuộc gói '+owner.code;
+      else packageAccount={id:catalog.find(c=>c.code===code)!.id,code};
+    }
+    packageAfter=before.length===1?before[0]:null;
+  }else{
+    packageAfter=matchPackage({ip:'',port:null,username,password,format:'FULL'},catalog);
+    if(!packageAfter)refusal='User/pass mới chưa thuộc gói nào: thêm gói với user/pass này trước, hoặc chọn cập nhật user/pass của gói (khi đổi cả gói)';
+  }
+  const vms:{vmId:string;endpointId:string}[]=[];let review=0;
+  const holds=await tx.vMProxyAllocation.findMany({where:{endpointId:{in:changing.map(r=>r.id)},releasedAt:null,role:{in:['DESIRED','INSTALLED']},vm:{managed:true,archivedAt:null}},select:{vmId:true,endpointId:true}});
+  for(const h of holds){if(vms.some(v=>v.vmId===h.vmId))continue;const vm=await loadChangeVM(tx as Prisma.TransactionClient,h.vmId);if(currentProxyOf(vm).endpointId===h.endpointId)vms.push({vmId:h.vmId,endpointId:h.endpointId});else review++;}
+  const byState:Record<string,number>={};for(const r of changing)byState[r.inventoryState]=(byState[r.inventoryState]||0)+1;
+  return {rows,changing,username,password,refusal,packageBefore:before.filter((c):c is string=>!!c),packageAfter,packageAccount,vms,review,summary:{endpoints:changing.length,unchanged:rows.length-changing.length,byState,vms:vms.length,reviewVms:review,package:packageAfter,packageBefore:before.filter((c):c is string=>!!c),updatesPackage:!!packageAccount,refusal}};
+}
+/**
+ * Change user/pass of existing proxies in place (the provider changed them on its site). Ids, IP, port, state, holds and history stay;
+ * the package follows the new credentials (or the package itself moves to them with updatePackageCredentials). Every VM using one of
+ * these proxies gets a new configuration marked "Chờ áp dụng trên máy" (reissueProxyConfig); the VM status is unchanged.
+ * preview:true returns the counts without writing.
+ */
+export async function changeProxyCredentials(scope:ActorScope,input:CredentialChangeInput,db:PrismaClient=prisma){
+  if(input.preview){await authorizeManage(db,scope);return {preview:true as const,...(await planCredentials(db,scope,input)).summary};}
+  const payload={endpointIds:input.endpointIds?[...input.endpointIds].sort():null,ip:input.ip?.trim()||null,username:digest(input.username.trim()),password:digest(input.password.trim()),updatePackageCredentials:!!input.updatePackageCredentials};
+  return runBusinessCommand(scope,{key:input.key,payload,kind:'PROXY_CREDENTIALS',module:'INFRASTRUCTURE',authorize:tx=>authorizeManage(tx,scope)},async(tx,images,current)=>{
+    const plan=await planCredentials(tx,current,input);
+    if(plan.refusal)throw new ProxyDomainError('INVALID_INPUT',plan.refusal);
+    if(!plan.changing.length)return {preview:false as const,...plan.summary};
+    const now=new Date(),cipher=()=>encrypt(JSON.stringify({username:plan.username,password:plan.password}));
+    if(plan.packageAccount){await images.remember('ACCOUNT',plan.packageAccount.id);await tx.proxyProviderAccount.update({where:{id:plan.packageAccount.id},data:{credentialCipher:cipher(),revision:{increment:1}}});}
+    for(const r of plan.changing){
+      await images.remember('ENDPOINT',r.id);
+      await tx.proxyIP.update({where:{id:r.id},data:{credentialCipher:cipher(),packageCode:plan.packageAfter,revision:{increment:1}}});
+      if(r.identityId&&r.host)await tx.proxyStatusEvent.create({data:{projectId:scope.projectId,identityId:r.identityId,endpointId:r.id,ip:r.host,kind:'CREDENTIALS_CHANGED',occurredAt:now,actorId:scope.userId,reason:'Đổi user/pass'+(r.packageCode!==plan.packageAfter?' · gói '+(r.packageCode||'chưa rõ')+' → '+plan.packageAfter:'')}});
+    }
+    let pending=0;
+    for(const v of plan.vms)if(await reissueProxyConfig(tx,images,{projectId:scope.projectId,actorId:current.userId,now,via:'Đổi user/pass'},v.vmId,v.endpointId))pending++;
+    await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_CREDENTIALS_CHANGE',entity:'ProxyIP',entityId:plan.changing[0].host||plan.changing[0].id,changes:{endpoints:plan.changing.length,vms:pending,package:plan.packageAfter,updatesPackage:!!plan.packageAccount}}});
+    return {preview:false as const,...plan.summary,vms:pending};
+  },db);
+}

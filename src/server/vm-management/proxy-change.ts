@@ -84,19 +84,46 @@ export async function assignProxyToVm(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:
     const hold=await tx.vMProxyAllocation.create({data:{projectId:ctx.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:keep.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:ctx.actorId}});
     await images.remember('VM_ALLOCATION',hold.id,true);
   }
-  if(!keep){
-    const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
-    const config=await tx.vMConfiguration.create({data:{projectId:ctx.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:ctx.actorId}});
-    await images.remember('VM_CONFIG',config.id,true);configId=config.id;
-    const hold=await tx.vMProxyAllocation.create({data:{projectId:ctx.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey,role:'DESIRED',createdById:ctx.actorId}});
-    await images.remember('VM_ALLOCATION',hold.id,true);
-  }
+  if(!keep)configId=await createAssignedConfig(tx,images,ctx,vm,endpoint,proxy);
   await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:configId,installedConfigurationId:null,proxyId:null,proxySlotState:'FULL',...(keep?{}:{configurationSequence:{increment:1}}),revision:{increment:1}}});
   await tx.proxyIP.update({where:{id:endpoint.id},data:{revision:{increment:1}}});await syncAssignmentState(tx,endpoint.id);
   await event(tx,ctx,endpoint,'ASSIGNED','Dùng cho '+here+(from.length?' (thay '+from.length+' proxy cũ)':''));
   await restoreAfterBlocked(tx,images,ctx,vm,from);
   await markProxyPending(tx,images,ctx,vm.id,configId!);
   return {changed:true,from,vm};
+}
+/** A fresh assigned configuration (next version, snapshot of the proxy as it is now) and its DESIRED hold. Returns the configuration id. */
+async function createAssignedConfig(tx:Tx,images:Collector,ctx:ChangeCtx,vm:ChangeVM,endpoint:{id:string;packageCode:string|null;identityId:string|null;revision:number;inventoryKey:string|null},proxy:NonNullable<ReturnType<typeof decodeEndpoint>>){
+  const snapshot:ConfigurationSnapshot={proxy,packageCode:endpoint.packageCode,identityId:endpoint.identityId!,endpointRevision:endpoint.revision,server:vm.server.code,vm:vm.code};
+  const config=await tx.vMConfiguration.create({data:{projectId:ctx.projectId,vmId:vm.id,version:vm.configurationSequence+1,endpointId:endpoint.id,snapshotCipher:encrypt(JSON.stringify(snapshot)),configurationHash:vmHash(snapshot),createdById:ctx.actorId}});
+  await images.remember('VM_CONFIG',config.id,true);
+  const hold=await tx.vMProxyAllocation.create({data:{projectId:ctx.projectId,vmId:vm.id,endpointId:endpoint.id,configurationId:config.id,allocationKey:endpoint.inventoryKey!,role:'DESIRED',createdById:ctx.actorId}});
+  await images.remember('VM_ALLOCATION',hold.id,true);
+  return config.id;
+}
+/**
+ * The VM keeps the same proxy but its user/pass changed on the provider's site (owner 29/10/2026): a new configuration (next version,
+ * new snapshot with the new credentials) replaces the current one and is marked "Chờ áp dụng trên máy" like any proxy change. The
+ * proxy stays LIVE on this VM (its old hold is released only to be replaced by the new one); the VM status is never touched.
+ * Returns false when `endpointId` is not the VM's clear current proxy (review / other proxy): nothing is written.
+ */
+export async function reissueProxyConfig(tx:Tx,images:Collector,ctx:ChangeCtx,vmId:string,endpointId:string){
+  await scopedChange(tx,ctx,'ASSIGN',[vmId],[endpointId]);
+  const vm=await loadChangeVM(tx,vmId);
+  if(currentProxyOf(vm).endpointId!==endpointId)return false;
+  const endpoint=await tx.proxyIP.findFirstOrThrow({where:{id:endpointId,projectId:ctx.projectId}}),proxy=decodeEndpoint(endpoint);
+  if(!proxy||proxy.format!=='FULL'||!endpoint.inventoryKey||!endpoint.identityId)throw new ProxyDomainError('INVALID_INPUT','Proxy chưa đủ điều kiện (cần đủ IP:port:user:pass)');
+  await images.remember('VM',vm.id);
+  for(const hold of vm.allocations){
+    await images.remember('VM_ALLOCATION',hold.id);
+    await tx.vMProxyAllocation.update({where:{id:hold.id},data:{releasedAt:ctx.now,releaseReason:'Đổi user/pass · '+ctx.via,revision:{increment:1}}});
+  }
+  const old=vm.desiredConfiguration;
+  if(old&&old.id!==vm.installedConfigurationId){await images.remember('VM_CONFIG',old.id);await tx.vMConfiguration.update({where:{id:old.id},data:{status:'CANCELLED',revision:{increment:1}}});}
+  const configId=await createAssignedConfig(tx,images,ctx,vm,endpoint,proxy);
+  await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:configId,installedConfigurationId:null,proxyId:null,proxySlotState:'FULL',configurationSequence:{increment:1},revision:{increment:1}}});
+  await markProxyPending(tx,images,ctx,vm.id,configId);
+  return true;
 }
 // ─── Blocked and the VM status (owner decisions 19/10/2026 and 21/10/2026) ───────────────────────────────────────────────────
 // A proxy reported BLOCKED (in Kho proxy or by choosing "Blocked" at the VM) sets the VM using it to "Blocked" and remembers the

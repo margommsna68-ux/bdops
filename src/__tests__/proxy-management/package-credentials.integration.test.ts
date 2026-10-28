@@ -3,11 +3,13 @@ import {randomUUID} from 'node:crypto';
 import {encrypt,decrypt} from '@/lib/encryption';
 import {businessDB as db,businessFixture} from './business-fixture';
 import {changeVmProxy} from '@/server/vm-management/proxy-command';
-import {renamePackage} from '@/server/proxy-management/package-credentials';
+import {renamePackage,changeProxyCredentials} from '@/server/proxy-management/package-credentials';
 import {listPackages} from '@/server/proxy-management/catalog-management';
 import {queryRegistry} from '@/server/proxy-management/history';
 import {packageReminders} from '@/server/proxy-management/reminders';
 import {undoOperation} from '@/server/operation-history/undo';
+import {openSnapshot} from '@/server/operation-history/journal';
+import {pendingApply} from '@/server/vm-management/proxy-change';
 afterAll(()=>db.$disconnect());
 // Owner 29/10/2026: the provider renumbers packages after payment and changes user/pass of proxies on its site. Synthetic data only.
 const octet=()=>1+Math.floor(Math.random()*250);
@@ -47,6 +49,59 @@ describe('Đổi mã gói',()=>{
       await undoOperation(f.scope,op.id,'',db);
       expect((await db.proxyProviderAccount.findUniqueOrThrow({where:{id:f.pkg.id}})).code).toBe('231243');
       for(const e of [a,b])expect((await db.proxyIP.findUniqueOrThrow({where:{id:e.id}})).packageCode).toBe('231243');
+    }finally{await f.cleanup();}
+  });
+});
+describe('Đổi user/pass tại chỗ',()=>{
+  it('3 endpoints of one IP, 2 on VMs: credentials changed, package kept, VMs pending a new config; secrets never journaled; undo',async()=>{
+    const f=await setup();try{
+      const ip=f.net+'73',e=[await f.proxy(ip,9001),await f.proxy(ip,9002),await f.proxy(ip,9003)];
+      await f.assign(0,e[0].id);await f.assign(1,e[1].id);
+      const v0=await f.vm(0),statusBefore=v0.operation?.status??null,oldConfig=v0.desiredConfigurationId;
+      // New credentials of no package: refused unless the package itself moves (all of its proxies are here).
+      const input={ip,username:'newuser',password:'S3cretPass'};
+      const preview=await changeProxyCredentials(f.scope,{...input,key:randomUUID(),preview:true},db);
+      expect(preview).toMatchObject({endpoints:3,vms:2,package:null,refusal:expect.stringMatching(/chưa thuộc gói/)});
+      await expect(changeProxyCredentials(f.scope,{...input,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      const ok=await changeProxyCredentials(f.scope,{...input,key:randomUUID(),updatePackageCredentials:true,preview:true},db);
+      expect(ok).toMatchObject({endpoints:3,byState:{LIVE:2,NEW:1},vms:2,package:'231243',updatesPackage:true,refusal:null});
+      const key=randomUUID(),done=await changeProxyCredentials(f.scope,{...input,key,updatePackageCredentials:true},db);
+      expect(done).toMatchObject({endpoints:3,vms:2,replay:false});
+      expect(await changeProxyCredentials(f.scope,{...input,key,updatePackageCredentials:true},db)).toMatchObject({replay:true});
+      for(const x of e){const row=await db.proxyIP.findUniqueOrThrow({where:{id:x.id}});expect(await f.creds(x.id)).toEqual({username:'newuser',password:'S3cretPass'});expect(row.packageCode).toBe('231243');expect(row.port).toBe(x.port);}
+      expect((await db.proxyIP.findUniqueOrThrow({where:{id:e[0].id}})).inventoryState).toBe('LIVE');
+      expect((await db.proxyIP.findUniqueOrThrow({where:{id:e[2].id}})).inventoryState).toBe('NEW');
+      for(const i of [0,1]){
+        const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[i].id},include:{operation:true,desiredConfiguration:true}});
+        expect(v.desiredConfiguration?.endpointId).toBe(e[i].id);expect(pendingApply(v)).toBe(v.desiredConfigurationId);
+        expect(JSON.parse(decrypt(v.desiredConfiguration!.snapshotCipher)).proxy).toMatchObject({username:'newuser',password:'S3cretPass'});
+        expect(await db.vMProxyAllocation.count({where:{vmId:v.id,releasedAt:null,role:'DESIRED'}})).toBe(1);
+      }
+      const v0b=await f.vm(0);expect(v0b.desiredConfigurationId).not.toBe(oldConfig);expect(v0b.operation?.status??null).toBe(statusBefore);
+      expect(await db.proxyStatusEvent.count({where:{projectId:f.projectId,kind:'CREDENTIALS_CHANGED'}})).toBe(3);
+      // Secrets never in clear in the journal (summary, request hash, decrypted snapshot) or the audit log.
+      const op=await db.operationJournal.findFirstOrThrow({where:{projectId:f.projectId,kind:'PROXY_CREDENTIALS'}});
+      const audits=await db.auditLog.findMany({where:{projectId:f.projectId}});
+      const events=await db.proxyStatusEvent.findMany({where:{projectId:f.projectId}});
+      for(const text of [JSON.stringify(op),JSON.stringify(openSnapshot(op.snapshotCipher)),JSON.stringify(audits),JSON.stringify(events)])expect(text).not.toMatch(/S3cretPass|newuser/);
+      await undoOperation(f.scope,op.id,'',db);
+      for(const x of e)expect(await f.creds(x.id)).toEqual({username:'u',password:'p'});
+      expect(JSON.parse(decrypt((await db.proxyProviderAccount.findUniqueOrThrow({where:{id:f.pkg.id}})).credentialCipher))).toEqual({username:'u',password:'p'});
+      const back=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id},include:{operation:true}});
+      expect(back.desiredConfigurationId).toBe(oldConfig);expect(pendingApply(back)).toBeNull(); // the mark names the cancelled new configuration: cleared
+      expect(await db.vMProxyAllocation.count({where:{vmId:back.id,releasedAt:null,role:'DESIRED',configurationId:oldConfig!}})).toBe(1);
+    }finally{await f.cleanup();}
+  });
+  it('follows the package of the new credentials, refuses empty / invalid credentials and a partial package move',async()=>{
+    const f=await setup();try{
+      const a=await f.proxy(f.net+'5',7001),b=await f.proxy(f.net+'6',7002);
+      for(const bad of [{username:'',password:'x'},{username:'a b',password:'x'},{username:'a',password:'x:y'},{username:'a',password:''}])
+        await expect(changeProxyCredentials(f.scope,{key:randomUUID(),endpointIds:[a.id],...bad},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+      expect(await changeProxyCredentials(f.scope,{key:randomUUID(),endpointIds:[a.id],username:'zz',password:'yy',updatePackageCredentials:true,preview:true},db)).toMatchObject({refusal:expect.stringMatching(/còn 1 proxy/)});
+      const r=await changeProxyCredentials(f.scope,{key:randomUUID(),endpointIds:[a.id],username:'ou',password:'op'},db);
+      expect(r).toMatchObject({endpoints:1,package:'other'});
+      expect((await db.proxyIP.findUniqueOrThrow({where:{id:a.id}})).packageCode).toBe('other');
+      expect((await db.proxyIP.findUniqueOrThrow({where:{id:b.id}})).packageCode).toBe('231243');
     }finally{await f.cleanup();}
   });
 });
