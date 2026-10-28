@@ -1724,11 +1724,35 @@ model EarnPayoutRequest {
   receipts      FundTransaction[]
   // Merged payout (owner brief 27/10/2026): other VMs whose SDKs were merged into this EarnApp account for this one payout.
   members       EarnPayoutMember[]
+  // Payout simplification (owner brief 28/10/2026): state also takes 'LOST_SUS' = the EarnApp account was SUS after the request was
+  // sent, so the money is lost. lostAmount = the amount that will never arrive (never income, never a PayPal receipt); lostAt = when
+  // a person recorded it. null on every other state.
+  lostAmount    Decimal?          @db.Decimal(12, 2)
+  lostAt        DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
   @@index([projectId, paypalId])
   @@index([vmId])
+}
+
+// A payout request removed from the live table (owner brief 28/10/2026): the whole request is kept here as a JSON snapshot with the
+// reason and who voided it, so removing a request never loses history. Plain ids (no relations): the request row itself is gone.
+model EarnPayoutRequestVoid {
+  id            String   @id @default(cuid())
+  projectId     String
+  requestId     String
+  vmId          String
+  cycle         Int
+  earnAppId     String
+  paypalEmailId String
+  snapshot      Json
+  reason        String
+  voidedById    String
+  voidedAt      DateTime @default(now())
+
+  @@index([projectId, vmId])
+  @@index([projectId, voidedAt])
 }
 
 // ═══════════════════════════════════════
@@ -1968,7 +1992,25 @@ model OpsApproval {
   consumedRequestId String?
   // CLI confirmation with the ADMIN's TOTP (23/10/2026 evening): wrong codes per approval; 5 → LOCKED (ask again with a new key).
   confirmFailed     Int       @default(0)
+  // Approval session (owner brief 28/10/2026): the OpsApprovalSession that covered this approval, null = approved on its own.
+  sessionId         String?
 
   @@index([projectId, status, requestedAt])
   @@index([requestKey, status])
+}
+
+// A time-boxed approval window for one AI token (owner brief 28/10/2026): an ADMIN with 2FA opens it once (via = how it was approved)
+// and the token's critical commands inside the window are approved without asking again, until expiresAt or until it is closed.
+model OpsApprovalSession {
+  id           String    @id @default(cuid())
+  projectId    String
+  tokenId      String
+  approvedById String
+  via          String
+  openedAt     DateTime  @default(now())
+  expiresAt    DateTime
+  closedAt     DateTime?
+  closedById   String?
+
+  @@index([projectId, tokenId, expiresAt])
 }
