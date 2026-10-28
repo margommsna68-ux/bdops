@@ -287,7 +287,7 @@ it('receipt with settleRemainder settles the gap in the same command',async()=>{
  const f=await setup();try{const r=await sentTwenty(f);
  const out=await rcpt(f,r.id,'18.50',{settleRemainder:true});
  expect(out).toMatchObject({settled:true,shortfall:'1.50'});
- const row=await f.req(r.id);expect(row).toMatchObject({settleNote:'Phí / thiếu 1,50 USD',settledById:f.scope.userId});expect(row.shortfall?.toString()).toBe('1.5');expect(row.settledAt).not.toBeNull();
+ const row=await f.req(r.id);expect(row).toMatchObject({settleNote:'Phí / thiếu 1.50 USD',settledById:f.scope.userId});expect(row.shortfall?.toString()).toBe('1.5');expect(row.settledAt).not.toBeNull();
  expect(await phaseOf(f,r.id)).toBe('RECEIVED');expect(kinds(row.history)).toEqual(expect.arrayContaining(['RECEIPT','SETTLE']));
  }finally{await f.cleanup();}
 });

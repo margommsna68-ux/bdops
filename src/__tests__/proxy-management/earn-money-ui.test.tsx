@@ -59,12 +59,12 @@ describe('balance draft identity',()=>{
 });
 describe('"Đã về PP" label',()=>{
   const line=(money:object)=>requestLine({request:{phase:'RECEIVED',paypal:'pp-synthetic',email:'test@example.invalid',money:{currency:'USD',remaining:'0.00',shortfall:null,...money}},milestone:'RECREATE'} as never)!;
-  it('$10 asked, $6 received, settled short $4 → "Đã về PP $6,00" and the settled gap on the second line',()=>{
+  it('$10 asked, $6 received, settled short $4 → "Đã về PP $6.00" and the settled gap on the second line',()=>{
     const l=line({amount:'10.00',received:'6.00',shortfall:'4.00'});
-    expect(l.text).toBe('Đã về PP $6,00');expect(l.sub).toMatch(/Đã chốt thiếu \$4,00/);expect(l.sub).toMatch(/Chờ tạo lại/);
+    expect(l.text).toBe('Đã về PP $6.00');expect(l.sub).toMatch(/Đã chốt thiếu \$4\.00/);expect(l.sub).toMatch(/Chờ tạo lại/);
   });
-  it('$10 received in full → "Đã về PP $10,00", no gap line',()=>{
+  it('$10 received in full → "Đã về PP $10.00", no gap line',()=>{
     const l=line({amount:'10.00',received:'10.00'});
-    expect(l.text).toBe('Đã về PP $10,00');expect(l.sub).not.toMatch(/chốt thiếu/);
+    expect(l.text).toBe('Đã về PP $10.00');expect(l.sub).not.toMatch(/chốt thiếu/);
   });
 });

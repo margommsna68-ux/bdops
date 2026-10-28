@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
-import {formatUsd} from '@/lib/money-input';
+import {formatUsd,parsePositiveAmount} from '@/lib/money-input';
 import {vmMoneyState} from '@/lib/vm-money';
 import type {ManagedVM} from '../shared';
 import {PayoutDailyInfo,payoutEmailAllowed,type PickPaypal,type OpsRow,type OpsRights} from './OpsCells';
@@ -16,8 +16,9 @@ type Pick=Omit<inferRouterOutputs<AppRouter>['vmOps']['payoutPick'],'paypals'>&{
 type Mode='REQUEST'|'SEND'|'RECEIVE';
 type Command={action:'REQUEST';vmId:string;body:Record<string,unknown>;snapshot:{cycle:number;earnAppId:string|null;request:OpsRow['request']}};
 type Row={vm:ManagedVM;cycle:number;earnAppId:string|null;request:OpsRow['request'];amount:string;email:string;pick?:Pick;error:string;loading:boolean;done:boolean;unknown:boolean;command?:Command};
-const money=(s:string)=>/^\d+([.,]\d{1,2})?$/.test(s.trim())&&Number(s.replace(',','.'))>0;
-const canonical=(s:string)=>s.trim().replace(',','.');
+// US number format (owner decision 28/10/2026): "12.18", "1,234.56"; a decimal comma is refused.
+const money=(s:string)=>parsePositiveAmount(s).value!==null;
+const canonical=(s:string)=>parsePositiveAmount(s).value??s.trim();
 const label=(r:Row)=>r.vm.server+' / '+r.vm.code;
 const journalKey=(project:string,user:string,id:string)=>'mth-payout-selection:'+JSON.stringify([project,user,id,'REQUEST']);
 function readCommand(key:string):Command|undefined{try{const s=window.sessionStorage.getItem(key);return s?JSON.parse(s):undefined;}catch{return undefined;}}

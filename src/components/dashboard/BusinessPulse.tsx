@@ -39,12 +39,12 @@ const healthParts=[['GOOD','good'],['ERROR','error'],['UNKNOWN','unknown']] as c
 const growthParts=[['INCREASING','good'],['FLAT','warn'],['DECREASED','muted'],['MONEY_UNKNOWN','unknown']] as const;
 const growthIcons={INCREASING:ArrowUpRight,FLAT:ArrowRight,DECREASED:ArrowDownRight,MONEY_UNKNOWN:CircleHelp};
 type Part={key:Filter;tone:string;value:number};
-const number=(n:number)=>n.toLocaleString('vi-VN');
+const number=(n:number)=>n.toLocaleString('en-US');
 const units=(s:string)=>{const [whole,fraction='']=s.split('.');return BigInt(whole)*BigInt(1000000)+BigInt(fraction.padEnd(6,'0'));};
 // Keep all six observed decimal places when summing; round only the displayed amount.
 function decimal(s:string){
   const cents=(units(s)+BigInt(5000))/BigInt(10000),fraction=(cents%BigInt(100)).toString().padStart(2,'0').replace(/0+$/,'');
-  return (cents/BigInt(100)).toLocaleString('vi-VN')+(fraction?','+fraction:'');
+  return (cents/BigInt(100)).toLocaleString('en-US')+(fraction?'.'+fraction:'');
 }
 const dollars=(s:string)=>'$'+decimal(s);
 function packageCost(amount:string,currency:string|null|undefined){
@@ -189,7 +189,7 @@ function HealthRing({parts,total}:{parts:Part[];total:number}){
   return <div className="bp-ring" role="group" aria-label="Phân bố VM hoạt động">
     <svg viewBox="0 0 120 120" aria-hidden="true"><circle className="bp-ring-track" cx="60" cy="60" r="50"/>
       {total>0&&parts.filter(p=>p.value>0).map(p=>{const size=p.value/total*100,offset=start;start+=size;return <circle key={p.key} className={'bp-stroke-'+p.tone} cx="60" cy="60" r="50" pathLength="100" strokeDasharray={`${size} ${100-size}`} strokeDashoffset={-offset} transform="rotate(-90 60 60)"/>;})}
-    </svg><div className="bp-ring-value"><strong>{percent===null?'—':`${percent.toLocaleString('vi-VN',{maximumFractionDigits:1})}%`}</strong><small>{total?'kiếm tiền':'Chưa hoạt động'}</small></div>
+    </svg><div className="bp-ring-value"><strong>{percent===null?'—':`${percent.toLocaleString('en-US',{maximumFractionDigits:1})}%`}</strong><small>{total?'kiếm tiền':'Chưa hoạt động'}</small></div>
   </div>;
 }
 function Action({label,hint,count,tone='neutral',selected,onClick}:{label:string;hint:string;count:number;tone?:string;selected:boolean;onClick:()=>void}){

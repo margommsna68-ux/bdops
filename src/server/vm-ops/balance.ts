@@ -9,6 +9,7 @@ import {ledgerRights} from '../business-management/paypal-ledger';
 import {authorizeVM} from '../vm-management/repository';
 import {LEDGER_CURRENCY} from '../business-management/types';
 import {staleCycle} from './ops';
+import {parseMoneyNumber} from '@/lib/money-input';
 import type {BalanceCheckView,Withdrawable} from '@/lib/vm-ops';
 // EarnApp balance at the VM (owner brief 20/10/2026). People and AI record what they READ on the EarnApp account of a VM, through
 // the same command and checks:
@@ -120,8 +121,9 @@ export async function previewBalancePaste(scope:ActorScope,input:{text:string;se
     if(!vm.earnApp||vm.earnApp.closedAt){rows.push({...at,outcome:'ERROR',message:'VM chưa có tài khoản EarnApp ở lượt này'});continue;}
     const acc={...at,earnAppId:vm.earnApp.id,account:vm.earnApp.login.email},cell=(c[1]||'').replace(/\s/g,'');
     if(!cell){rows.push({...acc,outcome:'SKIP',message:'Ô trống: giữ nguyên số đã có'});continue;}
-    const t=cell.replace(/^\$|USD$/i,''),norm=/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t)?t.replace(/\./g,'').replace(',','.'):/^\d+,\d{1,2}$/.test(t)?t.replace(',','.'):t;
-    if(!AMOUNT.test(norm)){rows.push({...acc,outcome:'ERROR',message:'Số dư không hợp lệ ("'+cell.slice(0,20)+'"); dùng 10,50 hoặc 10.50'});continue;}
+    // US number format (owner decision 28/10/2026): "10.50", "1,234.50"; a decimal comma ("10,50") is refused, never guessed.
+    const t=cell.replace(/^\$|USD$/i,''),us=/^[\d.,]+$/.test(t)?parseMoneyNumber(t,{fraction:2}):null,norm=us&&!us.error&&us.value!==null?t.replace(/,/g,''):t;
+    if(!AMOUNT.test(norm)){rows.push({...acc,outcome:'ERROR',message:'Số dư không hợp lệ ("'+cell.slice(0,20)+'"); dùng dấu . cho phần thập phân, ví dụ 10.50 hoặc 1,234.50'});continue;}
     if(c.length>2&&c.slice(2).some(x=>x)){rows.push({...acc,outcome:'ERROR',message:'Quá nhiều cột; mỗi dòng: '+(server?'VM | Số dư':'Server | VM | Số dư')});continue;}
     rows.push({...acc,amount:norm,outcome:'READY',message:'Ghi số dư (chưa xác nhận điều kiện rút)'});
   }

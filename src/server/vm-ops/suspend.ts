@@ -19,7 +19,8 @@ import {voidInTx} from './payout-fix';
 // A merged primary that was sent keeps its members: they find the primary SUS (memberOf → primarySus) and go to "Chờ tạo lại" too.
 type Tx=Prisma.TransactionClient;
 const REASON='EarnApp bị SUS';
-const vi=(v:string)=>{const [i,d='00']=v.split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+d;};
+// US number format (owner decision 28/10/2026): 1,234.50.
+const usText=(v:string)=>{const [i,d='00']=v.split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,',')+'.'+d;};
 export interface SuspendClosure {request:{id:string;outcome:'LOST'|'VOIDED'}|null;requestId:string|null;lostAmount:string|null;currency:string|null;archivedEmailIds:string[]}
 /**
  * Why closing the SUS of this VM would be refused (checked BEFORE anything is written, so a bulk status write turns it into an ERROR row
@@ -66,7 +67,7 @@ export async function closeSuspendedInTx(tx:Tx,images:BusinessCollector,ctx:{pro
       if(money?.phase==='WAITING'){
         outcome='LOST';lostAmount=money.remaining;
         await tx.earnPayoutRequest.update({where:{id:request.id},data:{state:'LOST_SUS',lostAmount,lostAt:now,revision:{increment:1},
-          history:[...(request.history as Prisma.JsonArray),historyEntry(ctx.actorId,'SUS',REASON+': mất '+vi(lostAmount)+' '+request.currency+(money.received!=='0.00'?' (đã về '+vi(money.received)+')':''))]}});
+          history:[...(request.history as Prisma.JsonArray),historyEntry(ctx.actorId,'SUS',REASON+': mất '+usText(lostAmount)+' '+request.currency+(money.received!=='0.00'?' (đã về '+usText(money.received)+')':''))]}});
       }else{
         await tx.earnPayoutRequest.update({where:{id:request.id},data:{revision:{increment:1},
           history:[...(request.history as Prisma.JsonArray),historyEntry(ctx.actorId,'SUS',REASON+': không mất tiền ('+(money?.phase==='RECEIVED'?'đã về đủ':'tiền về cần đối chiếu')+')')]}});

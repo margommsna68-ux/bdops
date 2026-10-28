@@ -49,7 +49,7 @@ it('"Tiền đã về N dòng": exact PayPal amount per row (empty, required), f
   const a=host.querySelector('[aria-label="Số tiền chính xác trong PayPal An-01 / VM_1"]') as HTMLInputElement;expect(a.value).toBe('');
   expect(button('Tiền đã về 0 dòng')!.disabled).toBe(true);
   const settle=Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Chốt luôn, phần thiếu là phí')!.querySelector('input')!;expect(settle.checked).toBe(true);
-  await change('Số tiền chính xác trong PayPal An-01 / VM_1','9,62');await change('Số tiền chính xác trong PayPal An-01 / VM_2','10');
+  await change('Số tiền chính xác trong PayPal An-01 / VM_1','9.62');await change('Số tiền chính xác trong PayPal An-01 / VM_2','10');
   expect(host.querySelector('[aria-label="Phí An-01 / VM_1"]')!.textContent).toMatch(/0[,.]38/);
   await click('Tiền đã về 2 dòng');
   expect(mock.receipt).toHaveBeenCalledTimes(2);

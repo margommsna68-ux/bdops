@@ -182,7 +182,7 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     history.push({...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()});
     // Settle the rest as a fee in the same command (anyone who may record the receipt; a standalone SETTLE still needs writeMoney).
     if(input.settleRemainder&&gap>0){
-      shortfall=fromCents(gap);const note='Phí / thiếu '+shortfall.replace('.',',')+' '+currency;
+      shortfall=fromCents(gap);const note='Phí / thiếu '+shortfall+' '+currency;
       Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall:D(shortfall)});
       history.push(historyEntry(current.userId,'SETTLE','Chốt nhận '+fromCents(toCents(m.received)+toCents(amount.toFixed(2)))+' '+currency+', thiếu '+shortfall+': '+note));
     }

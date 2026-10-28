@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import toast from 'react-hot-toast';
 import {Copy} from 'lucide-react';
 import {trpc} from '@/lib/trpc';
-import {formatLedger} from '@/lib/money-input';
+import {formatLedger,parsePositiveAmount} from '@/lib/money-input';
 import type {OpsRights} from './OpsCells';
 import {PayoutDailyInfo,payoutEmailAllowed} from './OpsCells';
 import {payoutActions,requestHasReceipts,pickPayoutEmail,defaultPayoutAmount,receiptCheck,frameJournalKey,readFrameCommand,refusedAnswer,bangkokDay,requestLabel,unchangedMessage,
@@ -74,7 +74,7 @@ export function PayoutFrame({projectId,userId,vmId,cycle,earnAppId,request:r,rig
   const id=r?{requestId:r.id,expectedRevision:r.revision,vmId,expectedCycle:r.cycle,earnAppId:r.earnAppId}:null;
   async function withdraw(){
     if(!earnAppId||lock.current)return;
-    const a=amount.trim().replace(',','.');if(!/^\d+(\.\d{1,2})?$/.test(a)||Number(a)<=0){setError('Số tiền là số dương, tối đa 2 chữ số thập phân');return;}
+    const parsed=parsePositiveAmount(amount),a=parsed.value;if(a===null){setError(parsed.error||'Số tiền là số dương, tối đa 2 chữ số thập phân');return;}
     setError('');setBusy(true);
     let emailId:string;
     try{const pick=await utils.vmOps.payoutPick.fetch({projectId,vmId,amount:a});
@@ -165,7 +165,7 @@ function EditForm({projectId,vmId,request:r,busy,onSubmit,onCancel}:{projectId:s
   const pick=trpc.vmOps.payoutPick.useQuery({projectId,vmId,amount:null},{retry:false});
   const [emailId,setEmail]=useState(r.emailId),[amount,setAmount]=useState(r.money?.amount??''),[day,setDay]=useState(r.requestedAt),[reference,setRef]=useState(r.reference??''),[note,setNote]=useState('');
   const needNote=r.submission!=='PREPARING'||requestHasReceipts(r.money);
-  const a=amount.trim().replace(',','.'),amountOk=!r.money||/^\d+(\.\d{1,2})?$/.test(a)&&Number(a)>0;
+  const a=parsePositiveAmount(amount).value??amount.trim(),amountOk=!r.money||parsePositiveAmount(amount).value!==null;
   const body:Record<string,unknown>={};
   if(emailId!==r.emailId)body.paypalEmailId=emailId;
   if(r.money&&amountOk&&Number(a).toFixed(2)!==r.money.amount)body.amount=Number(a).toFixed(2);

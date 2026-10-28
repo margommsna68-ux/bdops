@@ -44,7 +44,7 @@ it('SUS on a SENT waiting request',async()=>{
  expect(out).toMatchObject({vmId:a.vm.id,cycle:1,changed:true,request:{id:r.id,outcome:'LOST',lostAmount:'10.00'}});
  expect(out.archivedEmailIds).toEqual([a.email.id]);
  const row=await f.req(r.id);expect(row.state).toBe('LOST_SUS');expect(row.lostAmount?.toFixed(2)).toBe('10.00');expect(row.lostAt).not.toBeNull();
- expect(last(row.history)).toMatchObject({kind:'SUS',what:expect.stringMatching(/EarnApp bị SUS: mất 10,00 USD/)});
+ expect(last(row.history)).toMatchObject({kind:'SUS',what:expect.stringMatching(/EarnApp bị SUS: mất 10.00 USD/)});
  expect((await pendingByPaypal(db,f.scope.projectId)).get(f.pp.id)).toBeUndefined();
  expect((await f.ops(0))?.status).toBe('SUSPENDED');
  expect((await db.vmOpsEvent.findFirst({where:{vmId:a.vm.id,kind:'STATUS'},orderBy:{createdAt:'desc'}}))?.toStatus).toBe('SUSPENDED');

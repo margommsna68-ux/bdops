@@ -9,6 +9,7 @@ import {dayDate,dayText} from './money';
 import {LEDGER_CURRENCY} from './types';
 import {isEmail} from '../account-store/parse';
 import {checkTransfer,moneyCents,centsText} from '@/lib/paypal-transfer';
+import {parseMoneyNumber} from '@/lib/money-input';
 // PayPal ledger (18/10/2026). One book for money on the PayPal accounts, the same rows as Tiền vào PayPal (FundTransaction) and
 // Rút / chuyển (Withdrawal); Kho tài khoản reads it, nothing is copied into a second book.
 // - Money in = money actually received from outside (RECEIPT, status "đã nhận") + internal transfers in (the amount the receiving
@@ -22,7 +23,9 @@ import {checkTransfer,moneyCents,centsText} from '@/lib/paypal-transfer';
 const D=(v:Prisma.Decimal.Value)=>new Prisma.Decimal(v);
 const ZERO=()=>D(0);
 export function ledgerAmount(text:string,label='Số tiền'){
-  const t=text.trim().replace(/\s/g,''),norm=/^\d+,\d{1,2}$/.test(t)?t.replace(',','.'):t.replace(/,(?=\d{3}(\D|$))/g,'');
+  // US number format (owner decision 28/10/2026): "." decimal point, "," optional thousands separator ("1,234.56").
+  const t=text.trim().replace(/\s/g,'');if(/^[\d.,]+$/.test(t)){const p=parseMoneyNumber(t,{fraction:2});if(p.error)throw new ProxyDomainError('INVALID_INPUT',label+': '+p.error);}
+  const norm=t.replace(/,/g,'');
   if(!/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/.test(norm)||D(norm).lte(0))throw new ProxyDomainError('INVALID_INPUT',label+' phải là số dương, tối đa 2 chữ số thập phân');
   return D(norm);
 }
@@ -132,7 +135,7 @@ function transferShape(input:TransferInput){
   if(input.transactionId&&input.transactionId.trim().length>160||input.notes&&input.notes.length>2000)throw new ProxyDomainError('INVALID_INPUT','Mã giao dịch / ghi chú quá dài');
   const cents=(v:string|null|undefined,label:string)=>v?.trim()?D(centsText(moneyCents(v,label,true) as bigint)):null;
   const debited=ledgerAmount(input.debited,'Tổng PP bị trừ'),fee=cents(input.fee,'Phí'),received=cents(input.received,'Số bên nhận'),receiverFee=received?cents(input.receiverFee,'Phí bên nhận'):null;
-  const rate=received&&receivedCurrency!==currency?D(input.rate!.trim().replace(',','.')):null;
+  const rate=received&&receivedCurrency!==currency?D(input.rate!.trim().replace(/\s/g,'').replace(/,/g,'')):null;
   return {currency,debited,fee,received,receivedCurrency:received?receivedCurrency:null,rate,receiverFee};
 }
 export async function recordTransfer(scope:ActorScope,input:TransferInput&{key:string},db:PrismaClient=prisma){

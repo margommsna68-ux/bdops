@@ -18,7 +18,7 @@ import {saveVmSdk,linkVmSdk,confirmLegacySdk,previewSdkStore,applySdkStore,updat
 import {getManualInventory} from '../proxy-management/repository';
 import {hasServerScope} from '../permissions/server-scope';
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),bulkKind=z.enum(['SDK','PROXY','GMAIL','NOTE']);
-// SDK store: undefined = keep, null = clear, text = set (checked again on the server, e.g. "12,40").
+// SDK store: undefined = keep, null = clear, text = set (checked again on the server, e.g. "12.40"; US format since 28/10/2026).
 const money=z.string().max(40).nullable().optional(),sdkNote=z.string().max(1000).nullable().optional(),rev=z.number().int().nonnegative();
 async function domain<T>(fn:()=>Promise<T>){try{return await fn();}catch(error){
   if(error instanceof ProxyDomainError)throw new TRPCError({code:error.code==='FORBIDDEN'?'FORBIDDEN':error.code==='NOT_FOUND'?'NOT_FOUND':error.code==='SOURCE_UNAVAILABLE'?'PRECONDITION_FAILED':error.code==='INVALID_INPUT'?'BAD_REQUEST':'CONFLICT',message:userMessage(error)});

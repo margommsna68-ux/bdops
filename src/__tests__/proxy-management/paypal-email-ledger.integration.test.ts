@@ -163,6 +163,6 @@ it('money: 24 + 10 + 12 USD through three emails of pp-13 = 46; out 30 → 16; 3
     expect((await readPaypalLedger(f.worker,{month:'2026-10'},db)).paypals).toEqual([]);
     await db.projectMember.updateMany({where:{projectId:f.scope.projectId,userId:f.worker.userId},data:{allowedModules:['PAYPALS','FUNDS']}});
     const fundsOnly=(await readPaypalLedger({...f.worker,role:'MODERATOR'},{month:'2026-10'},db)).paypals.find(p=>p.paypalId===pp13)!.currencies[0];expect(fundsOnly).toMatchObject({receipts:'49.00',out:null,balance:null});
-    expect(parseReceiptLines('a@example.invalid 1,5\nb@example.invalid 1,234.50').map(r=>r.amount)).toEqual(['1.50','1234.50']);
+    expect(parseReceiptLines('a@example.invalid 1.5\nb@example.invalid 1,234.50').map(r=>r.amount)).toEqual(['1.50','1234.50']);
   }finally{await f.cleanup();}
 });

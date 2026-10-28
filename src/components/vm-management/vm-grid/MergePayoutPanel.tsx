@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {trpc} from '@/lib/trpc';
-import {formatUsd,formatLedger} from '@/lib/money-input';
+import {formatUsd,formatLedger,parsePositiveAmount} from '@/lib/money-input';
 import {vmMoneyState} from '@/lib/vm-money';
 import type {ManagedVM} from '../shared';
 import {PayoutDailyInfo,payoutEmailAllowed,type PickPaypal,type OpsRow,type OpsRights} from './OpsCells';
@@ -14,8 +14,9 @@ import {PayoutDailyInfo,payoutEmailAllowed,type PickPaypal,type OpsRow,type OpsR
 type Pick=Omit<inferRouterOutputs<AppRouter>['vmOps']['payoutPick'],'paypals'>&{paypals:PickPaypal[]};
 type Command={kind:'CREATE'|'ATTACH';body:Record<string,unknown>};
 const day=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-const money=(s:string)=>/^\d+([.,]\d{1,2})?$/.test(s.trim())&&Number(s.replace(',','.'))>0;
-const canonical=(s:string)=>s.trim().replace(',','.');
+// US number format (owner decision 28/10/2026): "12.18", "1,234.56"; a decimal comma is refused.
+const money=(s:string)=>parsePositiveAmount(s).value!==null;
+const canonical=(s:string)=>parsePositiveAmount(s).value??s.trim();
 const label=(vm:ManagedVM)=>vm.server+' / '+vm.code;
 const journalKey=(project:string,user:string,primary:string)=>'mth-payout-merge:'+JSON.stringify([project,user,primary]);
 function readCommand(key:string):Command|undefined{try{const s=window.sessionStorage.getItem(key);return s?JSON.parse(s):undefined;}catch{return undefined;}}

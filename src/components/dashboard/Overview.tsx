@@ -16,8 +16,8 @@ import '@/components/proxy-management/proxy-management.css';
 import './dashboard.css';
 export type Overview=inferRouterOutputs<AppRouter>['businessManagement']['overview'];
 type Ops=NonNullable<Overview['operations']>;
-const fmt=(n:number)=>n.toLocaleString('vi-VN');
-const usdt=(s:string)=>Number(s).toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt=(n:number)=>n.toLocaleString('en-US');
+const usdt=(s:string)=>Number(s).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 // Tổng quan: operations (current state) and what needs attention first, finance in its own section (the month only filters finance). Every number
 // links to the list it counts; the read model uses the same rules as those lists (see src/server/dashboard/overview.ts).
 export function Overview({projectId}:{projectId:string}){

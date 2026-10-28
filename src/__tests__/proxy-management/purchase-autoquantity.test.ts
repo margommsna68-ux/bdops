@@ -14,7 +14,7 @@ describe('input purchase quantity (no database)',()=>{
  });
  it('zero valid input produces no suggested purchase rather than a default quantity of one',()=>{expect(countAccountPurchaseQuantity('header\ninvalid','LOGIN')).toBe(0);expect(applySuggestedQuantity(emptyPurchase(),0).quantity).toBe('');});
  it('derives quantity before price validation so a typed unit price can preview immediately',()=>{
-  const s=applySuggestedQuantity({...emptyPurchase(),mode:'UNIT',unit:'2,5'},48);
+  const s=applySuggestedQuantity({...emptyPurchase(),mode:'UNIT',unit:'2.5'},48);
   expect(readPurchase(s,'tài khoản')).toMatchObject({errors:{},payload:{priceMode:'UNIT',amount:'2.5',quantity:48},total:'120'});
  });
  it('keeps a manual actual quantity of 50 when the received list changes from 48 to 47',()=>{

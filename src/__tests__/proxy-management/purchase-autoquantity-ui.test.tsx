@@ -116,7 +116,7 @@ it('partial save keeps original purchased quantity while only error lines remain
  expect(mock.preview.mock.lastCall?.[0]).toMatchObject({append:{batchId:'batch-one'}});expect(mock.preview.mock.lastCall?.[0]).not.toHaveProperty('batch');
 });
 it('completes a cost-free partial append after the retained purchase quote expires',async()=>{
- const originalMoney={...emptyPurchase(),mode:'UNIT' as const,unit:'50.000',currency:'VND',rate:'25.000',quote:{rate:'25000',token:'synthetic-quote',fetchedAt:new Date().toISOString(),side:'BUY' as const}};
+ const originalMoney={...emptyPurchase(),mode:'UNIT' as const,unit:'50,000',currency:'VND',rate:'25,000',quote:{rate:'25000',token:'synthetic-quote',fetchedAt:new Date().toISOString(),side:'BUY' as const}};
  importDraft(projectId,kind).values.money=originalMoney;
  mock.commit.mockResolvedValueOnce({applied:1,exists:0,errors:1,rows:[{line:1,outcome:'READY'},{line:2,outcome:'ERROR'}],batch:{id:'batch-one',code:'TK-SYNTHETIC',costRecorded:true}});
  await render();await settle();await click('Nhập 2 dòng hợp lệ');await settle();

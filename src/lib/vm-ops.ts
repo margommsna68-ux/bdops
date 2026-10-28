@@ -83,9 +83,9 @@ export function milestoneOf(m:{phase:RequestPhase;consumed:boolean;submission?:s
 // ─── PayPal gathering label (USD only; 100 USD is the minimum target of a PP code, not a cap) ─────────────────────────────────
 export const GATHER_TARGET_CENTS=10000;
 export type Gather='GATHERING'|'PROJECTED'|'REACHED';
-// Labels carry the unit (owner brief 19/10/2026: the host showed "0" and "Đang gom · thiếu 100,00"). Only USD uses "$".
-export const GATHER_LABEL:Record<Gather,string>={GATHERING:'Đang gom',PROJECTED:'Dự kiến đủ $100,00',REACHED:'Đạt mức gom $100,00'};
-/** One line for a PP: "Đang gom · thiếu $100,00", "Dự kiến đủ $100,00" (only with money still to come), "Đạt mức gom $100,00" (book balance). */
+// Labels carry the unit (owner brief 19/10/2026: the host showed "0" and "Đang gom · thiếu 100,00"; US digits since 28/10/2026). Only USD uses "$".
+export const GATHER_LABEL:Record<Gather,string>={GATHERING:'Đang gom',PROJECTED:'Dự kiến đủ $100.00',REACHED:'Đạt mức gom $100.00'};
+/** One line for a PP: "Đang gom · thiếu $100.00", "Dự kiến đủ $100.00" (only with money still to come), "Đạt mức gom $100.00" (book balance). */
 export function gatherText(g:{state:Gather;label:string;missing:string}){return g.state==='GATHERING'?g.label+' · thiếu '+formatUsd(g.missing):g.label;}
 export function gatherOf(balanceUsd:string|null,pendingUsd:string|null,extra='0'){
   const b=balanceUsd==null?0:toCents(balanceUsd),p=pendingUsd==null?0:toCents(pendingUsd),x=toCents(extra||'0');
@@ -136,7 +136,7 @@ export function suggestPaypal(list:PaypalCandidate[],amount:string):{paypalId:st
   if(!rows.length)return null;
   const fit=rows.filter(x=>x.proj+a<=GATHER_TARGET_CENTS),by=(x:{p:PaypalCandidate;proj:number},y:{p:PaypalCandidate;proj:number})=>y.proj-x.proj||x.p.code.localeCompare(y.p.code,'en',{numeric:true});
   const best=(fit.length?fit:rows).sort(by)[0],after=best.proj+a;
-  return {paypalId:best.p.id,why:best.p.code+': đã có / chờ / giữ '+formatUsd(fromCents(best.proj))+', sau khoản này '+formatUsd(fromCents(after))+(after>GATHER_TARGET_CENTS?' (không PP nào vừa đủ; chọn PP gần mục tiêu nhất)':' (gần $100,00 nhất, không vượt)')};
+  return {paypalId:best.p.id,why:best.p.code+': đã có / chờ / giữ '+formatUsd(fromCents(best.proj))+', sau khoản này '+formatUsd(fromCents(after))+(after>GATHER_TARGET_CENTS?' (không PP nào vừa đủ; chọn PP gần mục tiêu nhất)':' (gần $100.00 nhất, không vượt)')};
 }
 
 // ─── Sort keys and the summary strip (whole filtered result, before paging) ───────────────────────────────────────────────────

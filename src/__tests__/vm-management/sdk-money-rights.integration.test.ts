@@ -57,7 +57,7 @@ describe('SDK money rights on the web services',()=>{
       const full=(await readSdkStore(f.scope,db)).find(r=>r.code===c)!;
       expect(full).toMatchObject({amount:'731.25',observedAt:T1,moneyHidden:false});expect(full.amountSource).toContain('AE Mini Tool');
       expect((await readVMWorkspace(f.aiScope,db)).sdkMoney).toEqual({read:true,write:true});
-      expect(JSON.stringify(await inspectOperation(f.scope,journal.id,db))).toContain('731,25');
+      expect(JSON.stringify(await inspectOperation(f.scope,journal.id,db))).toContain('731.25');
       expect(JSON.stringify(await readSdkDetail(f.scope,row.id,db))).toContain('ảnh #731.25');
     }finally{await f.cleanup();}
   });

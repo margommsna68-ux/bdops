@@ -53,8 +53,9 @@ export function batchTotal(b:Pick<BatchInput,'priceMode'|'amount'|'currency'|'ra
   const amount=parseOriginalMoney(b.amount),total=b.priceMode==='UNIT'?new CashDecimal(amount).mul(quantity!).toFixed(8):amount;
   const money=normalizeCostMoney({amount:total,currency:b.currency,rate:b.rate||undefined,paypalVndRate:b.paypalVndRate,vndUsdtRate:b.vndUsdtRate});return {unit:b.priceMode==='UNIT'?amount:null,quantity,...money};
 }
-// Numbers reach these endpoints in canonical form only ("420000", "25820", "16.27"): the web form parses the Vietnamese text once
-// (src/lib/money-input.ts). Text such as "25.820" or "70.000" is refused instead of being read as 25,82 / 70 (bug 19/10/2026).
+// Numbers reach these endpoints in canonical form only ("420000", "25820", "16.27"): the web form parses the typed text once
+// (src/lib/money-input.ts, US format since 28/10/2026). Display text such as "25,820" or "70.000" is refused instead of being guessed
+// (bug 19/10/2026: "25.820" was read as 25.82).
 function canonical(text:string,label:string){if(!/^(0|[1-9]\d*)(\.\d*[1-9])?$/.test(text.trim()))throw new ProxyDomainError('INVALID_INPUT',label+' phải gửi ở dạng số chuẩn (ví dụ 420000, 25820 hoặc 16.27); "'+text.slice(0,20)+'" có thể bị hiểu sai nên không nhận');}
 // Rate source of a purchase cost: a sealed Binance P2P quote (same check as Chi phí: same user, project, currency and rate, at most 10
 // minutes old; an expired quote is refused, never re-priced) or the rate typed by the person.

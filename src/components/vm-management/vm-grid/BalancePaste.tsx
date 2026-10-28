@@ -1,6 +1,7 @@
 "use client";
 import React,{useEffect,useRef,useState} from 'react';
 import {trpc} from '@/lib/trpc';
+import {formatUsd} from '@/lib/money-input';
 import {errorMessage} from '../shared';
 // Dán bảng → Số dư (owner brief 20/10/2026): "VM | Số dư" (one server) or "Server | VM | Số dư". Checked while typing, one
 // "Cập nhật N VM". Each line carries the VM, its round and the EarnApp seen at the check, so a VM recreated or an account changed
@@ -33,13 +34,13 @@ export function BalancePasteBody({projectId,serverId,onSaved}:{projectId:string;
     }catch(e){setError(errorMessage(e)+' — nội dung vẫn giữ nguyên; bấm lại sẽ không ghi trùng.');}
   }
   return <>
-    <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách số dư" disabled={record.isLoading} value={text} placeholder={serverId?'VM_001\t10,50\nVM_002\t0':'An-01\tVM_001\t10,50\nAn-01\tVM_002\t0'} onChange={e=>setText(e.target.value)}/></label>
+    <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách số dư" disabled={record.isLoading} value={text} placeholder={serverId?'VM_001\t10.50\nVM_002\t0':'An-01\tVM_001\t10.50\nAn-01\tVM_002\t0'} onChange={e=>setText(e.target.value)}/></label>
     <label className="pm-label text-xs">Thời điểm kiểm tra (giờ thật đã xem trên EarnApp)<input type="datetime-local" className="pm-input" aria-label="Thời điểm kiểm tra" value={at} onChange={e=>setAt(e.target.value)}/></label>
     <p className="pm-muted text-xs">{serverId?'Mỗi dòng: VM | Số dư (USD).':'Mỗi dòng: Server | VM | Số dư (USD).'} 0 là số hợp lệ; ô trống giữ số đã có. Dán không xác nhận điều kiện rút; ghi điều kiện ở ô của từng VM. Không tạo VM hay tài khoản. Tự kiểm tra khi dán.</p>
     {!atValid&&<p className="text-xs text-red-600">Thời điểm kiểm tra không hợp lệ hoặc ở tương lai.</p>}
     {preview.isLoading&&<p className="text-xs pm-muted">Đang kiểm tra…</p>}
     {current&&<><p className="text-sm"><strong>{current.ready}</strong> sẽ cập nhật · {current.skipped} giữ nguyên · <span className={current.errors?'text-red-600':''}>{current.errors} lỗi</span></p>
-      <div className="vm-bulk-result"><table className="pm-table text-xs"><thead><tr><th>Dòng</th><th>Server / VM</th><th>Số dư</th><th>Kết quả</th></tr></thead><tbody>{current.rows.map(r=><tr key={r.line} className={r.outcome==='ERROR'?'text-red-600':''}><td>{r.line}</td><td>{[r.server,r.vm].filter(Boolean).join(' / ')}</td><td>{r.amount!=null?'$'+r.amount.replace('.',','):'—'}</td><td>{r.message}</td></tr>)}</tbody></table></div></>}
+      <div className="vm-bulk-result"><table className="pm-table text-xs"><thead><tr><th>Dòng</th><th>Server / VM</th><th>Số dư</th><th>Kết quả</th></tr></thead><tbody>{current.rows.map(r=><tr key={r.line} className={r.outcome==='ERROR'?'text-red-600':''}><td>{r.line}</td><td>{[r.server,r.vm].filter(Boolean).join(' / ')}</td><td>{r.amount!=null?formatUsd(r.amount):'—'}</td><td>{r.message}</td></tr>)}</tbody></table></div></>}
     {saved&&<p role="status" className="pm-success text-sm">{saved}</p>}
     {error&&<p role="alert" className="pm-error">{error}</p>}
     <div className="flex gap-2 justify-end"><button className={'pm-button'+(ready&&atValid?' pm-button-primary':'')} disabled={record.isLoading||preview.isLoading||!ready||!atValid} onClick={()=>void save()}>{record.isLoading?'Đang lưu…':`Cập nhật ${ready} VM`}</button></div>

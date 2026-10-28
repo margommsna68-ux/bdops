@@ -1,6 +1,7 @@
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@/server/routers/_app';
 import {toCents,fromCents} from '@/lib/vm-ops';
+import {parseMoneyNumber} from '@/lib/money-input';
 // One payout frame (owner 28/10/2026) for the Tiền VM cell, the VM panel and the "Rút EarnApp" report: pure rules, no React.
 type RouterOutputs=inferRouterOutputs<AppRouter>;
 export type VmOpsRequestView=NonNullable<RouterOutputs['vmOps']['board']['vms'][number]['request']>;
@@ -51,7 +52,6 @@ export function defaultPayoutAmount(v:string|null|undefined){
   const t=(v??'').trim();if(!/^\d+(\.\d+)?$/.test(t))return '';
   const [i,d='']=t.split('.'),c=Number(i)*100+Number((d+'00').slice(0,2));return c>0?fromCents(c):'';
 }
-const MONEY=/^\d+([.,]\d{1,2})?$/;
 /**
  * "Số tiền chính xác trong PayPal": empty and required. open = what may still arrive (the lost amount for late money after SUS) less a
  * linked pending receipt; fee = open − entered. "Chốt luôn, phần thiếu là phí" is offered while the entry is below the open part.
@@ -60,8 +60,9 @@ export function receiptCheck(m:{amount:string;received:string;remaining:string;p
   const base=m.phase==='LOST'&&m.lost?toCents(m.lost):toCents(m.remaining),open=Math.max(0,base-toCents(m.pendingLinked)),t=entered.trim();
   const none={valid:false,amount:null as string|null,fee:null as string|null,showSettle:false,open:fromCents(open),error:''};
   if(!t)return none;
-  if(!MONEY.test(t))return {...none,error:'Số tiền là số dương, tối đa 2 chữ số thập phân'};
-  const c=toCents(t.replace(',','.'));if(c<=0)return {...none,error:'Số tiền phải lớn hơn 0'};
+  // US number format (owner decision 28/10/2026): "12.18", "1,234.56"; a decimal comma is refused at the field.
+  const p=parseMoneyNumber(t,{fraction:2});if(p.error||p.value===null)return {...none,error:p.error||'Số tiền là số dương, tối đa 2 chữ số thập phân'};
+  const c=toCents(p.value);if(c<=0)return {...none,error:'Số tiền phải lớn hơn 0'};
   if(c>open)return {...none,error:'Số tiền vượt phần còn chờ ('+fromCents(open)+'); đối chiếu trước khi ghi'};
   return {valid:true,amount:fromCents(c),fee:fromCents(open-c),showSettle:c<open,open:fromCents(open),error:''};
 }

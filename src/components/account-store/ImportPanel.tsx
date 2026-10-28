@@ -76,7 +76,7 @@ export function ImportPanel({projectId,kind,canCost,onDone,onFinished,onClose,on
   const quantityFrozen=locked||!!target||!!done,money=applySuggestedQuantity(moneyDraft,suggestedQuantity,{locked:quantityFrozen});
   useEffect(()=>{if(money!==moneyDraft)setMoney(money);},[money,moneyDraft,setMoney]);
   const quantityPending=!manualQuantity(money)&&!quantityFrozen&&!empty&&(classifying||!matching||classificationSuccess!==classificationRequest);
-  // Money: canonical numbers only (the typed Vietnamese text is parsed once in readPurchase); a money field with an error blocks the
+  // Money: canonical numbers only (the typed US-format text is parsed once in readPurchase); a money field with an error blocks the
   // check and Nhập instead of sending something the server could read differently.
   // A partial purchase keeps its original money draft, but appending remaining rows never prices the batch again.
   useQuoteExpiry(target?null:money.quote);

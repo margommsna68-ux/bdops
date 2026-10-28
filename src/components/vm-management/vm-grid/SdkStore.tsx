@@ -123,7 +123,7 @@ function StorePaste({projectId}:{projectId:string}){
     if(r.note!==undefined){const from=r.before?.note??null,to=r.note;if(!r.before||from!==to)parts.push((r.before?(from?'"'+from.slice(0,30)+'"':'trống')+' → ':'')+(to===null?'xoá ghi chú':'"'+to.slice(0,30)+'"'));}
     return parts.join(' · ')||(r.outcome==='NEW'?'chưa ghi tiền':'');};
   return <div className="vm-sdk-paste">
-    <label className="pm-label">Dán từ Sheet: SDK | Tiền tích luỹ USD | Ghi chú<textarea className="pm-input pm-paste" rows={5} aria-label="Danh sách SDK dán vào kho" value={text} disabled={apply.isLoading} placeholder={'sdk-abc12345\t12,40\tmáy cũ moon1\nsdk-def67890\t\tchưa ghi tiền'} onChange={e=>{setSummary('');setText(e.target.value);}}/></label>
+    <label className="pm-label">Dán từ Sheet: SDK | Tiền tích luỹ USD | Ghi chú<textarea className="pm-input pm-paste" rows={5} aria-label="Danh sách SDK dán vào kho" value={text} disabled={apply.isLoading} placeholder={'sdk-abc12345\t12.40\tmáy cũ moon1\nsdk-def67890\t\tchưa ghi tiền'} onChange={e=>{setSummary('');setText(e.target.value);}}/></label>
     {summary&&<p role="status" className="pm-success text-sm">{summary}</p>}
     <p className="pm-muted text-xs">Tự kiểm tra khi dán, chưa ghi gì. Mã đã có là cập nhật (không tạo mã thứ hai). Ô trống giữ nguyên; gõ - để xoá tiền / ghi chú. Mã lặp trong danh sách bị báo ở mọi dòng.</p>
     {checking&&<p className="text-xs pm-muted"><Loader2 size={12} className="inline animate-spin"/> Đang kiểm tra…</p>}

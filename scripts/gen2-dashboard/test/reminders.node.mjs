@@ -27,7 +27,7 @@ test('afterSync persists UNKNOWN before fixed loopback POST, then DONE; only saf
  assert.equal(result.sent,1);assert.equal(result.state,'DONE');assert.deepEqual(h.polls,['/gen2-reminders?projectId=project']);
  assert.equal(h.requests[0].url,'http://127.0.0.1:8768/notify');const init=h.requests[0].init;
  assert.equal(init.redirect,'error');assert.equal(init.headers.Authorization,'Bearer SYNTHETIC_LOCAL_TOKEN');assert.ok(init.signal);
- const body=JSON.parse(init.body);assert.equal(body.server,'central');assert.equal(body.kind,'ALERT');assert.match(body.text,/\$12,35 PayPal/);assert.match(body.text,/Còn 3 ngày/);
+ const body=JSON.parse(init.body);assert.equal(body.server,'central');assert.equal(body.kind,'ALERT');assert.match(body.text,/\$12\.35 PayPal/);assert.match(body.text,/Còn 3 ngày/);
  assert.match(body.text,/https:\/\/wow\.lalamail\.sbs\/infrastructure\/proxies/);
  assert.equal(h.writes[0].entries[item().key].status,'UNKNOWN');assert.equal((await h.state()).entries[item().key].status,'DONE');
  const durable=JSON.stringify(await h.state());assert.doesNotMatch(durable,/SYNTHETIC|Authorization|GEN-100|amount|currency|text|link/);assert.doesNotMatch(JSON.stringify(result),/SYNTHETIC|GEN-100/);

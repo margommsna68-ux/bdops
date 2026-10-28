@@ -59,7 +59,7 @@ describe('SDK stale-value protection',()=>{
       const before=await Promise.all([db.sdkEvent.count({where:{sdkId:f.sdk.id}}),db.operationJournal.count({where:{projectId:f.scope.projectId}})]);
       const r=await saveVmSdk(f.scope,{key:randomUUID(),vmId:f.vm.id,expectedVmRevision:f.vm.revision,expectedCycle:1,code:f.code,expectedSdkRevision:f.sdk.revision,amount:'12.40'},db);
       expect(r.changed).toBe(false);
-      const p=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:`${f.vm.code}\t${f.code}\t12,4`},db);expect(p.rows[0].outcome).toBe('SKIP');
+      const p=await previewVmBulk(f.scope,{kind:'SDK',serverId:f.server.id,text:`${f.vm.code}\t${f.code}\t12.4`},db);expect(p.rows[0].outcome).toBe('SKIP');
       expect(await Promise.all([db.sdkEvent.count({where:{sdkId:f.sdk.id}}),db.operationJournal.count({where:{projectId:f.scope.projectId}})])).toEqual(before);
       expect((await db.sdkRecord.findUniqueOrThrow({where:{id:f.sdk.id}})).revision).toBe(f.sdk.revision);
     }finally{await f.cleanup();}

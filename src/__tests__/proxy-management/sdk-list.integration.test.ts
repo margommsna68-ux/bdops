@@ -89,7 +89,7 @@ describe('SDK list of a VM',()=>{
 describe('Dán bảng → SDK',()=>{
   it('A. VM codes in any order, several codes per VM, Server column optional; a retry writes nothing twice',async()=>{
     const f=await setup();try{
-      const text=[`VM_005\t${f.S(1)}\t1,5\tghi chú a`,`VM_002 | ${f.S(2)}`,`VM_005 | ${f.S(3)} | | ghi chú c`,`${f.server.code} | VM_010 | ${f.S(4)} | 2`,`VM_009 | ${f.S(5)}`,`VM_007 | ${f.S(6)}`,`VM_002 | ${f.S(1)}`].join('\n');
+      const text=[`VM_005\t${f.S(1)}\t1.5\tghi chú a`,`VM_002 | ${f.S(2)}`,`VM_005 | ${f.S(3)} | | ghi chú c`,`${f.server.code} | VM_010 | ${f.S(4)} | 2`,`VM_009 | ${f.S(5)}`,`VM_007 | ${f.S(6)}`,`VM_002 | ${f.S(1)}`].join('\n');
       const p=await previewSdkPaste(f.scope,{mode:'VM',text,serverId:f.server.id},db);
       expect(p.rows.map(r=>[r.line,r.vm,r.outcome])).toEqual([[1,'VM_005','ERROR'],[2,'VM_002','NEW'],[3,'VM_005','NEW'],[4,'VM_010','NEW'],[5,'VM_009','ERROR'],[6,'VM_007','ERROR'],[7,'VM_002','ERROR']]);
       expect(p.rows[0].message).toMatch(/dòng 7/);expect(p.rows[4].message).toMatch(/Không có VM VM_009/);expect(p.rows[5].message).toMatch(/đã xoá/);

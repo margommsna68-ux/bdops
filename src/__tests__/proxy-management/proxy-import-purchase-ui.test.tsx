@@ -33,7 +33,7 @@ it('cost is optional and absent outside NEW; importing without it sends no purch
   await render('BLOCKED');expect(host.textContent).not.toContain('Ghi chi phí mua proxy');await render('NEW');await fill(paste(),first);await click('Kiểm tra và lưu');expect(mock.preview.mock.calls[0][0]).not.toHaveProperty('purchase');
 });
 it('unit price multiplies auto quantity and a manual quantity stays sticky until reset to the list',async()=>{
-  await render();await fill(paste(),first+'\n'+second);await enableCost();await click('Tính theo giá mỗi proxy');await fill(labelInput('Giá mỗi proxy'),'1,25');
+  await render();await fill(paste(),first+'\n'+second);await enableCost();await click('Tính theo giá mỗi proxy');await fill(labelInput('Giá mỗi proxy'),'1.25');
   expect(labelInput('Số proxy thực mua').value).toBe('2');expect(host.textContent).toContain('2 proxy × 1.25 USDT = 2.50 USDT');
   await fill(paste(),first+'\n'+second+'\n'+third);expect(labelInput('Số proxy thực mua').value).toBe('3');
   await fill(labelInput('Số proxy thực mua'),'5');await fill(paste(),first);expect(labelInput('Số proxy thực mua').value).toBe('5');
@@ -59,7 +59,7 @@ it('partial success records purchase once; correcting and retrying refused rows 
 });
 it('shared currency/rate validation blocks incomplete purchase and preserves both PayPal USD rates',async()=>{
   await render();await fill(paste(),first);await enableCost();await fill(labelInput('Tổng tiền thực trả'),'25');await choose('Đồng tiền','PPUSD');
-  expect(button('Kiểm tra và lưu').disabled).toBe(true);await fill(labelInput('1 USD PayPal = ? VND'),'24.000');await fill(labelInput('1 USDT = ? VND'),'25.820');await click('Kiểm tra và lưu');
+  expect(button('Kiểm tra và lưu').disabled).toBe(true);await fill(labelInput('1 USD PayPal = ? VND'),'24,000');await fill(labelInput('1 USDT = ? VND'),'25,820');await click('Kiểm tra và lưu');
   expect(pricedInputs()[0].purchase).toMatchObject({amount:'25',currency:'PPUSD',paypalVndRate:'24000',vndUsdtRate:'25820'});
 });
 it('an already-owned input reduces the matched auto count and cannot bill the earlier quantity; actual invoice override stays explicit',async()=>{

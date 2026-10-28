@@ -1,5 +1,5 @@
 "use client";
-import {displayMoney,formatMoney,roundDecimal} from '@/lib/money-input';
+import {displayMoney,formatMoney,moneyNumber,roundDecimal} from '@/lib/money-input';
 import {CashDecimal} from '@/server/business-management/usdt-money';
 import {PurchaseMoneyFields,useQuoteExpiry} from './PurchaseMoneyFields';
 import {applySuggestedQuantity,emptyPurchase,readPurchase,type PurchaseState} from './purchase-money';
@@ -16,7 +16,7 @@ import {trpc} from '@/lib/trpc';
 import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {AccountCopy,type CopyField} from '@/components/business-management/AccountsWorkspace';
-import {viAmount,viDate} from './batch-format';
+import {amountText,viDate} from './batch-format';
 import {AppleLogo} from './AppleLogo';
 import {accountCheckState,CHECK_STATE_LABEL,type CheckState} from './check-status';
 import {NoteCell,NoteHeader,useNoteWidth} from './NoteCell';
@@ -38,7 +38,7 @@ const LOGIN_STATUS:Record<string,string>={ACTIVE:'Dùng được',SUSPENDED:'B�
 const PP_STATUS:Record<string,string>={ACTIVE:'Dùng được',LIMITED:'Bị limit',SUSPENDED:'Bị suspend',CLOSED:'Đã đóng',PENDING_VERIFY:'Chờ xác minh'};
 const TYPE:Record<string,string>={GMAIL:'Gmail',APPLE_ID:'Apple ID'};
 const PRICE_EMPTY={NONE:'Chưa ghi chi phí',VOIDED:'Khoản chi đã thu hồi',RECORDED:'—'} as const;
-const money=(v:string|null|undefined)=>v?v.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,''):'';
+const money=(v:string|null|undefined)=>moneyNumber(v);
 const vmHref=(p:{serverId:string;vmId:string})=>links.vms({serverId:p.serverId,vm:p.vmId,tab:'account'});
 // Kho tài khoản: two kinds of account, Gmail / Apple ID and PayPal (the same PayPal records as before), as the two tabs. Inside the
 // kind being looked at: Lịch sử nhập kho (one row per purchase) and Cần đối chiếu (old data against the new rules, shown only when there
@@ -240,8 +240,8 @@ function BatchTable({projectId,kindLabel,rows,focus,store,onContinue,onOpen,onSa
       return [<tr key={b.id} data-batch={b.code} aria-current={b.code===focus||undefined} className={b.code===focus?'pm-row-focus':undefined}>
         <td data-label="Đợt nhập"><span className="acc-batch-code">{b.code}</span><span className="acc-batch-sub">{viDate(b.purchasedAt)}{b.kind!=='PAYPAL'&&b.type?<span className="acc-batch-type">{TYPE[b.type]}</span>:null}</span></td>
         <td data-label="Nơi mua">{b.source||<span className="pm-muted">Chưa ghi</span>}</td>
-        <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?viAmount(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
-        <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{viAmount(String(b.received))}{b.kind==='PAYPAL'?' PP':''}</button>{b.kind==='PAYPAL'&&b.emails!=null?<span className="acc-batch-sub">{viAmount(String(b.emails))} email</span>:null}</td>
+        <td data-label="Số lượng mua" className="num">{b.paidQuantity!=null?amountText(String(b.paidQuantity)):<span className="pm-muted">Chưa ghi</span>}</td>
+        <td data-label="Đã nhập kho" className="num"><button type="button" className="pm-link acc-batch-count" aria-label={`Xem ${b.received} tài khoản của đợt ${b.code}`} title="Mở danh sách tài khoản của đợt" onClick={()=>onOpen(b)}>{amountText(String(b.received))}{b.kind==='PAYPAL'?' PP':''}</button>{b.kind==='PAYPAL'&&b.emails!=null?<span className="acc-batch-sub">{amountText(String(b.emails))} email</span>:null}</td>
         {money&&<td data-label="Tổng tiền mua" className="num">{m?.total?<span className="acc-batch-money">{displayMoney(m.total,m.currency||'')}</span>:<span className="pm-muted">{m?.original?'Không có khoản chi':'Chưa ghi'}</span>}
           {(m?.currency&&m.currency!=='USDT'&&m.usdt)||detail?<span className="acc-batch-sub">{m?.currency&&m.currency!=='USDT'&&m.usdt?<span title={'Lưu chính xác: '+formatMoney(m.usdt,'USDT',{exact:true})}>≈ {displayMoney(m.usdt,'USDT')}</span>:null}{detail&&<button type="button" className="pm-link acc-batch-more" aria-expanded={isOpen} onClick={()=>toggle(b.id)}>{isOpen?'Ẩn chi tiết':'Chi tiết'}</button>}</span>:null}</td>}
         <td data-label="Chi phí">{b.cost==='RECORDED'?(b.costLink?<Link className="acc-state NEW" href={links.costs({cost:b.costLink.id,month:b.costLink.month})} title="Mở khoản chi ở Chi phí">Đã ghi</Link>:<span className="acc-state NEW">Đã ghi</span>):b.cost==='VOIDED'?<span className="acc-state BLOCKED" title="Khoản chi đã thu hồi ở Chi phí">Đã thu hồi</span>:<span className="acc-state USED" title="Chưa ghi khoản chi trên web; không có nghĩa là chưa thanh toán">Chưa ghi</span>}</td>
@@ -256,12 +256,12 @@ function BatchMoney({b}:{b:Batch}){
   const m=b.money;if(!m)return <>—</>;
   const first=m.original?`${displayMoney(m.original.total,m.original.currency||'')}${m.original.unit&&m.original.quantity?` (${m.original.quantity} × ${displayMoney(m.original.unit,m.original.currency||'')})`:''}`:'';
   return <>{m.total?<div>Khoản chi hiện hành: {displayMoney(m.total,m.currency||'')}{m.unit&&b.paidQuantity?` (${b.paidQuantity} × ${displayMoney(m.unit,m.currency||'')})`:''}
-    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {viAmount(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {displayMoney(m.usdt,'USDT')}</>:null}</div>:null}
+    {m.currency!=='USDT'&&m.rate?<> · 1 USDT = {amountText(m.rate)} {m.currency}</>:null}{m.usdt&&m.currency!=='USDT'?<> · ≈ {displayMoney(m.usdt,'USDT')}</>:null}</div>:null}
     {m.total&&b.paidQuantity?<div className="pm-muted">Phân bổ ≈ {displayMoney(roundDecimal(new CashDecimal(m.total).div(b.paidQuantity).toFixed(8),2),m.currency||'')} / {b.kind==='PAYPAL'?'PP':'tài khoản'} (tham khảo, không ghi thêm chi phí)</div>:null}
     {first&&<div className="pm-muted">{m.total?'Đã điều chỉnh ở Chi phí · ban đầu ':b.cost==='VOIDED'?'Khoản chi đã thu hồi · giá ban đầu ':'Giá ban đầu '}{first}</div>}</>;
 }
 // Payment of a batch received without a price: recorded once (the total actually paid, or unit price × quantity actually bought), with
-// the same money fields as Nhập kho (Vietnamese numbers, rate source, expiry). One command key per content: a retry after a lost
+// the same money fields as Nhập kho (US numbers since 28/10/2026, rate source, expiry). One command key per content: a retry after a lost
 // answer replays instead of recording a second cost.
 export function BatchCostForm({projectId,batch,onClose,onSaved}:{projectId:string;batch:Batch;onClose:()=>void;onSaved:()=>void}){
   const unitWord=batch.kind==='PAYPAL'?'PP':'tài khoản';

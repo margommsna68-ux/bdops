@@ -35,7 +35,7 @@ describe('Kho SDK: tiền / ghi chú theo mã',()=>{
   it('1–3, 8. A = 12,40 USD with a note; a new code B replaces it without inheriting; A stays in the store and keeps its money on another server; editing the money never touches the books',async()=>{
     const f=await setup();try{
       const before=await finance(f.scope.projectId);
-      const r=await f.save(f.vm.id,f.A,{amount:'12,40',note:'máy chạy tốt'},f.worker);expect(r).toMatchObject({changed:true});
+      const r=await f.save(f.vm.id,f.A,{amount:'12.40',note:'máy chạy tốt'},f.worker);expect(r).toMatchObject({changed:true});
       let a=await f.rec(f.A);expect(a).toMatchObject({vmId:f.vm.id,note:'máy chạy tốt',linkState:'UNLINKED',amountById:f.worker.userId});expect(a!.amount!.toString()).toBe('12.4');
       const ws=(await readVMWorkspace(f.scope,db)).vms.find(v=>v.id===f.vm.id)!;expect(ws.sdk).toMatchObject({id:f.A,amount:'12.4',note:'máy chạy tốt',state:'UNLINKED'});
       // 2. VM_001 gets a new current code B: A stays in VM_001's SDK list (brief 20/10/2026) with 12,40; B has nothing of A.
@@ -170,8 +170,8 @@ describe('Dán vào Kho SDK',()=>{
   it('Dán bảng by VM carries the target code\'s money and note: VM | SDK | tiền | ghi chú; the replaced code keeps its own',async()=>{
     const f=await setup();try{
       await f.save(f.vm.id,f.A,{amount:'4',note:'A'});
-      const p=await previewVmBulk(f.scope,{kind:'SDK',text:`business-fixture\tVM_001\t${f.B}\t7,25\tghi B\nsecond-fixture\tVM_001\t${f.C}`},db);
-      expect(p.rows[0]).toMatchObject({outcome:'READY',amount:'7.25',note:'ghi B',info:expect.stringMatching(/7,25 USD/)});expect(p.rows[1]).toMatchObject({outcome:'READY'});
+      const p=await previewVmBulk(f.scope,{kind:'SDK',text:`business-fixture\tVM_001\t${f.B}\t7.25\tghi B\nsecond-fixture\tVM_001\t${f.C}`},db);
+      expect(p.rows[0]).toMatchObject({outcome:'READY',amount:'7.25',note:'ghi B',info:expect.stringMatching(/7\.25 USD/)});expect(p.rows[1]).toMatchObject({outcome:'READY'});
       const r=await applyVmBulk(f.scope,{kind:'SDK',key:randomUUID(),items:p.rows.map(x=>({line:x.line,vmId:x.vmId!,expectedRevision:x.expectedRevision!,value:x.value,amount:x.amount,note:x.note}))},db);expect(r.applied).toBe(2);
       expect(await f.rec(f.A)).toMatchObject({vmId:null,holderVmId:f.vm.id,note:'A'});expect((await f.rec(f.A))!.amount!.toString()).toBe('4');
       expect(await f.rec(f.B)).toMatchObject({vmId:f.vm.id,note:'ghi B'});expect((await f.rec(f.B))!.amount!.toString()).toBe('7.25');
@@ -208,7 +208,7 @@ describe('Dữ liệu cũ, xoá / khôi phục / tạo lại, hoàn tác',()=>{
   });
   it('11. undo of a money / note edit only while nothing changed after it; undo of a new code removes it; undo never reopens the old round',async()=>{
     const f=await setup();try{
-      await f.save(f.vm.id,f.A,{amount:'12,40',note:'n1'});await f.save(f.vm.id,f.A,{amount:'15'});
+      await f.save(f.vm.id,f.A,{amount:'12.40',note:'n1'});await f.save(f.vm.id,f.A,{amount:'15'});
       const edits=(await listOperations(f.scope,db)).filter(o=>o.kind==='VM_SDK_RECORD');
       await undoOperation(f.scope,edits[0].id,'',db);expect((await f.rec(f.A))!.amount!.toString()).toBe('12.4');
       await f.save(f.vm.id,f.A,{note:'n2'});const noteOp=(await listOperations(f.scope,db)).filter(o=>o.kind==='VM_SDK_RECORD'&&!o.undoneById)[0];

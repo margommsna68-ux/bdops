@@ -49,7 +49,7 @@ export function SdkPasteBody({projectId,serverId,serverCode,servers,onSaved}:{pr
     {mode==='RANGE'&&<label className="pm-label">VM bắt đầu{!serverId?<span className="pm-field-error"> Chọn server ở trên trước</span>:null}
       <select className="pm-input" aria-label="VM bắt đầu" value={start} disabled={!serverId||apply.isLoading} onChange={e=>setStart(e.target.value)}><option value="">Chọn VM bắt đầu…</option>{vms.map(v=><option key={v.id} value={v.id}>{v.code}</option>)}</select></label>}
     <label className="pm-label">Dán từ Sheet<textarea className="pm-input pm-paste" rows={7} aria-label="Danh sách SDK dán" disabled={apply.isLoading} value={text} onChange={e=>setText(e.target.value)}
-      placeholder={mode==='VM'?(serverCode?'VM_015\tSDK\t12,40\tghi chú':'moon05\tVM_015\tSDK\t12,40\tghi chú'):'SDK\t12,40\tghi chú\nSDK'}/></label>
+      placeholder={mode==='VM'?(serverCode?'VM_015\tSDK\t12.40\tghi chú':'moon05\tVM_015\tSDK\t12.40\tghi chú'):'SDK\t12.40\tghi chú\nSDK'}/></label>
     <p className="pm-muted text-xs">{mode==='VM'?(serverCode?'Mỗi dòng: VM | SDK | Tiền USD | Ghi chú (có thể thêm cột Server đầu dòng). ':'Mỗi dòng: Server | VM | SDK | Tiền USD | Ghi chú. ')+'Ghép đúng server + VM, không theo thứ tự dòng; nhiều SDK cùng một VM được.':'Mỗi dòng: SDK | Tiền USD | Ghi chú. Dòng thứ n vào VM số (bắt đầu + n) trong khoảng, không theo thứ tự bảng đang lọc / sắp xếp; dòng trống giữ vị trí.'} Tiền và ghi chú không bắt buộc; ô trống giữ nguyên. SDK được thêm vào danh sách của VM, không thay mã cũ.</p>
     {p?.range&&<p className="text-sm" aria-live="polite"><strong>{p.range.count} dòng</strong>: {p.range.from} → {p.range.to}</p>}
     {checking&&<p className="text-xs pm-muted">Đang kiểm tra…</p>}

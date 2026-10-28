@@ -77,7 +77,7 @@ describe('receiptCheck: "Số tiền chính xác trong PayPal"',()=>{
   const base={amount:'10.00',received:'0.00',remaining:'10.00',pendingLinked:'0.00',lost:null as string|null,phase:'WAITING'};
   it('empty is required, never prefilled',()=>{const r=receiptCheck(base,'');expect(r.valid).toBe(false);expect(r.error).toBe('');expect(r.fee).toBeNull();expect(r.showSettle).toBe(false);});
   it('less than the open part: fee = withdrawn − received, settle offered',()=>{
-    const r=receiptCheck(base,'9,62');expect(r).toMatchObject({valid:true,amount:'9.62',fee:'0.38',showSettle:true});
+    const r=receiptCheck(base,'9.62');expect(r).toMatchObject({valid:true,amount:'9.62',fee:'0.38',showSettle:true});
   });
   it('the exact open part: no fee, no settle',()=>{expect(receiptCheck(base,'10')).toMatchObject({valid:true,amount:'10.00',fee:'0.00',showSettle:false});});
   it('more than the open part or malformed: refused with a reason',()=>{

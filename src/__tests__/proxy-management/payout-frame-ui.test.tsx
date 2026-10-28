@@ -58,7 +58,7 @@ it('"Tiền đã về": empty required exact amount, live fee, settle ticked by 
   await click('Tiền đã về');
   const input=Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác trong PayPal'))!.querySelector('input')!;
   expect(input.value).toBe('');expect(button('Ghi tiền đã về')!.disabled).toBe(true);
-  await type(input,'9,62');
+  await type(input,'9.62');
   expect(host.textContent).toMatch(/Phí \(rút − thực nhận\): \$0[,.]38/);
   const settle=Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Chốt luôn, phần thiếu là phí')!.querySelector('input')!;expect(settle.checked).toBe(true);
   await click('Ghi tiền đã về');

@@ -325,7 +325,7 @@ function MoneySummaryLine({summary:s,vm,total,balanceRead,money,sdkMoney}:{summa
     {sdkMoney&&vm.checked>0&&<span>Tổng tiền VM đã kiểm tra: <strong>{formatUsd(vm.total)}</strong> ({vm.checked}/{total} VM)</span>}
     {count(vm.unchecked,'Chưa kiểm tra')}{count(vm.stale,'Số cũ')}{count(vm.failed,'Kiểm tra lỗi')}{count(vm.noTime,'Chưa rõ giờ')}
     {(balanceRead||money)&&s.known>0&&<span>Số dư EarnApp đã ghi: <strong>{s.balances.map(x=>fmtLedger(x.amount,x.currency)).join(' · ')}</strong> ({s.known} VM)</span>}
-    {money&&<span>Đang chờ về PP: <strong>{s.waiting.length?s.waiting.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'$0,00'}</strong></span>}
+    {money&&<span>Đang chờ về PP: <strong>{s.waiting.length?s.waiting.map(x=>fmtLedger(x.amount,x.currency)).join(' · '):'$0.00'}</strong></span>}
     {count(s.unassigned,'Chưa gán tài khoản')}
     <span className="pm-muted">Theo bộ lọc, mọi trang; tiền VM, số dư EarnApp và tiền chờ về PP không cộng với nhau.</span>
   </p>;

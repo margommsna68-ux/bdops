@@ -293,7 +293,7 @@ it('one-click Rút never switches a blocked bound email to a suggested PayPal', 
 
 it('one-click Rút takes an allowed email of the suggestion rather than the first blocked one, as PREPARING', async () => {
   single.paypals[0].emails[0].dailyAllowed = false; single.suggestion = {paypalId: 'pp', why: 'synthetic'};
-  await withdrawCell('10,5');
+  await withdrawCell('10.5');
   expect(mock.request).toHaveBeenCalledTimes(1);
   expect(mock.request.mock.calls[0][0]).toMatchObject({projectId: 'p', vmId: '1', expectedCycle: 1, earnAppId: 'acc1', paypalEmailId: 'e2', amount: '10.5', currency: 'USD', submission: 'PREPARING'});
 });

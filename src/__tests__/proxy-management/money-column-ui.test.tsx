@@ -37,28 +37,28 @@ describe('Tiền VM cell (owner brief 22/10/2026): the current SDK code money at
   });
   it('no EarnApp account, current SDK with money: the $ figure and a short observation time; the full time in the title',async()=>{
     await render(<PayoutCell projectId="p" vm={withSdks([sdk({})])} ops={ops(null,null)} account={undefined} rights={{...rights,assign:false}} onDone={()=>{}} onBusy={()=>{}}/>);
-    expect(container.textContent).toContain('$0,21');expect(container.textContent).toMatch(/Kiểm tra 5 phút trước/);
+    expect(container.textContent).toContain('$0.21');expect(container.textContent).toMatch(/Kiểm tra 5 phút trước/);
     expect(container.querySelector('.vm-money-line')?.getAttribute('title')).toMatch(/Kiểm tra lúc \d\d:\d\d \d\d\/\d\d\/\d{4}/);
   });
-  it('the current code only (never the highest), a failed reading keeps the last figure, hidden money reads "Ẩn", $0 reads $0,00',async()=>{
+  it('the current code only (never the highest), a failed reading keeps the last figure, hidden money reads "Ẩn", $0 reads $0.00',async()=>{
     await render(<PayoutCell projectId="p" vm={withSdks([sdk({current:false,amount:'99'}),sdk({recordId:'r2',code:'SDKSYNTH000002',amount:'0.21'} as never)])} ops={ops(null)} account={{earnApp:{id:'ea-synthetic',login:{email:'a@example.invalid'}}} as never} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    expect(container.textContent).toContain('$0,21');expect(container.textContent).not.toContain('$99');
+    expect(container.textContent).toContain('$0.21');expect(container.textContent).not.toContain('$99');
     await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:'3',amountFailedAt:new Date().toISOString()})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    expect(container.textContent).toContain('$3,00');expect(container.textContent).toContain('Kiểm tra lỗi');
+    expect(container.textContent).toContain('$3.00');expect(container.textContent).toContain('Kiểm tra lỗi');
     await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:null,amountObservedAt:null,moneyHidden:true})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
     expect(container.textContent).toContain('Ẩn');
     await render(<PayoutCell projectId="p" vm={withSdks([sdk({amount:'0'})])} ops={ops(null,null)} account={undefined} rights={rights} onDone={()=>{}} onBusy={()=>{}}/>);
-    expect(container.textContent).toContain('$0,00');
+    expect(container.textContent).toContain('$0.00');
   });
 });
 describe('balance line',()=>{
   it('a recorded balance is a $ amount on its own, with the condition and a short check time',()=>{
     const l=balanceLine(ops({latest:check('12.40','YES'),lastOk:check('12.40','YES')}),true)!;
-    expect(l.lead).toBe('$12,40');expect(l.text).toBe('Có thể rút');expect(l.sub).toMatch(/^Kiểm tra (\d\d\/\d\d )?\d\d:\d\d$/); // the day is added when the check (5 minutes ago) was before midnight in Asia/Bangkok
+    expect(l.lead).toBe('$12.40');expect(l.text).toBe('Có thể rút');expect(l.sub).toMatch(/^Kiểm tra (\d\d\/\d\d )?\d\d:\d\d$/); // the day is added when the check (5 minutes ago) was before midnight in Asia/Bangkok
   });
-  it('$0 recorded is $0,00; an unknown condition is said on the second line',()=>{
+  it('$0 recorded is $0.00; an unknown condition is said on the second line',()=>{
     const l=balanceLine(ops({latest:check('0.00','UNKNOWN'),lastOk:check('0.00','UNKNOWN')}),true)!;
-    expect(l.lead).toBe('$0,00');expect(l.text).toBe('');expect(l.sub).toMatch(/^Chưa kiểm tra điều kiện rút · Kiểm tra /);
+    expect(l.lead).toBe('$0.00');expect(l.text).toBe('');expect(l.sub).toMatch(/^Chưa kiểm tra điều kiện rút · Kiểm tra /);
   });
   it('without the balance read right: checked, no amount',()=>{
     const l=balanceLine(ops({latest:check('12.40','YES'),lastOk:check('12.40','YES')}),false)!;

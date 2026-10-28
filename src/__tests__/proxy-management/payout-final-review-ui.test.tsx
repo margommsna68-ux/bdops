@@ -41,7 +41,7 @@ it('VM history shows LOST as "Mất do SUS" and every voided request (reason / a
   expect(host.textContent).toContain('Mất do SUS');
   expect(host.textContent).toContain('Đã xoá do ghi nhầm');
   const rows=Array.from(host.querySelectorAll('[data-voided]'));expect(rows.map(r=>r.getAttribute('data-voided'))).toEqual(['r0','r9']);
-  expect(rows[0].textContent).toContain('Chủ');expect(rows[0].textContent).toContain('PP2 · wrong@example.invalid');expect(rows[0].textContent).toContain('Ghi nhầm email');expect(rows[0].textContent).toMatch(/12,50/);
+  expect(rows[0].textContent).toContain('Chủ');expect(rows[0].textContent).toContain('PP2 · wrong@example.invalid');expect(rows[0].textContent).toContain('Ghi nhầm email');expect(rows[0].textContent).toMatch(/12.50/);
   expect(rows[1].textContent).toContain('Nhân viên');expect(rows[1].textContent).toContain('PP3 · other@example.invalid');expect(rows[1].textContent).not.toMatch(/\$|USD|null/);
 });
 it('no voided request: no "Đã xoá do ghi nhầm" section',async()=>{

@@ -77,7 +77,7 @@ describe('business pulse drilldowns',()=>{
     const many=Array.from({length:2000},(_,i)=>vm(`VM-${i}`,null));
     many[0]={...many[0],health:null};
     await render(many,false);
-    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('99,9%');
+    expect(host.querySelector('[aria-label="Phân bố VM hoạt động"]')?.textContent).toContain('99.9%');
     await click('Chưa xác minh: 1 VM');expect(codes()).toEqual(['VM-0']);
   });
   it('keeps threshold boundaries and opens the exact VM/server detail',async()=>{
@@ -94,17 +94,17 @@ describe('business pulse drilldowns',()=>{
   });
   it('totals only the enough VMs in the selected server and updates with the same drilldown rows',async()=>{
     const withdrawal=()=>host.querySelector('[aria-labelledby="bp-withdrawal"]')!;
-    await render();expect(withdrawal().textContent).toContain('Tiền trong 2 VM: $22,35');
+    await render();expect(withdrawal().textContent).toContain('Tiền trong 2 VM: $22.35');
     await server('moon-1');await click('Đủ tiền rút: 1 VM');expect(codes()).toEqual(['VM-enough']);
-    expect(withdrawal().textContent).toContain('Tiền trong 1 VM: $10');expect(withdrawal().textContent).not.toContain('$22,35');
+    expect(withdrawal().textContent).toContain('Tiền trong 1 VM: $10');expect(withdrawal().textContent).not.toContain('$22.35');
     await render([...inputs,vm('VM-another','11.111111')]);
-    expect(codes()).toEqual(['VM-enough','VM-another']);expect(withdrawal().textContent).toContain('Tiền trong 2 VM: $21,11');
+    expect(codes()).toEqual(['VM-enough','VM-another']);expect(withdrawal().textContent).toContain('Tiền trong 2 VM: $21.11');
   });
   it('sums precise enough balances before rounding and excludes stale, failed, soon and paused amounts',async()=>{
     await render([vm('VM-a','10.004'),vm('VM-b','10.004'),vm('VM-soon','9.99'),vm('VM-paused','30',{status:'OFF'}),
       vm('VM-stale','100',{money:{amount:'100',observedAt:'2026-10-24T04:00:00Z',failedAt:null}}),
       vm('VM-failed','500',{money:{amount:'500',observedAt:checked,failedAt:'2026-10-26T04:30:00Z'}})]);
-    expect(host.querySelector('[aria-labelledby="bp-withdrawal"]')?.textContent).toContain('Tiền trong 2 VM: $20,01');
+    expect(host.querySelector('[aria-labelledby="bp-withdrawal"]')?.textContent).toContain('Tiền trong 2 VM: $20.01');
     await click('Đủ tiền rút: 2 VM');expect(codes()).toEqual(['VM-a','VM-b']);
   });
   it('separates paused/new from active health and offers the actual observations',async()=>{
@@ -171,17 +171,17 @@ describe('proxy payment reminders',()=>{
   it('shows recorded due dates, days, rounded cost and missing costs with real links',async()=>{
     await render(inputs,true,packages);const section=host.querySelector('[aria-labelledby="bp-packages"]')!;
     expect(section.textContent).toContain('28/10/2026');expect(section.textContent).toContain('Còn 2 ngày');expect(section.textContent).toContain('Quá hạn 1 ngày');
-    expect(section.textContent).toContain('$12,35');expect(section.textContent).toContain('Chưa ghi chi phí');
+    expect(section.textContent).toContain('$12.35');expect(section.textContent).toContain('Chưa ghi chi phí');
     expect(section.querySelector('a[href="/infrastructure/proxies?pay=p1"]')).not.toBeNull();
   });
   it('does not confuse restricted cost with a missing or zero price',async()=>{
     await render(inputs,true,packages,false);const text=host.querySelector('[aria-labelledby="bp-packages"]')!.textContent;
-    expect(text).toContain('Chi phí được ẩn');expect(text).not.toMatch(/\$|12,35|Chưa ghi chi phí/);
+    expect(text).toContain('Chi phí được ẩn');expect(text).not.toMatch(/\$|12\.35|Chưa ghi chi phí/);
   });
   it.each([
-    ['USD_PAYPAL','12.3456','$12,35 PayPal'],
-    ['VND','12345.6789','12.345,68 ₫'],
-    ['USDT','12.3456','12,35 USDT'],
+    ['USD_PAYPAL','12.3456','$12.35 PayPal'],
+    ['VND','12345.6789','12,345.68 ₫'],
+    ['USDT','12.3456','12.35 USDT'],
     ['USD','0','$0'],
   ])('renders the recorded %s currency with at most two decimals',async(currency,amount,expected)=>{
     await render(inputs,true,[{...packages[0],currency,amount}]);

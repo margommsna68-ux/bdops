@@ -11,7 +11,7 @@ type Fin=Extract<NonNullable<Overview['finance']>,{enabled:true}>;
 // proxy NEW blue, LIVE green, BLOCKED red, other grey.
 export const VM_SERIES=[{key:'ASSIGNED',label:'Có proxy',color:'#16a34a'},{key:'BLOCKED',label:'Proxy Blocked',color:'#dc2626'},{key:'REVIEW',label:'Cần kiểm tra',color:'#f59e0b'},{key:'MISSING',label:'Thiếu proxy',color:'#ef4444'}] as const;
 export const STOCK_SERIES=[{key:'NEW',label:'NEW',color:'#3b82f6'},{key:'LIVE',label:'LIVE',color:'#16a34a'},{key:'BLOCKED',label:'BLOCKED',color:'#ef4444'},{key:'OTHER',label:'Khác',color:'#94a3b8'}] as const;
-const fmt=(n:number)=>n.toLocaleString('vi-VN');
+const fmt=(n:number)=>n.toLocaleString('en-US');
 // Segment label only where it fits; every number is also in the legend totals and the table under the chart. The label lets clicks
 // through (pointer-events: none) so clicking the number opens the same list as clicking the coloured segment under it.
 const segmentLabel=(min:number)=>function SegmentLabel(props:{x?:number|string;y?:number|string;width?:number|string;height?:number|string;value?:unknown}){const w=Number(props.width),v=Number(props.value);if(!v||w<min)return null;return <text x={Number(props.x)+w/2} y={Number(props.y)+Number(props.height)/2} dy={4} textAnchor="middle" fontSize={11} fontWeight={600} fill="#fff" pointerEvents="none" style={{pointerEvents:'none'}}>{fmt(v)}</text>;};
@@ -73,7 +73,7 @@ export function CashChart({fin,month,targets}:{fin:Fin;month:string;targets:Fina
         <CartesianGrid vertical={false} stroke="var(--ds-border)"/>
         <XAxis dataKey="day" tick={{fontSize:10,fill:'var(--ds-text-secondary)'}} interval="preserveStartEnd" axisLine={false} tickLine={false}/>
         <YAxis width={44} tick={{fontSize:10,fill:'var(--ds-text-secondary)'}} axisLine={false} tickLine={false}/>
-        <Tooltip {...tooltipStyle} labelFormatter={(_,p)=>{const d=(p?.[0]?.payload as {date?:string}|undefined)?.date;return d?d.split('-').reverse().join('/'):'';}} formatter={(v,name)=>[Number(v).toLocaleString('vi-VN',{maximumFractionDigits:2})+' USDT',name==='received'?'Thực nhận':'Chi phí']}/>
+        <Tooltip {...tooltipStyle} labelFormatter={(_,p)=>{const d=(p?.[0]?.payload as {date?:string}|undefined)?.date;return d?d.split('-').reverse().join('/'):'';}} formatter={(v,name)=>[Number(v).toLocaleString('en-US',{maximumFractionDigits:2})+' USDT',name==='received'?'Thực nhận':'Chi phí']}/>
         <Bar dataKey="received" fill="#16a34a" radius={[3,3,0,0]} cursor={targets.received?'pointer':'default'} isAnimationActive={false} onClick={(d:{payload?:{date:string}})=>{if(d?.payload)go(targets.receivedDay(d.payload.date));}}/>
         <Bar dataKey="cost" fill="#ef4444" radius={[3,3,0,0]} cursor={targets.cost?'pointer':'default'} isAnimationActive={false} onClick={(d:{payload?:{date:string}})=>{if(d?.payload)go(targets.costDay(d.payload.date));}}/>
       </BarChart>

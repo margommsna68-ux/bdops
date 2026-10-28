@@ -16,7 +16,7 @@ describe('cost currency controls',()=>{
   const html=renderToStaticMarkup(<PurchaseMoneyFields projectId="p" unitWord="PP" value={{...emptyPurchase(),currency:'PPUSD'}} onChange={()=>{}} locked={false}/>);
   expect([...html.matchAll(/<option[^>]*value="([^"]+)"/g)].map(m=>m[1])).toEqual(['VND','PPUSD','USDT']);
   expect(html).toContain('1 USD PayPal = ? VND');expect(html).toContain('1 USDT = ? VND');
-  expect(html).not.toContain('value="24.000"');
+  expect(html).not.toContain('value="24,000"');
  });
  it('new packages use the owner currencies; legacy USD is offered only for an existing USD package',()=>{
   const props={projectId:'p',onClose:()=>{},onSaved:()=>{}};
@@ -50,20 +50,20 @@ describe('cost currency controls',()=>{
    await act(async()=>root.render(<CostForm projectId="p" onClose={()=>{}} onSaved={()=>{}} row={{id:'cost',currency:'PPUSD',amount:'250',rate:'1.075833333333',paypalVndRate:'24000',vndUsdtRate:'25820',date:'2026-10-23'} as never}/>));
    const field=(label:string)=>Array.from(document.querySelectorAll('label')).find(n=>n.textContent?.startsWith(label))!.querySelector('input')!;
    const fill=async(label:string,value:string)=>act(async()=>{const el=field(label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
-   expect(field('1 USD PayPal = ? VND').value).toBe('24.000');expect(field('1 USDT = ? VND').value).toBe('25.820');
+   expect(field('1 USD PayPal = ? VND').value).toBe('24,000');expect(field('1 USDT = ? VND').value).toBe('25,820');
    expect(mocks.queries).toHaveBeenCalledWith({projectId:'p',currency:'VND',side:'BUY'});
    const fetch=Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Lấy giá Binance P2P')!;
    await act(async()=>fetch.click());
-   await fill('1 USD PayPal = ? VND','23.500');
+   await fill('1 USD PayPal = ? VND','23,500');
    const submit=async()=>act(async()=>{document.querySelector('form')!.dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));});
    await submit();
    expect(mocks.save.mock.calls.at(-1)![0]).toMatchObject({currency:'PPUSD',paypalVndRate:'23500',vndUsdtRate:'25820',p2pQuoteToken:'sealed-vnd',rate:undefined});
-   await fill('1 USDT = ? VND','26.000');await submit();
+   await fill('1 USDT = ? VND','26,000');await submit();
    expect(mocks.save.mock.calls.at(-1)![0]).toMatchObject({paypalVndRate:'23500',vndUsdtRate:'26000',p2pQuoteToken:undefined,rate:undefined});
    await act(async()=>fetch.click());
    const clock=vi.spyOn(Date,'now').mockReturnValue(Date.now()+600000);
    try{
-    await fill('1 USD PayPal = ? VND','23.600');
+    await fill('1 USD PayPal = ? VND','23,600');
     expect(document.body.textContent).toContain('Giá Binance đã hết hạn');
     const count=mocks.save.mock.calls.length;await submit();expect(mocks.save).toHaveBeenCalledTimes(count);
     const manual=Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='Giữ tỷ giá, ghi là nhập tay')!;

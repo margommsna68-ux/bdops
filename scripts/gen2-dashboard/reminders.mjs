@@ -65,7 +65,7 @@ function amountText(amount,currency){
  if(amount===null)return 'xem web';
  const [whole,fraction='']=amount.split('.'),micros=BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));
  const cents=(micros+5000n)/10000n,decimals=String(cents%100n).padStart(2,'0').replace(/0+$/,'');
- const value=(cents/100n).toLocaleString('vi-VN')+(decimals?','+decimals:'');
+ const value=(cents/100n).toLocaleString('en-US')+(decimals?'.'+decimals:'');
  if(currency==='USD'||currency==='USD_PAYPAL')return '$'+value+(currency==='USD_PAYPAL'?' PayPal':'');
  return value+(currency==='VND'?' ₫':currency==='USDT'?' USDT':' (xem đơn vị tiền trên web)');
 }

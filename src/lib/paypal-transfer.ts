@@ -1,3 +1,4 @@
+import {parseMoneyNumber} from './money-input';
 // One rule for a PayPal transfer / withdrawal (review 18/10/2026), used by TransferForm while typing and by recordTransfer before
 // writing, so the screen and the server never disagree:
 // - "Tổng PP bị trừ" (debited) is what the source PayPal lost, in the source currency. The source fee is in that currency and
@@ -10,27 +11,28 @@
 export type TransferErrors=Partial<Record<'debited'|'fee'|'received'|'rate'|'receiverFee',string>>;
 export interface TransferCheckInput {type:'EXCHANGE'|'MIXING';currency:string;receivedCurrency?:string|null;debited?:string|null;fee?:string|null;received?:string|null;rate?:string|null;receiverFee?:string|null}
 const RATE_SCALE=BigInt('1000000000000');
-const norm=(raw:string)=>{const t=raw.trim().replace(/\s/g,'');return /^\d+,\d{1,2}$/.test(t)?t.replace(',','.'):t.replace(/,(?=\d{3}(\D|$))/g,'');};
+// US number format (owner decision 28/10/2026): "." decimal point, "," optional thousands separator; a decimal comma is refused.
+const norm=(raw:string):{value:string}|{error:string}=>{const t=raw.trim().replace(/\s/g,'');if(/^[\d.,]+$/.test(t)){const p=parseMoneyNumber(t,{fraction:14});if(p.error)return {error:p.error};}return {value:t.replace(/,/g,'')};};
 // Money with at most 2 decimals → cents; null = empty; a string = what is wrong.
 export function moneyCents(raw:string|null|undefined,label:string,allowZero=false):bigint|null|string{
-  if(raw==null||!raw.trim())return null;const n=norm(raw);
+  if(raw==null||!raw.trim())return null;const m=norm(raw);if('error' in m)return label+': '+m.error;const n=m.value;
   if(!/^(0|[1-9]\d{0,13})(\.\d{1,2})?$/.test(n))return label+' phải là số, tối đa 2 chữ số thập phân';
   const [i,d='']=n.split('.'),c=BigInt(i)*BigInt(100)+BigInt((d+'00').slice(0,2));
   if(!allowZero&&c<=BigInt(0))return label+' phải lớn hơn 0';return c;
 }
 function rateScaled(raw:string|null|undefined):bigint|null|string{
-  if(raw==null||!raw.trim())return null;const n=raw.trim().replace(/\s/g,'').replace(',','.');
+  if(raw==null||!raw.trim())return null;const m=norm(raw);if('error' in m)return 'Tỷ giá: '+m.error;const n=m.value;
   if(!/^\d{1,12}(\.\d{1,12})?$/.test(n))return 'Tỷ giá là số dương, tối đa 12 chữ số thập phân';
   const [i,d='']=n.split('.'),v=BigInt(i)*RATE_SCALE+BigInt((d+'000000000000').slice(0,12));return v>BigInt(0)?v:'Tỷ giá phải lớn hơn 0';
 }
 export const centsText=(c:bigint)=>{const neg=c<BigInt(0),a=neg?-c:c,s=a.toString().padStart(3,'0');return (neg?'-':'')+s.slice(0,-2)+'.'+s.slice(-2);};
-// Vietnamese display: 750.000,00
-export const viCents=(c:bigint)=>{const [i,d]=centsText(c).split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+d;};
+// US display: 750,000.00
+export const centsLabel=(c:bigint)=>{const [i,d]=centsText(c).split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,',')+'.'+d;};
 export function checkTransfer(input:TransferCheckInput){
   const errors:TransferErrors={},cur=input.currency.trim().toUpperCase(),rc=(input.receivedCurrency||cur).trim().toUpperCase(),same=rc===cur;
   const debited=moneyCents(input.debited,'Tổng PP bị trừ'),fee=moneyCents(input.fee,'Phí',true),received=moneyCents(input.received,'Số bên nhận thực nhận'),rfee=moneyCents(input.receiverFee,'Phí bên nhận',true),rate=rateScaled(input.rate);
   if(debited===null)errors.debited='Nhập tổng PP bị trừ (gồm phí)';else if(typeof debited==='string')errors.debited=debited;
-  if(typeof fee==='string')errors.fee=fee;else if(fee!==null&&typeof debited==='bigint'&&fee>=debited)errors.fee='Phí nằm trong tổng PP bị trừ: phải nhỏ hơn '+viCents(debited)+' '+cur;
+  if(typeof fee==='string')errors.fee=fee;else if(fee!==null&&typeof debited==='bigint'&&fee>=debited)errors.fee='Phí nằm trong tổng PP bị trừ: phải nhỏ hơn '+centsLabel(debited)+' '+cur;
   if(typeof received==='string')errors.received=received;
   if(typeof rfee==='string')errors.receiverFee=rfee;
   if(same&&rate!==null)errors.rate='Cùng đồng tiền '+cur+': không ghi tỷ giá';
@@ -40,11 +42,11 @@ export function checkTransfer(input:TransferCheckInput){
   if(typeof debited==='bigint'&&typeof fee!=='string'&&!errors.fee&&(same||typeof rate==='bigint')&&typeof rfee!=='string'){
     const net=debited-(fee??BigInt(0)),gross=same?net:(net*(rate as bigint)+RATE_SCALE/BigInt(2))/RATE_SCALE;
     expected=gross-(rfee??BigInt(0));
-    if(expected<=BigInt(0)){errors.receiverFee='Phí bên nhận phải nhỏ hơn '+viCents(gross)+' '+rc;expected=null;}
+    if(expected<=BigInt(0)){errors.receiverFee='Phí bên nhận phải nhỏ hơn '+centsLabel(gross)+' '+rc;expected=null;}
   }
-  if(received===null){if((input.type==='MIXING'||rfee!==null)&&!errors.received)errors.received=(input.type==='MIXING'?'Chuyển nội bộ: ghi số bên nhận thực nhận':'Có phí bên nhận: ghi số bên nhận thực nhận')+(expected!==null?' ('+viCents(expected)+' '+rc+')':'');}
+  if(received===null){if((input.type==='MIXING'||rfee!==null)&&!errors.received)errors.received=(input.type==='MIXING'?'Chuyển nội bộ: ghi số bên nhận thực nhận':'Có phí bên nhận: ghi số bên nhận thực nhận')+(expected!==null?' ('+centsLabel(expected)+' '+rc+')':'');}
   else if(typeof received==='bigint'&&expected!==null&&received!==expected)
-    errors.received='Bên nhận phải nhận '+viCents(expected)+' '+rc+' = ('+viCents(debited as bigint)+' − phí '+viCents((fee as bigint|null)??BigInt(0))+')'+(same?'':' × '+String(input.rate).trim())+(rfee?' − phí bên nhận '+viCents(rfee as bigint):'')+'. Sửa số nhận'+(same?' hoặc phí':', phí hoặc tỷ giá')+(rfee?'':'; nếu bên nhận bị trừ phí riêng, ghi ở Phí bên nhận');
+    errors.received='Bên nhận phải nhận '+centsLabel(expected)+' '+rc+' = ('+centsLabel(debited as bigint)+' − phí '+centsLabel((fee as bigint|null)??BigInt(0))+')'+(same?'':' × '+String(input.rate).trim())+(rfee?' − phí bên nhận '+centsLabel(rfee as bigint):'')+'. Sửa số nhận'+(same?' hoặc phí':', phí hoặc tỷ giá')+(rfee?'':'; nếu bên nhận bị trừ phí riêng, ghi ở Phí bên nhận');
   return {errors,expected:expected===null?null:centsText(expected),receivedCurrency:rc,same};
 }
 // TransferForm state (UI review 18/10/2026): while the received amount is untyped it is derived whenever it must be stated (internal

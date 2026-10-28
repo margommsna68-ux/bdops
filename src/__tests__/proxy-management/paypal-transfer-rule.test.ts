@@ -8,11 +8,11 @@ describe('checkTransfer',()=>{
     const r=checkTransfer({...base,received:'30'});expect(r.errors).toEqual({});expect(r.expected).toBe('30.00');
   });
   it('refuses 31 debited, fee 1, received 31 at the received field',()=>{
-    const r=checkTransfer({...base,received:'31'});expect(r.expected).toBe('30.00');expect(r.errors.received).toMatch(/30,00 USD/);
+    const r=checkTransfer({...base,received:'31'});expect(r.expected).toBe('30.00');expect(r.errors.received).toMatch(/30\.00 USD/);
   });
   it('different currency: (31 − 1) × 25 000 = 750 000 VND; 30 VND is refused',()=>{
     expect(checkTransfer({...base,receivedCurrency:'VND',rate:'25000',received:'750000'}).errors).toEqual({});
-    const r=checkTransfer({...base,receivedCurrency:'VND',rate:'25000',received:'30'});expect(r.expected).toBe('750000.00');expect(r.errors.received).toMatch(/750\.000,00 VND/);
+    const r=checkTransfer({...base,receivedCurrency:'VND',rate:'25000',received:'30'});expect(r.expected).toBe('750000.00');expect(r.errors.received).toMatch(/750,000\.00 VND/);
     expect(checkTransfer({...base,receivedCurrency:'VND',received:'750000'}).errors.rate).toMatch(/tỷ giá/i);
   });
   it('rounds half up to 2 decimals: 10 × 0.99 = 9.90; 0.03 × 0.5 = 0.015 → 0.02',()=>{
@@ -21,7 +21,7 @@ describe('checkTransfer',()=>{
   });
   it('a receiving-side fee is explicit, in the receiving currency, and taken from the computed amount',()=>{
     expect(checkTransfer({...base,receiverFee:'0.5',received:'29.5'}).errors).toEqual({});
-    expect(checkTransfer({...base,receiverFee:'0.5',received:'30'}).errors.received).toMatch(/29,50/);
+    expect(checkTransfer({...base,receiverFee:'0.5',received:'30'}).errors.received).toMatch(/29\.50/);
     expect(checkTransfer({...base,receiverFee:'30',received:'0'}).errors.receiverFee).toBeTruthy();
   });
   it('checks each field: fee inside the total, bad numbers, missing received on an internal transfer',()=>{
@@ -43,11 +43,11 @@ describe('transferDraft (TransferForm)',()=>{
     expect(r.payload).toMatchObject({received:'28.00',receiverFee:'2',receivedCurrency:'USD',rate:null});
   });
   it('keeps a hand-typed received amount and reports the mismatch at the field',()=>{
-    const r=transferDraft({...d,received:'29',auto:false});expect(r.shown).toBe('29');expect(r.errors.received).toMatch(/28,00 USD/);
+    const r=transferDraft({...d,received:'29',auto:false});expect(r.shown).toBe('29');expect(r.errors.received).toMatch(/28\.00 USD/);
   });
   it('a receiver fee that cannot be computed blocks at a field and is never dropped',()=>{
     const r=transferDraft({...d,recvCur:'VND'});expect(r.errors.rate).toBeTruthy();expect(r.payload.receiverFee).toBe('2');
-    expect(checkTransfer({type:'EXCHANGE',currency:'USD',debited:'31',fee:'1',receiverFee:'2'}).errors.received).toMatch(/28,00 USD/);
+    expect(checkTransfer({type:'EXCHANGE',currency:'USD',debited:'31',fee:'1',receiverFee:'2'}).errors.received).toMatch(/28\.00 USD/);
   });
   it('a withdrawal with no receiver fee and no known received amount still saves as before',()=>{
     const r=transferDraft({...d,recvFee:''});expect(r.shown).toBe('');expect(r.errors).toEqual({});

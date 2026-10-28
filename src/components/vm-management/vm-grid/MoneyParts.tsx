@@ -3,7 +3,7 @@ import React,{useState} from 'react';
 import toast from 'react-hot-toast';
 import {trpc} from '@/lib/trpc';
 import {balanceState,WITHDRAWABLE_LABEL,MILESTONE_LABEL,type Withdrawable} from '@/lib/vm-ops';
-import {formatLedger,parseViNumber} from '@/lib/money-input';
+import {formatLedger,parseMoneyNumber} from '@/lib/money-input';
 import type {OpsRow} from './OpsCells';
 // "Tiền / Rút" at the VM (owner brief 20/10/2026): the EarnApp balance read on the account (with when it was read) and, separately,
 // the payout request against the PayPal book. Both are shown when both exist; the balance is never reduced by the waiting money.
@@ -59,7 +59,7 @@ export function BalanceSection({projectId,vmCode,ops,read,write,onSaved}:{projec
   const touch=()=>{if(!bound&&ops.earnAppId)setBound({projectId,vmId:ops.vmId,cycle:ops.cycle,earnAppId:ops.earnAppId});};
   const moved=!!bound&&(bound.projectId!==projectId||bound.vmId!==ops.vmId||bound.cycle!==ops.cycle||bound.earnAppId!==ops.earnAppId);
   const reset=()=>{setAmount('');setCond('');setReason('');setEvidence('');setFailed(false);setW('UNKNOWN');setAt(nowLocal());setKey(null);setBound(null);setError('');};
-  const parsed=amount.trim()?parseViNumber(amount,{fraction:2}):{value:null,error:null},amountOk=!failed&&!!parsed.value&&!parsed.error,dirty=failed?!!reason.trim():amountOk;
+  const parsed=amount.trim()?parseMoneyNumber(amount,{fraction:2}):{value:null,error:null},amountOk=!failed&&!!parsed.value&&!parsed.error,dirty=failed?!!reason.trim():amountOk;
   const b=balanceState(ops.balance);
   async function submit(){
     if(!dirty||save.isLoading||!bound||moved)return;setError('');
@@ -80,7 +80,7 @@ export function BalanceSection({projectId,vmCode,ops,read,write,onSaved}:{projec
     {write&&ops.earnAppId&&<div className="vm-balance-form space-y-1" data-sdk-edit>
       <div className="flex gap-1 items-center flex-wrap" role="radiogroup" aria-label="Kết quả kiểm tra"><button type="button" role="radio" aria-checked={!failed} className={'pm-button pm-button-sm'+(!failed?' pm-button-primary':'')} onClick={()=>{touch();setFailed(false);}}>Đọc được số dư</button><button type="button" role="radio" aria-checked={failed} className={'pm-button pm-button-sm'+(failed?' pm-button-primary':'')} onClick={()=>{touch();setFailed(true);}}>Kiểm tra thất bại</button></div>
       {!failed?<div className="grid grid-cols-3 gap-1">
-        <label className="pm-label text-xs col-span-2">Số dư<input className="pm-input" inputMode="decimal" aria-label={'Số dư EarnApp '+vmCode} placeholder="ví dụ 10,50 (0 là hợp lệ)" value={amount} onChange={e=>{touch();setAmount(e.target.value);setError('');}} onKeyDown={keys} aria-invalid={!!parsed.error}/></label>
+        <label className="pm-label text-xs col-span-2">Số dư<input className="pm-input" inputMode="decimal" aria-label={'Số dư EarnApp '+vmCode} placeholder="ví dụ 10.50 (0 là hợp lệ)" value={amount} onChange={e=>{touch();setAmount(e.target.value);setError('');}} onKeyDown={keys} aria-invalid={!!parsed.error}/></label>
         <label className="pm-label text-xs">Đồng tiền<input className="pm-input" value={currency} maxLength={5} onChange={e=>{touch();setCurrency(e.target.value.toUpperCase());}} onKeyDown={keys}/></label>
         <label className="pm-label text-xs col-span-3">Điều kiện rút trên EarnApp<select className="pm-input" aria-label="Điều kiện rút" value={w} onChange={e=>{touch();setW(e.target.value as Withdrawable);}}><option value="UNKNOWN">Chưa kiểm tra điều kiện rút</option><option value="YES">Có thể rút (EarnApp cho rút)</option><option value="NO">Chưa đủ điều kiện rút</option></select></label>
         <label className="pm-label text-xs col-span-3">Điều kiện quan sát (nếu có)<input className="pm-input" maxLength={300} value={cond} onChange={e=>{touch();setCond(e.target.value);}} onKeyDown={keys}/></label></div>

@@ -70,9 +70,9 @@ describe('EarnApp balance at the VM',()=>{
   it('Dán bảng → Số dư: matched by server + VM code; empty keeps; 0 is a value; no EarnApp / unknown VM / repeats at the line',async()=>{
     const f=await setup();try{
       await db.earnAppAccount.update({where:{vmId:f.vms[3].id},data:{vmId:null}});
-      const p=await previewBalancePaste(f.scope,{serverId:f.server.id,text:['VM | Số dư','VM_002 | 0','VM_001\t12,50','VM_003 |','VM_009 | 3','VM_004 | 3','VM_001 | 4'].join('\n')},db);
+      const p=await previewBalancePaste(f.scope,{serverId:f.server.id,text:['VM | Số dư','VM_002 | 0','VM_001\t12.50','VM_003 |','VM_009 | 3','VM_004 | 3','VM_001 | 4'].join('\n')},db);
       expect(p.rows.map(r=>[r.vm,r.outcome,r.amount])).toEqual([['VM_002','READY','0'],['VM_001','READY','12.50'],['VM_003','SKIP',null],['VM_009','ERROR',null],['VM_004','ERROR',null],['VM_001','ERROR',null]]);
-      const multi=await previewBalancePaste(f.scope,{text:`${f.server.code} | VM_002 | 1.000,5`},db);expect(multi.rows[0]).toMatchObject({outcome:'READY',amount:'1000.5'});
+      const multi=await previewBalancePaste(f.scope,{text:`${f.server.code} | VM_002 | 1,000.5`},db);expect(multi.rows[0]).toMatchObject({outcome:'READY',amount:'1000.5'});
       const items=p.rows.filter(r=>r.outcome==='READY').map(r=>({vmId:r.vmId!,expectedCycle:r.expectedCycle!,earnAppId:r.earnAppId!,checkedAt:new Date().toISOString(),outcome:'OK' as const,amount:r.amount!,line:r.line}));
       const done=await recordBalanceChecks(f.scope,{key:randomUUID(),source:'PASTE',items},db);expect(done).toMatchObject({applied:2,errors:0});
       expect((await f.ops(1)).balance.latest).toMatchObject({amount:'0.00',withdrawable:'UNKNOWN'});expect((await f.ops(2)).balance.latest).toBeNull();
@@ -103,7 +103,7 @@ describe('payout: suggested PayPal, held emails, milestones',()=>{
       // $18 waiting on pp-82 (a request sent for VM_002)
       await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[1].id,expectedCycle:1,paypalEmailId:p82.emails[0].id,amount:'18',date:today},db);
       const pick=await readPayoutPick(f.scope,{vmId:f.vms[0].id,amount:'10'},db);
-      expect(pick.suggestion).toMatchObject({paypalId:p85.id});expect(pick.suggestion?.why).toMatch(/pp-85.*\$95,00/);
+      expect(pick.suggestion).toMatchObject({paypalId:p85.id});expect(pick.suggestion?.why).toMatch(/pp-85.*\$95\.00/);
       expect(pick.paypals.find(p=>p.id===p82.id)).toMatchObject({pendingUsd:'18.00'});
       // VM_002 already has its email on pp-82: its own email wins, never changed silently.
       expect((await readPayoutPick(f.scope,{vmId:f.vms[1].id,amount:'5'},db)).suggestion).toMatchObject({paypalId:p82.id,why:expect.stringMatching(/đã có email nhận/)});
