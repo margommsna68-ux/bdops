@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {bulkPlan,runSequential,serverCounts,runJournaled,receiptBody,MANUAL_RECREATE,type BulkRow} from '@/components/vm-management/vm-grid/payout-bulk-model';
+import {bulkPlan,runSequential,serverCounts,runJournaled,receiptBody,MANUAL_RECREATE,FLEET_RECORDS,type BulkRow} from '@/components/vm-management/vm-grid/payout-bulk-model';
 import {enrolledServerIds} from '@/server/fleet-commands/guards';
 // Bulk actions (owner 28/10/2026): "Đã rút N dòng", "Tiền đã về N dòng", "Tạo lại N VM", "Ghi nhận đã tạo lại N VM". Pure rules.
 const money={lost:null,amount:'10.00',currency:'USD',received:'0.00',pendingLinked:'0.00',remaining:'10.00',shortfall:null};
@@ -29,9 +29,17 @@ describe('bulkPlan',()=>{
     expect(why(p,'2')).toBe(MANUAL_RECREATE);expect(MANUAL_RECREATE).toContain('Tạo lại trên máy rồi bấm Ghi nhận đã tạo lại');
     expect(why(p,'3')).toContain('Chờ tạo lại');
   });
-  it('RECORD_RECREATED: every "Chờ tạo lại" VM, enrolled or not',()=>{
+  it('RECORD_RECREATED: "Chờ tạo lại" VMs of servers WITHOUT fleet control only (the worker records the enrolled ones)',()=>{
     const p=bulkPlan([row('1',{milestone:'RECREATE',fleetEnrolled:true}),row('2',{milestone:'RECREATE'}),row('3',{milestone:''})],'RECORD_RECREATED');
-    expect(p.ready.map(r=>r.vmId)).toEqual(['1','2']);expect(why(p,'3')).toContain('Chờ tạo lại');
+    expect(p.ready.map(r=>r.vmId)).toEqual(['2']);expect(why(p,'1')).toBe(FLEET_RECORDS);expect(why(p,'3')).toContain('Chờ tạo lại');
+  });
+  it('RECEIVE: late money after SUS only on a request that was sent (never a never-sent one)',()=>{
+    const p=bulkPlan([row('1',{request:req({submission:'PREPARING',state:'LOST_SUS',phase:'LOST'})}),row('2',{request:req({submission:'UNKNOWN',state:'LOST_SUS',phase:'LOST'})})],'RECEIVE');
+    expect(p.ready.map(r=>r.vmId)).toEqual(['2']);expect(why(p,'1')).toContain('Chưa ghi "Đã rút"');
+  });
+  it('a request that is no longer the VM’s current one is skipped as such',()=>{
+    const p=bulkPlan([{...row('1',{request:req({submission:'SENT'})}),notCurrent:true}],'RECEIVE');
+    expect(why(p,'1')).toBe('Yêu cầu không còn hiện hành');
   });
 });
 describe('runSequential',()=>{

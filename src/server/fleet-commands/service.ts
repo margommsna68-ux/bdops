@@ -202,7 +202,7 @@ export async function readFleetServers(scope:ActorScope,raw:unknown,db:PrismaCli
  return transaction(scope,db,async tx=>{
   const current=await authorizeVM(scope,'READ',tx);
   if(!ids.length)return {serverIds:[] as string[]};
-  const rows=await tx.server.findMany({where:{projectId:b.projectId,managed:true,archivedAt:null,id:{in:ids},...serverWhere(current)},select:{id:true}});
+  const rows=await tx.server.findMany({where:{projectId:b.projectId,managed:true,archivedAt:null,AND:[{id:{in:ids}},serverWhere(current)]},select:{id:true}});
   return {serverIds:rows.map(r=>r.id)};
  });
 }

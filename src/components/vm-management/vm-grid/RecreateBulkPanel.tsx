@@ -4,7 +4,7 @@ import {trpc} from '@/lib/trpc';
 import {FleetCreate,type CreateInput} from '@/server/fleet-commands/schema';
 import type {ManagedVM} from '../shared';
 import type {OpsRow} from './OpsCells';
-import {bulkPlan,runSequential,runJournaled,readJournal,serverCounts,MANUAL_RECREATE,type BulkRow} from './payout-bulk-model';
+import {bulkPlan,runSequential,runJournaled,readJournal,serverCounts,MANUAL_RECREATE,FLEET_RECORDS,type BulkRow} from './payout-bulk-model';
 // "Chờ tạo lại" (owner 28/10/2026): "Tạo lại N VM" for many VMs on many servers, always behind ONE confirmation listing the VMs per
 // server. VMs of servers under fleet control get one RECREATE_VM command each (the same fleet command service as the VM panel; the
 // server checks MANAGE, UUID / round / revision and recreateRule); the others are listed to recreate by hand, then "Ghi nhận đã tạo
@@ -12,7 +12,9 @@ import {bulkPlan,runSequential,runJournaled,readJournal,serverCounts,MANUAL_RECR
 // with the same body, never a second command.
 type Row=BulkRow&{label:string};
 type Kind='RECREATE'|'RECORD_RECREATED';
-type Status={state:''|'done'|'unknown'|'stuck';error:string};
+/** foreign = the VM panel's key holds ANOTHER fleet action: never resent or dropped here, only reconciled in the VM panel. */
+type Status={state:''|'done'|'unknown'|'stuck';error:string;foreign?:boolean};
+const FOREIGN='VM còn lệnh điều khiển khác chưa rõ kết quả.';
 const message=(e:unknown)=>e instanceof Error?e.message:'Không nhận được phản hồi hợp lệ';
 const store=()=>{try{return window.sessionStorage;}catch{return null;}};
 // Same key as FleetCommandPanel: the VM panel shows (and retries) a bulk command that is still uncertain.
@@ -34,15 +36,21 @@ export function RecreateBulkPanel({projectId,userId,vms,opsOf,rights,onSaved,onB
 function Section({kind,projectId,userId,rows,onSaved,onBusy}:{kind:Kind;projectId:string;userId:string;rows:Row[];onSaved:()=>Promise<unknown>|void;onBusy?:(busy:boolean)=>void}){
   const utils=trpc.useContext(),create=trpc.fleetCommands.create.useMutation(),record=trpc.vmOps.recreate.useMutation();
   // The plan is taken when the panel opens; a background reload never adds or retargets a row.
-  const [plan]=useState(()=>bulkPlan(rows,kind));
+  // "Ghi nhận" never takes a VM with a fleet command kept in this tab (sent / queued from here or from the VM panel): the worker
+  // records it when AE has recreated it; a manual record first would make the worker's callback fail.
+  const [plan]=useState(()=>{const p=bulkPlan(rows,kind);if(kind==='RECREATE')return p;
+    const queued=p.ready.filter(r=>!!readJournal(store(),fleetJournalKey(userId,projectId,r.serverId,r.vmId)));
+    return {ready:p.ready.filter(r=>!queued.includes(r)),skipped:[...p.skipped,...queued.map(row=>({row,why:'VM có lệnh tạo lại qua điều khiển đang chờ: web tự ghi nhận khi xong'}))]};});
   const keyOf=(r:Row)=>kind==='RECREATE'?fleetJournalKey(userId,projectId,r.serverId,r.vmId):recordJournalKey(projectId,userId,r.vmId,r.ops!.cycle);
   const [status,setStatus]=useState<Record<string,Status>>(()=>Object.fromEntries(plan.ready.map(r=>{const c=readJournal<{action?:string}>(store(),keyOf(r));
-    return [r.vmId,c?{state:'unknown',error:kind==='RECREATE'&&c.action!=='RECREATE_VM'?'VM còn lệnh điều khiển khác chưa rõ kết quả; đối soát ở khung VM.':'Lệnh trước chưa rõ kết quả; thử lại đúng lệnh cũ.'}:{state:'',error:''}];})));
+    const foreign=kind==='RECREATE'&&c?.action!=='RECREATE_VM';
+    return [r.vmId,c?foreign?{state:'stuck',error:FOREIGN,foreign:true}:{state:'unknown',error:'Lệnh trước chưa rõ kết quả; thử lại đúng lệnh cũ.'}:{state:'',error:''}];})));
   const [confirming,setConfirming]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const lock=useRef(false),mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const set=(id:string,s:Status)=>setStatus(old=>({...old,[id]:s}));
-  const ready=plan.ready.filter(r=>!status[r.vmId]?.state),pending=plan.ready.filter(r=>status[r.vmId]?.state==='unknown'||status[r.vmId]?.state==='stuck');
-  const manual=kind==='RECREATE'?plan.skipped.filter(s=>s.why===MANUAL_RECREATE):[],other=plan.skipped.filter(s=>s.why!==MANUAL_RECREATE||kind!=='RECREATE');
+  const ready=plan.ready.filter(r=>!status[r.vmId]?.state),pending=plan.ready.filter(r=>!status[r.vmId]?.foreign&&(status[r.vmId]?.state==='unknown'||status[r.vmId]?.state==='stuck'));
+  const manual=kind==='RECREATE'?plan.skipped.filter(s=>s.why===MANUAL_RECREATE):[],byFleet=kind==='RECORD_RECREATED'?plan.skipped.filter(s=>s.why===FLEET_RECORDS):[];
+  const other=plan.skipped.filter(s=>!manual.includes(s)&&!byFleet.includes(s));
   /** RECREATE_VM body from the VM's current fleet binding (UUID máy, round, revision, configuration), or why it cannot be sent. */
   async function fleetBody(r:Row):Promise<CreateInput|string>{
     const c=await utils.fleetCommands.control.fetch({projectId,serverId:r.serverId,vmId:r.vmId});
@@ -58,7 +66,8 @@ function Section({kind,projectId,userId,rows,onSaved,onBusy}:{kind:Kind;projectI
       const targets=retry?pending:ready;
       await runSequential(targets,async r=>{
         const key=keyOf(r),stored=readJournal<Record<string,unknown>>(store(),key);
-        if(kind==='RECREATE'&&stored&&stored.action!=='RECREATE_VM'){set(r.vmId,{state:'stuck',error:'VM còn lệnh điều khiển khác chưa rõ kết quả; đối soát ở khung VM.'});return;}
+        if(kind==='RECREATE'&&stored&&stored.action!=='RECREATE_VM'){set(r.vmId,{state:'stuck',error:FOREIGN,foreign:true});return;}
+        if(kind==='RECORD_RECREATED'&&readJournal(store(),fleetJournalKey(userId,projectId,r.serverId,r.vmId))){set(r.vmId,{state:'',error:'VM có lệnh tạo lại qua điều khiển đang chờ; không ghi nhận tay.'});return;}
         let body:Record<string,unknown>;
         if(stored)body=stored;
         else if(kind==='RECREATE'){let b:CreateInput|string;try{b=await fleetBody(r);}catch(e){set(r.vmId,{state:'',error:message(e)});return;}if(typeof b==='string'){set(r.vmId,{state:'',error:b});return;}body=b;}
@@ -87,8 +96,9 @@ function Section({kind,projectId,userId,rows,onSaved,onBusy}:{kind:Kind;projectI
     {plan.ready.length>0&&<ul className="space-y-1">{plan.ready.map(r=>{const s=status[r.vmId]??{state:'',error:''};return <li key={r.vmId} aria-label={r.label}><strong>{r.label}</strong>
       {s.state==='done'&&<span className="text-emerald-600"> — {kind==='RECREATE'?'Đã gửi lệnh tạo lại':'Đã ghi nhận tạo lại'}</span>}
       {s.error&&<span className="pm-error" role="alert"> — {s.error}</span>}
-      {s.state==='stuck'&&<button type="button" className="pm-button pm-button-sm ml-2" disabled={busy} onClick={()=>drop(r)}>Bỏ lệnh chưa rõ (đã đối chiếu)</button>}</li>;})}</ul>}
+      {s.state==='stuck'&&(s.foreign?<span className="pm-muted"> Đối chiếu trong khung VM</span>:<button type="button" className="pm-button pm-button-sm ml-2" disabled={busy} onClick={()=>drop(r)}>Bỏ lệnh chưa rõ (đã đối chiếu)</button>)}</li>;})}</ul>}
     {manual.length>0&&<div><p className="font-semibold">Tạo tay {manual.length} VM</p><ul>{manual.map(s=><li key={s.row.vmId}><strong>{s.row.label}</strong> — Tạo lại trên máy rồi bấm Ghi nhận đã tạo lại</li>)}</ul></div>}
+    {byFleet.length>0&&<p className="pm-muted">{byFleet.length} VM thuộc server có điều khiển: web tự ghi nhận khi lệnh “Tạo lại VM (AE)” xong, không ghi nhận tay ở đây.</p>}
     {other.length>0&&<div><p className="font-semibold">Bỏ qua {other.length} VM</p><ul>{other.map(s=><li key={s.row.vmId}><strong>{s.row.label}</strong> — {s.why}</li>)}</ul></div>}
     {notice&&<p role="status">{notice}</p>}
     {confirming?<div role="alertdialog" aria-label={'Xác nhận '+title} className="vm-status-error space-y-2">
@@ -97,7 +107,7 @@ function Section({kind,projectId,userId,rows,onSaved,onBusy}:{kind:Kind;projectI
       <div className="flex gap-2"><button type="button" className="pm-button pm-button-sm" disabled={busy} onClick={()=>setConfirming(false)}>Quay lại</button>
         <button type="button" className="pm-button pm-button-primary pm-button-sm" disabled={busy} onClick={()=>void run(false)}>Xác nhận {title.charAt(0).toLowerCase()+title.slice(1)}</button></div></div>
     :<div className="flex gap-2 flex-wrap">
-      {pending.length>0&&<button type="button" className="pm-button" disabled={busy} onClick={()=>void run(true)}>Thử lại lệnh chưa rõ</button>}
+      {pending.length>0&&<button type="button" className="pm-button" disabled={busy} onClick={()=>{if(kind==='RECREATE'&&!window.confirm('Gửi lại đúng lệnh tạo lại cũ cho '+pending.length+' VM? Lệnh cũ có thể đã chạy; máy chủ chỉ ghi một lần cho mỗi mã lệnh.'))return;void run(true);}}>Thử lại lệnh chưa rõ</button>}
       <button type="button" className="pm-button pm-button-primary" disabled={busy||!ready.length} onClick={()=>setConfirming(true)}>{busy?'Đang gửi…':title}</button></div>}
   </section>;
 }

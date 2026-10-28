@@ -5,15 +5,20 @@ import {refusedAnswer} from './payout-frame-model';
 export type BulkKind='SEND'|'RECEIVE'|'RECREATE'|'RECORD_RECREATED';
 export interface BulkRequest {id:string;state:string;submission:string;phase:string;money:unknown|null}
 export interface BulkRow {vmId:string;serverId:string;server:string;code:string;fleetEnrolled?:boolean;
+  /** The selected request is no longer the VM's current one (report page). */notCurrent?:boolean;
   ops:{cycle:number;milestone?:string|null;merge?:{role:string}|null;request:BulkRequest|null}|undefined}
+/** A VM on a fleet-controlled server is recorded by the worker after AE recreated it; a manual record would open the new round first. */
+export const FLEET_RECORDS='Server có điều khiển: web tự ghi nhận khi lệnh “Tạo lại VM (AE)” xong';
 export const MANUAL_RECREATE='Server chưa nối điều khiển: Tạo lại trên máy rồi bấm Ghi nhận đã tạo lại';
 const NOT_RECREATE='Không ở mốc “Chờ tạo lại” (tiền chưa về đủ và EarnApp không SUS)';
 /** Why a row is not taken by this bulk action; '' = ready. The server checks every rule again. */
 export function bulkReason(r:BulkRow,kind:BulkKind):string{
+  if(r.notCurrent)return 'Yêu cầu không còn hiện hành';
   const o=r.ops;if(!o)return 'Chưa đọc được trạng thái tiền của VM';
   if(kind==='RECREATE'||kind==='RECORD_RECREATED'){
     if(o.milestone!=='RECREATE')return NOT_RECREATE;
-    return kind==='RECREATE'&&!r.fleetEnrolled?MANUAL_RECREATE:'';
+    if(kind==='RECREATE')return r.fleetEnrolled?'':MANUAL_RECREATE;
+    return r.fleetEnrolled?FLEET_RECORDS:'';
   }
   if(o.merge?.role==='MEMBER')return 'VM đã gộp: lệnh rút và tiền về ghi ở VM chính';
   const q=o.request;if(!q)return 'Chưa có yêu cầu rút';
@@ -24,7 +29,7 @@ export function bulkReason(r:BulkRow,kind:BulkKind):string{
     return '';
   }
   if(!q.money)return 'Cần quyền xem số tiền của yêu cầu';
-  if(q.phase==='LOST'||q.state==='LOST_SUS')return ''; // late money after SUS
+  if(q.phase==='LOST'||q.state==='LOST_SUS')return q.submission==='SENT'||q.submission==='UNKNOWN'?'':'Chưa ghi "Đã rút" trên yêu cầu này'; // late money after SUS
   if(q.state!=='REQUESTED')return 'Yêu cầu đã thất bại / huỷ';
   if(q.submission!=='SENT')return 'Chưa ghi "Đã rút" trên yêu cầu này';
   if(q.phase==='REVIEW')return 'Cần đối chiếu tiền ở Kho tài khoản';

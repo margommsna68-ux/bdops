@@ -93,7 +93,7 @@ function ReportBulk({projectId,userId,kind,rows,onSaved}:{projectId:string;userI
  if(!allowed)return <p className="pm-muted">{kind==='SEND'?'Cần quyền ghi Tiền vào PayPal hoặc “Chuẩn bị rút EarnApp”.':'Cần quyền ghi tiền về PayPal.'}</p>;
  const byVm=new Map(board.data.vms.map(v=>[v.vmId,v]));
  const live=(vmId:string)=>byVm.get(vmId);
- const items:StatusBulkRow[]=rows.map(x=>{const o=live(x.vmId);return {vmId:x.vmId,serverId:x.serverId??'',server:x.server||'Server cũ',code:x.vm||x.vmId,label:(x.server||'Server cũ')+' / '+(x.vm||x.vmId),ops:o&&o.request?.id===x.id?o:undefined};});
+ const items:StatusBulkRow[]=rows.map(x=>{const o=live(x.vmId);return {vmId:x.vmId,serverId:x.serverId??'',server:x.server||'Server cũ',code:x.vm||x.vmId,label:(x.server||'Server cũ')+' / '+(x.vm||x.vmId),ops:o,notCurrent:!o||o.request?.id!==x.id};});
  return <PayoutStatusBulk projectId={projectId} userId={userId} kind={kind} rows={items} liveOf={live} onSaved={async()=>{await Promise.all([board.refetch(),onSaved()]);}}/>;
 }
 function Status({row}:{row:Row}){return <span className={'pr-status pr-status-'+row.status.toLowerCase()}>{row.status==='RECEIVED'&&row.shortfall&&row.shortfall!=='0.00'?'Đã chốt nhận thiếu':statuses[row.status]||row.status}</span>;}

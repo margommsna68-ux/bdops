@@ -2,7 +2,7 @@ import {afterAll,it,expect,vi} from 'vitest';
 import type {Prisma} from '@prisma/client';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {businessDB as db,businessFixture} from '../proxy-management/business-fixture';
-import {createFleetCommand,claimFleetCommand,stepFleetCommand,renewFleetCommand,completeFleetCommand,cancelFleetCommand,readFleetCommand,readFleetControl,authorizeNativeFleetCommand,nativeCommandHash} from '@/server/fleet-commands/service';
+import {createFleetCommand,claimFleetCommand,stepFleetCommand,renewFleetCommand,completeFleetCommand,cancelFleetCommand,readFleetCommand,readFleetControl,readFleetServers,authorizeNativeFleetCommand,nativeCommandHash} from '@/server/fleet-commands/service';
 import {createTelegramFleetHandler} from '@/server/fleet-commands/telegram';
 import {telegramBindingHash,telegramOwner} from '@/server/fleet-commands/telegram-binding';
 import {hashToken} from '@/server/ops-api/tokens';
@@ -381,4 +381,17 @@ it('web control exposes exact enrolled VM only and cannot enable the M1 gate thr
   await expect(caller.create({...f.input(),enabled:true,m1Ready:true} as ReturnType<typeof f.input>)).rejects.toBeTruthy();
   expect(process.env.FLEET_CONTROL_M1_READY).toBeUndefined();expect(await db.fleetCommand.count({where:{projectId:q.projectId}})).toBe(0);
  }finally{await f.cleanup();}
+});
+
+it('enrolled server ids for bulk recreate: only enrolled AND within a server-scoped reader servers; nothing before M1',async()=>{
+ const f=await fixture(),old=process.env.FLEET_CONTROL_SERVERS;try{
+  const s2=await db.server.create({data:{projectId:f.scope.projectId,code:'fleet-s2',managed:true}}),s3=await db.server.create({data:{projectId:f.scope.projectId,code:'fleet-s3',managed:true}});
+  process.env.FLEET_CONTROL_SERVERS=JSON.stringify([{projectId:f.scope.projectId,serverId:f.server.id,serverUuid:randomUUID()},{projectId:f.scope.projectId,serverId:s2.id,serverUuid:randomUUID()}]);
+  expect((await readFleetServers(f.scope,{projectId:f.scope.projectId},db)).serverIds.sort()).toEqual([f.server.id,s2.id].sort());
+  await db.projectMember.updateMany({where:{projectId:f.scope.projectId,userId:f.worker.userId},data:{serverScope:'SELECTED',allowedServerIds:[f.server.id,s3.id]}});
+  expect((await readFleetServers(f.worker,{projectId:f.scope.projectId},db)).serverIds).toEqual([f.server.id]);
+  await db.projectMember.updateMany({where:{projectId:f.scope.projectId,userId:f.worker.userId},data:{allowedServerIds:[s3.id]}});
+  expect((await readFleetServers(f.worker,{projectId:f.scope.projectId},db)).serverIds).toEqual([]);
+  delete process.env.FLEET_CONTROL_M1_READY;expect((await readFleetServers(f.scope,{projectId:f.scope.projectId},db)).serverIds).toEqual([]);
+ }finally{if(old===undefined)delete process.env.FLEET_CONTROL_SERVERS;else process.env.FLEET_CONTROL_SERVERS=old;await f.cleanup();}
 });

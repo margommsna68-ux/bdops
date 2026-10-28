@@ -44,18 +44,41 @@ it('a lost answer keeps the fleet command under the VM panel key; the retry send
   mock.create.mockRejectedValueOnce(new Error('502'));
   await render();await click('Tạo lại 3 VM');await click('Xác nhận tạo lại 3 VM');
   const first=mock.create.mock.calls[0][0];expect(window.sessionStorage.getItem('mth-fleet:u:p:s1:1')).toBe(JSON.stringify(first));
-  await click('Thử lại lệnh chưa rõ');expect(mock.create.mock.calls[3][0]).toEqual(first);expect(window.sessionStorage.length).toBe(0);
+  window.confirm=()=>true;await click('Thử lại lệnh chưa rõ');expect(mock.create.mock.calls[3][0]).toEqual(first);expect(window.sessionStorage.length).toBe(0);
 });
-it('"Ghi nhận đã tạo lại N VM": every "Chờ tạo lại" VM (enrolled or not), one vmOps.recreate each with its round, after confirming',async()=>{
+it('"Ghi nhận đã tạo lại N VM": only "Chờ tạo lại" VMs of servers without control (the worker records enrolled ones), after confirming',async()=>{
   await render({manage:false,assign:true});
   expect(button('Tạo lại 3 VM')).toBeUndefined();
-  await click('Ghi nhận đã tạo lại 4 VM');const d=host.querySelector('[role="alertdialog"]')!;expect(d.textContent).toContain('VT-01: 1 VM');
-  await click('Xác nhận ghi nhận đã tạo lại 4 VM');
-  expect(mock.recreate).toHaveBeenCalledTimes(4);expect(mock.recreate.mock.calls[0][0]).toMatchObject({projectId:'p',vmId:'1',expectedCycle:3});
-  expect(new Set(mock.recreate.mock.calls.map(c=>c[0].key)).size).toBe(4);expect(mock.recreate.mock.calls.map(c=>c[0].vmId)).not.toContain('5');
+  expect(host.textContent).toContain('3 VM thuộc server có điều khiển: web tự ghi nhận');
+  await click('Ghi nhận đã tạo lại 1 VM');const d=host.querySelector('[role="alertdialog"]')!;expect(d.textContent).toContain('VT-01: 1 VM');expect(d.textContent).not.toContain('MOON-01');
+  await click('Xác nhận ghi nhận đã tạo lại 1 VM');
+  expect(mock.recreate).toHaveBeenCalledTimes(1);expect(mock.recreate.mock.calls[0][0]).toMatchObject({projectId:'p',vmId:'4',expectedCycle:3});
+});
+it('never offers "Ghi nhận" for a VM with a fleet command kept in this tab, nor for one this panel just sent',async()=>{
+  mock.servers.mockReturnValue({isLoading:false,data:{serverIds:[]}});
+  window.sessionStorage.setItem('mth-fleet:u:p:s3:4',JSON.stringify({action:'RECREATE_VM'}));
+  await render();
+  expect(host.textContent).toContain('VT-01 / VM_4 — VM có lệnh tạo lại qua điều khiển đang chờ');
+  await click('Ghi nhận đã tạo lại 3 VM');await click('Xác nhận ghi nhận đã tạo lại 3 VM');
+  expect(mock.recreate.mock.calls.map(c=>c[0].vmId)).toEqual(['1','2','3']);
+});
+it('another fleet action kept under the VM panel key is never resent or dropped here: only "Đối chiếu trong khung VM"',async()=>{
+  const other=JSON.stringify({...binding('1','s1'),action:'START_VM',operationId:'0b6f3c1e-7d43-4b8e-9a51-2f1c5e7d9a10',ttlSeconds:300});
+  window.sessionStorage.setItem('mth-fleet:u:p:s1:1',other);
+  await render();
+  expect(host.textContent).toContain('Đối chiếu trong khung VM');expect(button('Bỏ lệnh chưa rõ (đã đối chiếu)')).toBeUndefined();expect(button('Thử lại lệnh chưa rõ')).toBeUndefined();
+  await click('Tạo lại 2 VM');await click('Xác nhận tạo lại 2 VM');
+  expect(mock.create.mock.calls.map(c=>c[0].vmId)).toEqual(['2','3']);expect(window.sessionStorage.getItem('mth-fleet:u:p:s1:1')).toBe(other);
+});
+it('"Thử lại lệnh chưa rõ" for RECREATE_VM asks before re-sending',async()=>{
+  mock.create.mockRejectedValueOnce(new Error('502'));
+  await render();await click('Tạo lại 3 VM');await click('Xác nhận tạo lại 3 VM');
+  const confirm=vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);vi.stubGlobal('confirm',confirm);window.confirm=confirm;
+  await click('Thử lại lệnh chưa rõ');expect(confirm).toHaveBeenCalledTimes(1);expect(mock.create).toHaveBeenCalledTimes(3);
+  await click('Thử lại lệnh chưa rõ');expect(mock.create).toHaveBeenCalledTimes(4);expect(mock.create.mock.calls[3][0]).toEqual(mock.create.mock.calls[0][0]);
 });
 it('without the session user nothing is shown or sent',async()=>{await render({manage:true,assign:true},null);expect(host.textContent).toContain('Đang tải phiên đăng nhập');expect(mock.control).not.toHaveBeenCalled();});
 it('fleet read failure: every VM is treated as manual (nothing sent to machines)',async()=>{
   mock.servers.mockReturnValue({isLoading:false,error:{message:'down'},data:undefined});
-  await render();expect(host.textContent).toContain('Tạo tay 4 VM');expect(button('Tạo lại 0 VM')!.disabled).toBe(true);
+  await render();expect(host.textContent).toContain('Tạo tay 4 VM');expect(button('Ghi nhận đã tạo lại 4 VM')).toBeTruthy();expect(button('Tạo lại 0 VM')!.disabled).toBe(true);
 });
