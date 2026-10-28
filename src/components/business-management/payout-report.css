@@ -32,7 +32,7 @@
 .pr-status:before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none;opacity:.8}
 .pr-status-waiting,.pr-status-partial{color:var(--pr-warn);background:color-mix(in srgb,var(--pr-warn) 10%,transparent)}
 .pr-status-received{color:var(--pr-good);background:color-mix(in srgb,var(--pr-good) 10%,transparent)}
-.pr-status-review,.pr-status-unknown,.pr-status-failed{color:var(--pr-error);background:color-mix(in srgb,var(--pr-error) 10%,transparent)}
+.pr-status-review,.pr-status-unknown,.pr-status-failed,.pr-status-lost{color:var(--pr-error);background:color-mix(in srgb,var(--pr-error) 10%,transparent)}
 .pr-empty{padding:28px;font-size:13px}
 .payout-report button:focus-visible,.payout-report a:focus-visible{outline:2px solid var(--ds-text-secondary);outline-offset:3px}
 .pr-overlay{position:fixed;inset:0;z-index:70;background:rgb(0 0 0 / 28%)}

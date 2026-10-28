@@ -21,8 +21,8 @@ export const VM_OPS:Record<VmOpsStatus,{label:string;tone:string;hint:string}>={
 export const NO_STATUS_LABEL='Chưa ghi';
 export const opsLabel=(s:VmOpsStatus|null|undefined)=>s?VM_OPS[s].label:NO_STATUS_LABEL;
 // Money milestone of the current round (computed from the payout request and the PayPal book, never picked by hand).
-export type Milestone=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'PREPARING'|'UNKNOWN';
-export const MILESTONE_LABEL:Record<Exclude<Milestone,''>,string>={WAITING:'Chờ tiền về',RECREATE:'Cần tạo lại VM',MONEY_REVIEW:'Cần đối chiếu tiền',FAILED:'Rút thất bại / huỷ',PREPARING:'Đang chuẩn bị rút',UNKNOWN:'Chưa xác định kết quả rút'};
+export type Milestone=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'PREPARING'|'UNKNOWN'|'LOST';
+export const MILESTONE_LABEL:Record<Exclude<Milestone,''>,string>={WAITING:'Chờ tiền về',RECREATE:'Chờ tạo lại',MONEY_REVIEW:'Cần đối chiếu tiền',FAILED:'Rút thất bại / huỷ',PREPARING:'Đang chuẩn bị rút',UNKNOWN:'Chưa xác định kết quả rút',LOST:'Mất do SUS'};
 // "Cần xử lý trước": SUS, proxy BLOCKED, Earn/VM lỗi, needs recreating, OFF, waiting for money, then the preparation steps and OK.
 export function opsPriority(v:{status:VmOpsStatus|null;proxyBlocked:boolean;milestone:Milestone}){
   if(v.status==='SUSPENDED')return 0;
@@ -38,7 +38,7 @@ export function opsPriority(v:{status:VmOpsStatus|null;proxyBlocked:boolean;mile
 export const toCents=(v:string|number)=>{const t=String(v).trim(),neg=t.startsWith('-'),[i,d='']=(neg?t.slice(1):t).split('.');return (neg?-1:1)*(Number(i)*100+Number((d+'00').slice(0,2)));};
 export const fromCents=(c:number)=>{const neg=c<0,a=Math.abs(c);return (neg?'-':'')+Math.floor(a/100)+'.'+String(a%100).padStart(2,'0');};
 export interface RequestMoneyInput {amount:string;currency:string;state:string;settledAt:string|null;shortfall:string|null;consumedAt:string|null;receipts:{amount:string;currency:string;confirmed:boolean;failed:boolean;voided:boolean}[]}
-export type RequestPhase='WAITING'|'RECEIVED'|'REVIEW'|'FAILED'|'CANCELLED';
+export type RequestPhase='WAITING'|'RECEIVED'|'REVIEW'|'FAILED'|'CANCELLED'|'LOST';
 // One payout request against the PayPal book: received = confirmed linked receipts; a linked pending receipt is part of what is
 // still to come (never added on top). Exactly the requested amount = received in full. Less is still waiting unless a person
 // settled the gap with a stated reason; more, or money in another currency, needs reconciling.
@@ -47,18 +47,20 @@ export function requestMoney(r:RequestMoneyInput){
   const received=same.filter(x=>x.confirmed).reduce((a,x)=>a+toCents(x.amount),0),pendingLinked=same.filter(x=>!x.confirmed).reduce((a,x)=>a+toCents(x.amount),0);
   const amount=toCents(r.amount),short=r.settledAt&&r.shortfall?toCents(r.shortfall):0,other=live.some(x=>x.currency!==r.currency);
   let phase:RequestPhase;
-  if(r.state==='CANCELLED')phase='CANCELLED';else if(r.state==='FAILED')phase='FAILED';
+  // LOST_SUS (28/10/2026): the EarnApp was suspended before the rest arrived. The unpaid part is gone: it is neither waiting nor received.
+  if(r.state==='CANCELLED')phase='CANCELLED';else if(r.state==='FAILED')phase='FAILED';else if(r.state==='LOST_SUS')phase='LOST';
   else if(received>amount||other)phase='REVIEW';
   else if(received===amount||short>0&&received+short===amount)phase='RECEIVED';
   else phase='WAITING';
   const remaining=phase==='WAITING'?amount-received:0;
   // The VM was already recreated with this money but it no longer adds up (a receipt was voided / changed): reconcile, the VM
   // stays in its new round.
-  const reviewAfterRecreate=!!r.consumedAt&&phase!=='RECEIVED';
+  const reviewAfterRecreate=!!r.consumedAt&&phase!=='RECEIVED'&&phase!=='LOST';
   return {phase,received:fromCents(received),pendingLinked:fromCents(pendingLinked),remaining:fromCents(remaining),reviewAfterRecreate};
 }
 export function milestoneOf(m:{phase:RequestPhase;consumed:boolean;submission?:string}|null):Milestone{
   if(!m)return '';
+  if(m.phase==='LOST')return 'LOST';
   // Not sent on EarnApp yet, or the send could not be confirmed: never "Chờ tiền về" (owner brief 20/10/2026).
   if(m.phase==='WAITING'&&m.submission==='PREPARING')return 'PREPARING';if(m.phase==='WAITING'&&m.submission==='UNKNOWN')return 'UNKNOWN';
   if(m.phase==='WAITING')return 'WAITING';if(m.phase==='RECEIVED')return m.consumed?'':'RECREATE';if(m.phase==='REVIEW')return 'MONEY_REVIEW';return 'FAILED';

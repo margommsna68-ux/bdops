@@ -12,7 +12,7 @@ import './payout-report.css';
 import {PayoutStatusActions} from './PayoutStatusActions';
 import type {readPayoutReport} from '@/server/vm-ops/payout-report';
 
-const statuses={PREPARING:'Đang chuẩn bị',UNKNOWN:'Chưa rõ kết quả',WAITING:'Chờ về PayPal',PARTIAL:'Đã nhận một phần',RECEIVED:'Đã nhận đủ / chốt',FAILED:'Thất bại',CANCELLED:'Đã huỷ',REVIEW:'Cần đối chiếu'};
+const statuses={PREPARING:'Đang chuẩn bị',UNKNOWN:'Chưa rõ kết quả',WAITING:'Chờ về PayPal',PARTIAL:'Đã nhận một phần',RECEIVED:'Đã nhận đủ / chốt',FAILED:'Thất bại',CANCELLED:'Đã huỷ',REVIEW:'Cần đối chiếu',LOST:'Mất do SUS'};
 const views={SENT_TODAY:{label:'Đã gửi trên EarnApp',note:'Tính theo ngày thực sự gửi, kể cả yêu cầu tạo từ hôm trước.'},WAITING:{label:'Đang chờ về PayPal',note:'Phần còn chờ của các yêu cầu đã gửi, gồm cả những ngày trước.'},RECEIVED_TODAY:{label:'PayPal thực nhận trong ngày',note:'Chỉ cộng khoản nhận đã xác nhận trong ngày này. Mở yêu cầu để xem toàn bộ lịch sử.'},ATTENTION:{label:'Yêu cầu cần xử lý',note:'Thất bại, chưa rõ kết quả hoặc cần đối chiếu; gồm mọi ngày.'}};
 const receiptStatuses:Record<string,string>={RECEIVED:'Đã nhận',CONFIRMED:'Đã nhận',PENDING:'Chờ xác nhận',FAILED:'Không về',VOIDED:'Đã thu hồi'};
 const dateText=(value:string|null)=>!value?'—':new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',...(value.length>10?{hour:'2-digit',minute:'2-digit'}:{})}).format(new Date(value.length===10?value+'T12:00:00+07:00':value));

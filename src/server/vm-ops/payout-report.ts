@@ -7,7 +7,7 @@ import {payoutRights} from './payout';
 import {moneyOfRequest} from './ops';
 import {dayDate,dayText} from '../business-management/money';
 
-const statuses=['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW'] as const;
+const statuses=['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW','LOST'] as const;
 export type PayoutReportStatus=typeof statuses[number];
 export const PAYOUT_REPORT_VIEWS=['SENT_TODAY','WAITING','RECEIVED_TODAY','ATTENTION'] as const;
 export type PayoutReportView=typeof PAYOUT_REPORT_VIEWS[number];
@@ -26,7 +26,7 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
    ...(input.paypalId?{paypalId:input.paypalId}:{}),
    ...(from||to?{requestedAt:{...(from?{gte:from}:{}),...(to?{lt:new Date(to.getTime()+86400_000)}:{})}}:{})},
    select:{id:true,revision:true,earnAppId:true,vmId:true,cycle:true,paypalId:true,amount:true,currency:true,requestedAt:true,submittedAt:true,reference:true,
-    state:true,submission:true,shortfall:true,settledAt:true,consumedAt:true,
+    state:true,submission:true,shortfall:true,settledAt:true,consumedAt:true,lostAmount:true,lostAt:true,
     members:{where:{removedAt:null},select:{vmId:true,cycle:true,consumedAt:true},orderBy:{createdAt:'asc'}},
     earnApp:{select:{vmId:true,closedAt:true,login:{select:{email:true}}}},paypal:{select:{code:true}},paypalEmail:{select:{email:true}},
     receipts:{where:{projectId},select:{id:true,date:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,transactionId:true},orderBy:[{date:'desc'},{id:'desc'}]}},
@@ -42,7 +42,7 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
  const vmById=new Map(vms.map(v=>[v.id,v]));
  const filtered=requests.map(r=>{
   const vm=vmById.get(r.vmId),money=moneyOfRequest(r);
-  const status:PayoutReportStatus=money.phase==='CANCELLED'?'CANCELLED':money.phase==='FAILED'?'FAILED':
+  const status:PayoutReportStatus=money.phase==='CANCELLED'?'CANCELLED':money.phase==='FAILED'?'FAILED':money.phase==='LOST'?'LOST':
    money.phase==='REVIEW'||money.reviewAfterRecreate?'REVIEW':r.submission==='PREPARING'?'PREPARING':r.submission==='UNKNOWN'?'UNKNOWN':
    money.phase==='RECEIVED'?'RECEIVED':toCents(money.received)>0?'PARTIAL':'WAITING';
   // Match updatePayout's activeVM + account/cycle test. A consumed request can
@@ -53,7 +53,7 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
    vmId:r.vmId,serverId:vm?.serverId??null,server:vm?.server.code??null,vm:vm?.code??null,cycle:r.cycle,
    login:r.earnApp.login.email,paypalId:r.paypalId,paypal:r.paypal.code,email:r.paypalEmail.email,
    requestedAt:r.requestedAt.toISOString(),submittedAt:r.submittedAt?.toISOString()??null,
-   amount:r.amount.toFixed(2),currency:r.currency,received:money.received,remaining:r.submission==='SENT'&&money.phase==='WAITING'?money.remaining:'0.00',shortfall:r.shortfall?.toFixed(2)??'0.00',status,reference:r.reference,
+   amount:r.amount.toFixed(2),currency:r.currency,received:money.received,remaining:r.submission==='SENT'&&money.phase==='WAITING'?money.remaining:'0.00',shortfall:r.shortfall?.toFixed(2)??'0.00',lostAmount:r.lostAmount?.toFixed(2)??'0.00',lostAt:r.lostAt?.toISOString()??null,status,reference:r.reference,
    members:r.members.map(m=>{const v=vmById.get(m.vmId);return {vmId:m.vmId,serverId:v?.serverId??null,server:v?.server.code??null,vm:v?.code??null,cycle:m.cycle,consumed:!!m.consumedAt};}),
    receipts:r.receipts.map(x=>({id:x.id,date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,
     status:x.voidedAt?'VOIDED' as const:x.failed?'FAILED' as const:x.confirmed?'CONFIRMED' as const:'PENDING' as const,transactionId:x.transactionId}))};
@@ -117,6 +117,13 @@ function reportSummary(entries:PayoutEntry[],receiptDay?:string){
   waiting:fromCents(s.waiting),received:fromCents(s.received),unknown:fromCents(s.unknown)}));
 }
 
+// Money lost because the EarnApp was suspended (state LOST_SUS), per currency. Never added to waiting or received.
+function lostTotals(entries:PayoutEntry[]){
+ const sums=new Map<string,number>();
+ for(const {row} of entries)if(row.status==='LOST')sums.set(row.currency,(sums.get(row.currency)??0)+toCents(row.lostAmount));
+ return Object.fromEntries([...sums].sort(([a],[b])=>a.localeCompare(b)).map(([currency,cents])=>[currency,fromCents(cents)])) as Record<string,string>;
+}
+
 export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,db:DB=prisma){
  const current=await authorizeVM(scope,'READ',db),rights=await payoutRights(current,db);
  if(!rights.requestMoney)throw new ProxyDomainError('FORBIDDEN','Xem báo cáo rút tiền cần quyền xem tiền của yêu cầu rút');
@@ -132,7 +139,7 @@ export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,
  const pages=Math.max(1,Math.ceil(filtered.length/50)),currentPage=Math.min(page,pages);
  return {rows:filtered.slice((currentPage-1)*50,currentPage*50).map(entry=>({...entry.row,
    receivedInView:view==='RECEIVED_TODAY'?sumAmounts(confirmedReceipts(entry,day)):null})),total:filtered.length,page:currentPage,pages,
-  updatedAt:at.toISOString(),summary,servers:model.servers,paypals:model.paypals,focus,
+  updatedAt:at.toISOString(),summary,lost:lostTotals(filtered),servers:model.servers,paypals:model.paypals,focus,
   rights:{manage:rights.writeMoney,markSubmission:rights.writeMoney||rights.payout,userId:current.userId}};
 }
 

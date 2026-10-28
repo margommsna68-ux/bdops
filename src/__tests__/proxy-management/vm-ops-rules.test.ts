@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {gatherOf,requestMoney,milestoneOf,opsPriority,opsLabel} from '@/lib/vm-ops';
+import {gatherOf,requestMoney,milestoneOf,opsPriority,opsLabel,MILESTONE_LABEL} from '@/lib/vm-ops';
 const req=(o:Partial<Parameters<typeof requestMoney>[0]>={})=>requestMoney({amount:'24',currency:'USD',state:'REQUESTED',settledAt:null,shortfall:null,consumedAt:null,receipts:[],...o});
 const rc=(amount:string,confirmed=true,extra={})=>({amount,currency:'USD',confirmed,failed:false,voided:false,...extra});
 describe('VM ops rules',()=>{
@@ -19,6 +19,14 @@ describe('VM ops rules',()=>{
     expect(milestoneOf(null)).toBe('');expect(milestoneOf({phase:'WAITING',consumed:false})).toBe('WAITING');
     expect(milestoneOf({phase:'RECEIVED',consumed:false})).toBe('RECREATE');expect(milestoneOf({phase:'RECEIVED',consumed:true})).toBe('');
     expect(milestoneOf({phase:'REVIEW',consumed:false})).toBe('MONEY_REVIEW');expect(milestoneOf({phase:'CANCELLED',consumed:false})).toBe('FAILED');
+  });
+  it('LOST_SUS is neither waiting nor received',()=>{
+    const m=requestMoney({amount:'12.00',currency:'USD',state:'LOST_SUS',settledAt:null,shortfall:null,consumedAt:null,receipts:[]});
+    expect(m).toMatchObject({phase:'LOST',remaining:'0.00',received:'0.00'});
+    expect(milestoneOf({phase:'LOST',consumed:false,submission:'SENT'})).toBe('LOST');
+    // A VM already recreated after the SUS is not a money mismatch: the loss stays a loss.
+    expect(req({state:'LOST_SUS',consumedAt:'x'})).toMatchObject({phase:'LOST',reviewAfterRecreate:false});
+    expect(MILESTONE_LABEL.LOST).toBe('Mất do SUS');expect(MILESTONE_LABEL.RECREATE).toBe('Chờ tạo lại');
   });
   it('gathering: 82 + 18 pending is only projected; 100 on the book is reached; the target is a minimum, not a cap',()=>{
     expect(gatherOf('82.00','18.00')).toMatchObject({state:'PROJECTED',missing:'18.00',missingAfterPending:'0.00'});

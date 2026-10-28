@@ -72,6 +72,34 @@ it('dashboard and focused report share Bangkok day, submission/receipt selection
  }finally{await f.cleanup();}
 });
 
+it('LOST_SUS is status LOST: not waiting, not attention, not on the dashboard cards, and adds to the lost total per currency',async()=>{
+ dashboardClock();const f=await fixture();try{
+  const lost=await f.request({amount:'15',state:'LOST_SUS',lostAmount:'10.00',lostAt:new Date('2026-10-26T12:30:00Z')});
+  await f.receipt(lost.id,{amount:'5'});
+  const lost2=await f.request({amount:'3',state:'LOST_SUS',lostAmount:'2.50',lostAt:new Date('2026-10-26T12:31:00Z')});
+  const lostVnd=await f.request({amount:'500',currency:'VND',state:'LOST_SUS',lostAmount:'500.00',lostAt:new Date('2026-10-26T12:32:00Z')});
+  const waiting=await f.request({amount:'4'});
+  const report=await readPayoutReport(f.scope,{},db);
+  expect(report.rows.find(r=>r.id===lost.id)).toMatchObject({status:'LOST',amount:'15.00',received:'5.00',remaining:'0.00',lostAmount:'10.00'});
+  expect(report.rows.find(r=>r.id===waiting.id)).toMatchObject({status:'WAITING',remaining:'4.00',lostAmount:'0.00'});
+  // Lost money is a separate bucket: only the live request is still "waiting"; the 5.00 actually received stays received.
+  expect(report.summary.find(s=>s.currency==='USD')).toMatchObject({waiting:'4.00',received:'5.00',unknown:'0.00'});
+  expect(report.summary.find(s=>s.currency==='VND')).toMatchObject({waiting:'0.00',received:'0.00'});
+  expect(report.lost).toEqual({USD:'12.50',VND:'500.00'});
+  expect((await readPayoutReport(f.scope,{status:'LOST'},db)).rows.map(r=>r.id).sort()).toEqual([lost.id,lost2.id,lostVnd.id].sort());
+  const waitingView=await readPayoutReport(f.scope,{view:'WAITING'},db),attention=await readPayoutReport(f.scope,{view:'ATTENTION'},db);
+  expect(waitingView.rows.map(r=>r.id)).toEqual([waiting.id]);expect(attention.rows).toEqual([]);
+  expect(attention.lost).toEqual({});
+  const dashboard=await readPayoutDashboard(f.scope,{},db);if(!dashboard.available)throw Error('expected available');
+  expect(dashboard.cards.waiting).toEqual({requests:1,vms:1,amounts:[{currency:'USD',amount:'4.00'}]});
+  expect(dashboard.cards.attention).toEqual({requests:0,vms:0,amounts:[]});
+  // Same enum through the router: the new status is a valid filter.
+  const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,email:'fixture@invalid'},expires:new Date(Date.now()+60000).toISOString()} as never});
+  const viaRouter=await caller.vmOps.payoutReport({projectId:f.scope.projectId,status:'LOST'});
+  expect(viaRouter.total).toBe(3);expect(viaRouter.lost).toEqual({USD:'12.50',VND:'500.00'});
+ }finally{await f.cleanup();}
+});
+
 it('focused totals cover more than 50 historical requests and count distinct VMs within the selected server',async()=>{
  dashboardClock();const f=await fixture();try{
   const second=await db.virtualMachine.create({data:{serverId:f.server.id,code:'VM_002',managed:true}});
