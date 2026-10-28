@@ -41,7 +41,8 @@ function moneyMatch(f:VmFacts,money:MoneyFilter):Tri{
     case 'VM_FAILED':return f.vmMoney==='FAILED'||f.vmMoney==='FAILED_STALE';
     case 'NONE':return f.milestone==null?null:!f.milestone;
     case 'SUS_WAITING':return f.milestone==null?null:f.opsKey==='SUSPENDED'&&f.requestPhase==='WAITING';
-    case 'WAITING':case 'RECREATE':case 'PREPARING':case 'LOST':case 'MONEY_REVIEW':case 'FAILED':return f.milestone==null?null:f.milestone===money;
+    case 'LOST':return f.milestone==null?null:f.requestPhase==='LOST'; // RECREATE wins the milestone; the request phase keeps "Mất do SUS" findable
+    case 'WAITING':case 'RECREATE':case 'PREPARING':case 'MONEY_REVIEW':case 'FAILED':return f.milestone==null?null:f.milestone===money;
     default:return f.moneyFlags==null?null:f.moneyFlags[money];
   }
 }

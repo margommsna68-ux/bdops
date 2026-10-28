@@ -72,8 +72,8 @@ it('numeric search matches exact VM number, never incidental IP or larger VM cod
 });
 
 it('money=PREPARING and money=LOST match only their milestone; SUS_WAITING needs SUS status and a waiting request',()=>{
- const sample=[fact({id:'p',server:'A',code:'VM_001',milestone:'PREPARING'}),fact({id:'l',server:'A',code:'VM_002',milestone:'LOST'}),fact({id:'w',server:'A',code:'VM_003',milestone:'WAITING'}),
-  fact({id:'sw',server:'A',code:'VM_004',milestone:'WAITING',opsKey:'SUSPENDED',requestPhase:'WAITING'}),fact({id:'sl',server:'A',code:'VM_005',milestone:'LOST',opsKey:'SUSPENDED',requestPhase:'LOST'}),fact({id:'ow',server:'A',code:'VM_006',milestone:'WAITING',opsKey:'OFF',requestPhase:'WAITING'})];
+ const sample=[fact({id:'p',server:'A',code:'VM_001',milestone:'PREPARING'}),fact({id:'l',server:'A',code:'VM_002',milestone:'LOST',requestPhase:'LOST'}),fact({id:'w',server:'A',code:'VM_003',milestone:'WAITING'}),
+  fact({id:'sw',server:'A',code:'VM_004',milestone:'WAITING',opsKey:'SUSPENDED',requestPhase:'WAITING'}),fact({id:'sl',server:'A',code:'VM_005',milestone:'RECREATE',opsKey:'SUSPENDED',requestPhase:'LOST'}),fact({id:'ow',server:'A',code:'VM_006',milestone:'WAITING',opsKey:'OFF',requestPhase:'WAITING'})];
  expect(applyFilters(sample,F({money:'PREPARING'})).map(v=>v.id)).toEqual(['p']);
  expect(applyFilters(sample,F({money:'LOST'})).map(v=>v.id)).toEqual(['l','sl']);
  expect(applyFilters(sample,F({money:'SUS_WAITING'})).map(v=>v.id)).toEqual(['sw']);

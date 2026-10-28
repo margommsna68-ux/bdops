@@ -5,6 +5,7 @@ import {businessDB as db,businessFixture} from './business-fixture';
 import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal,readVmOps} from '@/server/vm-ops/payout';
 import {readPayoutReport} from '@/server/vm-ops/payout-report';
 import {recordRecreated,recreateRule,setVmStatus} from '@/server/vm-ops/ops';
+import {matchVm,DEFAULT_FILTERS,type VmFacts} from '@/components/vm-management/vm-grid/filter-model';
 import {memberOf} from '@/server/vm-ops/payout-members';
 import {markEarnAppSuspended} from '@/server/vm-ops/suspend';
 import {undoOperation} from '@/server/operation-history/undo';
@@ -229,5 +230,27 @@ it('a VM recorded SUS by hand (no request) is queued for recreation',async()=>{
  const f=await setup(1);try{
  await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.rows[0].vm.id,status:'SUSPENDED',expectedCycle:1}]},db);
  expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)?.milestone).toBe('RECREATE');
+ }finally{await f.cleanup();}
+});
+
+// Review fix round 1: the LOST / SUS_WAITING chips read the board row's request phase (RECREATE wins the milestone).
+const asFacts=(row:{vmId:string;status:string|null;milestone:string;request:{phase:string}|null})=>({id:row.vmId,serverId:'s',server:'S',code:row.vmId,archived:false,serverArchived:false,view:'ASSIGNED',applyPending:false,todo:false,noSdk:false,hasAccount:true,hasPaypal:true,opsKey:row.status??'NONE',milestone:row.milestone,requestPhase:row.request?.phase??null,moneyFlags:null,vmMoney:'UNCHECKED',text:''}) as unknown as VmFacts;
+it('a SUS-lost VM exposes request.phase LOST and is found by money=LOST and RECREATE',async()=>{
+ const f=await setup(1);try{
+ const r=await f.create(0,'15','SENT');await f.receipt(r.id,'5');await f.sus(0);
+ const row=(await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)!;
+ expect(row.milestone).toBe('RECREATE');expect(row.request).toMatchObject({phase:'LOST',money:{lost:'10.00'}});
+ const facts=asFacts(row);
+ expect(matchVm(facts,{...DEFAULT_FILTERS,money:'LOST'})).toBe(true);expect(matchVm(facts,{...DEFAULT_FILTERS,money:'RECREATE'})).toBe(true);expect(matchVm(facts,{...DEFAULT_FILTERS,money:'SUS_WAITING'})).toBe(false);
+ }finally{await f.cleanup();}
+});
+it('legacy SUS (status set directly, request still waiting) exposes phase WAITING and matches SUS_WAITING',async()=>{
+ const f=await setup(1);try{
+ await f.create(0,'15','SENT');
+ await db.vmOperation.upsert({where:{vmId:f.rows[0].vm.id},update:{status:'SUSPENDED'},create:{vmId:f.rows[0].vm.id,projectId:f.scope.projectId,status:'SUSPENDED'} as never});
+ const row=(await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)!;
+ expect(row.status).toBe('SUSPENDED');expect(row.request?.phase).toBe('WAITING');
+ const facts=asFacts(row);
+ expect(matchVm(facts,{...DEFAULT_FILTERS,money:'SUS_WAITING'})).toBe(true);expect(matchVm(facts,{...DEFAULT_FILTERS,money:'LOST'})).toBe(false);
  }finally{await f.cleanup();}
 });
