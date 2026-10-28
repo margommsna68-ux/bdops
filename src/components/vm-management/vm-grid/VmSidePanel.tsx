@@ -20,6 +20,7 @@ import {links} from '@/lib/links';
 import {moduleOn} from '@/lib/features';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
 import {opsLabel,type VmOpsStatus} from '@/lib/vm-ops';
+import {FleetCommandPanel} from './FleetCommandPanel';
 const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Thay proxy'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 // Configuration history (19/10/2026: no install step; older install states stay readable as history).
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Gán',IN_PROGRESS:'Gán (dữ liệu cũ: đã bắt đầu cài)',FAILED:'Gán (dữ liệu cũ: cài chưa xong)',CONFIRMED:'Dữ liệu cũ: đã xác nhận cài',CANCELLED:'Đã thay / bỏ'};
@@ -46,6 +47,7 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
   const deleted=!!vm.archivedAt,cfg=(id?:string)=>detail.data?.configurations.find(c=>c.id===id),status=vmView(vm);
   const saveNotes=async(value:string)=>{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,notes:value||null,expectedRevision:vm.revision});if(r.saved){toast.success('Đã lưu');onSaved();}};
   return <div className="space-y-4 text-sm">
+    {!deleted&&<FleetCommandPanel projectId={projectId} serverId={vm.serverId} vmId={vm.id}/>}
     {status==='REVIEW'&&!deleted&&<p className="pm-review">{reviewReason(vm)}</p>}
     <section className="vm-panel-card"><h3>Proxy</h3>
       {(()=>{const info=proxyCellInfo(vm),c=info.current,config=c?[vm.desired,vm.installed].find(x=>x&&x.endpointId===c.endpointId):null,dc=config?cfg(config.id):undefined;

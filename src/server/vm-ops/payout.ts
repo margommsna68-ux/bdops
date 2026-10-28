@@ -15,6 +15,7 @@ import {activeVM,checkLink,writeLink} from '../account-store/links';
 import {moneyOfRequest,staleCycle} from './ops';
 import {balanceRights,currentBalances} from './balance';
 import {assertPayoutDailySlot,consumePayoutDailySlot,readPayoutDaily} from './payout-daily';
+import {assertMembersFree,attachMembers,linkMergedSdks,type MemberInput} from './payout-members';
 // EarnApp payout requests (owner decision 18/10/2026: one EarnApp account, one withdrawal).
 // - One request per EarnApp (unique earnAppId): a retry, a lost answer or a status correction stays on the same row; a new command
 //   key never creates a second one.
@@ -28,9 +29,9 @@ const currencyOf=(c:string)=>{const v=c.trim().toUpperCase();if(!LEDGER_CURRENCY
 const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
 // A history line keeps its kind next to the full text: the full text (amounts, corrections, shortfall, notes) is shown only with the
 // money rights; everyone else gets the operating milestone of the kind.
-export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED'|'PREPARED'|'SENT'|'UNKNOWN'|'RECEIPT';
+export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED'|'PREPARED'|'SENT'|'UNKNOWN'|'RECEIPT'|'MEMBERS';
 export const historyEntry=(by:string,kind:PayoutHistoryKind,what:string)=>({at:new Date().toISOString(),by,kind,what});
-const NEUTRAL:Record<PayoutHistoryKind,string>={REQUESTED:'Ghi yêu cầu rút',CORRECT:'Sửa yêu cầu rút',FAILED:'Đánh dấu thất bại',CANCELLED:'Đánh dấu huỷ',RETRY:'Gửi lại (cùng lượt rút)',SETTLE:'Chốt nhận thiếu',CONSUMED:'Dùng để ghi tạo lại VM',PREPARED:'Chuẩn bị rút (giữ email)',SENT:'Đã gửi trên EarnApp',UNKNOWN:'Chưa xác định kết quả gửi',RECEIPT:'Ghi tiền về PP'};
+const NEUTRAL:Record<PayoutHistoryKind,string>={REQUESTED:'Ghi yêu cầu rút',CORRECT:'Sửa yêu cầu rút',FAILED:'Đánh dấu thất bại',CANCELLED:'Đánh dấu huỷ',RETRY:'Gửi lại (cùng lượt rút)',SETTLE:'Chốt nhận thiếu',CONSUMED:'Dùng để ghi tạo lại VM',PREPARED:'Chuẩn bị rút (giữ email)',SENT:'Đã gửi trên EarnApp',UNKNOWN:'Chưa xác định kết quả gửi',RECEIPT:'Ghi tiền về PP',MEMBERS:'Cập nhật VM gộp'};
 // Lines written before 19/10/2026 carry no kind: it is read from the fixed start of the text (never from the amounts).
 const LEGACY:[string,PayoutHistoryKind][]=[['Ghi yêu cầu rút','REQUESTED'],['Sửa','CORRECT'],['Thất bại','FAILED'],['Huỷ','CANCELLED'],['Gửi lại','RETRY'],['Chốt nhận','SETTLE'],['Dùng để ghi tạo lại VM','CONSUMED']];
 export function neutralHistory(h:{kind?:string;what:string}){const kind=(h.kind&&h.kind in NEUTRAL?h.kind:LEGACY.find(([p])=>h.what.startsWith(p))?.[1]) as PayoutHistoryKind|undefined;return kind?NEUTRAL[kind]:'Cập nhật yêu cầu rút';}
@@ -174,7 +175,7 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
   },db);
 }
 // ─── Commands ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-export interface PayoutRequestInput {key:string;vmId:string;expectedCycle:number;/** VM revision seen (ops API); checked in the transaction. */expectedVmRevision?:number;/** The EarnApp seen when the form was opened (review fix 20/10/2026): another account on the VM meanwhile is refused. */earnAppId?:string;paypalEmailId:string;amount:string;currency?:string;reference?:string|null;date:string;/** PREPARING = hold the email, not sent on EarnApp yet (AI flow); default SENT = sent on EarnApp (as before 20/10/2026). */submission?:'PREPARING'|'SENT'}
+export interface PayoutRequestInput {key:string;vmId:string;expectedCycle:number;/** VM revision seen (ops API); checked in the transaction. */expectedVmRevision?:number;/** The EarnApp seen when the form was opened (review fix 20/10/2026): another account on the VM meanwhile is refused. */earnAppId?:string;paypalEmailId:string;amount:string;currency?:string;reference?:string|null;date:string;/** PREPARING = hold the email, not sent on EarnApp yet (AI flow); default SENT = sent on EarnApp (as before 20/10/2026). */submission?:'PREPARING'|'SENT';/** Merged payout (27/10/2026): other VMs whose SDKs were merged into this EarnApp account. */members?:MemberInput[]}
 export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestInput,db:PrismaClient=prisma){
   // A member with only EARN_PAYOUT may prepare (PREPARING); recording a request as already sent stays with the managers.
   const authorize=async(tx:Tx)=>{const r=await payoutRights(scope,tx);if(!(r.writeMoney||r.payout&&input.submission==='PREPARING'))throw new ProxyDomainError('FORBIDDEN',NO_PAYOUT);return r.current;};
@@ -187,6 +188,10 @@ export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestIn
     if(!earnApp||earnApp.closedAt)throw new ProxyDomainError('INVALID_INPUT','VM chưa có tài khoản EarnApp; gán tài khoản trước',input.earnAppId!==undefined?'ACCOUNT_CHANGED':'VALIDATION');
     if(input.earnAppId!==undefined&&earnApp.id!==input.earnAppId)throw new ProxyDomainError('STALE_PREVIEW','VM đã đổi tài khoản EarnApp từ khi mở form; nháp giữ cho tài khoản cũ, kiểm tra lại rồi ghi lần mới','ACCOUNT_CHANGED',{earnAppAccountId:earnApp.id});
     if(earnApp.payoutRequest){const r=earnApp.payoutRequest;throw new ProxyDomainError('INVALID_INPUT','EarnApp '+earnApp.login.email+' đã có yêu cầu rút ngày '+dayText(r.requestedAt)+' (PP '+r.paypal.code+'); mỗi EarnApp chỉ một lượt rút. Sửa trạng thái trên yêu cầu đó','DUPLICATE',{withdrawalId:r.id});}
+    // A VM merged into another open request this round cannot open its own (it would be in two requests at once).
+    const merged=await tx.earnPayoutMember.findFirst({where:{projectId:scope.projectId,vmId:vm.id,cycle,removedAt:null,request:{state:'REQUESTED'}},select:{request:{select:{id:true,vmId:true}}}});
+    if(merged){const p=await tx.virtualMachine.findUnique({where:{id:merged.request.vmId},select:{code:true,server:{select:{code:true}}}});throw new ProxyDomainError('INVALID_INPUT','VM '+vm.server.code+' / '+vm.code+' đã gộp vào lệnh rút của '+(p?p.server.code+' / '+p.code:'VM khác')+'; không ghi lệnh riêng','DUPLICATE',{withdrawalId:merged.request.id});}
+    if(input.members?.length&&input.members.length>100)throw new ProxyDomainError('INVALID_INPUT','Gộp tối đa 100 VM','VALIDATION');
     const amount=ledgerAmount(input.amount,'Số tiền yêu cầu'),currency=currencyOf(input.currency||'USD'),date=dayDate(input.date);
     let emailId=earnApp.paypalEmailId;const submission=input.submission||'SENT';
     if(submission==='PREPARING'&&input.paypalEmailId!==earnApp.paypalEmailId){
@@ -216,8 +221,9 @@ export async function createPayoutRequest(scope:ActorScope,input:PayoutRequestIn
     catch(e){if((e as {code?:string}).code==='P2002')throw new ProxyDomainError('STALE_PREVIEW','EarnApp này vừa được ghi yêu cầu rút; tải lại','DUPLICATE');throw e;}
     if(submission==='SENT')await consumePayoutDailySlot(tx,row);
     await images.remember('PAYOUT_REQUEST',row.id,true);
+    const members=await attachMembers(tx,images,{projectId:scope.projectId,actorId:current.userId,scope:current},row,input.members??[]);
     // What was recorded (kept with the command key): a retry acknowledges this request as it was created.
-    return {id:row.id,where:vm.server.code+' / '+vm.code,cycle,vmId:vm.id,earnAppId:earnApp.id,paypalEmailId:email.id,amount:amount.toFixed(2),currency,submission,requestedOn:dayText(date)};
+    return {members:members.map(m=>({vmId:m.vmId,where:m.where})),id:row.id,where:vm.server.code+' / '+vm.code,cycle,vmId:vm.id,earnAppId:earnApp.id,paypalEmailId:email.id,amount:amount.toFixed(2),currency,submission,requestedOn:dayText(date)};
   },db);
 }
 export type PayoutAction='FAILED'|'CANCELLED'|'RETRY'|'CORRECT'|'SETTLE'|'SENT'|'UNKNOWN';
@@ -286,6 +292,7 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
       Object.assign(data,{state:input.action,stateNote:note});what=(input.action==='FAILED'?'Thất bại':'Huỷ')+': '+note;
     }else if(input.action==='RETRY'){
       if(r.state==='REQUESTED')return {id:r.id,changed:false};
+      await assertMembersFree(tx,scope.projectId,r.id);
       await assertPayoutDailySlot(tx,scope.projectId,r.paypalId,r.paypalEmailId);
       if(r.submission==='SENT'||r.submission==='UNKNOWN')await consumePayoutDailySlot(tx,r);
       // A preparation sent again holds its email again (conditional: it may have been taken meanwhile).
@@ -304,23 +311,35 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
     }
     await images.remember('PAYOUT_REQUEST',r.id);
     const after=await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,revision:{increment:1},history:[...(r.history as Prisma.JsonArray),{...historyEntry(current.userId,kind,what),...(observedAt?{observedAt:observedAt.toISOString()}:{})}]}});
+    if(input.action==='SENT')await linkMergedSdks(tx,images,{projectId:scope.projectId,actorId:current.userId},r.id);
     return {id:r.id,changed:true,action:input.action,vmId:r.vmId,cycle:r.cycle,earnAppId:r.earnAppId,revision:after.revision,submission:after.submission,state:after.state,observedAt:observedAt?.toISOString()??null};
   },db);
 }
 // ─── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Operating state of every VM for the Server / VM grid: recorded status and round, the money milestone of the current round, and
 // (only with the money rights) the amounts.
+export type MergeView=null|{role:'PRIMARY';members:{vmId:string;where:string;share:string|null;consumed:boolean}[]}|{role:'MEMBER';primaryVmId:string;primaryWhere:string;consumed:boolean};
 export async function readVmOps(scope:ActorScope,db:PrismaClient=prisma){
   const current=await authorizeVM(scope,'READ',db);const {money:book,writeMoney,assign,payout,receipt,requestMoney:money}=await payoutRights(scope,db),bal=await balanceRights(scope,db);
   const [vms,users]=await Promise.all([db.virtualMachine.findMany({where:{managed:true,server:{projectId:scope.projectId,managed:true},...vmWhere(current)},select:{id:true,operation:true,earnApp:{select:{id:true,closedAt:true,payoutRequest:{include:requestInclude}}}}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
   const who=(id:string|null|undefined)=>{const u=id?users.find(x=>x.id===id):null;return u?u.name||u.username||'Tài khoản cũ':null;};
   const balances=await currentBalances(db,scope.projectId,vms.map(v=>({id:v.id,cycle:v.operation?.cycle??1,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null})),bal.read);
+  // Merged payout (27/10/2026): a member VM shows the request it was merged into (this round); a primary lists its members.
+  const cycleOf=new Map(vms.map(v=>[v.id,v.operation?.cycle??1]));
+  const asMember=(await db.earnPayoutMember.findMany({where:{projectId:scope.projectId,removedAt:null,vmId:{in:vms.map(v=>v.id)},request:{state:'REQUESTED'}},include:{request:{include:requestInclude}}})).filter(m=>cycleOf.get(m.vmId)===m.cycle);
+  const primaryIds=vms.map(v=>v.earnApp?.payoutRequest?.id).filter((x):x is string=>!!x);
+  const ofPrimary=await db.earnPayoutMember.findMany({where:{projectId:scope.projectId,removedAt:null,requestId:{in:primaryIds}},orderBy:{createdAt:'asc'}});
+  const names=new Map((await db.virtualMachine.findMany({where:{id:{in:[...new Set([...asMember.map(m=>m.request.vmId),...ofPrimary.map(m=>m.vmId)])]}},select:{id:true,code:true,server:{select:{code:true}}}})).map(v=>[v.id,v.server.code+' / '+v.code]));
+  const requestView=(r:NonNullable<NonNullable<typeof vms[number]['earnApp']>['payoutRequest']>,m:ReturnType<typeof moneyOfRequest>)=>({id:r.id,revision:r.revision,cycle:r.cycle,earnAppId:r.earnAppId,state:r.state,submission:r.submission,submittedAt:r.submittedAt?.toISOString()??null,stateNote:money?r.stateNote:null,phase:m.phase,paypalId:r.paypal.id,paypal:r.paypal.code,email:r.paypalEmail.email,emailId:r.paypalEmail.id,requestedAt:dayText(r.requestedAt),reference:money?r.reference:null,settled:!!r.settledAt,
+    money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,pendingLinked:m.pendingLinked,remaining:m.remaining,shortfall:r.shortfall?.toFixed(2)??null,settleNote:r.settleNote}:null});
   // money = amounts of payout requests (PayPal money readers, or EARN_PAYOUT / PAYPAL_RECEIPT_RECORD); book = the PayPal book itself.
   return {rights:{money,book,writeMoney,assign,payout,receipt,balanceRead:bal.read,balanceWrite:bal.write},vms:vms.map(v=>{
-    const cycle=v.operation?.cycle??1,r=v.earnApp?.payoutRequest&&v.earnApp.payoutRequest.cycle===cycle&&v.earnApp.payoutRequest.vmId===v.id?v.earnApp.payoutRequest:null,m=r?moneyOfRequest(r):null;
-    return {vmId:v.id,cycle,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null,balance:balances.get(v.id)??{latest:null,lastOk:null},status:v.operation?.status??null,statusAt:v.operation?.statusAt?.toISOString()??null,statusBy:who(v.operation?.statusById),milestone:milestoneOf(m&&{phase:m.phase,consumed:!!r!.consumedAt,submission:r!.submission}),
-      request:r?{id:r.id,revision:r.revision,cycle:r.cycle,earnAppId:r.earnAppId,state:r.state,submission:r.submission,submittedAt:r.submittedAt?.toISOString()??null,stateNote:money?r.stateNote:null,phase:m!.phase,paypalId:r.paypal.id,paypal:r.paypal.code,email:r.paypalEmail.email,emailId:r.paypalEmail.id,requestedAt:dayText(r.requestedAt),reference:money?r.reference:null,settled:!!r.settledAt,
-        money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m!.received,pendingLinked:m!.pendingLinked,remaining:m!.remaining,shortfall:r.shortfall?.toFixed(2)??null,settleNote:r.settleNote}:null}:null};
+    const cycle=v.operation?.cycle??1,own=v.earnApp?.payoutRequest&&v.earnApp.payoutRequest.cycle===cycle&&v.earnApp.payoutRequest.vmId===v.id?v.earnApp.payoutRequest:null;
+    const mem=own?null:asMember.find(x=>x.vmId===v.id)??null,r=own??mem?.request??null,m=r?moneyOfRequest(r):null;
+    const members=own?ofPrimary.filter(x=>x.requestId===own.id):[];
+    const merge:MergeView=mem?{role:'MEMBER',primaryVmId:mem.request.vmId,primaryWhere:names.get(mem.request.vmId)??'',consumed:!!mem.consumedAt}:members.length?{role:'PRIMARY',members:members.map(x=>({vmId:x.vmId,where:names.get(x.vmId)??'',share:money?x.shareAmount?.toFixed(2)??null:null,consumed:!!x.consumedAt}))}:null;
+    return {vmId:v.id,cycle,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null,balance:balances.get(v.id)??{latest:null,lastOk:null},status:v.operation?.status??null,statusAt:v.operation?.statusAt?.toISOString()??null,statusBy:who(v.operation?.statusById),milestone:milestoneOf(m&&{phase:m.phase,consumed:mem?!!mem.consumedAt:!!r!.consumedAt,submission:r!.submission}),
+      merge,request:r?requestView(r,m!):null};
   })};
 }
 // History of one VM position: recorded statuses, closed rounds and the payout requests of every round.
@@ -329,15 +348,17 @@ export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:P
   const current=await authorizeVM(scope,'READ',db);const {money,writeMoney}=await payoutRights(scope,db);
   const vm=await db.virtualMachine.findFirst({where:{id:input.vmId,managed:true,server:{projectId:scope.projectId,managed:true}},select:{id:true,operation:{select:{cycle:true}}}});if(!vm)throw new ProxyDomainError('NOT_FOUND');
   const [events,cycles,requests,users]=await Promise.all([db.vmOpsEvent.findMany({where:{vmId:vm.id,projectId:scope.projectId},orderBy:{createdAt:'desc'},take:200}),db.vmCycle.findMany({where:{vmId:vm.id,projectId:scope.projectId},orderBy:{number:'desc'}}),
-    db.earnPayoutRequest.findMany({where:{vmId:vm.id,projectId:scope.projectId},include:{...requestInclude,earnApp:{select:{login:{select:{email:true}},closedAt:true,vmId:true}}},orderBy:{createdAt:'desc'}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
+    db.earnPayoutRequest.findMany({where:{projectId:scope.projectId,OR:[{vmId:vm.id},{members:{some:{vmId:vm.id,removedAt:null}}}]},include:{...requestInclude,earnApp:{select:{login:{select:{email:true}},closedAt:true,vmId:true}}},orderBy:{createdAt:'desc'}}),db.user.findMany({where:{memberships:{some:{projectId:scope.projectId}}},select:{id:true,name:true,username:true}})]);
   const who=(id:string|null|undefined)=>{const u=id?users.find(x=>x.id===id):null;return u?u.name||u.username||'Tài khoản cũ':'—';};
   const logins=await db.gmailAccount.findMany({where:{id:{in:cycles.map(c=>c.loginId).filter((x):x is string=>!!x)}},select:{id:true,email:true}});
+  // Merged payout (27/10/2026): a request this VM was merged into is listed with its primary VM; it is acted on from the primary only.
+  const primaries=new Map((await db.virtualMachine.findMany({where:{id:{in:requests.filter(r=>r.vmId!==vm.id).map(r=>r.vmId)}},select:{id:true,code:true,server:{select:{code:true}}}})).map(v=>[v.id,v.server.code+' / '+v.code]));
   return {
     events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:hasServerScope(current)?null:e.note,detail:hasServerScope(current)?null:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
     cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:hasServerScope(current)?null:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
     // old = the request's account has left this VM or round: only reconciling it is offered (never on the account now on the VM).
     rights:{writeMoney},
-    requests:requests.map(r=>{const m=moneyOfRequest(r),old=!(r.earnApp.vmId===vm.id&&!r.earnApp.closedAt&&(vm.operation?.cycle??1)===r.cycle);return {id:r.id,revision:r.revision,vmId:r.vmId,earnAppId:r.earnAppId,submission:r.submission,old,cycle:r.cycle,login:r.earnApp.login.email,paypal:r.paypal.code,email:r.paypalEmail.email,requestedAt:dayText(r.requestedAt),state:r.state,phase:m.phase,consumed:!!r.consumedAt,reviewAfterRecreate:m.reviewAfterRecreate,
+    requests:requests.map(r=>{const m=moneyOfRequest(r),old=r.vmId!==vm.id||!(r.earnApp.vmId===vm.id&&!r.earnApp.closedAt&&(vm.operation?.cycle??1)===r.cycle);return {memberOf:r.vmId!==vm.id?primaries.get(r.vmId)??r.vmId:null,id:r.id,revision:r.revision,vmId:r.vmId,earnAppId:r.earnAppId,submission:r.submission,old,cycle:r.cycle,login:r.earnApp.login.email,paypal:r.paypal.code,email:r.paypalEmail.email,requestedAt:dayText(r.requestedAt),state:r.state,phase:m.phase,consumed:!!r.consumedAt,reviewAfterRecreate:m.reviewAfterRecreate,
       history:(r.history as {at:string;by:string;kind?:string;what:string}[]).map(h=>({at:h.at,by:who(h.by),what:money?h.what:neutralHistory(h)})),money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,remaining:m.remaining,receipts:r.receipts.map(x=>({date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,status:x.voidedAt?'Đã thu hồi':x.failed?'Không về':x.confirmed?'Đã nhận':'Chờ nhận'}))}:null};}),
   };
 }

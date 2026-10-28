@@ -37,32 +37,40 @@ export async function readSecret(file) {
  try{const v=JSON.parse((await fs.readFile(file,'utf8')).replace(/^\uFEFF/,''));if(typeof v.token!=='string'||!v.token||/[\r\n]/.test(v.token))throw new Error();return v.token;}
  catch{throw new Error('SECRET_UNAVAILABLE');}
 }
-/** @param {{token?:string,fetchImpl?:typeof fetch,now?:()=>number,sleep?:(ms:number)=>Promise<unknown>}} [options] */
-export function createApi({token,fetchImpl=fetch,now=Date.now,sleep=nap}={}) {
+/** @param {{token?:string,fetchImpl?:typeof fetch,now?:()=>number,sleep?:(ms:number)=>Promise<unknown>,onRequest?:(metric:object)=>unknown}} [options] */
+export function createApi({token,fetchImpl=fetch,now=Date.now,sleep=nap,onRequest=()=>{}}={}) {
  let lastGet=-Infinity,lastPost=-Infinity,lastWasBatch=false,inFlight=false;
- async function request(method,route,body,key) {
+  async function request(method,route,body,key,options={}) {
   if(inFlight)throw new Error('HTTP_ALREADY_RUNNING');
   const batch=method==='POST'&&route==='/batch',heartbeat=method==='POST'&&/^\/servers\/[A-Za-z0-9_-]{1,64}\/monitor-heartbeat$/.test(route);
   const payload=body===undefined?undefined:JSON.stringify(body);
   if(method==='GET'?!/^\/(?:gen2-(?:targets|reminders)|monitor-policy)\?projectId=[A-Za-z0-9_%.-]+$/.test(route):batch?!payload||Buffer.byteLength(payload,'utf8')>QUEUE_LIMITS.bytes||!validBatch(JSON.parse(payload)):heartbeat?!payload||!validHeartbeat(JSON.parse(payload)):!/^\/vms\/[A-Za-z0-9_-]+\/scan-observations$/.test(route))throw new Error('ENDPOINT_REFUSED');
   const url=new URL('/api/ops/v1'+route,ORIGIN);if(url.origin!==ORIGIN||url.protocol!=='https:')throw new Error('ORIGIN_REFUSED');
+   const timeoutMs=options.timeoutMs??30000;
+   if(Object.keys(options).some(k=>k!=='timeoutMs')||!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>30000)throw Error('HTTP_TIMEOUT_INVALID');
   inFlight=true;
+   const started=now(),kind=batch?'batch':heartbeat?'heartbeat':method==='POST'?'scan':route.startsWith('/gen2-targets?')?'targets':route.startsWith('/gen2-reminders?')?'reminders':'policy';
+   let waitMs=0,httpStarted=null,status=null,outcome='UNKNOWN',itemStatuses=null;
   try {
    const min=method==='POST'?(batch||lastWasBatch?6500:2300):550,last=method==='POST'?lastPost:lastGet;
-   const delay=Math.max(0,min-(now()-last));if(delay)await sleep(delay);
+    const delay=Math.max(0,min-(now()-last));if(delay){const waiting=now();await sleep(delay);waitMs=Math.max(0,now()-waiting);}
    if(method==='POST'){lastPost=now();lastWasBatch=batch;}else lastGet=now();
-   let response;try{response=await fetchImpl(url.href,{method,redirect:'error',signal:AbortSignal.timeout(30000),headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(payload?{body:payload}:{})});}catch{throw new Error('HTTP_UNKNOWN');}
+    httpStarted=now();let response;try{response=await fetchImpl(url.href,{method,redirect:'error',signal:AbortSignal.timeout(timeoutMs),headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(payload?{body:payload}:{})});}catch{throw new Error('HTTP_UNKNOWN');}
+    status=response.status;
    if(response.status===401||response.status===403) {
+     outcome='AUTH_REQUIRED';
     if(method==='GET')throw new Error('AUTH_REQUIRED');
     return {status:response.status,data:null,errorCode:null};
    }
    let envelope;try{envelope=await response.json();}catch{throw new Error('HTTP_UNKNOWN');}
+    if(batch&&Array.isArray(envelope?.data?.items)&&envelope.data.items.length<=QUEUE_LIMITS.batch){itemStatuses={};for(const row of envelope.data.items){const code=Number.isInteger(row?.status)&&row.status>=100&&row.status<=599?String(row.status):'INVALID';itemStatuses[code]=(itemStatuses[code]??0)+1;}}
+    outcome='RESPONSE';
    if(method==='GET'){if(!response.ok||envelope?.ok!==true)throw new Error('TARGET_READ_REFUSED');return envelope.data;}
    return {status:response.status,data:envelope?.ok===true?envelope.data:null,
     errorCode:envelope?.ok===false&&envelope.data===null&&typeof envelope?.error?.code==='string'&&typeof envelope.error.message==='string'?envelope.error.code:null};
-  }finally{inFlight=false;}
+   }finally{inFlight=false;try{onRequest({method,kind,durationMs:Math.max(0,now()-started),waitMs,httpMs:httpStarted===null?0:Math.max(0,now()-httpStarted),status,outcome,...(itemStatuses?{itemStatuses}:{})});}catch{/* Diagnostics must never alter delivery/retry semantics. */}}
  }
- return {get:route=>request('GET',route),post:(route,body,key)=>request('POST',route,body,key)};
+  return {get:route=>request('GET',route),post:(route,body,key,options)=>request('POST',route,body,key,options)};
 }
 function validateState(state) {
  if(state?.version!==1||typeof state.projectId!=='string'||!state.entries||typeof state.entries!=='object'||Array.isArray(state.entries))throw new Error('STATE_INVALID');

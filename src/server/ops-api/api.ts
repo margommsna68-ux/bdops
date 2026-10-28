@@ -8,7 +8,10 @@ import {assertScopedTargets,assertScopedSdkCodes,hasServerScope,serverWhere,vmWh
 import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
+import {addPayoutMembers} from '../vm-ops/payout-members';
 import {hashToken,memberOps,userActive,OPS_SCOPES,type OpsScope} from './tokens';
+import {recordRecreated} from '../vm-ops/ops';
+import {updateManagedVM} from '../vm-management/metadata';
 import {activeJobs,addVmOpsNote,claimVmJob,finishPrepareJob,finishProxyJob,jobView,proxyForJob,recordJobSdk,releaseVmJob,stepVmJob,APPLY_RESULTS,JOB_KINDS,type OpsCaller} from '../vm-ops/jobs';
 import {setVmStatus} from '../vm-ops/ops';
 import {runWithOpsAuth,assertOpsToken} from './context';
@@ -23,9 +26,12 @@ import {vmMoneyState} from '@/lib/vm-money';
 import {maskSdk} from '@/lib/sdk-mask';
 import {ScanBody,recordGen2Scan,machineUuid} from '../dashboard/scan';
 import {MONITOR_POLICY} from '@/lib/monitor-policy';
+import {createFleetCommand,claimFleetCommand,renewFleetCommand,stepFleetCommand,completeFleetCommand,cancelFleetCommand,readFleetCommand,listFleetCommands,authorizeNativeFleetCommand} from '../fleet-commands/service';
+import {telegramFleetTransport} from '../fleet-commands/telegram-transport';
 import {HeartbeatBody,recordMonitorHeartbeat,proxyAddressFingerprint} from '../dashboard/monitor';
 import {packageReminders} from '../proxy-management/reminders';
 import {assertBusinessArea} from '../business-management/scope';
+import {readMoneyReport} from '../dashboard/money-report';
 import {ApprovalHold,approvalSummary,consumeApproval,gateApproval,payloadHashOf,confirmApprovalByToken,readApprovalForToken} from './approvals';
 import {listAiAccounts,holdAiAccount,aiAccountCredentials,markAiAccountUsed,releaseAiAccount,reportAiLoginIssue} from './ai-accounts';
 import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory';
@@ -52,6 +58,16 @@ type Handler=(c:Ctx,params:string[])=>Promise<unknown>;
 interface Route {method:'GET'|'POST';path:RegExp;scope:OpsScope|null;action:string;run:Handler;approval?:boolean}
 const ID='([A-Za-z0-9_-]{1,64})';
 const routes:Route[]=[
+  {method:'POST',path:/^fleet-telegram$/,scope:'VM_OPS',action:'FLEET_TELEGRAM',run:async c=>{const result=await telegramFleetTransport(c.body,c.db);if('operationId' in result&&typeof result.operationId==='string')c.audit.objectId=result.operationId;return result;}},
+  {method:'POST',path:/^fleet-commands$/,scope:'VM_OPS',action:'FLEET_CREATE',run:fleetCreate},
+  {method:'GET',path:/^fleet-commands$/,scope:'VM_OPS',action:'FLEET_LIST',run:fleetList},
+  {method:'POST',path:/^fleet-commands\/claim$/,scope:'VM_OPS',action:'FLEET_CLAIM',run:(c)=>fleetWrite(c,[],claimFleetCommand)},
+  {method:'GET',path:new RegExp('^fleet-commands/'+ID+'$'),scope:'VM_OPS',action:'FLEET_DETAIL',run:fleetDetail},
+  {method:'POST',path:new RegExp('^fleet-commands/'+ID+'/renew$'),scope:'VM_OPS',action:'FLEET_RENEW',run:(c,p)=>fleetWrite(c,p,renewFleetCommand)},
+  {method:'POST',path:new RegExp('^fleet-commands/'+ID+'/step$'),scope:'VM_OPS',action:'FLEET_STEP',run:(c,p)=>fleetWrite(c,p,stepFleetCommand)},
+  {method:'POST',path:new RegExp('^fleet-commands/'+ID+'/authorize-native$'),scope:'VM_OPS',action:'FLEET_NATIVE_AUTH',run:(c,p)=>fleetWrite(c,p,authorizeNativeFleetCommand)},
+  {method:'POST',path:new RegExp('^fleet-commands/'+ID+'/complete$'),scope:'VM_OPS',action:'FLEET_COMPLETE',run:(c,p)=>fleetWrite(c,p,completeFleetCommand)},
+  {method:'POST',path:new RegExp('^fleet-commands/'+ID+'/cancel$'),scope:'VM_OPS',action:'FLEET_CANCEL',run:(c,p)=>fleetWrite(c,p,cancelFleetCommand)},
   {method:'GET',path:/^me$/,scope:null,action:'ME',run:me},
   // 23/10/2026 evening: the AI's own approvals — read, and confirm with the ADMIN's TOTP typed at the CLI; a batch of commands.
   {method:'GET',path:new RegExp('^approvals/'+ID+'$'),scope:'READ',action:'APPROVAL',run:approvalDetail},
@@ -63,6 +79,7 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^servers/'+ID+'/monitor-heartbeat$'),scope:'VM_OPS',action:'MONITOR_HEARTBEAT',run:monitorHeartbeat},
   {method:'GET',path:/^gen2-targets$/,scope:'READ',action:'GEN2_TARGETS',run:gen2Targets},
   {method:'GET',path:/^gen2-reminders$/,scope:'READ',action:'GEN2_REMINDERS',run:gen2Reminders},
+  {method:'GET',path:/^money-report$/,scope:'READ',action:'MONEY_REPORT',run:moneyReport},
   {method:'POST',path:new RegExp('^vms/'+ID+'/scan-observations$'),scope:'VM_OPS',action:'GEN2_SCAN',run:gen2Scan},
   {method:'GET',path:/^vms$/,scope:'READ',action:'VMS',run:vms},
   {method:'GET',path:/^vms\/resolve$/,scope:'READ',action:'VM_RESOLVE',run:resolveVm},
@@ -86,6 +103,8 @@ const routes:Route[]=[
   {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare,approval:true},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status,approval:true},
   {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt,approval:true},
+  // Merged payout (27/10/2026): add VMs whose SDKs were merged into this request's EarnApp account; held for an ADMIN like prepare.
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/members$'),scope:'PAYOUT',action:'WITHDRAWAL_MEMBERS',run:members,approval:true},
   // Owner decision 24/10/2026: inventory secrets are direct with current rights; list reads remain masked and reveals audited.
   {method:'POST',path:new RegExp('^sdks/'+ID+'/reveal$'),scope:'VM_OPS',action:'SDK_REVEAL',run:sdkReveal},
   // Real machines (21/10/2026): take a VM in hand, steps, the full proxy of that VM, the SDK of this install, status, Blocked, notes.
@@ -101,6 +120,7 @@ const routes:Route[]=[
   {method:'POST',path:new RegExp('^vms/'+ID+'/status$'),scope:'VM_OPS',action:'VM_STATUS',run:vmStatus},
   {method:'POST',path:new RegExp('^vms/'+ID+'/proxy-blocked$'),scope:'VM_OPS',action:'VM_PROXY_BLOCKED',run:vmBlocked},
   {method:'POST',path:new RegExp('^vms/'+ID+'/notes$'),scope:'VM_OPS',action:'VM_NOTE',run:vmNote},
+  {method:'POST',path:new RegExp('^vms/'+ID+'/recreated$'),scope:'VM_OPS',action:'VM_RECREATED',run:vmRecreated},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/finish-prepare$'),scope:'VM_OPS',action:'JOB_FINISH_PREPARE',run:finishPrepare},
   {method:'POST',path:new RegExp('^jobs/'+ID+'/finish-proxy$'),scope:'VM_OPS',action:'JOB_FINISH_PROXY',run:finishProxy},
 ];
@@ -181,7 +201,7 @@ interface RouteOutcome {status:number;result:string;body:unknown;headers:Record<
 // Only these critical routes persist a business result before replying. A prior result may be replayed after an approval expires;
 // non-journaled secret reads must never use another command's journal entry to bypass approval.
 async function committedCritical(c:Ctx,route:Route){
- if(!['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT'].includes(route.action))return false;
+ if(!['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT','WITHDRAWAL_MEMBERS'].includes(route.action))return false;
  const projectId=(c.body as {projectId?:string})?.projectId;if(!projectId||!c.token.projectIds.includes(projectId))return false;
  return !!await c.db.operationJournal.findFirst({where:{projectId,commandKey:serviceKey(c,projectId),actorId:c.token.userId,resultCipher:{not:null}},select:{id:true}});
 }
@@ -258,6 +278,7 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
 }
 // Only bound operational data is available to selected-server members. New routes fail closed.
 const SCOPED_ACTIONS=new Set(['MONITOR_POLICY','MONITOR_HEARTBEAT','GEN2_TARGETS','GEN2_SCAN','GEN2_REMINDERS','ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
+for(const action of ['FLEET_TELEGRAM','FLEET_CREATE','FLEET_LIST','FLEET_CLAIM','FLEET_DETAIL','FLEET_RENEW','FLEET_STEP','FLEET_NATIVE_AUTH','FLEET_COMPLETE','FLEET_CANCEL'])SCOPED_ACTIONS.add(action);
 function routeTargets(c:Ctx,path:string,params:string[]){
  const root=path.split('/')[0],id=params[0];
  const identity=id?(root==='servers'?{serverId:id}:root==='vms'?{vmId:id}:root==='jobs'?{jobId:id}:root==='sdks'?{sdkId:id}:root==='earnapp-accounts'?{earnAppId:id}:root==='withdrawals'?{requestId:id}:{}):{};
@@ -367,6 +388,8 @@ async function vmDetail(c:Ctx,[id]:string[]){
       note:'Tiền SDK là tiền tích luỹ đọc trên máy cho từng mã: không cộng thành số dư VM, không phải số dư EarnApp hay tiền về PayPal'},
     balance:earnAppId?await balanceView(c.db,projectId,{id:vm.id,cycle,earnAppId},rights.balanceRead):null,
     withdrawal:request&&request.vmId===vm.id&&request.cycle===cycle?withdrawalView(request,rights,{currentCycle:cycle}):null,
+    // Merged payout (27/10/2026): this VM's SDK was merged into another VM's request for this round (act on that withdrawal).
+    mergedInto:await (async()=>{const m=await c.db.earnPayoutMember.findFirst({where:{projectId,vmId:vm.id,cycle,removedAt:null,request:{state:'REQUESTED'}},select:{requestId:true,consumedAt:true,request:{select:{vmId:true}}}});return m?{withdrawalId:m.requestId,primaryVmId:m.request.vmId,consumed:!!m.consumedAt}:null;})(),
     pastCycles:{items:pc.items.map(x=>({number:x.number,reason:x.reason,earnAppAccountId:x.earnAppId,login:maskEmail(logins.find(l=>l.id===x.loginId)?.email),withdrawalId:x.payoutRequestId,closedAt:x.closedAt.toISOString()})),nextCursor:pc.nextCursor}};
 }
 async function earnAppDetail(c:Ctx,[id]:string[]){
@@ -447,13 +470,14 @@ async function withCurrentRequest(c:Ctx,projectId:string,requestId:string,e:unkn
   }
   return err;
 }
-const PrepareBody=z.object({projectId:id64,vmId:id64,expectedVmRevision:z.number().int().min(0),expectedCycle:z.number().int().min(1),earnAppAccountId:id64,paypalEmailId:id64,amount:money,currency:cur,requestedAt:iso}).strict();
+const MemberBody=z.object({vmId:id64,expectedCycle:z.number().int().min(1),expectedVmRevision:z.number().int().min(0)}).strict();
+const PrepareBody=z.object({projectId:id64,vmId:id64,expectedVmRevision:z.number().int().min(0),expectedCycle:z.number().int().min(1),earnAppAccountId:id64,paypalEmailId:id64,amount:money,currency:cur,requestedAt:iso,members:z.array(MemberBody).max(100).optional()}).strict();
 async function prepare(c:Ctx){
   const b=PrepareBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=b.vmId;
   const at=new Date(b.requestedAt);if(at.getTime()>Date.now()+5*60e3)throw fail('VALIDATION','requestedAt ở tương lai');
-  let rec:{id:string;vmId:string;cycle:number;earnAppId:string;paypalEmailId:string;amount:string;currency:string;submission:string;requestedOn:string};
+  let rec:{id:string;vmId:string;cycle:number;earnAppId:string;paypalEmailId:string;amount:string;currency:string;submission:string;requestedOn:string;members?:{vmId:string}[]};
   try{
-    const r=await createPayoutRequest(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId:b.vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,earnAppId:b.earnAppAccountId,paypalEmailId:b.paypalEmailId,amount:b.amount,currency:b.currency.toUpperCase(),date:dayText(at),submission:'PREPARING',reference:null},c.db);
+    const r=await createPayoutRequest(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId:b.vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,earnAppId:b.earnAppAccountId,paypalEmailId:b.paypalEmailId,amount:b.amount,currency:b.currency.toUpperCase(),date:dayText(at),submission:'PREPARING',reference:null,members:b.members},c.db);
     rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;
   }catch(e){
     const err=await withCurrentVm(c,projectId,b.vmId,e);
@@ -462,7 +486,7 @@ async function prepare(c:Ctx){
   }
   c.audit.objectId=rec.id;const {r,cycle}=await loadRequest(c,projectId,rec.id),rights=await rightsOf(c,projectId);
   return {replay:!!c.audit.replay,
-    recorded:{withdrawalId:rec.id,vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,submission:'PREPARING',requestedOn:rec.requestedOn},
+    recorded:{withdrawalId:rec.id,vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,submission:'PREPARING',requestedOn:rec.requestedOn,members:(rec.members??[]).map(m=>m.vmId)},
     current:{withdrawal:withdrawalView(r,rights,{currentCycle:cycle})}};
 }
 const StatusBody=z.object({projectId:id64,vmId:id64,expectedVmRevision:z.number().int().min(0),expectedCycle:z.number().int().min(1),earnAppAccountId:id64,expectedRequestRevision:z.number().int().min(0),status:z.enum(['SUBMITTED_ON_EARNAPP','UNKNOWN_RESULT']),evidenceNote:note,observedAt:iso}).strict();
@@ -479,6 +503,15 @@ async function status(c:Ctx,[id]:string[]){
   return {replay:!!c.audit.replay,changed,
     recorded:changed?{withdrawalId:id,status:rec.action==='SENT'?'SUBMITTED_ON_EARNAPP':'UNKNOWN_RESULT',vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId,revisionAfter:rec.revision,observedAt:rec.observedAt??null}:{withdrawalId:id,status:null,note:'Không thay đổi (đã ở trạng thái này)'},
     current:{withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})}};
+}
+const MembersBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),members:z.array(MemberBody).min(1).max(100)}).strict();
+async function members(c:Ctx,[id]:string[]){
+  const b=MembersBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
+  let rec:{added:{vmId:string}[];revision:number};
+  try{const r=await addPayoutMembers(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRevision:b.expectedRequestRevision,members:b.members},c.db);rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;}
+  catch(e){throw await withCurrentRequest(c,projectId,id,e);}
+  const {r,cycle}=await loadRequest(c,projectId,id);
+  return {replay:!!c.audit.replay,recorded:{withdrawalId:id,added:rec.added.map(a=>a.vmId),revisionAfter:rec.revision},current:{withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})}};
 }
 const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note}).strict();
 async function receipt(c:Ctx,[id]:string[]){
@@ -625,6 +658,25 @@ async function vmBlocked(c:Ctx,[vmId]:string[]){
   return statusRow(c,projectId,vmId,r);
 }
 const NoteBody=z.object({projectId:id64,expectedCycle:cycleN,note:z.string().min(1).max(500),jobId:id64.nullish()}).strict();
+// 28/10/2026 fleet RECREATE_VM: the machine was really recreated by AE (worker evidence). Same rule as the web button
+// (recordRecreated: payout received or SUS), then the new machine UUID replaces the old "UUID máy" line so GEN2 / fleet
+// commands bind to the new machine. The recreate itself is idempotent by key; the UUID line is written only when it differs.
+const RecreatedBody=z.object({projectId:id64,expectedCycle:cycleN,machineUuid:z.string().uuid(),note:z.string().max(300).nullish()}).strict();
+export function withMachineUuid(notes:string|null,uuid:string){
+  const kept=(notes??'').split(/\r?\n/).filter(l=>!/^\s*UUID m[áa]y\s*:/i.test(l)&&l.trim()!=='');
+  return [...kept,'UUID máy: '+uuid.toLowerCase()].join('\n');
+}
+async function vmRecreated(c:Ctx,[vmId]:string[]){
+  const b=RecreatedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const scope=scopeOf(c,projectId),uuid=b.machineUuid.toLowerCase();
+  const r=await asOps(c,projectId,vmId,()=>recordRecreated(scope,{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,note:redactSecrets(b.note?.trim()||null)},c.db));
+  const vm=await c.db.virtualMachine.findFirst({where:{id:vmId,server:{projectId}},select:{notes:true,revision:true,operation:{select:{cycle:true}}}});
+  if(!vm)throw fail('NOT_FOUND','VM không còn trên web');
+  let uuidWritten=false;
+  if(machineUuid(vm.notes)!==uuid){await updateManagedVM(scope,vmId,{notes:withMachineUuid(vm.notes,uuid),expectedRevision:vm.revision},c.db);uuidWritten=true;}
+  return {recreated:r,machineUuid:uuid,uuidWritten,cycle:vm.operation?.cycle??null};
+}
+
 async function vmNote(c:Ctx,[vmId]:string[]){
   const b=NoteBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
   const r=await asOps(c,projectId,vmId,()=>addVmOpsNote(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,note:b.note,jobId:b.jobId??null},c.db,caller(c),t=>redactSecrets(t)??''));
@@ -654,6 +706,12 @@ async function gen2Targets(c:Ctx){
  // Address-only comparison per owner contract. Neither configurationHash nor web install history proves native application.
  return {capturedAt:new Date().toISOString(),items:rows.map(v=>({id:v.id,serverId:v.serverId,serverCode:v.server.code,code:v.code,machineUuid:machineUuid(v.notes),expectedCycle:v.operation?.cycle??1,expectedVmRevision:v.revision,configurationId:v.desiredConfigurationId,endpointId:v.desiredConfiguration?.endpointId??null,proxyAddressFingerprint:proxyAddressFingerprint(v.desiredConfiguration?.endpoint),sdkId:v.sdkRecord?.id??null,sdkRevision:v.sdkRecord?.revision??null}))};
 }
+// 28/10/2026 daily Telegram report: money not increasing over the last 24 h (same rule as the business dashboard).
+async function moneyReport(c:Ctx){
+ const {projectId}=await projectOf(c,q(c,'projectId')),scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
+ assertBusinessArea(scope,'INFRASTRUCTURE',false);
+ return readMoneyReport(scope,c.db);
+}
 async function gen2Reminders(c:Ctx){
  const {projectId}=await projectOf(c,q(c,'projectId')),scope=await loadInfrastructureScope(c.db,c.token.userId,projectId);
  assertBusinessArea(scope,'INFRASTRUCTURE',false);if(hasServerScope(scope))return {items:[]};
@@ -671,6 +729,24 @@ async function monitorHeartbeat(c:Ctx,[serverId]:string[]){
  const b=HeartbeatBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=serverId;
  const r=await recordMonitorHeartbeat(scopeOf(c,projectId),serverId,serviceKey(c,projectId),b,c.db);
  c.audit.replay=r.replay;return r;
+}
+async function fleetCreate(c:Ctx){
+ const {projectId}=await projectOf(c,(c.body as {projectId?:string})?.projectId);
+ return createFleetCommand(scopeOf(c,projectId),c.body,c.db,{tokenId:c.token.id,source:'OPS'});
+}
+async function fleetList(c:Ctx){
+ const {projectId}=await projectOf(c,q(c,'projectId'));
+ return listFleetCommands(scopeOf(c,projectId),{projectId,...(q(c,'serverId')?{serverId:q(c,'serverId')}:{})},c.db);
+}
+async function fleetDetail(c:Ctx,[operationId]:string[]){
+ const {projectId}=await projectOf(c,q(c,'projectId'));c.audit.objectId=operationId;
+ return readFleetCommand(scopeOf(c,projectId),{projectId,operationId},c.db);
+}
+async function fleetWrite(c:Ctx,[operationId]:string[],operation:typeof claimFleetCommand|typeof renewFleetCommand|typeof stepFleetCommand|typeof completeFleetCommand|typeof cancelFleetCommand|typeof authorizeNativeFleetCommand){
+ const body=c.body as Record<string,unknown>,{projectId}=await projectOf(c,body?.projectId as string);
+ if(operationId&&body.operationId!==undefined&&body.operationId!==operationId)throw fail('VALIDATION','operationId khác đường dẫn');
+ c.audit.objectId=operationId??null;
+ return operation(scopeOf(c,projectId),{...body,...(operationId?{operationId}:{})},c.db);
 }
 const ObserveBody=z.object({projectId:id64,expectedCycle:cycleN,expectedVmRevision:rev,observedAt:iso,source:z.string().min(2).max(120),evidence:z.string().max(300).nullish(),
   sdks:z.array(z.object({code:z.string().min(8).max(128),expectedSdkRevision:rev.nullable(),amountUsd:sdkMoney.nullish(),amountRead:z.boolean().optional(),current:z.boolean().optional()}).strict()).min(1).max(OBSERVE_MAX)}).strict();

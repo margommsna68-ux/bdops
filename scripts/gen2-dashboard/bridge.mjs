@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {mergeNativeObservations} from './native-monitor.mjs';
+import {mergeNativeObservations,parseMonitorConfig} from './native-monitor.mjs';
 import { matchTargets,uuidOf } from './cache.mjs';
 import {batchSize as parseBatchSize,QUEUE_LIMITS,assertQueueBounds} from './io.mjs';
 
@@ -13,6 +13,9 @@ function cleanTarget(t) {
 const identity=t=>JSON.stringify([t.serverId,t.machineUuid,t.expectedCycle,t.configurationId,t.sdkId]);
 const revisions=t=>[t.expectedVmRevision,t.sdkRevision];
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const axes=['vmState','guest','network','proxy','app'];
+const time=v=>Date.parse(v)||0;
+export const pendingCounts=state=>({pendingBatches:state.batches?.length??0,pendingItems:(state.pending?1:0)+(state.batches??[]).reduce((n,b)=>n+b.body.items.length,0)});
 function acknowledgeMonitor(entry,monitor){
  if(entry.monitorVersion!==monitor.configVersion)entry.monitorAcks={};
  entry.monitorVersion=monitor.configVersion;entry.monitorAcks??={};
@@ -25,17 +28,19 @@ export class Bridge {
  constructor({state,projectId,api,readCache,persist,now=Date.now,afterSync=null,shouldStop=()=>false,batchSize=1,serverId=null,monitorConfig=null}) {
   if(state.projectId!==projectId)throw new Error('PROJECT_STATE_MISMATCH');
   Object.assign(this,{state,projectId,api,readCache,persist,now,afterSync,shouldStop,serverId,monitorConfig});this.batchSize=parseBatchSize(batchSize);this.busy=false;
+  if(monitorConfig){this.monitorConfig=parseMonitorConfig(monitorConfig,projectId);this.monitorServers=new Set(this.monitorConfig.bindings.map(b=>b.serverId));}
   if(serverId!==null&&(!id(serverId)||this.batchSize===1))throw new Error('SERVER_FILTER_INVALID');
  }
  async tick() {
   if(this.busy)throw new Error('LOOP_ALREADY_RUNNING');this.busy=true;
-  try{return await this.run();}finally{this.busy=false;}
+   const started=this.now();this.retryRequests=0;
+   try{return {...await this.run(),tickDurationMs:Math.max(0,this.now()-started),retryRequests:this.retryRequests,...pendingCounts(this.state)};}finally{this.busy=false;}
  }
- async flush() {
+  async flush({retry=false}={}) {
   const p=this.state.pending;if(!p)return 'IDLE';let res;
   const earlierAttempt=!!p.attempted;p.attempted=true;
   await this.persist(this.state); // also required when a previous disk write failed in this process
-  try{res=await this.api.post(`/vms/${p.vmId}/scan-observations`,p.body,p.key);}catch{return 'UNKNOWN';}
+   try{res=await this.api.post(`/vms/${p.vmId}/scan-observations`,p.body,p.key,retry?{timeoutMs:5000}:undefined);}catch{return 'UNKNOWN';}
   const before=structuredClone(this.state.entries[p.vmId]);
   const settle=async()=>{
    this.state.pending=null;
@@ -68,10 +73,10 @@ export class Bridge {
   // Copy-on-write: a failed disk commit never loses an ACK or original command in memory.
   await this.persist(next);Object.assign(this.state,next);
  }
- async flushBatch(batch) {
+  async flushBatch(batch,{retry=false}={}) {
   const earlierAttempt=batch.attempted;
   batch.attempted=true;await this.persist(this.state);
-  let res;try{res=await this.api.post('/batch',batch.body,batch.key);}catch{return {state:'UNKNOWN',saved:0};}
+   let res;try{res=await this.api.post('/batch',batch.body,batch.key,retry?{timeoutMs:5000}:undefined);}catch{return {state:'UNKNOWN',saved:0};}
   if(res?.status===401||res?.status===403)return {state:'AUTH_REQUIRED',saved:0};
   const rows=res?.data?.items;
   // A missing/duplicate/out-of-range index makes the whole envelope ambiguous.
@@ -88,8 +93,9 @@ export class Bridge {
    if(accepted) {
     saved++;
     if(entry?.identity===event.identity) {
+      if(item.body.monitor&&(entry.monitorVersion===item.body.monitor.configVersion||!entry.lastHealthAt||time(item.body.observedAt)>=time(entry.lastHealthAt)))acknowledgeMonitor(entry,item.body.monitor);
      if(!entry.lastHealthAt||Date.parse(item.body.observedAt)>=Date.parse(entry.lastHealthAt)) {
-      entry.lastHealthAt=item.body.observedAt;if(item.body.monitor)acknowledgeMonitor(entry,item.body.monitor);entry.ownAfter=[recorded.vmRevisionAfter,recorded.sdkRevisionAfter];
+       entry.lastHealthAt=item.body.observedAt;entry.ownAfter=[recorded.vmRevisionAfter,recorded.sdkRevisionAfter];
      }
      if(item.body.money&&(!entry.lastMoneyAt||Date.parse(item.body.money.observedAt)>Date.parse(entry.lastMoneyAt)))entry.lastMoneyAt=item.body.money.observedAt;
     }
@@ -110,20 +116,21 @@ export class Bridge {
  async run() {
   // A canary must not replay an old command belonging to another server. Keep the
   // original journal intact for the unfiltered bridge to reconcile before handoff.
-  if(this.serverId&&(this.state.pending&&identityServer(this.state.pending.identity)!==this.serverId||
-   (this.state.batches??[]).some(b=>b.events.some(e=>identityServer(e.identity)!==this.serverId))))return {state:'SCOPE_MISMATCH',saved:0};
-  if(this.state.pending)return {state:await this.flush(),saved:0};
+   const inScope=serverId=>(!this.serverId||serverId===this.serverId)&&(!this.monitorServers||this.monitorServers.has(serverId));
+   if((this.serverId||this.monitorServers)&&(this.state.pending&&!inScope(identityServer(this.state.pending.identity))||
+    (this.state.batches??[]).some(b=>b.events.some(e=>!inScope(identityServer(e.identity))))))return {state:'SCOPE_MISMATCH',saved:0};
+   if(this.state.pending){this.retryRequests++;return {state:await this.flush({retry:true}),saved:0};}
   try{assertQueueBounds(this.state);}catch(error){if(error.message==='QUEUE_FULL')return {state:'QUEUE_FULL',saved:0};throw error;}
   const counts={state:'IDLE',saved:0,rejected:0};
-  // Four rotating retries per tick bound outage work and reserve time for new observations.
+   // One bounded original-request retry before fresh capture; durable cursor prevents starvation.
   const pending=this.state.batches??[],cursor=pending.findIndex(b=>b.key===this.state.retryCursor)+1;
-  const retry=[...pending.slice(cursor),...pending.slice(0,cursor)].slice(0,4);
+   const retry=[...pending.slice(cursor),...pending.slice(0,cursor)].slice(0,1);
   for(const candidate of retry) {
    if(this.shouldStop())return counts;
    // An earlier ACK commits a cloned queue; never mutate a detached batch reference.
    const batch=this.state.batches.find(b=>b.key===candidate.key);if(!batch)continue;
    this.state.retryCursor=batch.key;
-   const result=await this.flushBatch(batch);counts.saved+=result.saved;counts.state=result.state;
+    this.retryRequests++;const result=await this.flushBatch(batch,{retry:true});counts.saved+=result.saved;counts.state=result.state;
    if(result.state==='AUTH_REQUIRED')return counts;
   }
   let response;
@@ -131,7 +138,7 @@ export class Bridge {
   catch(error){if(error.message==='AUTH_REQUIRED')return {...counts,state:'AUTH_REQUIRED'};throw error;}
   if(!stamp(response?.capturedAt)||Date.parse(response.capturedAt)>this.now()+300000||!Array.isArray(response.items))throw new Error('INVALID_TARGET_SNAPSHOT');
   if(response.items.length>QUEUE_LIMITS.targets)return {...counts,state:'QUEUE_FULL'};
-  const selected=this.serverId?response.items.filter(t=>t?.serverId===this.serverId):response.items;
+   const selected=response.items.filter(t=>inScope(t?.serverId));
   const targets=selected.map(cleanTarget).filter(Boolean),capture=new Date(response.capturedAt).toISOString();
   counts.rejected=selected.length-targets.length;
   for(const t of targets) {
@@ -140,7 +147,7 @@ export class Bridge {
     this.state.entries[t.id]={identity:ident,target:t,capturedAt:capture,lastHealthAt:previous?.identity===ident?previous.lastHealthAt:null,lastMoneyAt:previous?.identity===ident?previous.lastMoneyAt:null,waitNewScan:!!previous,ownAfter:null,reset:false};
    }else{previous.target=t;previous.ownAfter=null;}
   }
-  for(const key of Object.keys(this.state.entries))if((!this.serverId||this.state.entries[key].target?.serverId===this.serverId)&&!targets.some(t=>t.id===key))delete this.state.entries[key];
+   for(const key of Object.keys(this.state.entries))if(inScope(this.state.entries[key].target?.serverId)&&!targets.some(t=>t.id===key))delete this.state.entries[key];
   try{assertQueueBounds(this.state);}catch(error){if(error.message==='QUEUE_FULL')return {...counts,state:'QUEUE_FULL'};throw error;}
   await this.persist(this.state); // capture must be durable BEFORE reading the cache
   const cache=await this.readCache(),projected=this.monitorConfig?mergeNativeObservations(cache,targets,this.monitorConfig,this.now()):cache,matched=matchTargets(targets,projected.observations);
@@ -148,7 +155,9 @@ export class Bridge {
   const queued=new Map(),items=[],events=[];
   for(const b of this.state.batches??[])for(const [i,event] of b.events.entries()) {
    const key=JSON.stringify([event.vmId,event.identity]),body=b.body.items[i].body,previous=queued.get(key)||{};
-   queued.set(key,{health:Math.max(previous.health||0,Date.parse(body.observedAt)),money:Math.max(previous.money||0,Date.parse(body.money?.observedAt)||0)});
+    const monitor=previous.monitor??Object.create(null);
+    if(body.monitor){const clocks=monitor[body.monitor.configVersion]??=Object.create(null);for(const k of axes)if(body.monitor[k])clocks[k]=Math.max(clocks[k]||0,time(body.monitor[k].observedAt));}
+    queued.set(key,{health:Math.max(previous.health||0,time(body.observedAt)),money:Math.max(previous.money||0,time(body.money?.observedAt)),monitor});
   }
   for(const {target:t,observation:o} of matched.matches) {
    if(this.shouldStop())break;
@@ -156,7 +165,9 @@ export class Bridge {
    if(entry.lastHealthAt&&Date.parse(o.observedAt)<Date.parse(entry.lastHealthAt))continue;
    if(entry.waitNewScan&&Date.parse(o.observedAt)<=Date.parse(entry.capturedAt))continue;
    const waiting=queued.get(JSON.stringify([t.id,entry.identity]));
-   const healthNew=Date.parse(o.observedAt)>Math.max(Date.parse(entry.lastHealthAt)||0,waiting?.health||0);
+    const outerNew=time(o.observedAt)>Math.max(time(entry.lastHealthAt),waiting?.health||0);
+    const axisNew=o.monitor&&axes.some(k=>o.monitor[k]&&time(o.monitor[k].observedAt)>Math.max(entry.monitorVersion===o.monitor.configVersion?time(entry.monitorAcks?.[k]):0,waiting?.monitor?.[o.monitor.configVersion]?.[k]||0));
+    const healthNew=axisNew||(!o.monitor||o.earning!=null||o.problem!=null)&&outerNew;
    const money=o.money,timing=money&&Date.parse(money.observedAt)>Date.parse(entry.capturedAt);
    const moneyNew=t.sdkId&&rev(t.sdkRevision)&&timing&&Date.parse(money.observedAt)>Math.max(Date.parse(entry.lastMoneyAt)||0,waiting?.money||0);
    if(!healthNew&&!moneyNew)continue;

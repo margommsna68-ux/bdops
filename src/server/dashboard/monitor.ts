@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {createHash} from 'node:crypto';
 import {isIP} from 'node:net';
 import type {PrismaClient} from '@prisma/client';
-import {MONITOR_POLICY,monitorFreshness,monitorId} from '@/lib/monitor-policy';
+import {MONITOR_POLICY,MAX_MONITOR_CLOCK_SKEW_MS,monitorFreshness,monitorId} from '@/lib/monitor-policy';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {withProxyTransaction} from '../proxy-management/transaction';
 import {lockCashProject} from '../business-management/cash-lock';
@@ -57,7 +57,7 @@ export async function recordMonitorHeartbeat(scope:ActorScope,serverId:string,ke
    return {replay:true,serverId,source:b.source,seq:prior.seq,observedAt:prior.observedAt.toISOString(),receivedAt:prior.receivedAt.toISOString(),configVersion:prior.configVersion};
   }
   const now=new Date(),observedAt=new Date(b.observedAt),startedAt=new Date(b.startedAt);
-  if(observedAt>now)throw new ProxyDomainError('INVALID_INPUT','Heartbeat ở tương lai','VALIDATION');
+  if(observedAt.getTime()>now.getTime()+MAX_MONITOR_CLOCK_SKEW_MS)throw new ProxyDomainError('INVALID_INPUT','Heartbeat ở tương lai','VALIDATION');
   if(prior){
    if(prior.projectId!==scope.projectId||prior.serverUuid.toLowerCase()!==b.serverUuid.toLowerCase())conflict();
    if(observedAt<prior.observedAt)conflict();
@@ -74,7 +74,8 @@ export async function readMonitorHeartbeats(projectId:string,servers:{id:string;
  return servers.map(s=>{
   const source=(role:'CENTRAL'|'AGENT')=>{
    const r=rows.find(r=>r.serverId===s.id&&r.source===role);
-   return {freshness:r?.configVersion!==undefined&&r.configVersion!==MONITOR_POLICY.version?'UNSUPPORTED' as const:monitorFreshness(r?.observedAt.toISOString(),now,MONITOR_POLICY.heartbeatStaleSeconds),observedAt:r?.observedAt.toISOString()??null,receivedAt:r?.receivedAt.toISOString()??null,configVersion:r?.configVersion??null,counts:r?MonitorCounts.parse(r.counts):null};
+   const sourceAheadMs=r?Math.max(0,r.observedAt.getTime()-r.receivedAt.getTime()):0;
+   return {freshness:r?.configVersion!==undefined&&r.configVersion!==MONITOR_POLICY.version?'UNSUPPORTED' as const:monitorFreshness(r?.observedAt.toISOString(),now,MONITOR_POLICY.heartbeatStaleSeconds),observedAt:r?.observedAt.toISOString()??null,receivedAt:r?.receivedAt.toISOString()??null,configVersion:r?.configVersion??null,counts:r?MonitorCounts.parse(r.counts):null,...(sourceAheadMs>0?{clockWarning:'SOURCE_AHEAD' as const,sourceAheadMs}:{})};
   };
   return {serverId:s.id,server:s.code,central:source('CENTRAL'),agent:source('AGENT')};
  });

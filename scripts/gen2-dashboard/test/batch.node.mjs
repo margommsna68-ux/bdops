@@ -174,8 +174,8 @@ test('rotating retry budget reaches later unavailable envelopes across restart',
  // Three singleton survivors plus three more independent unknown envelopes.
  h.state.batches.push(...structuredClone(h.state.batches).map((b,i)=>({...b,key:`gen2-batch-abc${i}`,body:{...b.body,items:b.body.items.map(it=>({...it,idempotencyKey:`gen2-abc${i}`}))}})));
  h.outcome=()=>{throw Error('lost');};h.bridge.readCache=async()=>({observations:[]});
- const keys=h.state.batches.map(b=>b.key);h.calls.length=0;await h.bridge.tick();assert.equal(h.calls.length,4);
- const b=new Bridge({...h.options,state:structuredClone(h.state),readCache:async()=>({observations:[]})});await b.tick();
+ const keys=h.state.batches.map(b=>b.key);h.calls.length=0;await h.bridge.tick();assert.equal(h.calls.length,1);
+ let state=structuredClone(h.state);for(let i=1;i<keys.length;i++){const b=new Bridge({...h.options,state,readCache:async()=>({observations:[]})});await b.tick();state=structuredClone(state);}
  assert.ok(keys.every(key=>h.calls.some(c=>c.key===key)));
 });
 
@@ -239,6 +239,8 @@ test('retry resolves live batch objects after an earlier ACK replaces the queue'
  assert.equal(h.state.batches[1].attempted,false);
  h.outcome=call=>{if(call.key===a)return ack(call);throw Error('second command committed but response lost');};
  await h.bridge.tick();
+ // The one-request retry budget moves B to the next tick, after A's ACK commit.
+ await h.bridge.tick();
  const saved=h.saves.at(-1).batches.find(x=>x.key===b);
  assert.equal(saved.attempted,true,'second command attempt is durable after first ACK deep-clones queue');
  assert.deepEqual(saved.body,original);
@@ -256,4 +258,52 @@ for(const size of [1,25])test(`independent acknowledged axis clocks survive inve
  await h.bridge.tick();assert.deepEqual(h.state.entries.vm0.monitorAcks,{guest:T1,vmState:newer});
  h.obs[0].observedAt='2026-10-26T02:02:00.000Z';h.obs[0].monitor={configVersion:1,guest:{observedAt:T0,additions:'UNKNOWN',response:'UNKNOWN'}};
  await h.bridge.tick();assert.equal(h.state.entries.vm0.monitorAcks.guest,T1);
+});
+
+test('70 native VMs: one changed axis schedules one row; source-envelope clock alone schedules none',async()=>{
+ const h=fixture(70);for(const o of h.obs){o.money=null;o.monitor={configVersion:1,vmState:{observedAt:T1,state:'RUNNING'},guest:{observedAt:T1,additions:'PRESENT',response:'RESPONSIVE'}};}
+ await h.bridge.tick();assert.equal(h.calls.flatMap(c=>c.body.items).length,70);h.calls.length=0;
+ const t2='2026-10-26T02:00:10.000Z';for(const o of h.obs)o.observedAt=t2;h.obs[9].monitor.guest.observedAt=t2;
+ await h.bridge.tick();assert.deepEqual(h.calls.flatMap(c=>c.body.items.map(i=>i.path)),['vms/vm9/scan-observations']);h.calls.length=0;
+ for(const o of h.obs)o.observedAt='2026-10-26T02:00:20.000Z';await h.bridge.tick();assert.equal(h.calls.length,0);
+});
+
+test('every queued same-identity axis participates in native dedup; newer money and legacy health still publish',async()=>{
+ const h=fixture(1);h.obs[0].money=null;h.obs[0].monitor={configVersion:1,vmState:{observedAt:T1,state:'RUNNING'}};h.outcome=()=>{throw Error('lost');};await h.bridge.tick();
+ const original=structuredClone(h.state.batches[0]);h.obs[0].observedAt='2026-10-26T02:01:00.000Z';
+ h.obs[0].monitor={configVersion:1,guest:{observedAt:h.obs[0].observedAt,additions:'PRESENT',response:'RESPONSIVE'}};await h.bridge.tick();assert.equal(h.state.batches.length,2);
+ h.obs[0].observedAt='2026-10-26T02:02:00.000Z';h.obs[0].monitor.vmState={observedAt:T1,state:'RUNNING'};const before=h.state.batches.map(b=>b.key);await h.bridge.tick();assert.deepEqual(h.state.batches.map(b=>b.key),before);assert.deepEqual(h.state.batches[0].body,original.body);
+ h.outcome=null;h.obs[0].money={observedAt:h.obs[0].observedAt,amount:'9.00'};await h.bridge.tick();assert.ok(h.calls.at(-1).body.items[0].body.money);
+ const legacy=fixture(1);await legacy.bridge.tick();legacy.calls.length=0;legacy.obs[0].observedAt='2026-10-26T02:03:00.000Z';await legacy.bridge.tick();assert.equal(legacy.calls.length,1);
+});
+
+test('retry budget permits one original request before fresh capture and rotates fairly across restarts',async()=>{
+ const h=fixture(5,2);h.outcome=()=>{throw Error('lost');};await h.bridge.tick();const keys=h.state.batches.map(b=>b.key),bodies=structuredClone(h.state.batches.map(b=>b.body));
+ const calls=[];let beforeGet=0;
+ h.options.api.post=async(route,body,key,options)=>{calls.push({key,body:structuredClone(body),options});throw Error('retry timeout');};h.options.api.get=async()=>{beforeGet=calls.length;return {capturedAt:T0,items:h.targets};};
+ let state=h.state;
+ for(let i=0;i<keys.length;i++){const b=new Bridge({...h.options,state,readCache:async()=>({observations:[]})});await b.tick();assert.equal(beforeGet,i+1);state=structuredClone(state);}
+ assert.deepEqual(calls.map(c=>c.key),keys);assert.deepEqual(calls.map(c=>c.body),bodies);assert.ok(calls.every(c=>c.options?.timeoutMs===5000));
+});
+
+test('monitor config without --server restricts two bindings and preserves unrelated legacy entries and UNKNOWN',async()=>{
+ const h=fixture(3);const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+ h.targets[1].serverId='second';h.targets[1].serverCode='AN01';h.obs[0].serverId=a;h.obs[1].serverId=b;h.obs[1].serverName='AN01';h.targets[2].serverId='outside';h.targets[2].serverCode='MOON09';h.obs[2].serverName='MOON09';
+ h.state.entries.untouched={target:{serverId:'outside'},lastMoneyAt:T0};
+ const config={version:1,centralUuid:a,bindings:[{projectId:'p',serverId:'s',serverCode:'MOON01',serverUuid:a},{projectId:'p',serverId:'second',serverCode:'AN01',serverUuid:b}]};
+ h.bridge=new Bridge({...h.options,monitorConfig:config,readCache:async()=>({observations:h.obs})});await h.bridge.tick();
+ assert.deepEqual(h.calls.flatMap(c=>c.body.items.map(i=>i.path)),['vms/vm0/scan-observations','vms/vm1/scan-observations']);assert.equal(h.state.entries.vm2,undefined);assert.equal(h.state.entries.untouched.lastMoneyAt,T0);
+ h.state.pending={key:'gen2-original',vmId:'outside',identity:JSON.stringify(['outside']),body:{projectId:'p',money:{amount:'3'}}};const pending=structuredClone(h.state.pending),n=h.calls.length;
+ assert.equal((await h.bridge.tick()).state,'SCOPE_MISMATCH');assert.deepEqual(h.state.pending,pending);assert.equal(h.calls.length,n);
+ h.state.pending=null;h.state.batches=[{key:'gen2-batch-original',body:{projectId:'p',items:[{method:'POST',path:'vms/outside/scan-observations',body:{projectId:'p'},idempotencyKey:'gen2-original'}]},events:[{vmId:'outside',identity:JSON.stringify(['outside'])}],attempted:true}];
+ const original=structuredClone(h.state.batches);assert.equal((await h.bridge.tick()).state,'SCOPE_MISMATCH');assert.deepEqual(h.state.batches,original);assert.equal(h.calls.length,n);
+});
+
+test('older-envelope ACK still credits its independent newer axis after a newer envelope was acknowledged',async()=>{
+ const h=fixture(1);h.obs[0].money=null;h.obs[0].monitor={configVersion:1,guest:{observedAt:T1,additions:'PRESENT',response:'RESPONSIVE'}};
+ h.outcome=()=>{throw Error('lost');};await h.bridge.tick();const original=h.state.batches[0].key;
+ const newer='2026-10-26T02:01:00.000Z';h.obs[0].observedAt=newer;h.obs[0].monitor={configVersion:1,vmState:{observedAt:newer,state:'RUNNING'}};
+ h.outcome=c=>{if(c.key===original)throw Error('lost');return ack(c);};await h.bridge.tick();assert.equal(h.state.entries.vm0.lastHealthAt,newer);
+ h.outcome=null;await h.bridge.tick();assert.deepEqual(h.state.entries.vm0.monitorAcks,{vmState:newer,guest:T1});
+ const n=h.calls.length;h.obs[0].observedAt='2026-10-26T02:02:00.000Z';await h.bridge.tick();assert.equal(h.calls.length,n);
 });

@@ -62,7 +62,9 @@ type Mode='request'|'receive'|'fail'|'cancel'|'settle'|'retry'|'recreate'|'sent'
 // comes from the PayPal book; it cannot be picked by hand. Amounts only with the money rights.
 export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{projectId:string;vm:ManagedVM;ops:OpsRow|undefined;account:VmAccount|undefined;rights:OpsRights;onDone:()=>Promise<unknown>|void;onBusy:(vmId:string,busy:boolean)=>void}){
   const p=usePopover(),[mode,setMode]=useState<Mode>(null),r=ops?.request??null,m=r?.money??null,cycle=ops?.cycle??1,sus=ops?.status==='SUSPENDED';
-  const canRecreate=rights.assign&&(ops?.milestone==='RECREATE'||sus);
+  const member=ops?.merge?.role==='MEMBER'?ops.merge:null,primary=ops?.merge?.role==='PRIMARY'?ops.merge:null;
+  // A member is recreated with the merged payout (received in full, or the primary EarnApp SUS: the server checks which).
+  const canRecreate=rights.assign&&(ops?.milestone==='RECREATE'||sus||!!member&&!member.consumed);
   const openWith=(next:Mode)=>{setMode(next);p.setOpen(true);};
   useEffect(()=>{if(!p.open)setMode(null);},[p.open]);
   // An action form opened on a request stays open (locked, with its note) if a reload drops that request.
@@ -81,21 +83,23 @@ export function PayoutCell({projectId,vm,ops,account,rights,onDone,onBusy}:{proj
     {p.open&&typeof document!=='undefined'&&createPortal(<div ref={p.pop} role="dialog" aria-label={'Tiền trong VM '+vm.server+' / '+vm.code} className="vm-status-pop vm-payout-pop" style={{top:p.pos?.top??-9999,left:p.pos?.left??-9999}}>
       <p className="vm-status-pop-title"><strong>{vm.server} / {vm.code}</strong> · lượt {cycle}{account?.earnApp?' · '+account.earnApp.login.email:''}</p>
       {mode==='request'?<RequestForm projectId={projectId} vm={vm} cycle={cycle} earnAppId={ops?ops.earnAppId:undefined} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
-      :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={sus&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
+      :mode==='recreate'?<RecreateForm projectId={projectId} vm={vm} cycle={cycle} sus={(sus||!!member)&&ops?.milestone!=='RECREATE'} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}}/>
       :mode&&(r||actionOpen.current)?<RequestAction projectId={projectId} vm={vm} mode={mode} request={r} narrow={!rights.writeMoney} lock={p.lock} onDone={async()=>{p.setOpen(false);await onDone();}} onBack={()=>setMode(null)}/>
       :<div className="space-y-2">
         <VmMoneySection projectId={projectId} s={vmMoney} source={cur?.amountSource??null} sdkId={cur?.recordId??null} cycle={cycle} vmId={vm.id}/>
         {ops&&hasEarnApp&&<BalanceSection projectId={projectId} vmCode={vm.code} ops={ops} read={!!rights.balanceRead} write={!!rights.balanceWrite} onSaved={onDone}/>}
         <p className="font-semibold text-xs">Rút về PayPal</p>
+        {member&&<p className="text-xs">SDK của VM này đã gộp vào tài khoản EarnApp của <strong>{member.primaryWhere}</strong>; lệnh rút và tiền về ghi ở VM đó.</p>}
+        {primary&&r&&<MergedMembers projectId={projectId} request={r} members={primary.members} canEdit={!!(rights.writeMoney||rights.payout)} onDone={onDone}/>}
         {r?<RequestSummary request={r} milestone={ops?.milestone||''}/>:<p className="text-xs pm-muted">{hasEarnApp?'Chưa ghi yêu cầu rút cho EarnApp này.':'VM chưa có tài khoản EarnApp ở lượt này.'}</p>}
         <div className="flex flex-col gap-1">
           {!r&&hasEarnApp&&(rights.writeMoney||rights.payout)&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('request')}>{rights.writeMoney?'Ghi yêu cầu rút':'Chuẩn bị rút (giữ email)'}</button>}
-          {r&&(rights.writeMoney||rights.payout)&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<><button type="button" className="vm-status-action primary" onClick={()=>setMode('sent')}>Đã gửi trên EarnApp (xác nhận)</button>{r.submission==='PREPARING'&&<button type="button" className="vm-status-action" onClick={()=>setMode('unknown')}>Chưa xác định kết quả</button>}</>}
-          {r&&(rights.writeMoney||rights.receipt)&&r.state==='REQUESTED'&&r.submission==='SENT'&&r.phase==='WAITING'&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('receive')}>Ghi tiền về PP</button>}
-          {canRecreate&&<button type="button" className={'vm-status-action'+(ops?.milestone==='RECREATE'?' primary':'')} onClick={()=>setMode('recreate')}>Ghi nhận đã tạo lại VM{ops?.milestone!=='RECREATE'?' (SUS)':''}</button>}
-          {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase==='WAITING'&&m&&m.received!=='0.00'&&<button type="button" className="vm-status-action" onClick={()=>setMode('settle')}>Chốt nhận thiếu (ghi phí / chênh lệch)</button>}
-          {r&&rights.writeMoney&&r.state!=='REQUESTED'&&<button type="button" className="vm-status-action" onClick={()=>setMode('retry')}>Gửi lại (cùng lượt rút)</button>}
-          {r&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase!=='RECEIVED'&&<><button type="button" className="vm-status-action" onClick={()=>setMode('fail')}>Đánh dấu thất bại</button><button type="button" className="vm-status-action" onClick={()=>setMode('cancel')}>Huỷ yêu cầu</button></>}
+          {r&&!member&&(rights.writeMoney||rights.payout)&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<><button type="button" className="vm-status-action primary" onClick={()=>setMode('sent')}>Đã gửi trên EarnApp (xác nhận)</button>{r.submission==='PREPARING'&&<button type="button" className="vm-status-action" onClick={()=>setMode('unknown')}>Chưa xác định kết quả</button>}</>}
+          {r&&!member&&(rights.writeMoney||rights.receipt)&&r.state==='REQUESTED'&&r.submission==='SENT'&&r.phase==='WAITING'&&<button type="button" className="vm-status-action primary" onClick={()=>setMode('receive')}>Ghi tiền về PP</button>}
+          {canRecreate&&<button type="button" className={'vm-status-action'+(ops?.milestone==='RECREATE'?' primary':'')} onClick={()=>setMode('recreate')}>Ghi nhận đã tạo lại VM{ops?.milestone!=='RECREATE'?member&&!sus?' (EarnApp VM chính SUS)':' (SUS)':''}</button>}
+          {r&&!member&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase==='WAITING'&&m&&m.received!=='0.00'&&<button type="button" className="vm-status-action" onClick={()=>setMode('settle')}>Chốt nhận thiếu (ghi phí / chênh lệch)</button>}
+          {r&&!member&&rights.writeMoney&&r.state!=='REQUESTED'&&<button type="button" className="vm-status-action" onClick={()=>setMode('retry')}>Gửi lại (cùng lượt rút)</button>}
+          {r&&!member&&rights.writeMoney&&r.state==='REQUESTED'&&r.phase!=='RECEIVED'&&<><button type="button" className="vm-status-action" onClick={()=>setMode('fail')}>Đánh dấu thất bại</button><button type="button" className="vm-status-action" onClick={()=>setMode('cancel')}>Huỷ yêu cầu</button></>}
         </div>
         {!rights.writeMoney&&<p className="text-xs pm-muted">{rights.receipt?'Thất bại, huỷ, gửi lại, chốt thiếu cần quyền ghi Tiền vào PayPal.':rights.payout?'Ghi tiền về, thất bại, huỷ, gửi lại cần quyền ghi Tiền vào PayPal.':'Ghi tiền cần quyền ghi Tiền vào PayPal.'}</p>}
       </div>}
@@ -126,6 +130,13 @@ function VmMoneySection({projectId,s,source,sdkId,cycle,vmId}:{projectId:string;
     <p className="pm-muted">Không phải số dư tài khoản EarnApp; các SDK dự phòng không được cộng vào.</p>
     {sdkId&&<details open={open} onToggle={e=>setOpen((e.target as HTMLDetailsElement).open)}><summary className="cursor-pointer">Lịch sử kiểm tra</summary>{open&&<SdkTimeline projectId={projectId} sdkId={sdkId}/>}</details>}
   </div>;
+}
+// The other VMs of a merged payout (27/10/2026), listed on the primary; "Bỏ gộp" only before the click on EarnApp (PREPARING).
+function MergedMembers({projectId,request:r,members,canEdit,onDone}:{projectId:string;request:NonNullable<OpsRow['request']>;members:{vmId:string;where:string;share:string|null;consumed:boolean}[];canEdit:boolean;onDone:()=>Promise<unknown>|void}){
+  const remove=trpc.vmOps.removePayoutMember.useMutation(),keyOf=useCommandKey(),[error,setError]=useState('');
+  return <div className="text-xs space-y-1" aria-label="VM gộp vào lệnh rút"><p>Lệnh rút gộp {members.length+1} VM (VM này là VM chính):</p><ul className="space-y-1">{members.map(x=><li key={x.vmId} className="flex gap-2 items-center"><span>{x.where}</span>{x.share&&<span className="pm-muted">{formatUsd(x.share)}</span>}{x.consumed&&<span className="pm-muted">· đã tạo lại</span>}
+    {canEdit&&r.submission==='PREPARING'&&r.state==='REQUESTED'&&<button type="button" className="pm-link" disabled={remove.isLoading} onClick={async()=>{const input={projectId,requestId:r.id,expectedRevision:r.revision,vmId:x.vmId};setError('');try{await remove.mutateAsync({...input,key:keyOf(input)});await onDone();}catch(e){setError(e instanceof Error?e.message:'Chưa bỏ gộp được');}}}>Bỏ gộp</button>}</li>)}</ul>
+    {error&&<p className="pm-error" role="alert">{error}</p>}</div>;
 }
 function RequestSummary({request:r,milestone}:{request:NonNullable<OpsRow['request']>;milestone:string}){
   const m=r.money;

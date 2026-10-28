@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import type {PrismaClient,Prisma} from '@prisma/client';
 import type {ScanHealth} from '@/lib/business-pulse';
-import {MonitorObservation} from '@/lib/monitor-policy';
+import {MonitorObservation,MAX_MONITOR_CLOCK_SKEW_MS} from '@/lib/monitor-policy';
 import {assertMonitorCanary} from './monitor';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {authorizeVM} from '../vm-management/repository';
@@ -23,7 +23,7 @@ export const ScanBody=z.object({projectId:z.string().min(1).max(64),expectedCycl
  money:z.object({sdkId:z.string(),expectedSdkRevision:z.number().int().min(0),capturedAt:z.string().datetime({offset:true}),observedAt:z.string().datetime({offset:true}),amount:z.string().regex(/^\d{1,10}(\.\d{1,6})?$/).nullable()}).strict().optional(),
 }).strict();
 export type ScanInput=z.infer<typeof ScanBody>&{vmId:string;key:string};
-export function readScanHealth(detail:Prisma.JsonValue|null,configurationId:string|null,currentUuid:string|null,binding?:{projectId:string;serverId:string;cycle:number;revision:number}):ScanHealth|null{
+export function readScanHealth(detail:Prisma.JsonValue|null,configurationId:string|null,currentUuid:string|null,binding?:{projectId:string;serverId:string;cycle:number;revision:number}):(ScanHealth&{clockWarning?:'SOURCE_AHEAD';sourceAheadMs?:number})|null{
  if(!detail||typeof detail!=='object'||Array.isArray(detail))return null;
  if(!currentUuid||detail.machineUuid!==currentUuid)return null;
  if(detail.configurationId!==configurationId||typeof detail.at!=='string'||!Number.isFinite(Date.parse(detail.at)))return null;
@@ -33,7 +33,8 @@ export function readScanHealth(detail:Prisma.JsonValue|null,configurationId:stri
  if(!Number.isFinite(Date.parse(earningAt))||Date.parse(earningAt)>Date.parse(detail.at))return null;
  const monitor=MonitorObservation.safeParse(detail.monitor);
  if(detail.monitor&&(!monitor.success||binding&&(detail.projectId!==binding.projectId||detail.serverId!==binding.serverId||detail.cycle!==binding.cycle||detail.vmRevision!==binding.revision)))return null;
- return {at:earningAt,observedAt:detail.at,earning:detail.earning as boolean|null,problem:detail.problem as ScanHealth['problem'],...(typeof detail.receivedAt==='string'?{receivedAt:detail.receivedAt}:{}),...(monitor.success?{monitor:monitor.data}:{})};
+ const sourceAheadMs=monitor.success&&typeof detail.receivedAt==='string'?Date.parse(detail.at)-Date.parse(detail.receivedAt):0;
+ return {at:earningAt,observedAt:detail.at,earning:detail.earning as boolean|null,problem:detail.problem as ScanHealth['problem'],...(typeof detail.receivedAt==='string'?{receivedAt:detail.receivedAt}:{}),...(monitor.success?{monitor:monitor.data}:{}),...(sourceAheadMs>0?{clockWarning:'SOURCE_AHEAD' as const,sourceAheadMs}:{})};
 }
 const conflict=(text:string)=>new ProxyDomainError('STALE_PREVIEW',text,'REVISION_CONFLICT');
 /** An observation only: no status, configuration, SDK placement, VM job or account is changed. */
@@ -54,7 +55,7 @@ export async function recordGen2Scan(scope:ActorScope,input:ScanInput,db:PrismaC
   }
   if(b.monitor){
    assertMonitorCanary(scope.projectId,v.serverId);
-   if(at.getTime()>Date.now())throw new ProxyDomainError('INVALID_INPUT','Quan sát monitor ở tương lai','VALIDATION');
+   if(at.getTime()>Date.now()+MAX_MONITOR_CLOCK_SKEW_MS)throw new ProxyDomainError('INVALID_INPUT','Quan sát monitor ở tương lai','VALIDATION');
    for(const axis of [b.monitor.vmState,b.monitor.guest,b.monitor.network,b.monitor.proxy,b.monitor.app])if(axis&&(Date.parse(axis.observedAt)>at.getTime()||Date.parse(axis.observedAt)<barrier))throw conflict('Thời điểm trục giám sát không thuộc quan sát / cấu hình này');
    const p=b.monitor.proxy;
    if(p&&(p.endpointId!==v.desiredConfiguration?.endpointId||p.appliedConfigurationId!==null&&(p.appliedConfigurationId!==v.desiredConfigurationId||p.provenance==='GUEST'&&p.appliedConfigurationId!==v.installedConfigurationId)))throw conflict('Bằng chứng proxy không khớp endpoint / cấu hình đang áp dụng');

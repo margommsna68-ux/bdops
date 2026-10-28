@@ -27,6 +27,7 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
    ...(from||to?{requestedAt:{...(from?{gte:from}:{}),...(to?{lt:new Date(to.getTime()+86400_000)}:{})}}:{})},
    select:{id:true,revision:true,earnAppId:true,vmId:true,cycle:true,paypalId:true,amount:true,currency:true,requestedAt:true,submittedAt:true,reference:true,
     state:true,submission:true,shortfall:true,settledAt:true,consumedAt:true,
+    members:{where:{removedAt:null},select:{vmId:true,cycle:true,consumedAt:true},orderBy:{createdAt:'asc'}},
     earnApp:{select:{vmId:true,closedAt:true,login:{select:{email:true}}}},paypal:{select:{code:true}},paypalEmail:{select:{email:true}},
     receipts:{where:{projectId},select:{id:true,date:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,transactionId:true},orderBy:[{date:'desc'},{id:'desc'}]}},
    orderBy:[{requestedAt:'desc'},{createdAt:'desc'},{id:'desc'}]}),
@@ -35,7 +36,8 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
  ]);
  // EarnPayoutRequest.vmId is a historical scalar, not a Prisma relation.
  // Archived/deleted operating states remain visible; a missing VM retains its ID.
- const vms=await db.virtualMachine.findMany({where:{id:{in:[...new Set(requests.map(r=>r.vmId))]},server:{projectId}},
+ // Merged payout (27/10/2026): member VMs belong to the request too (server filter, search, VM counts); the money stays once.
+ const vms=await db.virtualMachine.findMany({where:{id:{in:[...new Set(requests.flatMap(r=>[r.vmId,...r.members.map(m=>m.vmId)]))]},server:{projectId}},
   select:{id:true,code:true,serverId:true,managed:true,archivedAt:true,operation:{select:{cycle:true}},server:{select:{code:true,managed:true,archivedAt:true}}}});
  const vmById=new Map(vms.map(v=>[v.id,v]));
  const filtered=requests.map(r=>{
@@ -52,11 +54,12 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
    login:r.earnApp.login.email,paypalId:r.paypalId,paypal:r.paypal.code,email:r.paypalEmail.email,
    requestedAt:r.requestedAt.toISOString(),submittedAt:r.submittedAt?.toISOString()??null,
    amount:r.amount.toFixed(2),currency:r.currency,received:money.received,remaining:r.submission==='SENT'&&money.phase==='WAITING'?money.remaining:'0.00',shortfall:r.shortfall?.toFixed(2)??'0.00',status,reference:r.reference,
+   members:r.members.map(m=>{const v=vmById.get(m.vmId);return {vmId:m.vmId,serverId:v?.serverId??null,server:v?.server.code??null,vm:v?.code??null,cycle:m.cycle,consumed:!!m.consumedAt};}),
    receipts:r.receipts.map(x=>({id:x.id,date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,
     status:x.voidedAt?'VOIDED' as const:x.failed?'FAILED' as const:x.confirmed?'CONFIRMED' as const:'PENDING' as const,transactionId:x.transactionId}))};
   return {row,money,submission:r.submission};
- }).filter(({row})=>(!input.serverId||row.serverId===input.serverId)&&(!input.status||row.status===input.status)
-  &&(!q||[row.server,row.vm,row.login,row.paypal,row.email,row.reference].some(s=>s?.toLocaleLowerCase().includes(q))));
+ }).filter(({row})=>(!input.serverId||row.serverId===input.serverId||row.members.some(m=>m.serverId===input.serverId))&&(!input.status||row.status===input.status)
+  &&(!q||[row.server,row.vm,row.login,row.paypal,row.email,row.reference,...row.members.flatMap(m=>[m.server,m.vm])].some(s=>s?.toLocaleLowerCase().includes(q))));
  return {entries:filtered,servers,paypals};
 }
 
@@ -88,7 +91,7 @@ function selectView(entries:PayoutEntry[],view:PayoutReportView,day:string){
 function focusTotals(entries:PayoutEntry[],view:PayoutReportView,day:string){
  const amounts=view==='RECEIVED_TODAY'?sumAmounts(entries.flatMap(entry=>confirmedReceipts(entry,day))):
   sumAmounts(entries.map(entry=>({currency:entry.row.currency,amount:view==='WAITING'?entry.money.remaining:entry.row.amount})));
- return {requests:entries.length,vms:new Set(entries.map(entry=>entry.row.vmId)).size,amounts};
+ return {requests:entries.length,vms:new Set(entries.flatMap(entry=>[entry.row.vmId,...entry.row.members.map(m=>m.vmId)])).size,amounts};
 }
 function reportSummary(entries:PayoutEntry[],receiptDay?:string){
  const totals=new Map<string,{prepared:number;sent:number;waiting:number;received:number;unknown:number}>();

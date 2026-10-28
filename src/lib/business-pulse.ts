@@ -19,8 +19,9 @@ export const PROBLEM_LABEL:Record<ScanProblem,string>={EARNAPP:'EarnApp không h
 const micros=(s:string)=>{if(!/^\d+(\.\d{1,6})?$/.test(s))return null;const [w,d='']=s.split('.');return BigInt(w)*BigInt(1000000)+BigInt(d.padEnd(6,'0'));};
 const text=(n:bigint)=>{const unit=BigInt(1000000),d=(n%unit).toString().padStart(6,'0').replace(/0+$/,'');return (n/unit).toString()+(d?'.'+d:'');};
 export function vietnamDay(now:Date){return new Date(now.getTime()+7*3600e3).toISOString().slice(0,10);}
-export function businessPulse(input:PulseInput[],moneyRead:boolean,now:Date=new Date()){
- const day=vietnamDay(now),start=Date.parse(day+'T00:00:00+07:00');
+/** windowStart: start of the money-trend window (default: today 00:00 Vietnam; the 10:00 Telegram report uses the last 24 h). */
+export function businessPulse(input:PulseInput[],moneyRead:boolean,now:Date=new Date(),windowStart?:Date){
+ const day=vietnamDay(now),start=windowStart?windowStart.getTime():Date.parse(day+'T00:00:00+07:00');
  const rows=input.map(v=>{
   const scan=v.health,validScan=!!scan&&monitorFreshness(scan.at,now)==='FRESH'&&(!scan.monitor||scan.monitor.configVersion===MONITOR_POLICY.version);
   const monitor=monitorProjection(scan?.monitor,now),nativeState=scan?.monitor?.vmState?.state;

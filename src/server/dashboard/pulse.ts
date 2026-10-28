@@ -9,7 +9,7 @@ import {MONITOR_POLICY,type MonitorObservationInput} from '@/lib/monitor-policy'
 import {readMonitorHeartbeats,isMonitorCanary} from './monitor';
 
 /** Reads only the authorized workspace. Legacy events without binding are not proof of this VM/round. */
-export async function readBusinessPulse(scope:ActorScope,workspace:Awaited<ReturnType<typeof readVMWorkspace>>,accounts:Awaited<ReturnType<typeof readVmAccounts>>|null,db:PrismaClient,now:Date){
+export async function readBusinessPulse(scope:ActorScope,workspace:Awaited<ReturnType<typeof readVMWorkspace>>,accounts:Awaited<ReturnType<typeof readVmAccounts>>|null,db:PrismaClient,now:Date,windowStart?:Date){
  const active=new Set(workspace.servers.filter(s=>!s.archivedAt).map(s=>s.id));
  const vms=workspace.vms.filter(v=>!v.archivedAt&&active.has(v.serverId)),ids=vms.map(v=>v.id),moneyRead=workspace.sdkMoney.read;
  const sdkIds=vms.flatMap(v=>v.sdks.filter(s=>s.current).map(s=>s.recordId));
@@ -54,5 +54,5 @@ export async function readBusinessPulse(scope:ActorScope,workspace:Awaited<Retur
   return {id:v.id,serverId:v.serverId,server:v.server,code:v.code,cycle:v.cycle,status:v.ops,recordedIssue,monitorCanary:canaryServers.has(v.serverId),agentHeartbeatFreshness:heartbeats.find(h=>h.serverId===v.serverId)?.agent.freshness,hasAccount:!!acc,hasPaypal:!!acc?.paypal?.emailId,payout:requests.some(r=>r.vmId===v.id&&r.cycle===v.cycle),health,
    money:moneyRead&&cur?{amount:cur.amount,observedAt:cur.amountObservedAt,failedAt:cur.amountFailedAt}:null,points};
  });
- return {...businessPulse(input,moneyRead,now),heartbeats};
+ return {...businessPulse(input,moneyRead,now,windowStart),heartbeats};
 }

@@ -2,7 +2,7 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.6.0",
+  "version": "1.7.1",
   "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Only withdrawal prepare/status/receipts retain approval. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
@@ -640,6 +640,13 @@
      "note": {
       "type": "string",
       "nullable": true
+     },
+     "members": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/WithdrawalMember"
+      },
+      "description": "Merged payout (27/10/2026): other VMs whose SDKs were merged into this EarnApp account; empty for a normal request. The money is the request money, counted once."
      }
     },
     "required": [
@@ -661,7 +668,8 @@
      "settled",
      "consumed",
      "money",
-     "note"
+     "note",
+     "members"
     ]
    },
    "WithdrawalDetail": {
@@ -767,6 +775,13 @@
       "items": {
        "$ref": "#/components/schemas/HistoryLine"
       }
+     },
+     "members": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/WithdrawalMember"
+      },
+      "description": "Merged payout (27/10/2026): other VMs whose SDKs were merged into this EarnApp account; empty for a normal request. The money is the request money, counted once."
      }
     },
     "required": [
@@ -790,7 +805,8 @@
      "money",
      "note",
      "receipts",
-     "history"
+     "history",
+     "members"
     ]
    },
    "ActiveJob": {
@@ -1189,6 +1205,28 @@
        "items",
        "nextCursor"
       ]
+     },
+     "mergedInto": {
+      "type": "object",
+      "nullable": true,
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "primaryVmId": {
+        "type": "string"
+       },
+       "consumed": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "withdrawalId",
+       "primaryVmId",
+       "consumed"
+      ],
+      "description": "This VM's SDK was merged into another VM's withdrawal for this round; act on that withdrawal"
      }
     },
     "required": [
@@ -1211,7 +1249,8 @@
      "sdk",
      "balance",
      "withdrawal",
-     "pastCycles"
+     "pastCycles",
+     "mergedInto"
     ]
    },
    "EarnAppAccount": {
@@ -2047,6 +2086,13 @@
        "requestedOn": {
         "type": "string",
         "format": "date"
+       },
+       "members": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "description": "VM ids merged in"
        }
       },
       "required": [
@@ -2058,7 +2104,8 @@
        "amount",
        "currency",
        "submission",
-       "requestedOn"
+       "requestedOn",
+       "members"
       ]
      },
      "current": {
@@ -7328,6 +7375,128 @@
      "data",
      "error"
     ]
+   },
+   "WithdrawalMember": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "vmId": {
+      "type": "string"
+     },
+     "cycle": {
+      "type": "integer"
+     },
+     "consumed": {
+      "type": "boolean",
+      "description": "recorded as recreated with this payout"
+     },
+     "share": {
+      "type": "string",
+      "nullable": true,
+      "description": "reference share (money rights only); never income"
+     }
+    },
+    "required": [
+     "vmId",
+     "cycle",
+     "consumed",
+     "share"
+    ]
+   },
+   "MemberInput": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "vmId": {
+      "type": "string"
+     },
+     "expectedCycle": {
+      "type": "integer"
+     },
+     "expectedVmRevision": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "vmId",
+     "expectedCycle",
+     "expectedVmRevision"
+    ]
+   },
+   "MembersAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "added": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       },
+       "revisionAfter": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "withdrawalId",
+       "added",
+       "revisionAfter"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "$ref": "#/components/schemas/Withdrawal"
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkMembersAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/MembersAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -8553,6 +8722,14 @@
          "requestedAt": {
           "type": "string",
           "format": "date-time"
+         },
+         "members": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+           "$ref": "#/components/schemas/MemberInput"
+          },
+          "description": "Merged payout: other VMs whose SDKs were merged into this EarnApp account (optional)"
          }
         },
         "required": [
@@ -12562,6 +12739,225 @@
       }
      }
     }
+   }
+  },
+  "/vms/{id}/recreated": {
+   "post": {
+    "summary": "Fleet RECREATE_VM readback: record the real recreation (same rule as the web button: payout received or SUS) and write the new machine UUID",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "machineUuid": {
+          "type": "string",
+          "format": "uuid"
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 300,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "machineUuid"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean"
+          },
+          "data": {
+           "type": "object",
+           "properties": {
+            "machineUuid": {
+             "type": "string"
+            },
+            "uuidWritten": {
+             "type": "boolean"
+            },
+            "cycle": {
+             "type": "integer",
+             "nullable": true
+            },
+            "recreated": {
+             "type": "object"
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}/members": {
+   "post": {
+    "summary": "Add VMs whose SDKs were merged into this withdrawal's EarnApp account (operation PAYOUT, ADMIN approval)",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "members": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+           "$ref": "#/components/schemas/MemberInput"
+          }
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedRequestRevision",
+         "members"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkMembersAck"
+        }
+       }
+      }
+     },
+     "202": {
+      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalRequired"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN / APPROVAL_REJECTED (ADMIN đã từ chối; lệnh không ghi, key này kết thúc); privileged LOCKED gate returns APPROVAL_REJECTED with details.status LOCKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "410": {
+      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApprovalExpired"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "description": " Per PayPal: at most two distinct receiving emails per Vietnam calendar day, including open preparations. PAYPAL_DAILY_LIMIT (409) includes paypalId/date/timeZone/limit/used/reserved/remaining. No third email is assigned or held; keep the draft. Server clock is authoritative, not requestedAt/observedAt."
    }
   }
  }

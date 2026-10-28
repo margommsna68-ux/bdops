@@ -1,5 +1,9 @@
 import {z} from 'zod';
 
+// Storage tolerance only. Source/receipt clocks remain intact; future evidence
+// still has UNKNOWN freshness and cannot prove a healthy axis.
+export const MAX_MONITOR_CLOCK_SKEW_MS=5000;
+
 /** Wire contract shared by the web and collectors. Changes require a new version. Seconds unless named otherwise. */
 export const MONITOR_POLICY=Object.freeze({
  version:1, inventorySeconds:60, guestSeconds:600, proxySeconds:600, healthStaleSeconds:1200,

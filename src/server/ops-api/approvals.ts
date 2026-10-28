@@ -10,8 +10,8 @@ import {assertOpsToken} from './context';
 // a later retry replays through the service's own idempotency. A different body under an approved key is refused.
 export const APPROVAL_TTL_MS=15*60000;
 export type ApprovalStatus='PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'|'CONSUMED'|'LOCKED';
-export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT'] as const;
-export const ACTION_LABEL:Record<string,string>={BATCH:'Lô lệnh (nhiều mục cần duyệt)',ACCOUNT_CREDENTIALS:'Lấy thông tin đăng nhập tài khoản EarnApp',WITHDRAWAL_PREPARE:'Chuẩn bị rút tiền (giữ email PayPal)',WITHDRAWAL_STATUS:'Ghi trạng thái yêu cầu rút',WITHDRAWAL_RECEIPT:'Ghi tiền về PayPal',VM_PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM',SDK_REVEAL:'Xem mã SDK đầy đủ'};
+export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT','WITHDRAWAL_MEMBERS'] as const;
+export const ACTION_LABEL:Record<string,string>={BATCH:'Lô lệnh (nhiều mục cần duyệt)',ACCOUNT_CREDENTIALS:'Lấy thông tin đăng nhập tài khoản EarnApp',WITHDRAWAL_PREPARE:'Chuẩn bị rút tiền (giữ email PayPal)',WITHDRAWAL_MEMBERS:'Gộp thêm VM vào lệnh rút',WITHDRAWAL_STATUS:'Ghi trạng thái yêu cầu rút',WITHDRAWAL_RECEIPT:'Ghi tiền về PayPal',VM_PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM',SDK_REVEAL:'Xem mã SDK đầy đủ'};
 export function canonical(x:unknown):string{
   if(Array.isArray(x))return '['+x.map(canonical).join(',')+']';
   if(x&&typeof x==='object')return '{'+Object.keys(x as object).sort().filter(k=>(x as Record<string,unknown>)[k]!==undefined).map(k=>JSON.stringify(k)+':'+canonical((x as Record<string,unknown>)[k])).join(',')+'}';
@@ -27,7 +27,9 @@ export async function approvalSummary(db:PrismaClient,projectId:string,action:st
   if(typeof body.amount==='string')out.amount=body.amount+' '+(typeof body.currency==='string'?body.currency.toUpperCase():'');
   if(typeof body.status==='string')out.status=body.status;
   if(typeof body.paypalEmailId==='string'){const e=await db.payPalEmail.findFirst({where:{id:body.paypalEmailId,paypal:{projectId}},select:{email:true,paypal:{select:{code:true}}}});if(e)out.paypal=e.paypal.code+' → '+e.email.replace(/^(.).*(@.*)$/,'$1***$2');}
-  if(action==='WITHDRAWAL_STATUS'||action==='WITHDRAWAL_RECEIPT')out.withdrawalId=params[0];
+  if(action==='WITHDRAWAL_STATUS'||action==='WITHDRAWAL_RECEIPT'||action==='WITHDRAWAL_MEMBERS')out.withdrawalId=params[0];
+  // Merged payout (27/10/2026): the ADMIN sees which VMs are merged in.
+  if(Array.isArray(body.members)){const ids=body.members.map(m=>(m as {vmId?:unknown})?.vmId).filter((x):x is string=>typeof x==='string');const vms=await db.virtualMachine.findMany({where:{id:{in:ids},server:{projectId}},select:{id:true,code:true,server:{select:{code:true}}}});out.members=ids.map(i=>{const v=vms.find(x=>x.id===i);return v?v.server.code+' / '+v.code:i;});}
   if(action==='SDK_REVEAL'){const s=await db.sdkRecord.findFirst({where:{id:params[0],projectId},select:{code:true,vm:{select:{code:true,server:{select:{code:true}}}}}});if(s){out.sdk=maskSdk(s.code);if(s.vm)out.vm=s.vm.server.code+' / '+s.vm.code;}}
   if(typeof body.jobId==='string')out.jobId=body.jobId;
   if(typeof body.transactionId==='string')out.transactionId=body.transactionId;

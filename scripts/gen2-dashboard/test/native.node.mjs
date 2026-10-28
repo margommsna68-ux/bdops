@@ -29,7 +29,7 @@ test('wrong VM code and mismatching proxy addresses never produce verified axes'
  const s=sample();s.vmCode='VM_063';const [o]=mergeNativeObservations(project([s]),[target],config,now).observations;assert.equal(o.monitor,undefined);
  const p=sample();p.proxyEvidence.proxyAddressFingerprint='b'.repeat(64);const [v]=mergeNativeObservations(project([p]),[target],config,now).observations;assert.equal(v.monitor.proxy,undefined);
 });
-test('enrollment cannot silently expand to another project or multiple canary hosts',()=>{
+test('enrollment rejects another project and duplicate canary hosts',()=>{
  assert.throws(()=>parseMonitorConfig({...config,bindings:[{...config.bindings[0],projectId:'other'}]},'p'));
  assert.throws(()=>parseMonitorConfig({...config,bindings:[...config.bindings,...config.bindings]},'p'));
 });
@@ -39,4 +39,34 @@ test('CLI rejects a server filter outside native enrollment before either lane s
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'monitor-config-')),file=path.join(dir,'config.json');
  try{await fs.writeFile(file,JSON.stringify(config));await assert.rejects(()=>main(['--project','p','--batch-size','25','--server','other','--monitor-config',file,'--state-dir',path.join(dir,'state')]),/MONITOR_SERVER_MISMATCH/);assert.deepEqual(await fs.readdir(dir),['config.json']);}
  finally{await fs.unlink(file);const state=path.join(dir,'state');try{for(const name of await fs.readdir(state))await fs.unlink(path.join(state,name));await fs.rmdir(state);}catch(e){if(e.code!=='ENOENT')throw e;}await fs.rmdir(dir);}
+});
+
+test('monitor config supports Central plus AN01 with at most eight unique exact ID/UUID/code bindings',()=>{
+ const second={projectId:'p',serverId:'central-web',serverCode:'MOON01',serverUuid:central};
+ const raw={...config,bindings:[config.bindings[0],second]};
+ assert.deepEqual(parseMonitorConfig(raw,'p').bindings,raw.bindings);
+ for(const b of [{...second,serverId:'web'},{...second,serverUuid:peer},{...second,serverCode:'moon-05'},{...second,projectId:'other'}])assert.throws(()=>parseMonitorConfig({...raw,bindings:[raw.bindings[0],b]},'p'),/MONITOR_CONFIG_INVALID/);
+ const eight=Array.from({length:8},(_,i)=>({projectId:'p',serverId:'s'+i,serverCode:'AN'+i,serverUuid:`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`}));
+ assert.equal(parseMonitorConfig({...config,bindings:eight},'p').bindings.length,8);
+ assert.throws(()=>parseMonitorConfig({...config,bindings:[...eight,{...second,serverCode:'extra'}]},'p'),/MONITOR_CONFIG_INVALID/);
+ assert.throws(()=>parseMonitorConfig({...config,bindings:[]},'p'),/MONITOR_CONFIG_INVALID/);
+});
+
+test('two bound hosts retain exact per-host VM UUID/code mapping and never promote another host sample',()=>{
+ const secondMachine='b96d80b1-1111-4111-8111-111111111111';
+ const multi=parseMonitorConfig({...config,bindings:[...config.bindings,{projectId:'p',serverId:'central-web',serverCode:'MOON01',serverUuid:central}]},'p');
+ const second={...target,id:'vm2',serverId:'central-web',serverCode:'MOON01',code:'VM_001',machineUuid:secondMachine};
+ const s={...sample(),machineUuid:secondMachine,vmCode:'VM_001'};
+ const p=project();p.nativeSnapshots.push({serverUuid:central,observedAt:at,samples:[s]});
+ const out=mergeNativeObservations(p,[target,second],multi,now).observations;
+ assert.equal(out.length,2);assert.equal(out.find(o=>o.uuid===machine).serverId,peer);assert.equal(out.find(o=>o.uuid===secondMachine).serverId,central);
+ p.nativeSnapshots[1].samples[0].vmCode='VM_002';assert.equal(mergeNativeObservations(p,[target,second],multi,now).observations.length,1);
+});
+
+test('multi-binding config rejects a partial --server publisher before acquiring its lock',async()=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path'),{main}=await import('../run.mjs');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'monitor-multi-config-')),file=path.join(dir,'config.json');
+ try{await fs.writeFile(file,JSON.stringify({...config,bindings:[...config.bindings,{projectId:'p',serverId:'central-web',serverCode:'MOON01',serverUuid:central}]}));
+  await assert.rejects(()=>main(['--project','p','--batch-size','25','--server','web','--monitor-config',file,'--state-dir',path.join(dir,'state')]),/MONITOR_SERVER_MISMATCH/);assert.deepEqual(await fs.readdir(dir),['config.json']);
+ }finally{await fs.unlink(file);await fs.rmdir(dir);}
 });

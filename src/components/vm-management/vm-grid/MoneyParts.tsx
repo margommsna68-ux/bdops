@@ -24,7 +24,12 @@ export function balanceLine(ops:OpsRow|undefined,read:boolean):MoneyLine|null{
   if(read&&b.amount!=null)return {lead:money(b.amount,b.currency),text:unknown?'':cond,sub,tone};
   return {text:unknown?'Đã kiểm tra':'Đã kiểm tra · '+cond,sub,tone};
 }
+// Merged payout (27/10/2026): a member VM shows the request it was merged into; the primary says how many VMs are in it.
 export function requestLine(ops:OpsRow|undefined):MoneyLine|null{
+  const line=baseLine(ops),g=ops?.merge;if(!line||!g)return line;
+  return g.role==='MEMBER'?{...line,sub:'Đã gộp vào '+g.primaryWhere+(line.sub?' · '+line.sub:'')}:{...line,text:line.text+' · gộp '+(g.members.length+1)+' VM'};
+}
+function baseLine(ops:OpsRow|undefined):MoneyLine|null{
   const r=ops?.request;if(!r)return null;const m=r.money,who=r.paypal+' · '+r.email;
   if(ops!.milestone==='PREPARING')return {text:'Đang chuẩn bị rút'+(m?' '+money(m.amount,m.currency):''),sub:who+' · chưa gửi trên EarnApp',tone:'waiting'};
   if(ops!.milestone==='UNKNOWN')return {text:'Chưa xác định kết quả rút',sub:'Đối chiếu lịch sử EarnApp trước khi làm tiếp',tone:'failed'};

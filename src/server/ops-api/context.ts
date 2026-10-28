@@ -9,6 +9,7 @@ import {assertScopedTargets,assertScopedSdkCodes,assertUnrestrictedServers} from
 /** `also`: more operations this write needs (e.g. BALANCE_WRITE when an SDK observation carries money), checked with `operation`. */
 export interface OpsAuth {tokenId:string;userId:string;operation:string|null;also?:string[];targets?:unknown;unrestrictedServers?:boolean}
 const store=new AsyncLocalStorage<OpsAuth>();
+export const currentOpsAuth=()=>store.getStore();
 export const runWithOpsAuth=<T>(auth:OpsAuth,fn:()=>Promise<T>)=>store.run(auth,fn);
 export async function assertOpsToken(tx:Prisma.TransactionClient,scope:{userId:string;projectId:string}){
   const auth=store.getStore();if(!auth)return;

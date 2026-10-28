@@ -37,6 +37,10 @@ export async function assertServerWebRequest(db:ScopeDB,userId:string,path:strin
   return;
  }
  const [area,action]=path.split('.');
+ // These services resolve stored operation IDs and recheck their server inside the transaction.
+ if(area==='fleetCommands'&&['control','create','detail','list','cancel'].includes(action)){
+  await assertScopedTargets(db,current,input);return;
+ }
  if(!PROJECT_READ.has(path)&&!(area==='vmManagement'&&VM.has(action))&&!(area==='vmOps'&&OPS.has(action))&&!(area==='proxyManagement'&&PROXY.has(action)))throw new ProxyDomainError('FORBIDDEN','Thao tác kho chung hoặc toàn dự án không thuộc phạm vi server được giao');
  if(area==='vmManagement'&&['bulkPreview','bulkApply'].includes(action)&&!['SDK','NOTE'].includes(String(input.kind)))throw new ProxyDomainError('FORBIDDEN','Kho chung do ADMIN cấp vào server trước');
  await assertScopedTargets(db,current,input,{write:!(area==='proxyManagement'&&/^(copy|export)/.test(action))});

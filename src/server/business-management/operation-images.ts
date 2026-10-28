@@ -25,7 +25,9 @@ const fields:Record<BusinessResource,string[]>={
  PAYOUT:['earnAppId','paypalId','paypalEmailId','vmId','startedAt','endedAt'],
  VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
  PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt'],
- VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','closedAt'],
+ VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','payoutMemberId','closedAt'],
+ // Merged payout member (27/10/2026): another VM whose SDK was merged into the request's EarnApp account.
+ PAYOUT_MEMBER:['requestId','vmId','cycle','sdkId','shareAmount','shareObservedAt','removedAt','removedById','consumedAt','consumedReason','revision'],
  SDK:['code','vmId','holderVmId','heldAt','heldById','amount','currency','amountAt','amountById','amountObservedAt','amountSource','amountFailedAt','amountVmId','amountCycle','amountFailedVmId','amountFailedCycle','note','noteAt','noteById','linkState','linkedEarnAppId','linkedVmId','linkedCycle','linkedAt','linkedById','confirmedAt','confirmedById','revision'],
  // The SDK position of a VM (its mirror): lets undo see a code placed on that VM later by someone else.
  SDK_SLOT:['sdkId'],
@@ -54,6 +56,7 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
  if(type==='VM_OPS')row=await db.vmOperation.findFirst({where:{id,projectId}});
  if(type==='PAYOUT_REQUEST')row=await db.earnPayoutRequest.findFirst({where:{id,projectId}});
  if(type==='VM_CYCLE')row=await db.vmCycle.findFirst({where:{id,projectId}});
+ if(type==='PAYOUT_MEMBER')row=await db.earnPayoutMember.findFirst({where:{id,projectId}});
  if(type==='SDK')row=await db.sdkRecord.findFirst({where:{id,projectId}});
  return row?capture(type,row):null;
 }
@@ -66,18 +69,19 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  // Facts that never go back (19/10/2026): an email given to its first EarnApp stays used forever, with or without money on it; a
  // recorded recreation keeps its closed round, its closed EarnApp and the used receipt (see operation-history/undo-rules.ts).
  if(image.resource==='PAYPAL_EMAIL'&&image.after.usedEarnAppId&&!image.before?.usedEarnAppId)throw new ProxyDomainError('INVALID_INPUT','Email PayPal đã cấp cho EarnApp giữ dấu đã dùng vĩnh viễn; dùng Bỏ gán thay vì hoàn tác');
- if((image.resource==='VM_CYCLE'&&!image.before)||(image.resource==='EARNAPP'&&image.after.closedAt&&!image.before?.closedAt)||(image.resource==='PAYOUT_REQUEST'&&image.after.consumedAt&&!image.before?.consumedAt))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận tạo lại VM chỉ để xem; không hoàn tác');
+ if((image.resource==='VM_CYCLE'&&!image.before)||(image.resource==='EARNAPP'&&image.after.closedAt&&!image.before?.closedAt)||(['PAYOUT_REQUEST','PAYOUT_MEMBER'].includes(image.resource)&&image.after.consumedAt&&!image.before?.consumedAt))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận tạo lại VM chỉ để xem; không hoàn tác');
  // SDK store: a link to EarnApp is never taken back; positions are restored through the mirror (see vm-management/sdk-store.ts).
  if(image.resource==='SDK_SLOT')return;
  if(image.resource==='SDK'){await restoreSdkImage(tx,projectId,image,actorId);return;}
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
- if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt','submittedAt','holdAt','loginIssueAt'].includes(key)?new Date(String(value)):value;}}
+ if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt','submittedAt','holdAt','loginIssueAt','removedAt','shareObservedAt'].includes(key)?new Date(String(value)):value;}}
  else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK','ACCOUNT_BATCH'].includes(image.resource))data.archivedAt=new Date();
  else if(image.resource==='EARNAPP'){await tx.earnAppPayout.deleteMany({where:{earnAppId:image.id}});await tx.earnAppAccount.delete({where:{id:image.id}});return;} // created by the undone operation
  else if(image.resource==='PAYOUT'){await tx.earnAppPayout.deleteMany({where:{id:image.id}});return;} // history period opened by the undone operation
  else if(image.resource==='VM_OPS'){await tx.vmOperation.delete({where:{id:image.id}});return;} // first record of this VM: back to "Chưa ghi"
- else if(image.resource==='PAYOUT_REQUEST'){if(await tx.fundTransaction.findFirst({where:{payoutRequestId:image.id},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Yêu cầu rút đã có khoản tiền về liên kết; giữ yêu cầu để đối chiếu');await tx.earnPayoutRequest.delete({where:{id:image.id}});return;}
+ else if(image.resource==='PAYOUT_MEMBER'){await tx.earnPayoutMember.deleteMany({where:{id:image.id}});return;} // attached by the undone operation (already gone with its request)
+ else if(image.resource==='PAYOUT_REQUEST'){if(await tx.fundTransaction.findFirst({where:{payoutRequestId:image.id},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','Yêu cầu rút đã có khoản tiền về liên kết; giữ yêu cầu để đối chiếu');await tx.earnPayoutMember.deleteMany({where:{requestId:image.id}});await tx.earnPayoutRequest.delete({where:{id:image.id}});return;}
  else if(['COST','FUND','WITHDRAWAL','PROFIT','TEAM_RECEIPT','COLLECTOR_EXPENSE'].includes(image.resource))data.voidedAt=new Date();
  else throw new ProxyDomainError('INVALID_INPUT');
  if(image.resource!=='PAYOUT')data.revision={increment:1};
@@ -102,6 +106,10 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
   if(data.state==='REQUESTED'&&(data.submission==='PREPARING'||data.submission==='UNKNOWN'))await assertPayoutDailySlot(tx,projectId,String(data.paypalId),String(data.paypalEmailId));
   await tx.earnPayoutRequest.update({where:{id:image.id},data:data as Prisma.EarnPayoutRequestUncheckedUpdateInput});
  }
+ // Merged payout (review 27/10/2026): undo never puts a VM into two open requests at once.
+ if(image.resource==='PAYOUT_MEMBER'&&before&&!before.removedAt&&image.after?.removedAt){const {openPayoutOf}=await import('../vm-ops/payout-members');const other=await openPayoutOf(tx,projectId,String(before.vmId),Number(before.cycle),String(before.requestId));if(other)throw new ProxyDomainError('INVALID_INPUT','VM đã vào lệnh rút khác ('+other.where+'); không hoàn tác bỏ gộp');}
+ if(image.resource==='PAYOUT_REQUEST'&&data.state==='REQUESTED'&&image.after?.state!=='REQUESTED'){const {assertMembersFree}=await import('../vm-ops/payout-members');try{await assertMembersFree(tx,projectId,image.id);}catch(e){throw new ProxyDomainError('INVALID_INPUT',e instanceof ProxyDomainError?e.message.replace(/^[A-Z_]+: /,''):'VM đã vào lệnh rút khác; không hoàn tác');}}
+ if(image.resource==='PAYOUT_MEMBER')await tx.earnPayoutMember.update({where:{id:image.id},data:data as Prisma.EarnPayoutMemberUncheckedUpdateInput});
  if(image.resource==='VM_CYCLE')throw new ProxyDomainError('INVALID_INPUT');
  if(image.resource==='ACCOUNT_BATCH')await tx.accountPurchaseBatch.update({where:{id:image.id},data:data as Prisma.AccountPurchaseBatchUncheckedUpdateInput});
  if(image.resource==='PACKAGE')await tx.proxyProviderAccount.update({where:{id:image.id},data:data as Prisma.ProxyProviderAccountUncheckedUpdateInput});
@@ -125,6 +133,7 @@ export function describeBusinessImage(image:BusinessImage){
   if(image.resource==='SDK')return (row.vmId?'Đang trên VM':'Trong kho')+' · '+(row.amount!=null?formatSdkAmount(String(row.amount)):'chưa ghi tiền')+' · '+SDK_STATE_LABEL[row.linkState as SdkLinkState]+(row.note?' · '+String(row.note).slice(0,60):'');
   if(image.resource==='VM_OPS')return 'Lượt '+row.cycle+' · '+(row.status?String(row.status):'Chưa ghi');
   if(image.resource==='VM_CYCLE')return 'Lượt '+row.number+' đã đóng ('+row.reason+')';
+  if(image.resource==='PAYOUT_MEMBER')return 'VM gộp lượt '+row.cycle+(row.removedAt?' · đã bỏ gộp':'')+(row.consumedAt?' · đã dùng để tạo lại VM':'');
   if(image.resource==='PAYOUT_REQUEST')return `${row.amount} ${row.currency} · ${row.state}`+(row.consumedAt?' · đã dùng để tạo lại VM':'');
   if(image.resource==='PROFIT')return `Lợi nhuận ${row.netProfit} ${row.currency} · ${row.settled?'Đã chốt':'Bản tính'}`;
   if(row.amount){const status=image.resource==='FUND'?row.failed?'Không về':row.confirmed?'Đã nhận':'Chờ nhận':image.resource==='WITHDRAWAL'?row.type==='MIXING'?'Chuyển nội bộ':row.paidToTeam?'Đã về':'Chờ về':image.resource==='SPLIT_PAYMENT'?row.paid?'Đã ghi trả':'Chưa ghi trả':'Chi phí';return `${row.amount} ${row.currency||''} · ${status}`;}
@@ -132,5 +141,5 @@ export function describeBusinessImage(image:BusinessImage){
   return [row.status,row.notes].filter(Boolean).join(' · ')||'Đã lưu';
  };
  const secrets=['password','twoFaCurrent','twoFa','token','hotmailToken','twoFaLink','smsLink'],secretChanged=b&&secrets.some(k=>s[k]!==b[k]);
- return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',PAYOUT:'Email nhận của EarnApp',VM_OPS:'Tình trạng VM',PAYOUT_REQUEST:'Yêu cầu rút EarnApp',VM_CYCLE:'Lượt VM đã đóng',SDK:'SDK (Kho SDK)',SDK_SLOT:'SDK của VM',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:(image.after?format(s):'Đã gỡ (hoàn tác)')+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:['VM_OPS','VM_CYCLE','PAYOUT_REQUEST'].includes(image.resource)?'Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật':b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
+ return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',PAYOUT:'Email nhận của EarnApp',VM_OPS:'Tình trạng VM',PAYOUT_REQUEST:'Yêu cầu rút EarnApp',PAYOUT_MEMBER:'VM gộp vào lệnh rút',VM_CYCLE:'Lượt VM đã đóng',SDK:'SDK (Kho SDK)',SDK_SLOT:'SDK của VM',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:(image.after?format(s):'Đã gỡ (hoàn tác)')+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:['VM_OPS','VM_CYCLE','PAYOUT_REQUEST','PAYOUT_MEMBER'].includes(image.resource)?'Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật':b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
 }

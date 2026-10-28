@@ -4,9 +4,16 @@ import {sanitizeNativeSource} from '../../integrations/gen2-monitor-canary/engin
 import {serverOf,codeOf,uuidOf} from './cache.mjs';
 const id=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(s);
 export function parseMonitorConfig(v,projectId){
- if(!v||v.version!==1||!uuidOf(v.centralUuid)||!Array.isArray(v.bindings)||v.bindings.length!==1)throw Error('MONITOR_CONFIG_INVALID');
- const b=v.bindings[0];if(b.projectId!==projectId||!id(b.serverId)||!uuidOf(b.serverUuid)||!id(b.serverCode))throw Error('MONITOR_CONFIG_INVALID');
- return {version:1,centralUuid:uuidOf(v.centralUuid),bindings:[{projectId,serverId:b.serverId,serverCode:b.serverCode,serverUuid:uuidOf(b.serverUuid)}]};
+ if(!v||Array.isArray(v)||Object.keys(v).some(k=>!['version','centralUuid','bindings'].includes(k))||v.version!==1||!id(projectId)||!uuidOf(v.centralUuid)||!Array.isArray(v.bindings)||v.bindings.length<1||v.bindings.length>8)throw Error('MONITOR_CONFIG_INVALID');
+ const ids=new Set(),uuids=new Set(),codes=new Set();
+ const bindings=v.bindings.map(b=>{
+  if(!b||Array.isArray(b)||Object.keys(b).some(k=>!['projectId','serverId','serverCode','serverUuid'].includes(k))||b.projectId!==projectId||!id(b.serverId)||!uuidOf(b.serverUuid)||!id(b.serverCode))throw Error('MONITOR_CONFIG_INVALID');
+  const uuid=uuidOf(b.serverUuid),code=serverOf(b.serverCode);
+  if(ids.has(b.serverId)||uuids.has(uuid)||codes.has(code))throw Error('MONITOR_CONFIG_INVALID');
+  ids.add(b.serverId);uuids.add(uuid);codes.add(code);
+  return {projectId,serverId:b.serverId,serverCode:b.serverCode,serverUuid:uuid};
+ });
+ return {version:1,centralUuid:uuidOf(v.centralUuid),bindings};
 }
 export async function readNativeSnapshots(machineRoot,config,now=Date.now()){
  const out=[];

@@ -8,6 +8,7 @@ import {runBusinessCommand,type BusinessCollector} from '../business-management/
 import {authorizeVM} from '../vm-management/repository';
 import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
 import {releaseForRecreate} from '../vm-management/sdk-store';
+import {memberOf} from './payout-members';
 import {currentProxyOf,loadChangeVM,markVmBlocked} from '../vm-management/proxy-change';
 import {assertInfrastructureAction} from '../permissions/infrastructure';
 const canBlock=(scope:ActorScope)=>{try{assertInfrastructureAction(scope,'BLOCK');return true;}catch{return false;}};
@@ -103,6 +104,23 @@ export async function currentRoundPayout(tx:Tx|PrismaClient,projectId:string,vm:
 export function moneyOfRequest(r:{amount:Prisma.Decimal;currency:string;state:string;settledAt:Date|null;shortfall:Prisma.Decimal|null;consumedAt:Date|null;receipts:{amount:Prisma.Decimal;currency:string;confirmed:boolean;failed:boolean;voidedAt:Date|null}[]}){
   return requestMoney({amount:r.amount.toString(),currency:r.currency,state:r.state,settledAt:r.settledAt?.toISOString()??null,shortfall:r.shortfall?.toString()??null,consumedAt:r.consumedAt?.toISOString()??null,receipts:r.receipts.map(x=>({amount:x.amount.toString(),currency:x.currency,confirmed:x.confirmed,failed:x.failed,voided:!!x.voidedAt}))});
 }
+/** The recreate decision of recordRecreated as a read-only rule (fleet RECREATE_VM precondition, 28/10/2026): payout of this round
+ * RECEIVED and not consumed (own request or merged payout of the primary VM), or EarnApp SUS (own, or the primary's for a merged member). */
+export async function recreateRule(tx:Tx|PrismaClient,projectId:string,vm:{id:string;operation:{cycle:number;status:VmOpsStatus|null}|null}):Promise<{refusal:string|null;reason:'PAYOUT_RECEIVED'|'SUSPENDED'|null}>{
+  const cycle=vm.operation?.cycle??1;
+  const {earnApp,request,money}=await currentRoundPayout(tx,projectId,vm);
+  const paid=!!request&&money?.phase==='RECEIVED'&&!request.consumedAt,sus=vm.operation?.status==='SUSPENDED';
+  const merged=!request||request.state!=='REQUESTED'?await memberOf(tx,projectId,vm.id,cycle):null,mFree=!!merged&&!merged.member.consumedAt;
+  const mPaid=mFree&&merged!.money.phase==='RECEIVED',mSus=mFree&&!mPaid&&merged!.primarySus,viaMember=mPaid||mSus;
+  if(merged&&!viaMember&&!sus){
+    const m=merged.money,why=merged.member.consumedAt?'Khoản gộp này đã dùng để tạo lại VM':m.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':m.phase==='REVIEW'?'Tiền về cần đối chiếu trước':'Lệnh rút chưa xong';
+    return {refusal:'VM đã gộp vào lệnh rút của '+merged.primaryWhere+': '+why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp của VM chính bị SUS',reason:null};
+  }
+  if(paid||mPaid)return {refusal:null,reason:'PAYOUT_RECEIVED'};
+  if(sus||viaMember)return {refusal:null,reason:'SUSPENDED'};
+  const why=!earnApp?'VM chưa có tài khoản EarnApp ở lượt này':!request?'Chưa có yêu cầu rút cho lượt này':request.consumedAt?'Khoản nhận này đã dùng để tạo lại VM':money?.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':money?.phase==='REVIEW'?'Tiền về cần đối chiếu trước':'Yêu cầu rút đang '+(request.state==='FAILED'?'thất bại':'huỷ');
+  return {refusal:why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp bị SUS',reason:null};
+}
 // A proxy kept for the position on a recreation: still ours (TUT or shared), current stock, not BLOCKED / replaced / retired.
 export function keepable(endpoint:{retiredAt:Date|null;inventoryState:string;inventoryKey:string|null;identity:{owner:string;subgroup:string|null}|null}|null){
   if(!endpoint)return 'Không có proxy';
@@ -120,11 +138,21 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
     const cycle=vm.operation?.cycle??1;if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle));
     const {earnApp,request,money}=await currentRoundPayout(tx,scope.projectId,vm);
     const paid=!!request&&money?.phase==='RECEIVED'&&!request.consumedAt,sus=vm.operation?.status==='SUSPENDED';
-    if(!paid&&!sus){
+    // Merged payout (27/10/2026): a VM whose SDK was merged into another VM's EarnApp account for this round's payout.
+    const merged=!request||request.state!=='REQUESTED'?await memberOf(tx,scope.projectId,vm.id,cycle):null,mFree=!!merged&&!merged.member.consumedAt;
+    const mPaid=mFree&&merged!.money.phase==='RECEIVED',mSus=mFree&&!mPaid&&merged!.primarySus,viaMember=mPaid||mSus;
+    if(merged&&!viaMember&&!sus){
+      const m=merged.money,why=merged.member.consumedAt?'Khoản gộp này đã dùng để tạo lại VM':m.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':m.phase==='REVIEW'?'Tiền về cần đối chiếu trước':'Lệnh rút chưa xong';
+      throw new ProxyDomainError('INVALID_INPUT','VM đã gộp vào lệnh rút của '+merged.primaryWhere+': '+why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp của VM chính bị SUS');
+    }
+    if(!paid&&!sus&&!viaMember){
       const why=!earnApp?'VM chưa có tài khoản EarnApp ở lượt này':!request?'Chưa có yêu cầu rút cho lượt này':request.consumedAt?'Khoản nhận này đã dùng để tạo lại VM':money?.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':money?.phase==='REVIEW'?'Tiền về cần đối chiếu trước':'Yêu cầu rút đang '+(request.state==='FAILED'?'thất bại':'huỷ');
       throw new ProxyDomainError('INVALID_INPUT',why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp bị SUS');
     }
-    const reason=paid?'PAYOUT_RECEIVED':'SUSPENDED',now=new Date();
+    const reason=paid||mPaid?'PAYOUT_RECEIVED':'SUSPENDED',now=new Date();
+    // A member keeps its own EarnApp account for the new round (owner 27/10/2026: it was never used; log in again on the new machine),
+    // unless that account itself is SUS on this VM.
+    const closeAccount=!!earnApp&&!(viaMember&&!sus);
     // Proxy for the next round. Install evidence belongs to its round (review 19/10/2026): the old round's configurations stay as
     // history (CONFIRMED / CANCELLED rows, ids kept in VmCycle), the VM no longer points at them, and nothing planned or started on
     // the old machine can be confirmed for the new one. The proxy of the position (the pending plan, else the installed one) is kept
@@ -156,10 +184,15 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
     await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:keptConfig,installedConfigurationId:null,...(keptConfig?{configurationSequence:{increment:1}}:{})}});
     await tx.virtualMachine.update({where:{id:vm.id},data:{revision:{increment:1}}});
     // The old round.
-    const closed=await tx.vmCycle.create({data:{projectId:scope.projectId,vmId:vm.id,number:cycle,reason,earnAppId:earnApp?.id??null,loginId:earnApp?.loginId??null,paypalEmailId:earnApp?.paypalEmailId??null,sdkId:vm.sdkId,status:vm.operation?.status??null,desiredConfigurationId:vm.desiredConfigurationId,installedConfigurationId:vm.installedConfigurationId,proxyKept,payoutRequestId:paid?request!.id:null,note:input.note?.trim().slice(0,500)||null,closedById:current.userId}});
+    const closed=await tx.vmCycle.create({data:{projectId:scope.projectId,vmId:vm.id,number:cycle,reason,earnAppId:earnApp?.id??null,loginId:earnApp?.loginId??null,paypalEmailId:earnApp?.paypalEmailId??null,sdkId:vm.sdkId,status:vm.operation?.status??null,desiredConfigurationId:vm.desiredConfigurationId,installedConfigurationId:vm.installedConfigurationId,proxyKept,payoutRequestId:paid?request!.id:null,payoutMemberId:viaMember?merged!.member.id:null,note:input.note?.trim().slice(0,500)||null,closedById:current.userId}});
     await images.remember('VM_CYCLE',closed.id,true);
     if(paid){await images.remember('PAYOUT_REQUEST',request!.id);await tx.earnPayoutRequest.update({where:{id:request!.id},data:{consumedAt:now,revision:{increment:1},history:[...(request!.history as Prisma.JsonArray),{at:now.toISOString(),by:current.userId,kind:'CONSUMED',what:'Dùng để ghi tạo lại VM (đóng lượt '+cycle+')'}]}});}
-    if(earnApp){
+    if(viaMember){
+      const m=merged!.member;await images.remember('PAYOUT_MEMBER',m.id);await images.remember('PAYOUT_REQUEST',m.requestId);
+      await tx.earnPayoutMember.update({where:{id:m.id},data:{consumedAt:now,consumedReason:reason,revision:{increment:1}}});
+      await tx.earnPayoutRequest.update({where:{id:m.requestId},data:{revision:{increment:1},history:[...(merged!.request.history as Prisma.JsonArray),{at:now.toISOString(),by:current.userId,kind:'CONSUMED',what:where(vm)+' dùng khoản gộp để ghi tạo lại (đóng lượt '+cycle+(reason==='SUSPENDED'?', EarnApp VM chính SUS':'')+')'}]}});
+    }
+    if(earnApp&&closeAccount){
       await images.remember('EARNAPP',earnApp.id);await tx.earnAppAccount.update({where:{id:earnApp.id},data:{vmId:null,closedAt:now,closedReason:paid?'RECREATED':'SUSPENDED',revision:{increment:1}}});
       for(const o of await tx.earnAppPayout.findMany({where:{earnAppId:earnApp.id,endedAt:null}})){await images.remember('PAYOUT',o.id);await tx.earnAppPayout.update({where:{id:o.id},data:{endedAt:now}});}
       await images.remember('GMAIL',earnApp.loginId);await tx.gmailAccount.update({where:{id:earnApp.loginId},data:{revision:{increment:1}}});
@@ -168,7 +201,7 @@ export async function recordRecreated(scope:ActorScope,input:{key:string;vmId:st
     const sdkLeft=await releaseForRecreate(tx,images,scope.projectId,current.userId,vm,cycle);
     const ops=await ensureOps(tx,images,scope.projectId,vm.id);
     await tx.vmOperation.update({where:{id:ops.id},data:{cycle:cycle+1,status:'NEW_VM',statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1}}});
-    await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle:cycle+1,kind:'RECREATE',fromStatus:ops.status,toStatus:'NEW_VM',note:input.note?.trim().slice(0,500)||null,detail:{closedCycle:cycle,reason,proxy:proxyNote,earnAppClosed:!!earnApp,sdkMoved:!!sdkLeft},actorId:current.userId}});
+    await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle:cycle+1,kind:'RECREATE',fromStatus:ops.status,toStatus:'NEW_VM',note:input.note?.trim().slice(0,500)||null,detail:{closedCycle:cycle,reason,proxy:proxyNote,earnAppClosed:closeAccount,merged:viaMember?merged!.primaryWhere:null,sdkMoved:!!sdkLeft},actorId:current.userId}});
     return {vmId:vm.id,where:where(vm),cycle:cycle+1,reason,proxy:proxyNote,proxyKept:!!proxyKept};
   },db);
 }

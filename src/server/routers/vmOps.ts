@@ -5,10 +5,12 @@ import {domain} from './businessManagement';
 import {VM_OPS_STATUSES} from '@/lib/vm-ops';
 import {setVmStatus,recordRecreated} from '../vm-ops/ops';
 import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readPayoutPick,readPaypalGather,recordPayoutReceipt} from '../vm-ops/payout';
+import {addPayoutMembers,removePayoutMember} from '../vm-ops/payout-members';
 import {recordBalanceChecks,readBalanceHistory,previewBalancePaste} from '../vm-ops/balance';
 import {readPayoutReport,readPayoutDashboard,PAYOUT_REPORT_VIEWS} from '../vm-ops/payout-report';
 // VM operating state, payout requests and recreation (owner brief 18/10/2026). People and AI use these same checked endpoints.
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),cycle=z.number().int().positive(),revision=z.number().int().nonnegative();
+const member=z.object({vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),shareAmount:z.string().max(40).nullish()});
 const scope=(ctx:{prisma:Parameters<typeof loadInfrastructureScope>[0];user:{id:string}},projectId:string)=>loadInfrastructureScope(ctx.prisma,ctx.user.id,projectId);
 export const vmOpsRouter=router({
   payoutDashboard:protectedProcedure.input(project.extend({serverId:id.optional()})).query(({ctx,input})=>domain(async()=>readPayoutDashboard(await scope(ctx,input.projectId),input,ctx.prisma))),
@@ -19,7 +21,10 @@ export const vmOpsRouter=router({
   recreate:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>recordRecreated(await scope(ctx,input.projectId),input,ctx.prisma))),
   payoutPick:protectedProcedure.input(project.extend({vmId:id,amount:z.string().max(40).nullish()})).query(({ctx,input})=>domain(async()=>readPayoutPick(await scope(ctx,input.projectId),input,ctx.prisma))),
   gather:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readPaypalGather(await scope(ctx,input.projectId),ctx.prisma))),
-  requestPayout:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),earnAppId:id,paypalEmailId:id,amount:z.string().max(40),currency:z.string().max(5).optional(),reference:z.string().max(200).nullish(),date:z.string().length(10),submission:z.enum(['PREPARING','SENT']).optional()})).mutation(({ctx,input})=>domain(async()=>createPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  requestPayout:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),earnAppId:id,paypalEmailId:id,amount:z.string().max(40),currency:z.string().max(5).optional(),reference:z.string().max(200).nullish(),date:z.string().length(10),submission:z.enum(['PREPARING','SENT']).optional(),members:z.array(member).max(100).optional()})).mutation(({ctx,input})=>domain(async()=>createPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  // Merged payout (27/10/2026).
+  addPayoutMembers:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,members:z.array(member).min(1).max(100)})).mutation(({ctx,input})=>domain(async()=>addPayoutMembers(await scope(ctx,input.projectId),input,ctx.prisma))),
+  removePayoutMember:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id})).mutation(({ctx,input})=>domain(async()=>removePayoutMember(await scope(ctx,input.projectId),input,ctx.prisma))),
   updatePayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,history:z.boolean().optional(),action:z.enum(['FAILED','CANCELLED','RETRY','CORRECT','SETTLE','SENT','UNKNOWN']),note:z.string().max(500).nullish(),amount:z.string().max(40).nullish(),reference:z.string().max(200).nullish()})).mutation(({ctx,input})=>domain(async()=>updatePayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
   // Money received for one payout request (review fix 21/10/2026): the same command as the ops API (recordPayoutReceipt); managers or
   // PAYPAL_RECEIPT_RECORD. Confirmed money only, parts add up, never over what is open, duplicates refused, period lock.

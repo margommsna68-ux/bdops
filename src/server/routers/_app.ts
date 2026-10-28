@@ -1,5 +1,6 @@
 import { router } from "../trpc";
 import {appleCheckRouter} from './appleCheck';
+import {fleetCommandsRouter} from './fleetCommands';
 import { projectRouter } from "./project";
 import { paypalRouter } from "./paypal";
 import { fundRouter } from "./fund";
@@ -30,6 +31,7 @@ import {opsTokenRouter} from './opsToken';
 import { opsApprovalRouter } from './opsApproval';
 
 export const appRouter = router({
+  fleetCommands:fleetCommandsRouter,
   appleCheck:appleCheckRouter,
   project: projectRouter,
   paypal: paypalRouter,

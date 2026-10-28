@@ -72,6 +72,7 @@ enum ProjectType {
 }
 
 model Project {
+  fleetCommands FleetCommand[]
   appleCheckWorker AppleCheckWorker?
   id                 String                 @id @default(cuid())
   name               String
@@ -115,6 +116,52 @@ model Project {
   earnAppPayouts     EarnAppPayout[]
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
+}
+
+// M2 commands are immutable machine/cycle snapshots, independent of current VM lifecycle.
+model FleetCommand {
+  operationId String @id
+  projectId String
+  project Project @relation(fields:[projectId], references:[id], onDelete:Cascade)
+  serverId String
+  serverUuid String
+  vmId String
+  vmCode String
+  machineUuid String
+  expectedCycle Int
+  expectedVmRevision Int
+  configurationId String?
+  action String
+  source String
+  requesterId String
+  requesterTokenId String?
+  requestHash String
+  state String @default("QUEUED")
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  workerId String?
+  workerUserId String?
+  leaseEpoch Int @default(0)
+  leaseUntil DateTime?
+  dispatchedAt DateTime?
+  cancelRequestedAt DateTime?
+  completedAt DateTime?
+  result Json?
+  events FleetCommandEvent[]
+
+  @@index([projectId,serverId,state,createdAt])
+  @@index([projectId,vmId,state])
+}
+
+model FleetCommandEvent {
+  operationId String
+  command FleetCommand @relation(fields:[operationId], references:[operationId], onDelete:Cascade)
+  eventId String
+  kind String
+  requestHash String
+  detail Json
+  createdAt DateTime @default(now())
+  @@id([operationId,eventId])
 }
 
 model ProjectMember {
@@ -1589,6 +1636,8 @@ model VmCycle {
   installedConfigurationId String?
   proxyKept                String? // endpoint kept for the next round (needs a new install confirmation)
   payoutRequestId          String?      @unique
+  // A member VM of a merged payout closed its round with that payout (27/10/2026).
+  payoutMemberId           String?      @unique
   note                     String?
   closedById               String
   closedAt                 DateTime     @default(now())
@@ -1602,6 +1651,32 @@ model VmCycle {
 // row only says what was asked for. state is the person's record: REQUESTED, FAILED or CANCELLED (with a note).
 // Distinct emails whose payout was sent/attempted during a Vietnam calendar day.
 // Independent of ordinary undo and request state: failure/cancellation never erases a consumed daily slot.
+// Merged EarnApp payout (owner brief 27/10/2026): the owner / AI merged the SDKs of several VMs into one EarnApp account (the request's
+// own VM) to withdraw once. Each extra VM is a member of that request in its round; the request's own VM is never a member row.
+// Money stays on the request (counted once); the share is a reference only, never income. A member is recorded as recreated once
+// (consumedAt) when the request has been received in full, or when the primary account went SUS.
+model EarnPayoutMember {
+  id              String            @id @default(cuid())
+  projectId       String
+  requestId       String
+  request         EarnPayoutRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  vmId            String
+  cycle           Int
+  sdkId           String?
+  shareAmount     Decimal?          @db.Decimal(12, 2)
+  shareObservedAt DateTime?
+  removedAt       DateTime?
+  removedById     String?
+  consumedAt      DateTime?
+  consumedReason  String?
+  createdById     String
+  createdAt       DateTime          @default(now())
+  revision        Int               @default(0)
+
+  @@index([requestId])
+  @@index([projectId, vmId, cycle])
+}
+
 model PayPalPayoutDayEmail {
   projectId     String
   paypalId      String
@@ -1647,6 +1722,8 @@ model EarnPayoutRequest {
   submittedAt   DateTime?
   revision      Int               @default(0)
   receipts      FundTransaction[]
+  // Merged payout (owner brief 27/10/2026): other VMs whose SDKs were merged into this EarnApp account for this one payout.
+  members       EarnPayoutMember[]
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 

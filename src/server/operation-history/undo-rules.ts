@@ -16,7 +16,7 @@ export function undoRefusal(kind:string,snapshot:OperationSnapshot):string|null{
     const before=image.before as Record<string,unknown>|null,after=image.after as Record<string,unknown>;
     if(image.resource==='VM_CYCLE'&&!before)return RECREATE_VIEW_ONLY;
     if(image.resource==='EARNAPP'&&after?.closedAt&&!before?.closedAt)return RECREATE_VIEW_ONLY;
-    if(image.resource==='PAYOUT_REQUEST'&&after?.consumedAt&&!before?.consumedAt)return RECREATE_VIEW_ONLY;
+    if((image.resource==='PAYOUT_REQUEST'||image.resource==='PAYOUT_MEMBER')&&after?.consumedAt&&!before?.consumedAt)return RECREATE_VIEW_ONLY;
     if(image.resource==='SDK'&&after?.linkState==='LINKED'&&before?.linkState!=='LINKED')return SDK_LINK_FINAL;
     if(image.resource==='PAYPAL_EMAIL'&&after?.usedEarnAppId&&!before?.usedEarnAppId)return 'Email PayPal '+String(after.email??'')+' đã được cấp cho EarnApp; dấu đã dùng giữ vĩnh viễn nên lần cấp này không hoàn tác được. Dùng Bỏ gán tài khoản ở Server / VM nếu cần gỡ khỏi VM';
   }
