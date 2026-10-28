@@ -17,7 +17,7 @@ const ACTION_LABEL:Record<FrameCommandAction,string>={REQUEST:'Rút',SEND:'Đã 
 const DONE:Record<FrameCommandAction,string>={REQUEST:'Đã giữ email, đang rút',SEND:'Đã ghi "Đã rút"',DROP:'Đã bỏ yêu cầu rút, email trả kho',EDIT:'Đã sửa yêu cầu rút',UNSEND:'Đã bỏ "Đã rút"',RECEIPT:'Đã ghi tiền về PayPal',SETTLE:'Đã chốt nhận thiếu',SUS:'Đã ghi EarnApp bị SUS',FAIL:'Đã ghi thất bại',RETRY:'Đã ghi gửi lại',VOID:'Đã xoá do ghi nhầm'};
 const message=(e:unknown)=>e instanceof Error?e.message:'Không nhận được phản hồi hợp lệ';
 const ymd=(d:string)=>d.split('-').reverse().join('/');
-const tone=(label:string)=>label==='Đã về'||label==='Về thiếu (đã chốt)'?'recreate':label==='Mất do SUS'||label==='Thất bại'||label==='Đã huỷ'||label==='Chưa rõ đã rút chưa'?'failed':label==='Cần đối chiếu tiền'?'money_review':'waiting';
+const tone=(label:string)=>label==='Đã về'||label==='Về thiếu (đã chốt)'||label==='Nhận dư (đã chốt)'?'recreate':label==='Mất do SUS'||label==='Thất bại'||label==='Đã huỷ'||label==='Chưa rõ đã rút chưa'?'failed':label==='Cần đối chiếu tiền'?'money_review':'waiting';
 type Form='EDIT'|'RECEIPT'|'SUS'|'FAIL'|'SETTLE'|null;
 export interface PayoutFrameProps {projectId:string;userId?:string;vmId:string;cycle:number;earnAppId:string|null;request:VmOpsRequestView|null;rights:OpsRights;
   /** Tiền VM of the current SDK: the default amount of "Rút". */vmMoney?:string|null;vmRevision?:number;vmLabel?:string;
@@ -106,7 +106,7 @@ export function PayoutFrame({projectId,userId,vmId,cycle,earnAppId,request:r,rig
       <p className="flex items-center gap-1 flex-wrap"><strong>{r.paypal}</strong> · <span className="break-all">{r.email}</span>
         <button type="button" className="pm-button pm-button-quiet pm-button-sm" aria-label={'Copy email '+r.email} onClick={()=>copy(r.email)}><Copy size={12}/>Copy</button></p>
       {money?<p>Đã rút <strong>{formatLedger(money.amount,money.currency)}</strong>{money.received!=='0.00'?<> · đã về <strong>{formatLedger(money.received,money.currency)}</strong></>:null}{r.phase==='WAITING'&&money.received!=='0.00'?' · còn chờ '+formatLedger(money.remaining,money.currency):''}
-        {money.shortfall&&money.shortfall!=='0.00'?' · phí / thiếu '+formatLedger(money.shortfall,money.currency):''}{money.lost?' · mất '+formatLedger(money.lost,money.currency):''}</p>:<p className="pm-muted">Số tiền chỉ hiện cho người có quyền tiền.</p>}
+        {money.shortfall&&money.shortfall!=='0.00'?(money.shortfall.startsWith('-')?' · nhận dư '+formatLedger(money.shortfall.slice(1),money.currency):' · phí / thiếu '+formatLedger(money.shortfall,money.currency)):''}{money.lost?' · mất '+formatLedger(money.lost,money.currency):''}</p>:<p className="pm-muted">Số tiền chỉ hiện cho người có quyền tiền.</p>}
       {r.reference&&<p className="pm-muted">Mã tham chiếu {r.reference}</p>}
       {r.stateNote&&r.state!=='REQUESTED'&&<p className="pm-muted">{r.stateNote}</p>}
       {readOnly&&<p className="pm-muted">{readOnly}</p>}
@@ -140,7 +140,8 @@ function NoteForm({title,label,submit,required,busy,onSubmit,onCancel}:{title:st
       <button type="button" className="pm-button pm-button-primary pm-button-sm" disabled={busy||!!required&&!note.trim()} onClick={()=>void onSubmit(note.trim()||null)}>{busy?'Đang lưu…':submit}</button></div></div>;
 }
 // "Tiền đã về": the exact amount seen in PayPal (empty, required), the withdrawn amount and the fee next to it, today (Bangkok) by
-// default, an optional PayPal transaction id, and "Chốt luôn, phần thiếu là phí" ticked while the amount is below what is open.
+// default, an optional PayPal transaction id, and "Chốt luôn, phần thiếu là phí" ticked while the amount is below what is open. A
+// figure above what is open is accepted (owner 28/10/2026) and shown as "Dư"; the server closes the request with that surplus.
 function ReceiptForm({request:r,busy,onSubmit,onCancel}:{request:VmOpsRequestView;busy:boolean;onSubmit:(b:Record<string,unknown>)=>Promise<boolean>;onCancel:()=>void}){
   const [entered,setEntered]=useState(''),[date,setDate]=useState(bangkokDay),[txid,setTx]=useState(''),[settle,setSettle]=useState(true);
   const m=r.money;
@@ -152,7 +153,7 @@ function ReceiptForm({request:r,busy,onSubmit,onCancel}:{request:VmOpsRequestVie
     <div className="grid grid-cols-2 gap-2">
       <label className="pm-label text-xs">Số tiền chính xác trong PayPal<input className="pm-input" inputMode="decimal" required aria-required value={entered} disabled={busy} aria-invalid={!!c.error} onChange={e=>setEntered(e.target.value)}/></label>
       <label className="pm-label text-xs">Ngày<input type="date" className="pm-input" value={date} max={today} disabled={busy} onChange={e=>setDate(e.target.value)}/></label></div>
-    <p aria-live="polite">{c.fee!==null?<>Phí (rút − thực nhận): <strong>{formatLedger(c.fee,cur)}</strong></>:<span className="pm-muted">Nhập đúng số tiền thấy trong PayPal; phí tự tính.</span>}</p>
+    <p aria-live="polite">{c.fee!==null?<>Phí (rút − thực nhận): <strong>{formatLedger(c.fee,cur)}</strong></>:c.surplus!==null?<>Dư (thực nhận − còn chờ): <strong>{formatLedger(c.surplus,cur)}</strong> · ghi đúng số này và chốt đã về</>:<span className="pm-muted">Nhập đúng số tiền thấy trong PayPal; phí tự tính.</span>}</p>
     <label className="pm-label text-xs">Mã giao dịch PayPal (nếu có)<input className="pm-input" maxLength={100} value={txid} disabled={busy} onChange={e=>setTx(e.target.value)}/></label>
     {c.showSettle&&<label className="flex items-center gap-1"><input type="checkbox" checked={settle} disabled={busy} onChange={e=>setSettle(e.target.checked)}/>Chốt luôn, phần thiếu là phí</label>}
     {c.error&&<p role="alert" className="vm-status-error">{c.error}</p>}

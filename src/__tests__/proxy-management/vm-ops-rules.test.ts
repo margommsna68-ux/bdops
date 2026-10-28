@@ -10,6 +10,10 @@ describe('VM ops rules',()=>{
     expect(req({receipts:[rc('24')]}).phase).toBe('RECEIVED');
     expect(req({receipts:[rc('20')],settledAt:'x',shortfall:'4'}).phase).toBe('RECEIVED');// settled short with a stated reason
     expect(req({receipts:[rc('25')]}).phase).toBe('REVIEW');
+    // Owner 28/10/2026: an over-receipt settled with its surplus (negative shortfall) is received; unsettled old data stays REVIEW.
+    expect(req({receipts:[rc('24.06')],settledAt:'x',shortfall:'-0.06'}).phase).toBe('RECEIVED');
+    expect(req({receipts:[rc('24.06')],settledAt:'x',shortfall:'-0.05'}).phase).toBe('REVIEW');
+    expect(req({receipts:[rc('24.06'),{...rc('1'),currency:'VND'}],settledAt:'x',shortfall:'-0.06'}).phase).toBe('REVIEW');
     expect(req({receipts:[rc('24',true,{voided:true})]}).phase).toBe('WAITING');
     expect(req({receipts:[rc('24',true,{failed:true})]}).phase).toBe('WAITING');
     expect(req({state:'FAILED',receipts:[rc('24',false)]})).toMatchObject({phase:'FAILED',remaining:'0.00'});

@@ -92,7 +92,7 @@ Phần này chỉ áp dụng khi token được chủ cấp PAYOUT / RECEIPT. To
   - Xong việc hoặc khi chủ bảo dừng: `session-close`. Hết phiên thì `prepare` lại trả 202 như cũ.
 - **Luồng:**
   - `prepare` (giữ email) → rút thật trên EarnApp → `status SUBMITTED_ON_EARNAPP`.
-  - Khi thấy tiền trong PayPal: `receipts` với **đúng số thực nhận** (thường thấp hơn số rút vì phí) và mã giao dịch.
+  - Khi thấy tiền trong PayPal: `receipts` với **đúng số thực nhận** và mã giao dịch. Số PayPal là chính xác và cuối cùng (chủ 28/10/2026): thường thấp hơn số rút vì phí, nhưng có thể cao hơn một chút — vẫn ghi đúng số đó; lệnh tự đóng là đã về, phần dư ghi `shortfall` âm, ghi chú "Nhận dư $X". Không làm tròn, không sửa số cho khớp.
   - Kèm `settleRemainder:true` chỉ khi đã đọc đúng số trong PayPal, để chốt phần thiếu là phí. Không ghi tiền về khi chưa thấy tiền thật.
 - **Sửa sai trước khi có tiền về:**
   - `edit` đổi email / số tiền / ngày / tham chiếu; yêu cầu đã gửi thì cần `note`.

@@ -99,12 +99,12 @@ function ReportBulk({projectId,userId,kind,rows,onSaved}:{projectId:string;userI
  const items:StatusBulkRow[]=rows.map(x=>{const o=live(x.vmId);return {vmId:x.vmId,serverId:x.serverId??'',server:x.server||'Server cũ',code:x.vm||x.vmId,label:(x.server||'Server cũ')+' / '+(x.vm||x.vmId),ops:o,notCurrent:!o||o.request?.id!==x.id};});
  return <PayoutStatusBulk projectId={projectId} userId={userId} kind={kind} rows={items} liveOf={live} onSaved={async()=>{await Promise.all([board.refetch(),onSaved()]);}}/>;
 }
-function Status({row}:{row:Row}){return <span className={'pr-status pr-status-'+row.status.toLowerCase()}>{row.status==='RECEIVED'&&row.shortfall&&row.shortfall!=='0.00'?'Đã chốt nhận thiếu':statuses[row.status]||row.status}</span>;}
+function Status({row}:{row:Row}){return <span className={'pr-status pr-status-'+row.status.toLowerCase()}>{row.status==='RECEIVED'&&row.shortfall&&row.shortfall!=='0.00'?(row.shortfall.startsWith('-')?'Đã về (nhận dư)':'Đã chốt nhận thiếu'):statuses[row.status]||row.status}</span>;}
 function PayoutDetail({row:r,projectId,rights,onSaved}:{row:Row;projectId:string;rights:Report['rights'];onSaved:()=>Promise<unknown>}){
  return <div className="pr-panel-body">
   <div className="pr-panel-status"><Status row={r}/>{r.submittedAt&&<span className="pm-muted">Đã gửi {dateText(r.submittedAt)}</span>}</div>
   <dl className="pr-amounts"><div><dt>Yêu cầu</dt><dd>{displayMoney(r.amount,r.currency)}</dd></div><div><dt>Thực nhận</dt><dd>{displayMoney(r.received,r.currency)}</dd></div><div><dt>Còn chờ</dt><dd>{displayMoney(r.remaining,r.currency)}</dd></div></dl>
-  {r.shortfall&&r.shortfall!=='0.00'&&<p className="pr-notice">Đã chốt nhận thiếu {displayMoney(r.shortfall,r.currency)}</p>}
+  {r.shortfall&&r.shortfall!=='0.00'&&<p className="pr-notice">{r.shortfall.startsWith('-')?'Nhận dư '+displayMoney(r.shortfall.slice(1),r.currency):'Đã chốt nhận thiếu '+displayMoney(r.shortfall,r.currency)}</p>}
   {!!r.members?.length&&<div className="text-sm"><strong>Rút gộp {r.members.length+1} VM</strong> (tiền tính một lần trên lệnh này): {r.vm||r.vmId} (chính){r.members.map(m=><span key={m.vmId}>, {(m.server||'Server cũ')+' / '+(m.vm||m.vmId)}{m.consumed?' · đã tạo lại':''}</span>)}</div>}
   <dl className="pr-destination"><div><dt>PayPal nhận</dt><dd><strong>{r.paypal}</strong><span>{r.email}</span></dd></div><div><dt>EarnApp</dt><dd>{r.login||'Chưa ghi tài khoản'}</dd></div>{r.reference&&<div><dt>Tham chiếu</dt><dd>{r.reference}</dd></div>}</dl>
   {r.current&&!r.consumed&&rights&&<div className="pr-status-editor"><h2>Rút về PayPal</h2><PayoutFrameForVm projectId={projectId} userId={rights.userId} vmId={r.vmId} requestId={r.id} onDone={onSaved}/></div>}

@@ -461,7 +461,7 @@
      },
      "shortfall": {
       "type": "string",
-      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "pattern": "^-?\\d{1,10}(\\.\\d{1,2})?$",
       "example": "10.00",
       "nullable": true
      },
@@ -2298,14 +2298,14 @@
        },
        "settled": {
         "type": "boolean",
-        "description": "true = settleRemainder closed the request; the rest is a fee / shortfall"
+        "description": "true = this receipt closed the request: settleRemainder settled the rest as a fee / shortfall, or (owner 28/10/2026) the receipt was above what was open and the surplus was settled (negative shortfall)"
        },
        "shortfall": {
         "type": "string",
-        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "pattern": "^-?\\d{1,10}(\\.\\d{1,2})?$",
         "example": "10.00",
         "nullable": true,
-        "description": "the fee / shortfall settled by this receipt (null without money rights or when nothing was settled)"
+        "description": "the fee / shortfall settled by this receipt; negative = surplus (PayPal showed more than asked, recorded exactly). null without money rights or when nothing was settled"
        }
       },
       "required": [
@@ -9566,7 +9566,7 @@
   },
   "/withdrawals/{id}/receipts": {
    "post": {
-    "summary": "Money that really arrived on PayPal for this request (operation RECEIPT); parts add up; never over what is open — no ADMIN approval (28/10/2026)",
+    "summary": "Money that really arrived on PayPal for this request (operation RECEIPT); parts add up; the exact PayPal figure is final, even above what is open (the request is then closed as received with the surplus as a negative shortfall, note Nhận dư $X) — no ADMIN approval (28/10/2026)",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -9613,7 +9613,7 @@
          },
          "settleRemainder": {
           "type": "boolean",
-          "description": "Owner 28/10/2026: the real PayPal amount is always below the withdrawn one. true = record this exact PayPal amount and close the request, the rest being the PayPal fee (shortfall). Allowed to anyone who may record the receipt."
+          "description": "Owner 28/10/2026: the real PayPal amount is usually below the withdrawn one (a receipt above what is open is accepted and settled as a surplus). true = record this exact PayPal amount and close the request, the rest being the PayPal fee (shortfall). Allowed to anyone who may record the receipt."
          }
         },
         "required": [

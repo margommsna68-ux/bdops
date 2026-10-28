@@ -64,6 +64,14 @@ it('"Tiền đã về": empty required exact amount, live fee, settle ticked by 
   await click('Ghi tiền đã về');
   expect(mock.receipt.mock.calls[0][0]).toMatchObject({projectId:'p',requestId:'req',expectedRequestRevision:3,amount:'9.62',currency:'USD',transactionId:null,settleRemainder:true});
 });
+it('"Tiền đã về" above the request (owner 28/10/2026): accepted, live "Dư", no settle box, sent exactly',async()=>{
+  await render(request({submission:'SENT'}));await click('Tiền đã về');
+  await type(Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác trong PayPal'))!.querySelector('input')!,'10.06');
+  expect(host.textContent).toMatch(/Dư \(thực nhận − còn chờ\): \$0\.06/);expect(host.textContent).not.toMatch(/vượt/);
+  expect(Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Chốt luôn, phần thiếu là phí')).toBeUndefined();
+  expect(button('Ghi tiền đã về')!.disabled).toBe(false);await click('Ghi tiền đã về');
+  expect(mock.receipt.mock.calls[0][0]).toMatchObject({requestId:'req',amount:'10.06',currency:'USD'});expect(mock.receipt.mock.calls[0][0]).not.toHaveProperty('settleRemainder');
+});
 it('the receipt right alone: Tiền đã về and its settle box, never Sửa / Bỏ "Đã rút" / Thất bại',async()=>{
   await render(request({submission:'SENT'}),{assign:false,money:true,writeMoney:false,payout:false,receipt:true});
   expect(button('Tiền đã về')).toBeTruthy();for(const t of ['Sửa','Bỏ "Đã rút"','Thất bại','EarnApp bị SUS','Gửi lại'])expect(button(t)).toBeUndefined();

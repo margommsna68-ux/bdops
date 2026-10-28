@@ -80,8 +80,14 @@ describe('receiptCheck: "Số tiền chính xác trong PayPal"',()=>{
     const r=receiptCheck(base,'9.62');expect(r).toMatchObject({valid:true,amount:'9.62',fee:'0.38',showSettle:true});
   });
   it('the exact open part: no fee, no settle',()=>{expect(receiptCheck(base,'10')).toMatchObject({valid:true,amount:'10.00',fee:'0.00',showSettle:false});});
-  it('more than the open part or malformed: refused with a reason',()=>{
-    expect(receiptCheck(base,'10.01')).toMatchObject({valid:false});expect(receiptCheck(base,'10.01').error).toMatch(/vượt/);
+  it('more than the open part (owner 28/10/2026): accepted as the exact PayPal figure, surplus shown, no settle box',()=>{
+    expect(receiptCheck({...base,amount:'20.04',remaining:'20.04'},'20.10')).toMatchObject({valid:true,amount:'20.10',fee:null,surplus:'0.06',showSettle:false,error:''});
+    expect(receiptCheck(base,'9.62').surplus).toBeNull();
+  });
+  it('more than the open part while a linked pending receipt exists: reconcile first',()=>{
+    expect(receiptCheck({...base,received:'4.00',remaining:'6.00',pendingLinked:'1.00'},'5.50')).toMatchObject({valid:false});
+  });
+  it('malformed: refused with a reason',()=>{
     expect(receiptCheck(base,'1.234').valid).toBe(false);expect(receiptCheck(base,'0').valid).toBe(false);expect(receiptCheck(base,'-1').valid).toBe(false);
   });
   it('a second part counts what already arrived and a linked pending receipt',()=>{

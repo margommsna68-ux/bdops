@@ -112,6 +112,15 @@ describe('ops API: fix and SUS routes',()=>{
       expect((await call('GET','withdrawals?projectId='+f.projectId+'&email=nobody@example.invalid',{token:t})).json.data.items).toEqual([]);
     }finally{await cleanupAll(f);}
   });
+  it('a receipt above the request (owner 28/10/2026) is recorded exactly and closes it as received with the surplus',async()=>{
+    const f=await setup();try{
+      const t=await f.token(f.ai,ALL),email=(await f.pp('pp-82')).emails[0].id,a=await request(f,t,0,email,true,{amount:'20.04'});
+      const r=await call('POST','withdrawals/'+a+'/receipts',{token:t,autoApprove:false,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(a),amount:'20.10',currency:'USD',receivedAt:new Date().toISOString(),transactionId:'TX-'+randomUUID().slice(0,8)}});
+      expect(r.status,JSON.stringify(r.json.error)).toBe(200);expect(r.json.data.recorded).toMatchObject({amount:'20.10',settled:true,shortfall:'-0.06'});
+      expect(r.json.data.current.withdrawal).toMatchObject({phase:'RECEIVED',settled:true,money:{received:'20.10',remaining:'0.00',shortfall:'-0.06'}});
+      expect((await db.earnPayoutRequest.findUniqueOrThrow({where:{id:a}})).settleNote).toBe('Nhận dư $0.06');
+    }finally{await cleanupAll(f);}
+  });
   it('web router: editPayout, unsendPayout, voidPayout, suspendEarnApp and payoutReceipt settleRemainder',async()=>{
     const f=await setup();try{
       const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'}} as unknown as Context);

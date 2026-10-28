@@ -56,7 +56,8 @@ export interface RequestMoneyInput {amount:string;currency:string;state:string;s
 export type RequestPhase='WAITING'|'RECEIVED'|'REVIEW'|'FAILED'|'CANCELLED'|'LOST';
 // One payout request against the PayPal book: received = confirmed linked receipts; a linked pending receipt is part of what is
 // still to come (never added on top). Exactly the requested amount = received in full. Less is still waiting unless a person
-// settled the gap with a stated reason; more, or money in another currency, needs reconciling.
+// settled the gap with a stated reason; more is received when settled as a surplus (recordPayoutReceipt, 28/10/2026), otherwise it
+// needs reconciling, as does money in another currency.
 export function requestMoney(r:RequestMoneyInput){
   const live=r.receipts.filter(x=>!x.voided&&!x.failed),same=live.filter(x=>x.currency===r.currency);
   const received=same.filter(x=>x.confirmed).reduce((a,x)=>a+toCents(x.amount),0),pendingLinked=same.filter(x=>!x.confirmed).reduce((a,x)=>a+toCents(x.amount),0);
@@ -64,8 +65,12 @@ export function requestMoney(r:RequestMoneyInput){
   let phase:RequestPhase;
   // LOST_SUS (28/10/2026): the EarnApp was suspended before the rest arrived. The unpaid part is gone: it is neither waiting nor received.
   if(r.state==='CANCELLED')phase='CANCELLED';else if(r.state==='FAILED')phase='FAILED';else if(r.state==='LOST_SUS')phase='LOST';
-  else if(received>amount||other)phase='REVIEW';
-  else if(received===amount||short>0&&received+short===amount)phase='RECEIVED';
+  else if(other)phase='REVIEW';
+  // Settled with a stated gap: a fee (positive shortfall) or, since 28/10/2026, a surplus (negative shortfall: PayPal showed a little
+  // more than asked, the exact figure is final). Received more without such a settlement (older data) still needs reconciling.
+  else if(short!==0&&received+short===amount)phase='RECEIVED';
+  else if(received>amount)phase='REVIEW';
+  else if(received===amount)phase='RECEIVED';
   else phase='WAITING';
   const remaining=phase==='WAITING'?amount-received:0;
   // The VM was already recreated with this money but it no longer adds up (a receipt was voided / changed): reconcile, the VM

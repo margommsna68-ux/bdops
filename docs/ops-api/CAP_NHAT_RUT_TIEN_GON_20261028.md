@@ -17,5 +17,7 @@
 - `GET withdrawals?projectId=…&email=<email PayPal nhận>` — tìm lệnh đang chờ theo email trong thư báo tiền PayPal (cần quyền PAYOUT hoặc RECEIPT).
 
 ## Tiền về
-- Luôn ghi ĐÚNG số tiền thấy trong PayPal (thấp hơn số rút vì phí) kèm mã giao dịch PayPal (`transactionId`), và `settleRemainder:true` để chốt phần thiếu là phí. Cùng mã giao dịch ghi lần hai → bị từ chối (DUPLICATE).
-- Tiền về muộn sau SUS: vẫn ghi được; về một phần thì phần còn lại vẫn là "Mất do SUS".
+- Luôn ghi ĐÚNG số tiền thấy trong PayPal kèm mã giao dịch PayPal (`transactionId`). Số PayPal là con số chính xác và cuối cùng (chủ quyết định 28/10/2026).
+- Thường thấp hơn số rút vì phí: kèm `settleRemainder:true` để chốt phần thiếu là phí.
+- Có thể cao hơn một chút: vẫn ghi đúng số đó (không bị từ chối). Lệnh tự đóng là đã về (VM vào Chờ tạo lại), phần dư ghi `shortfall` âm (ví dụ `-0.06`) với ghi chú "Nhận dư $0.06"; `recorded.settled:true`. Cùng mã giao dịch ghi lần hai → bị từ chối (DUPLICATE).
+- Tiền về muộn sau SUS: vẫn ghi được; về một phần thì phần còn lại vẫn là "Mất do SUS"; về đủ hoặc dư thì mở lại thành đã về (dư ghi như trên).

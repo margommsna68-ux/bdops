@@ -35,7 +35,7 @@ export const vmOpsRouter=router({
   voidPayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,reason:z.string().min(1).max(500)})).mutation(({ctx,input})=>domain(async()=>voidPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
   suspendEarnApp:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>markEarnAppSuspended(await scope(ctx,input.projectId),input,ctx.prisma))),
   // Money received for one payout request (review fix 21/10/2026): the same command as the ops API (recordPayoutReceipt); managers or
-  // PAYPAL_RECEIPT_RECORD. Confirmed money only, parts add up, never over what is open, duplicates refused, period lock.
+  // PAYPAL_RECEIPT_RECORD. Confirmed money only, parts add up, the exact PayPal figure even above what is open (settled as a surplus, 28/10/2026), duplicates refused, period lock.
   payoutReceipt:protectedProcedure.input(project.extend({key,requestId:id,expectedRequestRevision:revision,amount:z.string().max(20),currency:z.string().max(5),receivedAt:z.string().max(40),transactionId:z.string().max(100).nullish(),evidence:z.string().max(300).nullish(),settleRemainder:z.boolean().optional()})).mutation(({ctx,input})=>domain(async()=>recordPayoutReceipt(await scope(ctx,input.projectId),input,ctx.prisma))),
   // EarnApp balance at the VM (owner brief 20/10/2026): one command for the cell, the paste and AI; every line carries VM, round and
   // EarnApp seen; the check time is when it was read.

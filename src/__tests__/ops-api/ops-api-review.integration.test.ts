@@ -135,7 +135,6 @@ describe('7. PAYPAL_RECEIPT_RECORD on the web: the same recordPayoutReceipt, not
         await caller.vmOps.payoutReceipt({...base,key:randomUUID(),expectedRequestRevision:await reqRev(w.withdrawalId),amount:'6.00',transactionId:'TX-W6-'+f.x});
         await expect(caller.vmOps.payoutReceipt({...base,key:randomUUID(),expectedRequestRevision:0,amount:'4.00',transactionId:'TX-W4-'+f.x})).rejects.toMatchObject({code:'CONFLICT'}); // stale revision
         await expect(caller.vmOps.payoutReceipt({...base,key:randomUUID(),expectedRequestRevision:await reqRev(w.withdrawalId),amount:'6.00',transactionId:'TX-W6-'+f.x})).rejects.toThrow(/một lần/); // same payment id
-        await expect(caller.vmOps.payoutReceipt({...base,key:randomUUID(),expectedRequestRevision:await reqRev(w.withdrawalId),amount:'5.00',transactionId:'TX-W5-'+f.x})).rejects.toThrow(/vượt phần còn chờ/);
         // The same right through the API (token with RECEIPT for this user) completes the request: 6 + 4 = 10 by the book.
         const rt=await f.token(id,['READ','RECEIPT']),done=await call('POST','withdrawals/'+w.withdrawalId+'/receipts',{token:rt,body:{projectId:f.projectId,currency:'USD',receivedAt:base.receivedAt,expectedRequestRevision:await reqRev(w.withdrawalId),amount:'4.00',transactionId:'TX-W4-'+f.x}});
         expect(done.json.error).toBeNull();expect(done.json.data.current.withdrawal).toMatchObject({phase:'RECEIVED',money:{received:'10.00',remaining:'0.00'}});

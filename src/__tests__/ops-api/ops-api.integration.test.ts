@@ -150,11 +150,10 @@ describe('ops API: payout flow',()=>{
       const sentKey=randomUUID(),sentBody=await statusBody(f,0,{id:w.id,revision:await reqRev(w.id)});
       const sent=await api('POST','withdrawals/'+w.id+'/status',{token:t,key:sentKey,body:sentBody});expect(sent.json.data).toMatchObject({changed:true,recorded:{status:'SUBMITTED_ON_EARNAPP',withdrawalId:w.id},current:{withdrawal:{submission:'SUBMITTED_ON_EARNAPP'}}});
       expect(await db.payPalEmail.findUniqueOrThrow({where:{id:email}})).toMatchObject({usedEarnAppId:v0.earnAppId,holdEarnAppId:null});
-      // Receipts: 6 then 4 (parts, never the requested amount, never over what is open, one payment id once whatever the key).
+      // Receipts: 6 then 4 (parts, never the requested amount, one payment id once whatever the key; above what is open: payout-over-receipt).
       const rec=async(amount:string,tx:string|null,o:Record<string,unknown>={},k=randomUUID())=>api('POST','withdrawals/'+w.id+'/receipts',{token:t,key:k,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(w.id),amount,currency:'USD',receivedAt:new Date().toISOString(),transactionId:tx,evidenceNote:'PayPal activity',...o}});
       const six=await rec('6.00','TX-6-'+f.x);expect(six.json.data.current.withdrawal.money).toMatchObject({received:'6.00',remaining:'4.00'});expect(six.json.data.current.withdrawal.phase).toBe('WAITING');
       expect((await rec('6.00','TX-6-'+f.x)).json.error?.code).toBe('DUPLICATE');
-      expect((await rec('5.00','TX-5-'+f.x)).json.error?.code).toBe('VALIDATION'); // over the 4 still open
       expect((await rec('4.00','TX-4-'+f.x,{currency:'EUR'})).json.error?.code).toBe('VALIDATION');
       const four=await rec('4.00','TX-4-'+f.x);expect(four.json.data.current.withdrawal).toMatchObject({phase:'RECEIVED',money:{received:'10.00',remaining:'0.00'}});
       expect(await db.fundTransaction.findMany({where:{payoutRequestId:w.id},select:{amount:true,confirmed:true,earnAppId:true,paypalEmailId:true}})).toHaveLength(2);

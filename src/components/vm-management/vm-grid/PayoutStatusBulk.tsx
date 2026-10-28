@@ -69,7 +69,7 @@ function Queue({projectId,userId,kind,rows,liveOf,onSaved,onBusy}:{projectId:str
   const label=kind==='SEND'?`Đã rút ${ready.length} dòng`:`Tiền đã về ${ready.length} dòng`;
   return <div className="space-y-3" aria-label={kind==='SEND'?'Danh sách Đã rút':'Danh sách Tiền đã về'}>
     {kind==='SEND'?<p className="text-xs pm-muted">Rút trên EarnApp xong thì bấm “{label}”: mỗi yêu cầu đang rút được ghi “Đã rút” (một lệnh riêng mỗi dòng).</p>
-    :<><p className="text-xs pm-muted">Nhập đúng số tiền thấy trong PayPal cho từng dòng (dòng để trống không ghi); phí = số rút − số thực nhận.</p>
+    :<><p className="text-xs pm-muted">Nhập đúng số tiền thấy trong PayPal cho từng dòng (dòng để trống không ghi); phí = số rút − số thực nhận; số lớn hơn vẫn ghi đúng (hiện “Dư”).</p>
       <div className="flex gap-3 items-end flex-wrap"><label className="pm-label text-xs">Ngày tiền về<input type="date" className="pm-input" value={date} max={today} disabled={busy||pending.length>0} onChange={e=>setDate(e.target.value)}/></label>
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={settle} disabled={busy||pending.length>0} onChange={e=>setSettle(e.target.checked)}/>Chốt luôn, phần thiếu là phí</label></div></>}
     {lines.length>0&&<div className="overflow-x-auto"><table className="vm-bulk-table text-xs w-full"><thead><tr><th className="text-left">VM</th><th className="text-left">PayPal nhận</th><th className="text-right">Đã rút</th>
@@ -77,7 +77,7 @@ function Queue({projectId,userId,kind,rows,liveOf,onSaved,onBusy}:{projectId:str
       <tbody>{lines.map(l=>{const m=l.req.money,c=kind==='RECEIVE'?check(l):null,locked=busy||!!l.status||stale(l);return <tr key={l.req.id} aria-label={l.row.label}>
         <td><strong>{l.row.label}</strong></td><td>{l.req.paypal} · <span className="break-all">{l.req.email}</span></td><td className="text-right">{m?formatLedger(m.amount,m.currency):'—'}</td>
         {kind==='RECEIVE'&&<><td><input className="pm-input" inputMode="decimal" required aria-required aria-label={'Số tiền chính xác trong PayPal '+l.row.label} aria-invalid={!!c?.error} value={l.entered} disabled={locked} onChange={e=>patch(l.req.id,{entered:e.target.value,error:''})}/>{c?.error&&<span className="pm-error block">{c.error}</span>}</td>
-          <td className="text-right" aria-label={'Phí '+l.row.label}>{c?.fee!==null&&c?.fee!==undefined&&m?formatLedger(c.fee,m.currency):'—'}</td>
+          <td className="text-right" aria-label={'Phí '+l.row.label}>{c?.fee!==null&&c?.fee!==undefined&&m?formatLedger(c.fee,m.currency):c?.surplus&&m?'Dư '+formatLedger(c.surplus,m.currency):'—'}</td>
           <td><input className="pm-input" maxLength={100} aria-label={'Mã giao dịch '+l.row.label} value={l.txid} disabled={locked} onChange={e=>patch(l.req.id,{txid:e.target.value})}/></td></>}
         <td className="space-y-1">{result(l)}</td></tr>;})}</tbody></table></div>}
     {plan.skipped.length>0&&<div className="text-xs"><p className="font-semibold">Bỏ qua {plan.skipped.length} dòng</p><ul className="space-y-1">{plan.skipped.map(s=><li key={s.row.vmId}><strong>{(s.row as StatusBulkRow).label}</strong> — {s.why}</li>)}</ul></div>}

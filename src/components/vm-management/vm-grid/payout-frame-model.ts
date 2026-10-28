@@ -55,16 +55,19 @@ export function defaultPayoutAmount(v:string|null|undefined){
 /**
  * "Số tiền chính xác trong PayPal": empty and required. open = what may still arrive (the lost amount for late money after SUS) less a
  * linked pending receipt; fee = open − entered. "Chốt luôn, phần thiếu là phí" is offered while the entry is below the open part.
+ * Above the open part (owner 28/10/2026: the PayPal figure is exact and final): accepted, surplus = entered − open, the server closes
+ * the request as received; only with a linked pending receipt (older data) it must be reconciled first.
  */
 export function receiptCheck(m:{amount:string;received:string;remaining:string;pendingLinked:string;lost:string|null;phase?:string},entered:string){
   const base=m.phase==='LOST'&&m.lost?toCents(m.lost):toCents(m.remaining),open=Math.max(0,base-toCents(m.pendingLinked)),t=entered.trim();
-  const none={valid:false,amount:null as string|null,fee:null as string|null,showSettle:false,open:fromCents(open),error:''};
+  const none={valid:false,amount:null as string|null,fee:null as string|null,surplus:null as string|null,showSettle:false,open:fromCents(open),error:''};
   if(!t)return none;
   // US number format (owner decision 28/10/2026): "12.18", "1,234.56"; a decimal comma is refused at the field.
   const p=parseMoneyNumber(t,{fraction:2});if(p.error||p.value===null)return {...none,error:p.error||'Số tiền là số dương, tối đa 2 chữ số thập phân'};
   const c=toCents(p.value);if(c<=0)return {...none,error:'Số tiền phải lớn hơn 0'};
-  if(c>open)return {...none,error:'Số tiền vượt phần còn chờ ('+fromCents(open)+'); đối chiếu trước khi ghi'};
-  return {valid:true,amount:fromCents(c),fee:fromCents(open-c),showSettle:c<open,open:fromCents(open),error:''};
+  if(c>open&&toCents(m.pendingLinked)>0)return {...none,error:'Còn khoản về chưa xác nhận; đối chiếu ở Kho tài khoản trước khi ghi số lớn hơn phần còn chờ ('+fromCents(open)+')'};
+  if(c>open)return {valid:true,amount:fromCents(c),fee:null,surplus:fromCents(c-open),showSettle:false,open:fromCents(open),error:''};
+  return {valid:true,amount:fromCents(c),fee:fromCents(open-c),surplus:null,showSettle:c<open,open:fromCents(open),error:''};
 }
 // Lost answers (pattern of PayoutBulkPanel): the command (key + exact body) is written to this tab before sending; a retry sends it again.
 export const FRAME_ACTIONS=['REQUEST','SEND','DROP','EDIT','UNSEND','RECEIPT','SETTLE','SUS','FAIL','RETRY','VOID'] as const;
@@ -86,7 +89,7 @@ export function requestLabel(r:{state:string;submission:string;phase:string;sett
   if(r.phase==='LOST'||r.state==='LOST_SUS')return 'Mất do SUS';
   if(r.state==='FAILED')return 'Thất bại';if(r.state==='CANCELLED')return 'Đã huỷ';
   if(r.submission==='PREPARING')return 'Đang rút, chưa xác nhận';if(r.submission==='UNKNOWN')return 'Chưa rõ đã rút chưa';
-  if(r.phase==='RECEIVED')return r.money?.shortfall&&r.money.shortfall!=='0.00'?'Về thiếu (đã chốt)':'Đã về';
+  if(r.phase==='RECEIVED'){const s=r.money?.shortfall;return s&&s!=='0.00'?(s.startsWith('-')?'Nhận dư (đã chốt)':'Về thiếu (đã chốt)'):'Đã về';}
   if(r.phase==='REVIEW')return 'Cần đối chiếu tiền';
   return 'Đã rút, chờ tiền';
 }

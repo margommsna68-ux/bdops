@@ -57,6 +57,14 @@ it('"Tiền đã về N dòng": exact PayPal amount per row (empty, required), f
   expect(mock.receipt.mock.calls[1][0]).toMatchObject({requestId:'r2',amount:'10.00'});expect(mock.receipt.mock.calls[1][0]).not.toHaveProperty('settleRemainder');
   expect(mock.receipt.mock.calls[0][0].key).not.toBe(mock.receipt.mock.calls[1][0].key);
 });
+it('"Tiền đã về N dòng" above the request (owner 28/10/2026): the row shows "Dư" and is sent exactly',async()=>{
+  props.opsOf=(id:string)=>({...ops(id),request:request({id:'r'+id,earnAppId:'acc'+id,email:id+'@example.invalid'})});
+  await render();await click('Tiền đã về');
+  await change('Số tiền chính xác trong PayPal An-01 / VM_1','10.06');
+  expect(host.querySelector('[aria-label="Phí An-01 / VM_1"]')!.textContent).toBe('Dư $0.06');
+  await click('Tiền đã về 1 dòng');
+  expect(mock.receipt).toHaveBeenCalledTimes(1);expect(mock.receipt.mock.calls[0][0]).toMatchObject({requestId:'r1',amount:'10.06'});expect(mock.receipt.mock.calls[0][0]).not.toHaveProperty('settleRemainder');
+});
 it('a revision conflict on one receipt row does not stop the next; the failed row keeps its amount and is never sent twice',async()=>{
   mock.receipt.mockRejectedValueOnce(Object.assign(new Error('Yêu cầu vừa được sửa'),{data:{code:'CONFLICT'}}));
   props.opsOf=(id:string)=>({...ops(id),request:request({id:'r'+id,earnAppId:'acc'+id})});
