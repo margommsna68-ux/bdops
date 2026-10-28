@@ -8,7 +8,7 @@ import {decodeEndpoint} from './repository';
 import {fullProxy} from './parse';
 import {normalizeProxySearch,proxySearchEndpoint} from '@/lib/proxy-search';
 import {compareCodes,dueState,sortLocations,sortRegistryRows} from './package-terms';
-import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,isShared,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
+import {GROUP_GENJY,GROUP_SHARED,GROUP_TUT,GROUP_UNKNOWN,HISTORICAL_STATES,isShared,ProxyDomainError,UNASSIGNED_SERVER,type ActorScope,type CopyResult,type CopySkipReason,type ProxyTimeline,type RegistryFilter,type RegistryHistoryHint,type RegistryHistoryMatch,type RegistryLocation,type RegistryPage,type RegistryRow} from './types';
 type ReadDB=PrismaClient|Prisma.TransactionClient;
 type VMRef={id:string;code:string;serverId:string;server:{code:string}};
 // Every valid position of an endpoint: active holds (with their role) plus the VM link recorded from the Sheet (role null) when it is not already held.
@@ -41,6 +41,10 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Rea
   const counts={current:rows.filter(r=>!!r.endpointId&&r.owner==='SELF'&&!['QUARANTINED',...HISTORICAL_STATES].includes(r.state)).length,historical:rows.filter(r=>HISTORICAL_STATES.includes(r.state)).length,reserved:new Set(rows.filter(r=>r.owner==='GENJY'&&!isShared(r.owner,r.subgroup)).map(r=>r.identityId)).size,shared:new Set(rows.filter(r=>isShared(r.owner,r.subgroup)&&!HISTORICAL_STATES.includes(r.state)).map(r=>r.identityId)).size,quarantined:rows.filter(r=>!!r.endpointId&&r.state==='QUARANTINED').length};
   const servers=Array.from(new Set(rows.flatMap(r=>r.locations.map(l=>l.serverCode)))).sort(compareCodes);
   const search=normalizeProxySearch(filter.search||'').trim().toLowerCase(),endpointSearch=proxySearchEndpoint(search),serverSet=filter.servers?.length?new Set(filter.servers):null;
+  const searchMatch=(r:RegistryRow)=>!search||(endpointSearch?r.ip===endpointSearch.ip&&r.port===endpointSearch.port:[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search)));
+  // History matches of a CURRENT search (28/10/2026): the same search over replaced / retired / void rows, so an empty current list can point to history.
+  const retiredAtById=new Map(endpoints.map(e=>[e.id,e.retiredAt?.toISOString()||null]));
+  const historyMatches:RegistryHistoryMatch[]=filter.view==='CURRENT'&&search?rows.filter(r=>HISTORICAL_STATES.includes(r.state)&&searchMatch(r)).map(r=>({identityId:r.identityId,endpointId:r.endpointId,ip:r.ip,port:r.port,state:r.state,retiredAt:r.endpointId?retiredAtById.get(r.endpointId)??null:null,replacedBy:null,receivedDate:null})):[];
   const inBatch=filter.batchId?new Set((await db.proxyStatusEvent.findMany({where:{projectId:scope.projectId,batchId:filter.batchId,kind:'RECEIVED'},select:{endpointId:true}})).map(e=>e.endpointId)):null;
   // Group filter: the built-in groups map to owners; anything else is a ProxyGroup id.
   const groupKey=registryGroupKey;
@@ -50,7 +54,7 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Rea
     (filter.view==='ALL'||(filter.view==='HISTORY'?HISTORICAL_STATES.includes(r.state):!HISTORICAL_STATES.includes(r.state)))&&
     (!filter.owner||r.owner===filter.owner)&&
     (!serverSet||(r.locations.length?r.locations.some(l=>serverSet.has(l.serverCode)):serverSet.has(UNASSIGNED_SERVER)))&&
-    (!search||(endpointSearch?r.ip===endpointSearch.ip&&r.port===endpointSearch.port:[r.ip,r.packageCode||'',r.groupName||'',...r.locations.flatMap(l=>[l.serverCode,l.vmCode,l.serverCode+'/'+l.vmCode])].some(v=>v.toLowerCase().includes(search)))));
+    searchMatch(r));
   // Package counts apply every other filter, over all rows before paging.
   const packageCounts:Record<string,number>=Object.create(null);
   for(const r of packageScope)if(groupMatch(r)&&(!filter.state||stateMatches(r.state,filter.state))){const code=r.packageCode||'';packageCounts[code]=(packageCounts[code]||0)+1;}
@@ -62,7 +66,7 @@ export async function loadRegistryRows(scope:ActorScope,filter:RowsFilter,db:Rea
   for(const r of stateScoped){const k=groupKey(r);groupCounts[k]=(groupCounts[k]||0)+1;}
   const filtered=stateScoped.filter(groupMatch);
   sortRegistryRows(filtered,filter.sort);
-  return {rows:filtered,counts,servers,groups:restricted?groups.filter(g=>rows.some(r=>r.groupId===g.id)):groups,groupCounts,stateCounts,packageCounts};
+  return {rows:filtered,counts,servers,groups:restricted?groups.filter(g=>rows.some(r=>r.groupId===g.id)):groups,groupCounts,stateCounts,packageCounts,historyMatches};
 }
 async function authorize(scope:ActorScope,copy:boolean,db:ReadDB){
   const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,copy?'COPY_CREDENTIALS':'READ');return current;
@@ -70,13 +74,22 @@ async function authorize(scope:ActorScope,copy:boolean,db:ReadDB){
 export async function queryRegistry(scope:ActorScope,filter:RegistryFilter,db:PrismaClient=prisma):Promise<RegistryPage>{
   scope=await authorize(scope,false,db);
   if(filter.limit<1||filter.limit>100) throw new ProxyDomainError('INVALID_INPUT');
-  const {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts}=await loadRegistryRows(scope,filter,db);
+  const {rows:filtered,counts,servers,groups,groupCounts,stateCounts,packageCounts,historyMatches}=await loadRegistryRows(scope,filter,db);
+  // Nothing current for this search but history has it: tell the person where to look and what replaced it (never credentials).
+  let historyHint:RegistryHistoryHint|null=null;
+  if(!filtered.length&&historyMatches.length){
+    const shown=historyMatches.slice(0,5),ids=shown.flatMap(m=>m.endpointId?[m.endpointId]:[]);
+    const replacements=ids.length?await db.proxyReplacement.findMany({where:{projectId:scope.projectId,status:'APPLIED',oldEndpointId:{in:ids}},include:{newEndpoint:{include:{identity:{select:{ip:true}}}}},orderBy:{recordedAt:'asc'}}):[];
+    const byOld=new Map<string,{ip:string|null;receivedDate:string|null}>();
+    for(const r of replacements)byOld.set(r.oldEndpointId,{ip:r.newEndpoint.identity?.ip??r.newEndpoint.host??null,receivedDate:r.receivedDate?.toISOString().slice(0,10)||null});
+    historyHint={total:historyMatches.length,rows:shown.map(m=>{const r=m.endpointId?byOld.get(m.endpointId):undefined;return {...m,replacedBy:r?.ip??null,receivedDate:r?.receivedDate??null};})};
+  }
   // ?page= of the registry: a page past the end (rows changed since the link was made) is served as the last page and reported back.
   let start=0;
   if(filter.page&&!filter.cursor){if(!Number.isInteger(filter.page)||filter.page<1) throw new ProxyDomainError('INVALID_INPUT');start=(Math.min(filter.page,Math.max(1,Math.ceil(filtered.length/filter.limit)))-1)*filter.limit;}
   if(filter.cursor){let cursor:string;try{cursor=Buffer.from(filter.cursor,'base64url').toString('utf8');}catch{throw new ProxyDomainError('INVALID_INPUT');}const index=filtered.findIndex(r=>(r.endpointId||r.identityId)===cursor);if(index<0) throw new ProxyDomainError('STALE_PREVIEW','Danh sách đã thay đổi; tải lại');start=index+1;}
   const page=filtered.slice(start,start+filter.limit),last=page[page.length-1];
-  return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,packageCounts,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
+  return {rows:page,page:Math.floor(start/filter.limit)+1,counts,total:filtered.length,servers,groups,groupCounts,stateCounts,packageCounts,historyHint,nextCursor:start+filter.limit<filtered.length&&last?Buffer.from(last.endpointId||last.identityId).toString('base64url'):null};
 }
 export async function getProxyTimeline(scope:ActorScope,identityId:string,db:PrismaClient=prisma):Promise<ProxyTimeline>{
   scope=await authorize(scope,false,db);

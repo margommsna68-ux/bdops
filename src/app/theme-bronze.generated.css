@@ -311,6 +311,7 @@
 [data-theme="bronze"] .pm-registry-blocked[aria-pressed="true"]{color:#7A3525;border-color:rgba(166,80,58,0.4);background:rgba(166,80,58,0.08)}
 [data-theme="bronze"] .pm-registry-blocked[aria-pressed="true"] .pm-registry-filter-count{background:rgba(166,80,58,0.12)}
 [data-theme="bronze"] .pm-registry-blocked:focus-visible{outline:2px solid #A9713F}
+[data-theme="bronze"] .pm-history-hint{background:rgba(169,113,63,0.09)}
 [data-theme="bronze"] .vm-chip.attention strong{color:#7A5012}
 [data-theme="bronze"] .vm-chip.active{background:#744820;border-color:#744820;color:#FFFAF2}
 [data-theme="bronze"] .vm-chip.active strong{color:#FFFAF2}

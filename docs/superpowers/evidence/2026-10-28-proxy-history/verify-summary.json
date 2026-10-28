@@ -1,0 +1,143 @@
+{
+ "previewOfOldProxiesAsNew": [
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 175.29.132.190 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 178.94.226.206 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "GENJY_RESERVED",
+   "message": "IP thuộc nhóm chung mooon–Genjy"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "INVALID_INPUT",
+   "message": "Nhập mới cần đủ port, user và pass"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "GENJY_RESERVED",
+   "message": "IP thuộc nhóm chung mooon–Genjy"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "INVALID_INPUT",
+   "message": "Nhập mới cần đủ port, user và pass"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.136.144 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.137.32 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.137.48 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.136.89 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "INVALID_INPUT",
+   "message": "Nhập mới cần đủ port, user và pass"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.137.69 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.137.81 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "INVALID_INPUT",
+   "message": "Nhập mới cần đủ port, user và pass"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.137.97 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.138.154 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.138.142 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 84.32.136.120 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 158.46.197.178 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 158.46.197.233 23/09/2026"
+  },
+  {
+   "outcome": "ERROR",
+   "code": "HISTORICAL_IP",
+   "message": "Đã replace bằng 95.135.206.185 23/09/2026"
+  }
+ ],
+ "registryCounts": {
+  "current": 669,
+  "historical": 125,
+  "reserved": 691,
+  "shared": 30,
+  "quarantined": 52
+ },
+ "statesAfter": [
+  {
+   "_count": 5,
+   "inventoryState": "NEW"
+  },
+  {
+   "_count": 1298,
+   "inventoryState": "LIVE"
+  },
+  {
+   "_count": 6,
+   "inventoryState": "BLOCKED"
+  },
+  {
+   "_count": 124,
+   "inventoryState": "REPLACED"
+  },
+  {
+   "_count": 52,
+   "inventoryState": "QUARANTINED"
+  },
+  {
+   "_count": 1,
+   "inventoryState": "RETIRED"
+  }
+ ],
+ "replacementLinksFromBatch": 45
+}

@@ -91,3 +91,4 @@
   .pm-registry-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pm-registry-filter-field:last-child{grid-column:1 / -1}
 }
+.pm-history-hint{margin:18px 0 0;max-width:min(620px,calc(100vw - 72px));position:sticky;left:20px;text-align:left;padding:14px 16px;border-radius:8px;background:rgba(59,130,246,.09);color:var(--ds-text-primary)}.pm-history-hint .pm-button{display:inline-flex;align-items:center;gap:6px}
