@@ -5,7 +5,7 @@ import {createRoot,type Root} from 'react-dom/client';
 const mock=vi.hoisted(()=>({query:vi.fn(),replace:vi.fn(),params:new URLSearchParams()}));
 vi.mock('next/navigation',()=>({useRouter:()=>({replace:mock.replace}),useSearchParams:()=>mock.params}));
 vi.mock('next/link',()=>({default:({children,...props}:React.AnchorHTMLAttributes<HTMLAnchorElement>)=><a {...props}>{children}</a>}));
-vi.mock('@/components/business-management/PayoutStatusActions',()=>({PayoutStatusActions:()=> <div data-testid="status-editor">Cập nhật trạng thái yêu cầu</div>}));
+vi.mock('@/components/vm-management/vm-grid/PayoutFrame',()=>({PayoutFrameForVm:()=> <div data-testid="status-editor">Rút về PayPal</div>}));
 vi.mock('@/lib/trpc',()=>({trpc:{vmOps:{payoutReport:{useQuery:mock.query}}}}));
 import {PayoutReportWorkspace} from '@/components/business-management/PayoutReportWorkspace';
 let root:Root,host:HTMLDivElement;

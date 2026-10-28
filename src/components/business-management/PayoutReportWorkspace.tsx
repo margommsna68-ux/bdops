@@ -9,7 +9,7 @@ import {links} from '@/lib/links';
 import {displayMoney} from '@/lib/money-input';
 import '@/components/proxy-management/proxy-management.css';
 import './payout-report.css';
-import {PayoutStatusActions} from './PayoutStatusActions';
+import {PayoutFrameForVm} from '@/components/vm-management/vm-grid/PayoutFrame';
 import type {readPayoutReport} from '@/server/vm-ops/payout-report';
 
 const statuses={PREPARING:'Đang chuẩn bị',UNKNOWN:'Chưa rõ kết quả',WAITING:'Chờ về PayPal',PARTIAL:'Đã nhận một phần',RECEIVED:'Đã nhận đủ / chốt',FAILED:'Thất bại',CANCELLED:'Đã huỷ',REVIEW:'Cần đối chiếu',LOST:'Mất do SUS'};
@@ -69,15 +69,13 @@ type Report=Awaited<ReturnType<typeof readPayoutReport>>;
 type Row=Report['rows'][number];
 function Status({row}:{row:Row}){return <span className={'pr-status pr-status-'+row.status.toLowerCase()}>{row.status==='RECEIVED'&&row.shortfall&&row.shortfall!=='0.00'?'Đã chốt nhận thiếu':statuses[row.status]||row.status}</span>;}
 function PayoutDetail({row:r,projectId,rights,onSaved}:{row:Row;projectId:string;rights:Report['rights'];onSaved:()=>Promise<unknown>}){
- const [saved,setSaved]=useState(0);
  return <div className="pr-panel-body">
   <div className="pr-panel-status"><Status row={r}/>{r.submittedAt&&<span className="pm-muted">Đã gửi {dateText(r.submittedAt)}</span>}</div>
   <dl className="pr-amounts"><div><dt>Yêu cầu</dt><dd>{displayMoney(r.amount,r.currency)}</dd></div><div><dt>Thực nhận</dt><dd>{displayMoney(r.received,r.currency)}</dd></div><div><dt>Còn chờ</dt><dd>{displayMoney(r.remaining,r.currency)}</dd></div></dl>
   {r.shortfall&&r.shortfall!=='0.00'&&<p className="pr-notice">Đã chốt nhận thiếu {displayMoney(r.shortfall,r.currency)}</p>}
   {!!r.members?.length&&<div className="text-sm"><strong>Rút gộp {r.members.length+1} VM</strong> (tiền tính một lần trên lệnh này): {r.vm||r.vmId} (chính){r.members.map(m=><span key={m.vmId}>, {(m.server||'Server cũ')+' / '+(m.vm||m.vmId)}{m.consumed?' · đã tạo lại':''}</span>)}</div>}
   <dl className="pr-destination"><div><dt>PayPal nhận</dt><dd><strong>{r.paypal}</strong><span>{r.email}</span></dd></div><div><dt>EarnApp</dt><dd>{r.login||'Chưa ghi tài khoản'}</dd></div>{r.reference&&<div><dt>Tham chiếu</dt><dd>{r.reference}</dd></div>}</dl>
-  {r.current&&['WAITING','PARTIAL'].includes(r.status)&&<div className="pr-receive-action"><Link className="pm-button pm-button-primary" href={links.vms({serverId:r.serverId,q:r.vm||undefined})}>Ghi tiền về PP tại VM <ArrowUpRight size={14}/></Link><p className="pm-muted">Mở ô TIỀN TRONG VM để nhập số thực nhận.</p></div>}
-  {(rights?.manage||rights?.markSubmission)&&<PayoutStatusActions key={saved} projectId={projectId} userId={rights.userId} row={r} manage={rights.manage} markSubmission={rights.markSubmission} onDone={()=>{void onSaved().then(()=>setSaved(n=>n+1));}}/>}
+  {r.current&&!r.consumed&&rights&&<div className="pr-status-editor"><h2>Rút về PayPal</h2><PayoutFrameForVm projectId={projectId} userId={rights.userId} vmId={r.vmId} requestId={r.id} onDone={onSaved}/></div>}
   <section className="pr-receipts"><h2>Tiền về email <span>{r.receipts.length} khoản</span></h2>{r.receipts.length?<ul>{r.receipts.map(f=><li key={f.id}><div><strong>{displayMoney(f.amount,f.currency)}</strong><span>{receiptStatuses[f.status]||f.status}</span></div><small className="pm-muted">{dateText(f.date)}</small><p>Mã giao dịch: {f.transactionId||'Chưa ghi'}</p></li>)}</ul>:<p className="pm-muted pr-receipts-empty">Chưa ghi khoản thực nhận.</p>}</section>
  </div>;
 }

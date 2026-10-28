@@ -14,6 +14,10 @@ vi.mock('@/lib/trpc', () => ({trpc: {
     requestPayout: {useMutation: () => ({mutateAsync: mock.request, isLoading: false})},
     updatePayout: {useMutation: () => ({mutateAsync: mock.update})},
     payoutReceipt: {useMutation: () => ({mutateAsync: mock.receipt})},
+    editPayout: {useMutation: () => ({mutateAsync: vi.fn()})},
+    unsendPayout: {useMutation: () => ({mutateAsync: vi.fn()})},
+    voidPayout: {useMutation: () => ({mutateAsync: vi.fn()})},
+    suspendEarnApp: {useMutation: () => ({mutateAsync: vi.fn()})},
     balanceRecord: {useMutation: () => ({})},
     balanceHistory: {useQuery: () => ({data: undefined})},
   },
@@ -61,12 +65,14 @@ async function change(el: HTMLInputElement|HTMLSelectElement, value: string) {
     el.dispatchEvent(new dom.window.Event(el.tagName==='SELECT'?'change':'input', {bubbles: true}));
   });
 }
-async function openCell() {
+// One-click "Rút" (owner 28/10/2026): the cell frame reads the picker once and holds the chosen email in the same click.
+async function withdrawCell(amount = '10') {
+  mock.pick.mockImplementation(async () => single);
   await cell();
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-haspopup="dialog"]')!.click());
-  await act(async () => Array.from(document.querySelectorAll('button')).find(b => b.textContent==='Chuẩn bị rút (giữ email)')!.click());
+  await change(document.querySelector<HTMLInputElement>('input[aria-label="Số tiền rút"]')!, amount);
+  await act(async () => Array.from(document.querySelectorAll('button')).find(b => b.textContent==='Rút')!.click());
 }
-const field = (text: string) => Array.from(document.querySelectorAll('label')).find(l => l.textContent?.startsWith(text))!.querySelector('input,select') as HTMLInputElement|HTMLSelectElement;
 
 it('disables the third distinct email in a bulk draft and releases local capacity without clearing amounts', async () => {
   await bulk();
@@ -107,27 +113,7 @@ it('keeps a blocked own email fixed in bulk even when another PayPal is usable',
   expect(save().disabled).toBe(true); expect(host.textContent).toContain('Hôm nay 2/2 email');
 });
 
-it('blocks a selected single email when refreshed daily allowance changes, retaining the draft', async () => {
-  await openCell();
-  await change(field('Mã PP'), 'pp'); await change(field('Số tiền (USD)'), '12');
-  expect(save().disabled).toBe(false);
-  single = pick('1', paypal(1, 1)); await cell();
-  expect(field('Email nhận').value).toBe('e1'); expect(field('Số tiền (USD)').value).toBe('12');
-  expect(save().disabled).toBe(true);
-  expect(document.body.textContent).toContain('Hôm nay 2/2 email');
-  expect(document.body.textContent).toContain('đang giữ 1');
-  await act(async () => save().click()); expect(mock.request).not.toHaveBeenCalled();
-});
 
-it('never switches a blocked bound single email to a suggested PayPal', async () => {
-  single = pick('1', paypal(2)); single.earnApp.emailId = 'e1'; single.paypals[0].emails[0].own = true;
-  single.paypals.push({...paypal(), id: 'pp2', code: 'PP2'}); single.suggestion = {paypalId: 'pp2', why: 'synthetic stale suggestion'};
-  await openCell(); await change(field('Số tiền (USD)'), '10');
-  expect(field('Mã PP').value).toBe('pp'); expect(field('Mã PP').disabled).toBe(true);
-  expect(field('Email nhận').value).toBe('e1'); expect(field('Email nhận').disabled).toBe(true);
-  expect(save().disabled).toBe(true);
-  expect(Array.from(document.querySelectorAll('button')).some(b => b.textContent==='Dùng gợi ý')).toBe(false);
-});
 
 it('keeps successful rows occupying local quota until the batch closes', async () => {
   await bulk();
@@ -175,20 +161,7 @@ it('retains the bulk draft and server refusal when another operator fills the qu
   expect(document.querySelector<HTMLInputElement>('[aria-label="Số tiền An-01 / VM_1"]')!.value).toBe('12');
 });
 
-it('chooses an allowed single email rather than the first blocked option', async () => {
-  single.paypals[0].emails[0].dailyAllowed = false;
-  await openCell(); await change(field('Mã PP'), 'pp'); await change(field('Số tiền (USD)'), '10');
-  expect(field('Email nhận').value).toBe('e2'); expect(save().disabled).toBe(false);
-  expect(Array.from((field('Email nhận') as HTMLSelectElement).options).find(o=>o.value==='e1')!.disabled).toBe(true);
-  expect(document.body.textContent).toContain('Số dư cần quyền xem tiền');
-});
 
-it('permits a server-allowed own email already counted in a full daily quota', async () => {
-  single = pick('1', paypal(1, 1)); single.earnApp.emailId = 'e1';
-  single.paypals[0].usable = true; single.paypals[0].emails[0] = {...single.paypals[0].emails[0], own: true, dailyAllowed: true, dailyOccupied: true};
-  await openCell(); await change(field('Số tiền (USD)'), '10');
-  expect(field('Email nhận').value).toBe('e1'); expect(save().disabled).toBe(false);
-});
 
 it('does not count an already occupied own email twice against the bulk remaining slot', async () => {
   mock.pick.mockImplementation(async ({vmId}: {vmId: string}) => {
@@ -245,15 +218,6 @@ it('blocks an occupied but disallowed legacy overbooking in bulk without switchi
   await act(async () => save().click()); expect(mock.request).not.toHaveBeenCalled();
 });
 
-it('blocks an occupied but disallowed legacy overbooking in the single form', async () => {
-  single=pick('1',paypal(0,3)); single.earnApp.emailId='e1'; single.paypals[0].usable=true;
-  single.paypals[0].emails[0]={...single.paypals[0].emails[0],own:true,dailyOccupied:true,dailyAllowed:false};
-  single.paypals[0].emails[1]={...single.paypals[0].emails[1],dailyOccupied:true,dailyAllowed:true};
-  await openCell(); await change(field('Số tiền (USD)'), '10');
-  expect(save().disabled).toBe(true); expect(field('Email nhận').value).toBe('e1'); expect(field('Email nhận').disabled).toBe(true);
-  expect(document.body.textContent).toContain('Hôm nay 3/2 email');
-  await act(async () => save().click()); expect(mock.request).not.toHaveBeenCalled();
-});
 
 it.each(['revision','cycle','account'] as const)('releases stale unsent fixed-email slots after a live %s refresh without editing drafts', async kind => {
   mock.pick.mockImplementation(async ({vmId}: {vmId:string}) => {
@@ -310,4 +274,41 @@ it('retains an in-flight command slot and email ownership when its VM becomes st
   await act(async()=>root.render(<PayoutBulkPanel projectId="p" userId="u" vms={[{...vm('1'),revision:3},vm('2')]} opsOf={ops} rights={rights} onSaved={()=>{}} onBusy={()=>{}}/>));
   expect(option('2','e1').disabled).toBe(true); expect(option('2','e2').disabled).toBe(true);
   await act(async()=>resolveRequest!({}));
+});
+
+it('one-click Rút holds nothing when the suggested PayPal is full today', async () => {
+  single = pick('1', paypal(1, 1)); single.suggestion = null;
+  await withdrawCell();
+  expect(mock.request).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('Không còn PayPal có email trống dùng được hôm nay');
+});
+
+it('one-click Rút never switches a blocked bound email to a suggested PayPal', async () => {
+  single = pick('1', paypal(2)); single.earnApp.emailId = 'e1'; single.paypals[0].emails[0].own = true; single.paypals[0].emails[0].dailyAllowed = false;
+  single.paypals.push({...paypal(), id: 'pp2', code: 'PP2'}); single.suggestion = {paypalId: 'pp2', why: 'synthetic stale suggestion'};
+  await withdrawCell();
+  expect(mock.request).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('Email đã gắn với EarnApp này hết lượt hôm nay');
+});
+
+it('one-click Rút takes an allowed email of the suggestion rather than the first blocked one, as PREPARING', async () => {
+  single.paypals[0].emails[0].dailyAllowed = false; single.suggestion = {paypalId: 'pp', why: 'synthetic'};
+  await withdrawCell('10,5');
+  expect(mock.request).toHaveBeenCalledTimes(1);
+  expect(mock.request.mock.calls[0][0]).toMatchObject({projectId: 'p', vmId: '1', expectedCycle: 1, earnAppId: 'acc1', paypalEmailId: 'e2', amount: '10.5', currency: 'USD', submission: 'PREPARING'});
+});
+
+it('one-click Rút permits a server-allowed own email already counted in a full daily quota', async () => {
+  single = pick('1', paypal(1, 1)); single.earnApp.emailId = 'e1';
+  single.paypals[0].usable = true; single.paypals[0].emails[0] = {...single.paypals[0].emails[0], own: true, dailyAllowed: true, dailyOccupied: true};
+  await withdrawCell();
+  expect(mock.request.mock.calls[0][0]).toMatchObject({paypalEmailId: 'e1', submission: 'PREPARING'});
+});
+
+it('one-click Rút refuses an occupied but disallowed legacy overbooking of the bound email', async () => {
+  single=pick('1',paypal(0,3)); single.earnApp.emailId='e1'; single.paypals[0].usable=true;
+  single.paypals[0].emails[0]={...single.paypals[0].emails[0],own:true,dailyOccupied:true,dailyAllowed:false};
+  single.paypals[0].emails[1]={...single.paypals[0].emails[1],dailyOccupied:true,dailyAllowed:true};
+  await withdrawCell();
+  expect(mock.request).not.toHaveBeenCalled();
 });

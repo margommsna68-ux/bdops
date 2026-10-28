@@ -291,7 +291,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         <div hidden={storeOpen}>{pager('top')}</div>
         <div ref={gridHost} hidden={storeOpen}><VmGrid sort={url.sort} onSort={sort=>go({sort})} projectId={projectId} rows={paged.rows} single={single} deletedView={deletedView} prefs={prefs} onPrefs={savePrefs} rights={rights} selected={selected} onToggle={toggle} onTogglePage={togglePage} accountOf={id=>accountOfVm.get(id)} activeVmId={url.vm} maxHeight={maxHeight} loading={workspace.isLoading||(accountView&&accounts.isLoading)}
           emptyText={deletedView?'Không có máy đã xoá.':servers.length?'Không có VM trong bộ lọc này.':'Thêm server và VM để bắt đầu.'} onOpen={(id,tab)=>openVm(id,tab)} onCopy={(vm,which)=>void copyList([vm],which)} onDelete={vm=>void remove([vm.id])} onRestore={vm=>void restore([vm.id])} onSave={saveCell}
-          opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])} accountState={accounts.isError?'ERROR':accounts.data?'READY':'LOADING'}/></div>
+          opsOf={id=>opsOfVm.get(id)} opsRights={opsRights} onOpsStatus={setOpsStatus} onOpsDone={()=>Promise.all([board.refetch(),refresh()])} accountState={accounts.isError?'ERROR':accounts.data?'READY':'LOADING'} userId={userId}/></div>
         <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>
@@ -303,7 +303,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
           {bulk==='account'&&<AccountBulkPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}
           {bulk==='note'&&<NotesPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}
           {bulk==='copy'&&manualCopy&&<label className="pm-label">Chọn và copy (Ctrl+C)<textarea className="pm-input font-mono" rows={8} readOnly value={manualCopy} onFocus={e=>e.target.select()}/></label>}
-        </div></aside>:panelVm&&<VmSidePanel key={panelVm.id} projectId={projectId} vm={panelVm} tab={url.tab} cause={url.cause} rights={rights} account={accountOfVm.get(panelVm.id)} onTab={t=>go({tab:t},'replace')} onClose={closePanel} onSaved={()=>void refresh()} onCopy={(vm,which)=>void copyList([vm],which)}/>}
+        </div></aside>:panelVm&&<VmSidePanel key={panelVm.id} projectId={projectId} userId={userId} ops={opsOfVm.get(panelVm.id)} opsRights={board.data?opsRights:undefined} onOpsDone={()=>Promise.all([board.refetch(),refresh()])} vm={panelVm} tab={url.tab} cause={url.cause} rights={rights} account={accountOfVm.get(panelVm.id)} onTab={t=>go({tab:t},'replace')} onClose={closePanel} onSaved={()=>void refresh()} onCopy={(vm,which)=>void copyList([vm],which)}/>}
       </div>}
     </div>
     {form==='ADD'&&<AddVmDialog projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} known={allVMs.map(v=>({serverId:v.serverId,code:v.code,archivedAt:v.archivedAt}))} onClose={()=>setForm(null)} onSaved={()=>void refresh()}/>}

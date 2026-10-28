@@ -21,19 +21,22 @@ import {moduleOn} from '@/lib/features';
 import {AccountPicker,TYPE_LABEL,type VmAccount} from './AccountCell';
 import {opsLabel,type VmOpsStatus} from '@/lib/vm-ops';
 import {FleetCommandPanel} from './FleetCommandPanel';
+import {PayoutFrame} from './PayoutFrame';
+import type {OpsRow,OpsRights} from './OpsCells';
+import {vmMoneyState} from '@/lib/vm-money';
 const TABS:{key:PanelTab;label:string}[]=[{key:'overview',label:'Tổng quan'},{key:'proxy',label:'Thay proxy'},{key:'work',label:'Công việc'},{key:'account',label:'Tài khoản'},{key:'history',label:'Lịch sử'}];
 // Configuration history (19/10/2026: no install step; older install states stay readable as history).
 const CONFIG_STATUS:Record<string,string>={PLANNED:'Gán',IN_PROGRESS:'Gán (dữ liệu cũ: đã bắt đầu cài)',FAILED:'Gán (dữ liệu cũ: cài chưa xong)',CONFIRMED:'Dữ liệu cũ: đã xác nhận cài',CANCELLED:'Đã thay / bỏ'};
 const ROLE:Record<string,string>={DESIRED:'Đang dùng',INSTALLED:'Đã cài trước đây',UNCERTAIN:'Giữ để kiểm tra'};
 const CAUSE:Record<string,string>={HOLD:'VM còn giữ proxy. Bỏ gán ở Kho proxy (hoặc đối chiếu ở ô Proxy) trước khi xoá.',INSTALLED:'VM còn liên kết proxy cũ. Đổi hoặc bỏ gán proxy trước khi xoá.',SDK:'SDK cũ của máy đã được chuyển sang VM khác; web không giành lại. Ghi SDK mới cho máy này nếu cần.',SERVER:'Server của VM đang ở trạng thái đã xoá; khôi phục server trước.'};
-export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose,onSaved,onCopy}:{projectId:string;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
+export function VmSidePanel({projectId,userId,ops,opsRights,onOpsDone,vm,tab,cause,rights,account,onTab,onClose,onSaved,onCopy}:{projectId:string;userId?:string;ops?:OpsRow;opsRights?:OpsRights;onOpsDone?:()=>Promise<unknown>|void;vm:ManagedVM;tab:PanelTab;cause:string|null;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onClose:()=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const deleted=!!vm.archivedAt,status=vmView(vm);
   return <aside className="vm-panel" aria-label={'Chi tiết '+vm.server+' / '+vm.code}>
     <div className="vm-panel-head"><div className="min-w-0"><p className="pm-muted text-xs">{vm.server}</p><h2 className="pm-code vm-ellipsis">{vm.code}</h2><span className={`pm-badge ${deleted?'pm-badge-muted':status==='REVIEW'||status==='BLOCKED'?'pm-badge-red':status==='ASSIGNED'?'pm-badge-green':'pm-badge-muted'}`}>{deleted?'Đã xoá':viewLabels[status]}</span></div><button className="pm-icon-button" aria-label="Đóng chi tiết" title="Đóng (Esc)" onClick={onClose}><X size={16}/></button></div>
     <div className="vm-panel-tabs" role="tablist">{TABS.filter(t=>t.key!=='work'||moduleOn('WORK')).map(t=><button key={t.key} type="button" role="tab" aria-selected={tab===t.key} className={tab===t.key?'active':''} onClick={()=>onTab(t.key)}>{t.label}</button>)}</div>
     <div className="vm-panel-body">
       {cause&&CAUSE[cause]&&<p className="pm-review text-sm" role="note"><strong>Lý do bị chặn:</strong> {CAUSE[cause]}</p>}
-      {tab==='overview'&&<Overview projectId={projectId} vm={vm} rights={rights} account={account} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
+      {tab==='overview'&&<Overview projectId={projectId} userId={userId} ops={ops} opsRights={opsRights} onOpsDone={onOpsDone} vm={vm} rights={rights} account={account} onTab={onTab} onSaved={onSaved} onCopy={onCopy}/>}
       {tab==='proxy'&&(deleted?<p className="pm-muted text-sm">Máy đã xoá không được giao proxy. Khôi phục trước.</p>:<div className="vm-panel-card"><ChangeProxy projectId={projectId} vm={vm} info={proxyCellInfo(vm)} rights={{assign:rights.assign,copy:rights.copy,replace:!!rights.replace,block:!!rights.block}} onBusy={()=>undefined} onDone={onSaved} onCancel={()=>onTab('overview')}/></div>)}
       {tab==='work'&&!moduleOn('WORK')&&<p className="pm-muted text-sm">Giao việc đang tạm ẩn. Dữ liệu việc cũ vẫn được giữ.</p>}
       {tab==='work'&&moduleOn('WORK')&&<WorkTab projectId={projectId} vm={vm}/>}
@@ -42,7 +45,7 @@ export function VmSidePanel({projectId,vm,tab,cause,rights,account,onTab,onClose
     </div>
   </aside>;
 }
-function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:string;vm:ManagedVM;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
+function Overview({projectId,userId,ops,opsRights,onOpsDone,vm,rights,account,onTab,onSaved,onCopy}:{projectId:string;userId?:string;ops?:OpsRow;opsRights?:OpsRights;onOpsDone?:()=>Promise<unknown>|void;vm:ManagedVM;rights:GridRights;account:VmAccount|undefined;onTab:(t:PanelTab)=>void;onSaved:()=>void;onCopy:(vm:ManagedVM,which:CopyWhich)=>void}){
   const detail=trpc.vmManagement.detail.useQuery({projectId,vmId:vm.id}),updateVM=trpc.vmManagement.updateVM.useMutation();
   const deleted=!!vm.archivedAt,cfg=(id?:string)=>detail.data?.configurations.find(c=>c.id===id),status=vmView(vm);
   const saveNotes=async(value:string)=>{const r=await updateVM.mutateAsync({projectId,vmId:vm.id,notes:value||null,expectedRevision:vm.revision});if(r.saved){toast.success('Đã lưu');onSaved();}};
@@ -59,8 +62,17 @@ function Overview({projectId,vm,rights,account,onTab,onSaved,onCopy}:{projectId:
     <section className="vm-panel-card"><h3>SDK EarnApp</h3>
       <SdkEditor key={vm.id} embedded projectId={projectId} vm={vm} account={account} canEdit={rights.assign&&!deleted} money={{read:!!rights.sdkMoneyRead,write:!!rights.sdkMoneyWrite&&!deleted}} draft={null} onDraft={()=>undefined}/></section>
     <section className="vm-panel-card"><h3>Tài khoản EarnApp</h3><p>{account?.earnApp?<>{account.earnApp.login.email} <span className="pm-muted">({TYPE_LABEL[account.earnApp.login.type||'']||'chưa chọn loại'})</span> · PayPal {account.earnApp.paypal?account.earnApp.paypal.code+' · '+(account.earnApp.paypal.email||'chưa xác định email'):'chưa có'}</>:account?.legacyGmail?<span className="pm-muted">Gmail cũ: {account.legacyGmail} (chưa có tài khoản EarnApp)</span>:<span className="pm-muted">Chưa gán</span>}</p><p className="pm-muted text-xs">{account?.earnApp?.registeredAt?'Đã ghi đăng ký EarnApp':'Chưa ghi đăng ký EarnApp'}. Sửa ngay tại ô Tài khoản EarnApp trong bảng.</p>{!deleted&&(rights.accountAssign??rights.assign)&&<button className="pm-button pm-button-quiet mt-2" onClick={()=>onTab('account')}>Đổi tài khoản / PayPal</button>}</section>
+    {!deleted&&ops&&opsRights&&<PayoutSection projectId={projectId} userId={userId} vm={vm} ops={ops} rights={opsRights} onDone={onOpsDone??onSaved}/>}
     <section className="vm-panel-card"><h3>Ghi chú</h3><InlineText value={displayNote(vm.notes)} label={'ghi chú '+vm.code} placeholder="thêm ghi chú" canEdit={rights.manage&&!deleted} multiline className="vm-panel-note" onSave={saveNotes}/></section>
   </div>;
+}
+// "Rút về PayPal" of this VM (owner 28/10/2026): the same frame as the Tiền VM cell and the report page.
+function PayoutSection({projectId,userId,vm,ops,rights,onDone}:{projectId:string;userId?:string;vm:ManagedVM;ops:OpsRow;rights:OpsRights;onDone:()=>Promise<unknown>|void}){
+  const cur=vm.sdks.find(s=>s.current)??null,s=vmMoneyState(cur?{code:cur.code,amount:cur.amount,observedAt:cur.amountObservedAt,failedAt:cur.amountFailedAt,moneyHidden:cur.moneyHidden,stored:cur.stored}:null);
+  const member=ops.merge?.role==='MEMBER'?ops.merge:null;
+  return <section className="vm-panel-card"><h3>Rút về PayPal</h3>
+    <PayoutFrame projectId={projectId} userId={userId} vmId={vm.id} vmLabel={vm.server+' / '+vm.code} cycle={ops.cycle} earnAppId={ops.earnAppId} request={ops.request} rights={rights} vmMoney={s.kind==='OK'||s.kind==='STALE'?s.amount:null} vmRevision={vm.revision}
+      readOnly={member?'SDK của VM này đã gộp vào tài khoản EarnApp của '+member.primaryWhere+'; lệnh rút và tiền về ghi ở VM đó.':null} onDone={async()=>{await onDone();}}/></section>;
 }
 function WorkTab({projectId,vm}:{projectId:string;vm:ManagedVM}){
   const work=trpc.businessManagement.work.useQuery({projectId}),rows=(work.data?.items||[]).filter(w=>w.vmId===vm.id);
