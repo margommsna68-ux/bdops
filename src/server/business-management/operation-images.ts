@@ -24,6 +24,8 @@ const fields:Record<BusinessResource,string[]>={
  EARNAPP:['loginId','vmId','paypalId','paypalEmailId','registeredAt','registeredById','revision','closedAt','closedReason'],
  PAYOUT:['earnAppId','paypalId','paypalEmailId','vmId','startedAt','endedAt'],
  VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
+ // "Chờ áp dụng trên máy" mark of the VM (29/10/2026): kept apart from VM_OPS so status undos never depend on it.
+ VM_PENDING:['vmId','proxyPendingConfigId','proxyPendingAt'],
  PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt','lostAmount','lostAt'],
  VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','payoutMemberId','closedAt'],
  // Merged payout member (27/10/2026): another VM whose SDK was merged into the request's EarnApp account.
@@ -54,6 +56,7 @@ export async function readBusinessImage(db:PrismaClient|Prisma.TransactionClient
  if(type==='ACCOUNT_BATCH')row=await db.accountPurchaseBatch.findFirst({where:{id,projectId}});
  if(type==='PAYOUT')row=await db.earnAppPayout.findFirst({where:{id,projectId}});
  if(type==='VM_OPS')row=await db.vmOperation.findFirst({where:{id,projectId}});
+ if(type==='VM_PENDING')row=await db.vmOperation.findFirst({where:{id,projectId}});
  if(type==='PAYOUT_REQUEST')row=await db.earnPayoutRequest.findFirst({where:{id,projectId}});
  if(type==='VM_CYCLE')row=await db.vmCycle.findFirst({where:{id,projectId}});
  if(type==='PAYOUT_MEMBER')row=await db.earnPayoutMember.findFirst({where:{id,projectId}});
@@ -84,6 +87,8 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if((image.resource==='VM_CYCLE'&&!image.before)||(image.resource==='EARNAPP'&&image.after.closedAt&&!image.before?.closedAt)||(['PAYOUT_REQUEST','PAYOUT_MEMBER'].includes(image.resource)&&image.after.consumedAt&&!image.before?.consumedAt))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận tạo lại VM chỉ để xem; không hoàn tác');
  // SDK store: a link to EarnApp is never taken back; positions are restored through the mirror (see vm-management/sdk-store.ts).
  if(image.resource==='SDK_SLOT')return;
+ // Only the pending mark goes back (a mark created by the undone operation is cleared); the status revision is not touched.
+ if(image.resource==='VM_PENDING'){const b=image.before;await tx.vmOperation.update({where:{id:image.id},data:{proxyPendingConfigId:(b?.proxyPendingConfigId as string|null)??null,proxyPendingAt:b?.proxyPendingAt?new Date(String(b.proxyPendingAt)):null}});return;}
  if(image.resource==='SDK'){await restoreSdkImage(tx,projectId,image,actorId);return;}
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
@@ -144,6 +149,7 @@ export function describeBusinessImage(image:BusinessImage){
   if(image.resource==='VM_SDK'||image.resource==='SDK_SLOT')return row.sdkId?String(row.sdkId):'Chưa có SDK';
   if(image.resource==='SDK')return (row.vmId?'Đang trên VM':'Trong kho')+' · '+(row.amount!=null?formatSdkAmount(String(row.amount)):'chưa ghi tiền')+' · '+SDK_STATE_LABEL[row.linkState as SdkLinkState]+(row.note?' · '+String(row.note).slice(0,60):'');
   if(image.resource==='VM_OPS')return 'Lượt '+row.cycle+' · '+(row.status?String(row.status):'Chưa ghi');
+ if(image.resource==='VM_PENDING')return row.proxyPendingConfigId?'Chờ áp dụng trên máy':'Không chờ áp dụng';
   if(image.resource==='VM_CYCLE')return 'Lượt '+row.number+' đã đóng ('+row.reason+')';
   if(image.resource==='PAYOUT_MEMBER')return 'VM gộp lượt '+row.cycle+(row.removedAt?' · đã bỏ gộp':'')+(row.consumedAt?' · đã dùng để tạo lại VM':'');
   if(image.resource==='PAYOUT_REQUEST')return `${row.amount} ${row.currency} · ${row.state}`+(row.consumedAt?' · đã dùng để tạo lại VM':'');
@@ -153,5 +159,5 @@ export function describeBusinessImage(image:BusinessImage){
   return [row.status,row.notes].filter(Boolean).join(' · ')||'Đã lưu';
  };
  const secrets=['password','twoFaCurrent','twoFa','token','hotmailToken','twoFaLink','smsLink'],secretChanged=b&&secrets.some(k=>s[k]!==b[k]);
- return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',PAYOUT:'Email nhận của EarnApp',VM_OPS:'Tình trạng VM',PAYOUT_REQUEST:'Yêu cầu rút EarnApp',PAYOUT_MEMBER:'VM gộp vào lệnh rút',VM_CYCLE:'Lượt VM đã đóng',SDK:'SDK (Kho SDK)',SDK_SLOT:'SDK của VM',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:(image.after?format(s):'Đã gỡ (hoàn tác)')+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:['VM_OPS','VM_CYCLE','PAYOUT_REQUEST','PAYOUT_MEMBER'].includes(image.resource)?'Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật':b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
+ return {resource:{GMAIL:'Gmail',PAYPAL:'PayPal',PAYPAL_EMAIL:'Email PayPal',VM_BINDING:'Tài khoản VM',VM_SDK:'SDK EarnApp',WORK:'Công việc',COST:'Chi phí',FUND:'Tiền nhận',WITHDRAWAL:'Tiền rút / chuyển',PROFIT:'Kỳ lợi nhuận',SPLIT_PAYMENT:'Ghi trả lợi nhuận',TEAM_RECEIPT:'Nhận về team',COLLECTOR_EXPENSE:'Đối soát collector',PACKAGE:'Gói proxy',PAYOUT:'Email nhận của EarnApp',VM_OPS:'Tình trạng VM',VM_PENDING:'Chờ áp dụng proxy',PAYOUT_REQUEST:'Yêu cầu rút EarnApp',PAYOUT_MEMBER:'VM gộp vào lệnh rút',VM_CYCLE:'Lượt VM đã đóng',SDK:'SDK (Kho SDK)',SDK_SLOT:'SDK của VM',EARNAPP:'Tài khoản EarnApp',ACCOUNT_BATCH:'Lô nhập tài khoản'}[image.resource],label,before:format(b),after:(image.after?format(s):'Đã gỡ (hoàn tác)')+(secretChanged?' · Đã cập nhật thông tin đăng nhập':''),onUndo:['VM_OPS','VM_CYCLE','PAYOUT_REQUEST','PAYOUT_MEMBER'].includes(image.resource)?'Chỉ huỷ ghi nhận trên web; không đảo ngược việc rút tiền hay xoá / cài máy thật':b?'Khôi phục ghi nhận trước nếu chưa được sửa tiếp':'Ẩn / thu hồi bản ghi; giữ lịch sử'};
 }

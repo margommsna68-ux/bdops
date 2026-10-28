@@ -5,7 +5,7 @@ import {encrypt,decrypt} from '@/lib/encryption';
 import {assertInfrastructureAction,loadInfrastructureScope} from '../permissions/infrastructure';
 import {assertUnrestrictedServers} from '../permissions/server-scope';
 import {runBusinessCommand} from '../business-management/idempotency';
-import {currentProxyOf,loadChangeVM,reissueProxyConfig} from '../vm-management/proxy-change';
+import {currentProxyOf,loadChangeVM,pendingApply,reissueProxyConfig} from '../vm-management/proxy-change';
 import {loadCatalog} from './repository';
 import {matchPackage} from './catalog';
 import {ProxyDomainError,type ActorScope} from './types';
@@ -45,7 +45,9 @@ export async function renamePackage(scope:ActorScope,input:{key:string;code:stri
   },db);
 }
 
-export interface CredentialChangeInput {key:string;endpointIds?:string[];ip?:string;username:string;password:string;updatePackageCredentials?:boolean;preview?:boolean}
+export interface CredentialChangeInput {key:string;endpointIds?:string[];ip?:string;username:string;password:string;updatePackageCredentials?:boolean;preview?:boolean;force?:boolean}
+// Fleet command states still waiting for / running on a machine (same list as fleet-commands/guards ACTIVE).
+const FLEET_ACTIVE=['QUEUED','CLAIMED','DISPATCHED','UNKNOWN'];
 const digest=(s:string)=>'sha256:'+createHash('sha256').update(s).digest('hex');
 const CRED=/^[^\s:|]{1,200}$/;
 /** Parse "user:pass" (the owner pastes it like that); credentials must not contain spaces, ':' or '|'. */
@@ -78,11 +80,27 @@ async function planCredentials(tx:Reader,scope:ActorScope,input:CredentialChange
     packageAfter=matchPackage({ip:'',port:null,username,password,format:'FULL'},catalog);
     if(!packageAfter)refusal='User/pass mới chưa thuộc gói nào: thêm gói với user/pass này trước, hoặc chọn cập nhật user/pass của gói (khi đổi cả gói)';
   }
-  const vms:{vmId:string;endpointId:string}[]=[];let review=0;
+  // VMs using these proxies get a new configuration "Chờ áp dụng trên máy", except a BLOCKED proxy: its VM waits for the provider's
+  // replacement (Kho proxy → Nhận replace), so only its credentials change (review 29/10/2026).
+  const vms:{vmId:string;endpointId:string}[]=[],blockedVms:string[]=[],alreadyPendingVmIds:string[]=[];let review=0;
+  const blocked=new Set(changing.filter(r=>r.inventoryState==='BLOCKED').map(r=>r.id));
   const holds=await tx.vMProxyAllocation.findMany({where:{endpointId:{in:changing.map(r=>r.id)},releasedAt:null,role:{in:['DESIRED','INSTALLED']},vm:{managed:true,archivedAt:null}},select:{vmId:true,endpointId:true}});
-  for(const h of holds){if(vms.some(v=>v.vmId===h.vmId))continue;const vm=await loadChangeVM(tx as Prisma.TransactionClient,h.vmId);if(currentProxyOf(vm).endpointId===h.endpointId)vms.push({vmId:h.vmId,endpointId:h.endpointId});else review++;}
+  for(const h of holds){
+    if(vms.some(v=>v.vmId===h.vmId)||blockedVms.includes(h.vmId))continue;
+    const vm=await loadChangeVM(tx as Prisma.TransactionClient,h.vmId);
+    if(currentProxyOf(vm).endpointId!==h.endpointId){review++;continue;}
+    if(blocked.has(h.endpointId)){blockedVms.push(h.vmId);continue;}
+    vms.push({vmId:h.vmId,endpointId:h.endpointId});if(pendingApply(vm))alreadyPendingVmIds.push(h.vmId);
+  }
+  // Work in progress on these VMs / proxies: an active VM job, a fleet command not finished, an Apple ID check holding the proxy.
+  const vmIds=vms.map(v=>v.vmId),activeWork:{vmId:string|null;endpointId:string|null;kind:'VM_JOB'|'FLEET_COMMAND'|'APPLE_CHECK'}[]=[];
+  if(vmIds.length){
+    for(const j of await tx.vmJob.findMany({where:{projectId:scope.projectId,vmId:{in:vmIds},state:'ACTIVE'},select:{vmId:true}}))activeWork.push({vmId:j.vmId,endpointId:null,kind:'VM_JOB'});
+    for(const c of await tx.fleetCommand.findMany({where:{projectId:scope.projectId,vmId:{in:vmIds},state:{in:FLEET_ACTIVE}},select:{vmId:true}}))activeWork.push({vmId:c.vmId,endpointId:null,kind:'FLEET_COMMAND'});
+  }
+  for(const r of changing)if(r.appleCheckLeaseJobId)activeWork.push({vmId:null,endpointId:r.id,kind:'APPLE_CHECK'});
   const byState:Record<string,number>={};for(const r of changing)byState[r.inventoryState]=(byState[r.inventoryState]||0)+1;
-  return {rows,changing,username,password,refusal,packageBefore:before.filter((c):c is string=>!!c),packageAfter,packageAccount,vms,review,summary:{endpoints:changing.length,unchanged:rows.length-changing.length,byState,vms:vms.length,reviewVms:review,package:packageAfter,packageBefore:before.filter((c):c is string=>!!c),updatesPackage:!!packageAccount,refusal}};
+  return {rows,changing,username,password,refusal,packageBefore:before.filter((c):c is string=>!!c),packageAfter,packageAccount,vms,review,activeWork,summary:{endpoints:changing.length,unchanged:rows.length-changing.length,byState,vms:vms.length,reviewVms:review,blockedVms:blockedVms.length,blockedVmIds:blockedVms,alreadyPendingVmIds,activeWork,package:packageAfter,packageBefore:before.filter((c):c is string=>!!c),updatesPackage:!!packageAccount,refusal}};
 }
 /**
  * Change user/pass of existing proxies in place (the provider changed them on its site). Ids, IP, port, state, holds and history stay;
@@ -92,10 +110,11 @@ async function planCredentials(tx:Reader,scope:ActorScope,input:CredentialChange
  */
 export async function changeProxyCredentials(scope:ActorScope,input:CredentialChangeInput,db:PrismaClient=prisma){
   if(input.preview){await authorizeManage(db,scope);return {preview:true as const,...(await planCredentials(db,scope,input)).summary};}
-  const payload={endpointIds:input.endpointIds?[...input.endpointIds].sort():null,ip:input.ip?.trim()||null,username:digest(input.username.trim()),password:digest(input.password.trim()),updatePackageCredentials:!!input.updatePackageCredentials};
+  const payload={endpointIds:input.endpointIds?[...input.endpointIds].sort():null,ip:input.ip?.trim()||null,username:digest(input.username.trim()),password:digest(input.password.trim()),updatePackageCredentials:!!input.updatePackageCredentials,force:!!input.force};
   return runBusinessCommand(scope,{key:input.key,payload,kind:'PROXY_CREDENTIALS',module:'INFRASTRUCTURE',authorize:tx=>authorizeManage(tx,scope)},async(tx,images,current)=>{
     const plan=await planCredentials(tx,current,input);
     if(plan.refusal)throw new ProxyDomainError('INVALID_INPUT',plan.refusal);
+    if(plan.activeWork.length&&!input.force)throw new ProxyDomainError('STALE_PREVIEW','Có việc đang chạy trên '+plan.activeWork.length+' VM / proxy (job VM, lệnh fleet hoặc Check Apple ID); chờ xong hoặc xác nhận làm tiếp');
     if(!plan.changing.length)return {preview:false as const,...plan.summary};
     const now=new Date(),cipher=()=>encrypt(JSON.stringify({username:plan.username,password:plan.password}));
     if(plan.packageAccount){await images.remember('ACCOUNT',plan.packageAccount.id);await tx.proxyProviderAccount.update({where:{id:plan.packageAccount.id},data:{credentialCipher:cipher(),revision:{increment:1}}});}
@@ -106,7 +125,7 @@ export async function changeProxyCredentials(scope:ActorScope,input:CredentialCh
     }
     let pending=0;
     for(const v of plan.vms)if(await reissueProxyConfig(tx,images,{projectId:scope.projectId,actorId:current.userId,now,via:'Đổi user/pass'},v.vmId,v.endpointId))pending++;
-    await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_CREDENTIALS_CHANGE',entity:'ProxyIP',entityId:plan.changing[0].host||plan.changing[0].id,changes:{endpoints:plan.changing.length,vms:pending,package:plan.packageAfter,updatesPackage:!!plan.packageAccount}}});
+    await tx.auditLog.create({data:{userId:scope.userId,projectId:scope.projectId,action:'PROXY_CREDENTIALS_CHANGE',entity:'ProxyIP',entityId:plan.changing[0].host||plan.changing[0].id,changes:{endpoints:plan.changing.length,vms:pending,blockedVms:plan.summary.blockedVms,package:plan.packageAfter,updatesPackage:!!plan.packageAccount,forced:!!input.force&&plan.activeWork.length>0}}});
     return {preview:false as const,...plan.summary,vms:pending};
   },db);
 }

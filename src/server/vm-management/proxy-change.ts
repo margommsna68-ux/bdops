@@ -122,6 +122,10 @@ export async function reissueProxyConfig(tx:Tx,images:Collector,ctx:ChangeCtx,vm
   if(old&&old.id!==vm.installedConfigurationId){await images.remember('VM_CONFIG',old.id);await tx.vMConfiguration.update({where:{id:old.id},data:{status:'CANCELLED',revision:{increment:1}}});}
   const configId=await createAssignedConfig(tx,images,ctx,vm,endpoint,proxy);
   await tx.virtualMachine.update({where:{id:vm.id},data:{desiredConfigurationId:configId,installedConfigurationId:null,proxyId:null,proxySlotState:'FULL',configurationSequence:{increment:1},revision:{increment:1}}});
+  // The pending mark is an undo image here (VM_PENDING): undo puts back exactly the mark the VM had before (review 29/10/2026).
+  const ops=await tx.vmOperation.findUnique({where:{vmId:vm.id},select:{id:true}});
+  if(ops)await images.remember('VM_PENDING',ops.id);
+  else{const created=await tx.vmOperation.create({data:{projectId:ctx.projectId,vmId:vm.id}});await images.remember('VM_PENDING',created.id,true);}
   await markProxyPending(tx,images,ctx,vm.id,configId);
   return true;
 }

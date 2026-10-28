@@ -64,7 +64,7 @@ describe('Đổi user/pass tại chỗ',()=>{
       expect(preview).toMatchObject({endpoints:3,vms:2,package:null,refusal:expect.stringMatching(/chưa thuộc gói/)});
       await expect(changeProxyCredentials(f.scope,{...input,key:randomUUID()},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
       const ok=await changeProxyCredentials(f.scope,{...input,key:randomUUID(),updatePackageCredentials:true,preview:true},db);
-      expect(ok).toMatchObject({endpoints:3,byState:{LIVE:2,NEW:1},vms:2,package:'231243',updatesPackage:true,refusal:null});
+      expect(ok).toMatchObject({endpoints:3,byState:{LIVE:2,NEW:1},vms:2,blockedVms:0,activeWork:[],package:'231243',updatesPackage:true,refusal:null});expect([...(ok as {alreadyPendingVmIds:string[]}).alreadyPendingVmIds].sort()).toEqual([f.vms[0].id,f.vms[1].id].sort());
       const key=randomUUID(),done=await changeProxyCredentials(f.scope,{...input,key,updatePackageCredentials:true},db);
       expect(done).toMatchObject({endpoints:3,vms:2,replay:false});
       expect(await changeProxyCredentials(f.scope,{...input,key,updatePackageCredentials:true},db)).toMatchObject({replay:true});
@@ -88,9 +88,28 @@ describe('Đổi user/pass tại chỗ',()=>{
       for(const x of e)expect(await f.creds(x.id)).toEqual({username:'u',password:'p'});
       expect(JSON.parse(decrypt((await db.proxyProviderAccount.findUniqueOrThrow({where:{id:f.pkg.id}})).credentialCipher))).toEqual({username:'u',password:'p'});
       const back=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id},include:{operation:true}});
-      expect(back.desiredConfigurationId).toBe(oldConfig);expect(pendingApply(back)).toBeNull(); // the mark names the cancelled new configuration: cleared
+      expect(back.desiredConfigurationId).toBe(oldConfig);expect(v0.operation?.proxyPendingConfigId).toBe(oldConfig);expect(pendingApply(back)).toBe(oldConfig); // the VM was already pending on its old configuration: undo keeps that mark
       expect(await db.vMProxyAllocation.count({where:{vmId:back.id,releasedAt:null,role:'DESIRED',configurationId:oldConfig!}})).toBe(1);
     }finally{await f.cleanup();}
+  });
+  it('a BLOCKED proxy only changes credentials (its VM waits for the replacement); active work refuses unless forced',async()=>{
+    const f=await setup();try{
+      const ip=f.net+'80',a=await f.proxy(ip,6001),b=await f.proxy(ip,6002);
+      await f.assign(0,a.id);await f.assign(1,b.id);
+      await db.proxyIP.update({where:{id:b.id},data:{inventoryState:'BLOCKED',status:'BLOCKED'}});
+      const v1=await f.vm(1),cfg1=v1.desiredConfigurationId;
+      await db.vmJob.create({data:{projectId:f.projectId,vmId:f.vms[0].id,cycle:1,kind:'CHECK',claimedById:f.scope.userId,expiresAt:new Date(Date.now()+3600000)}});
+      const input={ip,username:'ou',password:'op'};
+      const p=await changeProxyCredentials(f.scope,{...input,key:randomUUID(),preview:true},db);
+      expect(p).toMatchObject({endpoints:2,vms:1,blockedVms:1,blockedVmIds:[f.vms[1].id],package:'other',activeWork:[{vmId:f.vms[0].id,kind:'VM_JOB'}]});
+      await expect(changeProxyCredentials(f.scope,{...input,key:randomUUID()},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
+      const r=await changeProxyCredentials(f.scope,{...input,key:randomUUID(),force:true},db);
+      expect(r).toMatchObject({endpoints:2,vms:1,blockedVms:1});
+      expect(await f.creds(b.id)).toEqual({username:'ou',password:'op'});
+      const after1=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[1].id},include:{operation:true}});
+      expect(after1.desiredConfigurationId).toBe(cfg1);
+      const after0=await f.vm(0);expect(pendingApply(after0)).toBe(after0.desiredConfigurationId);
+    }finally{await db.vmJob.deleteMany({where:{projectId:f.projectId}});await f.cleanup();}
   });
   it('follows the package of the new credentials, refuses empty / invalid credentials and a partial package move',async()=>{
     const f=await setup();try{
