@@ -150,10 +150,14 @@ export async function removePayoutMember(scope:ActorScope,input:{key:string;requ
  * recreated as SUSPENDED like the primary). A request lost to SUS (LOST_SUS, 28/10/2026) keeps its members: they follow the primary.
  */
 export async function memberOf(tx:Tx|PrismaClient,projectId:string,vmId:string,cycle:number){
-  const member=await tx.earnPayoutMember.findFirst({where:{projectId,vmId,cycle,removedAt:null,request:{state:{in:['REQUESTED','LOST_SUS']}}},include:{request:{include:{receipts:{select:{amount:true,currency:true,confirmed:true,failed:true,voidedAt:true}},earnApp:{select:{closedReason:true}}}}}});
+  // A live request wins over one lost to SUS: a member of a LOST_SUS request may have joined another merged payout of the same round
+  // meanwhile (openPayoutOf counts only REQUESTED), and that payout must be the one its recreation waits for / consumes.
+  const find=(state:'REQUESTED'|'LOST_SUS')=>tx.earnPayoutMember.findFirst({where:{projectId,vmId,cycle,removedAt:null,request:{state}},orderBy:{createdAt:'desc'},include:{request:{include:{receipts:{select:{amount:true,currency:true,confirmed:true,failed:true,voidedAt:true}},earnApp:{select:{closedReason:true}}}}}});
+  const member=await find('REQUESTED')??await find('LOST_SUS');
   if(!member)return null;
   const r=member.request,ops=await tx.vmOperation.findUnique({where:{vmId:r.vmId},select:{cycle:true,status:true}});
-  const primarySus=r.earnApp.closedReason==='SUSPENDED'||(ops?.status==='SUSPENDED'&&ops.cycle===r.cycle);
+  // LOST_SUS is the SUS fact itself: it holds even if the primary's status was changed afterwards (OFF / OK) without undoing the SUS.
+  const primarySus=r.state==='LOST_SUS'||r.earnApp.closedReason==='SUSPENDED'||(ops?.status==='SUSPENDED'&&ops.cycle===r.cycle);
   const vm=await tx.virtualMachine.findUnique({where:{id:r.vmId},select:{code:true,server:{select:{code:true}}}});
   return {member,request:r,money:moneyOfRequest(r),primarySus,primaryWhere:vm?where(vm):r.vmId};
 }

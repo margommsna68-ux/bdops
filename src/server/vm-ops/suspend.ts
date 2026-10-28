@@ -21,6 +21,21 @@ type Tx=Prisma.TransactionClient;
 const REASON='EarnApp bị SUS';
 const vi=(v:string)=>{const [i,d='00']=v.split('.');return i.replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+d;};
 export interface SuspendClosure {request:{id:string;outcome:'LOST'|'VOIDED'}|null;requestId:string|null;lostAmount:string|null;currency:string|null;archivedEmailIds:string[]}
+/**
+ * Why closing the SUS of this VM would be refused (checked BEFORE anything is written, so a bulk status write turns it into an ERROR row
+ * for this VM only): a preparation that cannot be voided (a receipt, money already on its email for this EarnApp, a missing email) or
+ * merged members outside the writer's servers. null = the closure can run.
+ */
+export async function suspendRefusal(tx:Tx,ctx:{projectId:string;scope:ActorScope},vm:{id:string;operation:{cycle:number}|null}):Promise<string|null>{
+  const {request}=await currentRoundPayout(tx,ctx.projectId,vm);
+  if(!request||request.state!=='REQUESTED'||request.submission!=='PREPARING')return null;
+  if(request.receipts.length)return 'Yêu cầu rút đang chuẩn bị đã có khoản tiền về; đối chiếu trước khi ghi SUS';
+  if(await tx.fundTransaction.findFirst({where:{projectId:ctx.projectId,paypalEmailId:request.paypalEmailId,earnAppId:request.earnAppId},select:{id:true}}))return 'Email của yêu cầu rút đang chuẩn bị đã nhận tiền; đối chiếu trước khi ghi SUS';
+  if(!await tx.payPalEmail.findFirst({where:{id:request.paypalEmailId,projectId:ctx.projectId},select:{id:true}}))return 'Email PayPal của yêu cầu rút không còn trong kho; đối chiếu trước khi ghi SUS';
+  const members=await tx.earnPayoutMember.findMany({where:{requestId:request.id,removedAt:null},select:{vmId:true}});
+  if(members.length){try{await assertScopedVmIds(tx,ctx.scope,members.map(m=>m.vmId));}catch{return 'Lệnh rút đang gộp VM ngoài phạm vi server của bạn; người quản lý ghi SUS';}}
+  return null;
+}
 /** The closing part of a SUS inside the caller's transaction (the caller writes the status with applyVmStatus afterwards). */
 export async function closeSuspendedInTx(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string;scope:ActorScope},vm:{id:string;operation:{cycle:number}|null}):Promise<SuspendClosure>{
   const now=new Date(),{earnApp,request,money}=await currentRoundPayout(tx,ctx.projectId,vm);
@@ -83,6 +98,7 @@ export async function markEarnAppSuspended(scope:ActorScope,input:SuspendInput,d
     if(vm.operation?.status==='SUSPENDED')return {vmId:vm.id,cycle,changed:false,request:{id:current_.request?.id??null,outcome:null,lostAmount:null},archivedEmailIds:[] as string[]};
     // An AI operator never leaves New VM / "Chờ áp dụng proxy" with a plain status (as setVmStatus); SUS is no exception.
     if(opts.operator&&vm.operation?.status&&['NEW_VM','PROXY_PENDING'].includes(vm.operation.status))throw new ProxyDomainError('INVALID_INPUT',opsLabel(vm.operation.status)+' chỉ kết thúc qua việc đã nhận (finish-prepare / finish-proxy)','VALIDATION');
+    const refusal=await suspendRefusal(tx,{projectId:scope.projectId,scope:infra},vm);if(refusal)throw new ProxyDomainError('INVALID_INPUT',refusal,'VALIDATION');
     const closed=await closeSuspendedInTx(tx,images,{projectId:scope.projectId,actorId:current.userId,scope:infra},vm);
     await applyVmStatus(tx,images,{projectId:scope.projectId,actorId:current.userId,now:new Date(),operator:!!opts.operator},vm,'SUSPENDED',input.note??null,susDetail(closed));
     return {vmId:vm.id,cycle,changed:true,request:{id:closed.requestId,outcome:closed.request?.outcome??null,lostAmount:closed.lostAmount},archivedEmailIds:closed.archivedEmailIds};

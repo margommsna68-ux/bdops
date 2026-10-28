@@ -4,7 +4,8 @@ import type {VirtualMachine,EarnAppAccount,PayPalEmail} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
 import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal} from '@/server/vm-ops/payout';
 import {readPayoutReport} from '@/server/vm-ops/payout-report';
-import {recreateRule,setVmStatus} from '@/server/vm-ops/ops';
+import {recordRecreated,recreateRule,setVmStatus} from '@/server/vm-ops/ops';
+import {memberOf} from '@/server/vm-ops/payout-members';
 import {markEarnAppSuspended} from '@/server/vm-ops/suspend';
 import {undoOperation} from '@/server/operation-history/undo';
 
@@ -160,5 +161,46 @@ it('a SUS on a received request leaves it as it is',async()=>{
  const out=await f.sus(0);expect(out.request).toMatchObject({id:r.id,outcome:null});
  expect((await f.req(r.id)).state).toBe('REQUESTED');expect((await f.email(a.email.id)).archivedAt).not.toBeNull();
  expect(await recreateRule(db,f.scope.projectId,await f.vmOps(0))).toMatchObject({reason:'PAYOUT_RECEIVED'});
+ }finally{await f.cleanup();}
+});
+// ─── Review fix round 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────
+const memberRule=async(vmId:string)=>({id:vmId,operation:await db.vmOperation.findUnique({where:{vmId}})});
+it('a member still recreates as SUSPENDED after the SUS primary status was changed away (LOST_SUS is the SUS fact)',async()=>{
+ const f=await setup(2);try{const member=f.rows[1].vm;
+ await f.create(0,'20','SENT',{members:[{vmId:member.id,expectedCycle:1}]});await f.sus(0);
+ const res=await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.rows[0].vm.id,status:'OFF',expectedCycle:1}]},db);expect(res.applied).toBe(1);
+ expect(await recreateRule(db,f.scope.projectId,await memberRule(member.id))).toMatchObject({refusal:null,reason:'SUSPENDED'});
+ expect(await recreateRule(db,f.scope.projectId,await f.vmOps(0))).toMatchObject({refusal:null,reason:'SUSPENDED'});
+ }finally{await f.cleanup();}
+});
+it('a member of a LOST_SUS request that joined a live merged payout waits for the live one',async()=>{
+ const f=await setup(3);try{const member=f.rows[1].vm;
+ const lost=await f.create(0,'20','SENT',{members:[{vmId:member.id,expectedCycle:1}]});await f.sus(0);
+ const live=await f.create(2,'12','SENT',{members:[{vmId:member.id,expectedCycle:1}]});
+ const m=await memberOf(db,f.scope.projectId,member.id,1);expect(m?.request.id).toBe(live.id);expect(m?.request.id).not.toBe(lost.id);
+ expect(await recreateRule(db,f.scope.projectId,await memberRule(member.id))).toMatchObject({reason:null,refusal:expect.stringMatching(/chưa về đủ/)});
+ await expect(recordRecreated(f.scope,{key:randomUUID(),vmId:member.id,expectedCycle:1},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ }finally{await f.cleanup();}
+});
+it('bulk SUS: a row whose preparation cannot be voided is an ERROR row, the others are closed',async()=>{
+ const f=await setup(2);try{const a=f.rows[0],b=f.rows[1];
+ const prep=await f.create(0,'10','PREPARING');const sent=await f.create(1,'15','SENT');
+ await db.fundTransaction.create({data:{projectId:f.scope.projectId,paypalId:f.pp.id,paypalEmailId:a.email.id,earnAppId:a.ea.id,date:new Date(),amount:'1',transactionId:'TX-SUS-'+randomUUID()}});
+ const res=await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:a.vm.id,status:'SUSPENDED',expectedCycle:1},{vmId:b.vm.id,status:'SUSPENDED',expectedCycle:1}]},db);
+ expect(res.rows.map(r=>r.outcome)).toEqual(['ERROR','APPLIED']);expect(res.rows[0].message).toMatch(/đã nhận tiền/);
+ expect(await f.req(prep.id)).toMatchObject({state:'REQUESTED',submission:'PREPARING'});expect((await f.email(a.email.id)).archivedAt).toBeNull();
+ expect((await f.ops(0))?.status??null).not.toBe('SUSPENDED');
+ expect((await f.req(sent.id)).state).toBe('LOST_SUS');expect((await f.ops(1))?.status).toBe('SUSPENDED');
+ await expect(f.sus(0)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ }finally{await db.fundTransaction.deleteMany({where:{projectId:f.scope.projectId}});await f.cleanup();}
+});
+it('SUS then recordRecreated: EarnApp closed SUSPENDED, the round closed without a payout, new round NEW_VM',async()=>{
+ const f=await setup(1);try{const a=f.rows[0];
+ const r=await f.create(0,'15','SENT');await f.sus(0);
+ expect(await recordRecreated(f.scope,{key:randomUUID(),vmId:a.vm.id,expectedCycle:1},db)).toMatchObject({cycle:2,reason:'SUSPENDED'});
+ expect(await db.earnAppAccount.findUniqueOrThrow({where:{id:a.ea.id}})).toMatchObject({vmId:null,closedReason:'SUSPENDED'});
+ expect(await db.vmCycle.findFirstOrThrow({where:{vmId:a.vm.id,number:1}})).toMatchObject({reason:'SUSPENDED',payoutRequestId:null});
+ expect(await f.ops(0)).toMatchObject({cycle:2,status:'NEW_VM'});
+ expect(await f.req(r.id)).toMatchObject({state:'LOST_SUS',consumedAt:null});
  }finally{await f.cleanup();}
 });
