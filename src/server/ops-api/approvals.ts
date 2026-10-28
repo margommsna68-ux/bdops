@@ -4,7 +4,7 @@ import {ProxyDomainError} from '../proxy-management/types';
 import {checkTotp,totpMessage} from '../users/totp';
 import {maskSdk} from '@/lib/sdk-mask';
 import {assertOpsToken} from './context';
-import {activeSession,approveUnderSession,assertApprover} from './approval-session';
+import {activeSession,approveUnderSession,assertApprover,sessionStillActive} from './approval-session';
 // Critical ops-API commands wait for an ADMIN's 2FA approval (owner decision 23/10/2026): the AI never holds a code. The request is held
 // with the hash of exactly what the AI sent and an allowed summary (names, amounts, masked emails / SDK codes; never credentials). The
 // ADMIN of that project, with 2FA on, approves with a TOTP code; the AI's retry with the same Idempotency-Key then runs once (CONSUMED);
@@ -64,9 +64,9 @@ export async function gateApproval(db:PrismaClient,g:GateInput){
     if(row.status==='REJECTED'||row.status==='LOCKED')throw new ApprovalHold('APPROVAL_REJECTED',row.status==='LOCKED'?'Yêu cầu đã khoá sau 5 lần sai mã; xin lại bằng key mới':'ADMIN đã từ chối lệnh này',{approvalId:row.id,status:row.status});
     if(row.status==='EXPIRED'||row.expiresAt<now){await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED'}});return {expired:row};}
     if(row.status==='APPROVED'){
-      // Approved by a session: usable only while a session of this token + project is still in force ("Khóa phiên ngay", expiry,
+      // Approved by a session: usable only while THAT session (row.sessionId) is still in force ("Khóa phiên ngay", expiry,
       // approver demoted / 2FA reset / token revoked end it at once); otherwise the approval lapses (410, new key).
-      if(row.sessionId&&!await activeSession(tx,{projectId:row.projectId,tokenId:row.tokenId})){
+      if(row.sessionId&&!await sessionStillActive(tx,{sessionId:row.sessionId,projectId:row.projectId,tokenId:row.tokenId})){
         const lapsed=await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE}});return {expired:lapsed};
       }
       return {approval:row,replay:false};
@@ -89,7 +89,10 @@ export async function gateApproval(db:PrismaClient,g:GateInput){
  });
 }
 export async function consumeApproval(db:PrismaClient,approvalId:string,requestId:string){
-  await db.opsApproval.updateMany({where:{id:approvalId,status:'APPROVED'},data:{status:'CONSUMED',consumedAt:new Date(),consumedRequestId:requestId}});
+  const n=await db.opsApproval.updateMany({where:{id:approvalId,status:'APPROVED'},data:{status:'CONSUMED',consumedAt:new Date(),consumedRequestId:requestId}});
+  // The gate approved this command while its session was in force; a "Khóa phiên ngay" that landed after the gate but before the
+  // command finished lapsed the row. The command did run, so the history says so (and a retry replays instead of asking again).
+  if(n.count===0)await db.opsApproval.updateMany({where:{id:approvalId,status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE,sessionId:{not:null}},data:{status:'CONSUMED',consumedAt:new Date(),consumedRequestId:requestId,decisionNote:'Đã chạy trước khi phiên bị khoá'}});
 }
 // ─── Web side (ADMIN) ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 export async function listApprovals(db:PrismaClient,projectId:string,o:{status?:ApprovalStatus|'OPEN';limit?:number}={}){

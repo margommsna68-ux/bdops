@@ -200,4 +200,42 @@ describe('15-minute approval session',()=>{
       expect(again.status).toBe(410);expect(await db.earnPayoutRequest.count({where:{projectId:f.projectId}})).toBe(0);
     }finally{await done(f);}
   });
+  // Review fix round 2 (28/10/2026): approval rows are always locked before session rows; a row is usable only under ITS session.
+  it('"Khóa phiên ngay" racing an AI retry never deadlocks; the end state is consistent',async()=>{
+    const {f,admin,secret,t,tokenId}=await ready();try{
+      const p1=await prepare(f,t,0,0),approvalId=p1.r.json.error!.details.approvalId as string;
+      expect((await open(f,t,admin.email,fresh(secret))).json.data.approvedPending).toBe(1);
+      // Hold the gate between its approval-row lock and its session check while the close starts.
+      const mod=sessionMod as unknown as Record<string,(...a:unknown[])=>Promise<unknown>>,name='sessionStillActive' in mod?'sessionStillActive':'activeSession',real=mod[name];
+      let closing:Promise<unknown>|null=null;
+      vi.spyOn(mod,name).mockImplementationOnce(async(...a:unknown[])=>{closing=closeApprovalSession(db,{projectId:f.projectId,tokenId,actorId:admin.id});await new Promise(r=>setTimeout(r,400));return real(...a);});
+      const [retry]=await Promise.allSettled([api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false})]);
+      const [close]=await Promise.allSettled([closing!]);
+      expect(retry.status).toBe('fulfilled');expect(close.status).toBe('fulfilled');
+      const r=(retry as PromiseFulfilledResult<Awaited<ReturnType<typeof api>>>).value;expect([200,410]).toContain(r.status);
+      const row=await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}}),paid=await db.earnPayoutRequest.count({where:{projectId:f.projectId}});
+      expect(['CONSUMED','EXPIRED']).toContain(row.status);expect(paid).toBe(row.status==='CONSUMED'?1:0);expect(r.status).toBe(row.status==='CONSUMED'?200:410);
+      expect((await db.opsApprovalSession.findMany({where:{tokenId}})).every(s=>!!s.closedAt)).toBe(true);
+    }finally{await done(f);}
+  });
+  it('an approval is usable only while the session that granted it is in force, not any session of the token',async()=>{
+    const {f,admin,secret,t,tokenId}=await ready();try{
+      const p1=await prepare(f,t,0,0),approvalId=p1.r.json.error!.details.approvalId as string;
+      const a=await open(f,t,admin.email,fresh(secret));expect(a.json.data.approvedPending).toBe(1);
+      const u=await db.user.findUniqueOrThrow({where:{id:admin.id}});
+      await db.opsApprovalSession.update({where:{id:a.json.data.sessionId},data:{closedAt:new Date()}});
+      await db.opsApprovalSession.create({data:{projectId:f.projectId,tokenId,approvedById:admin.id,via:'CLI',openedAt:new Date(),expiresAt:new Date(Date.now()+APPROVAL_SESSION_MS),totpVersion:u.totpVersion}});
+      const again=await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false});
+      expect(again.status).toBe(410);expect((await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}})).status).toBe('EXPIRED');
+    }finally{await done(f);}
+  });
+  it('reopening carries the unused approvals of the replaced session over to the new one',async()=>{
+    const {f,admin,secret,t}=await ready();try{
+      const p1=await prepare(f,t,0,0),approvalId=p1.r.json.error!.details.approvalId as string;
+      expect((await open(f,t,admin.email,fresh(secret))).json.data.approvedPending).toBe(1);
+      const b=await open(f,t,admin.email,fresh(secret));expect(b.status).toBe(200);
+      expect((await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}})).sessionId).toBe(b.json.data.sessionId);
+      expect((await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false})).status).toBe(200);
+    }finally{await done(f);}
+  });
 });

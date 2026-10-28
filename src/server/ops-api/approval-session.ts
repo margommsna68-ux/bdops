@@ -32,21 +32,36 @@ async function tokenValid(tx:Tx,tokenId:string,projectId:string){
  * The session in force for this token + project, or null. Reads FOR SHARE the session, the token, the approver and the approver's
  * membership, so a close / revoke / demotion / disable / 2FA reset either lands before (null) or waits for the caller's transaction.
  */
+// Lock order (review fix round 2): every path takes OpsApproval rows (FOR UPDATE, ordered by id) BEFORE OpsApprovalSession rows.
+// gateApproval: approval row, then session FOR SHARE; open: pending / session-approved rows, then close earlier sessions; close:
+// lapse the approval rows, then close the sessions. A "Khóa phiên ngay" racing an AI retry waits instead of deadlocking.
 export async function activeSession(tx:Tx,input:{projectId:string;tokenId:string}):Promise<OpsApprovalSession|null>{
   for(let attempt=0;attempt<2;attempt++){
     const now=new Date(),s=await tx.opsApprovalSession.findFirst({where:{projectId:input.projectId,tokenId:input.tokenId,closedAt:null,expiresAt:{gt:now}},orderBy:{openedAt:'desc'},select:{id:true}});
     if(!s)return null;
-    await tx.$queryRaw`SELECT "id" FROM "OpsApprovalSession" WHERE "id"=${s.id} FOR SHARE`;
-    const fresh=await tx.opsApprovalSession.findUnique({where:{id:s.id}});
+    const r=await sessionInForce(tx,s.id);
     // Closed while we waited for the lock (e.g. replaced by a new session): look once more for the newer one.
-    if(!fresh||fresh.closedAt)continue;
-    if(fresh.expiresAt.getTime()<=Date.now()||fresh.totpVersion==null||fresh.projectId!==input.projectId||fresh.tokenId!==input.tokenId)return null;
-    if(!await tokenValid(tx,fresh.tokenId,fresh.projectId))return null;
-    try{const a=await assertApprover(tx,fresh.approvedById,fresh.projectId,{totpVersion:fresh.totpVersion});if(a.locked)return null;}
-    catch(e){if(e instanceof ProxyDomainError)return null;throw e;}
-    return fresh;
+    if(r==='CLOSED')continue;
+    return r&&r.projectId===input.projectId&&r.tokenId===input.tokenId?r:null;
   }
   return null;
+}
+/** One given session, locked FOR SHARE and fully re-validated (open, unexpired, version, token, approver); 'CLOSED' when closed. */
+async function sessionInForce(tx:Tx,sessionId:string):Promise<OpsApprovalSession|null|'CLOSED'>{
+  await tx.$queryRaw`SELECT "id" FROM "OpsApprovalSession" WHERE "id"=${sessionId} FOR SHARE`;
+  const fresh=await tx.opsApprovalSession.findUnique({where:{id:sessionId}});
+  if(!fresh)return null;
+  if(fresh.closedAt)return 'CLOSED';
+  if(fresh.expiresAt.getTime()<=Date.now()||fresh.totpVersion==null)return null;
+  if(!await tokenValid(tx,fresh.tokenId,fresh.projectId))return null;
+  try{const a=await assertApprover(tx,fresh.approvedById,fresh.projectId,{totpVersion:fresh.totpVersion});if(a.locked)return null;}
+  catch(e){if(e instanceof ProxyDomainError)return null;throw e;}
+  return fresh;
+}
+/** Is THIS session (the one that approved a row) still in force for that token + project? */
+export async function sessionStillActive(tx:Tx,input:{sessionId:string;projectId:string;tokenId:string}){
+  const r=await sessionInForce(tx,input.sessionId);
+  return !!r&&r!=='CLOSED'&&r.projectId===input.projectId&&r.tokenId===input.tokenId;
 }
 /**
  * Approve a PENDING approval row under the session; called by gateApproval inside its transaction. Status-guarded: a row that is no
@@ -89,10 +104,15 @@ export async function openApprovalSession(db:PrismaClient,input:OpenInput){
       return {failed:true} as const;
     }
     if(a.locked)throw new ProxyDomainError('FORBIDDEN','Mã 2FA đang bị khoá');
-    const now=new Date(),expiresAt=new Date(now.getTime()+APPROVAL_SESSION_MS);
-    const closed=await tx.opsApprovalSession.updateMany({where:{projectId:input.projectId,tokenId:input.tokenId,closedAt:null},data:{closedAt:now,closedById:admin.id}});
+    const now=new Date(),expiresAt=new Date(now.getTime()+APPROVAL_SESSION_MS),held=[...HELD_ACTIONS] as string[];
+    // Approval rows first (lock order): the token's pending held rows and the unused approvals of its earlier sessions.
+    await tx.$queryRaw`SELECT "id" FROM "OpsApproval" WHERE "projectId"=${input.projectId} AND "tokenId"=${input.tokenId} AND ("status"='PENDING' OR ("status"='APPROVED' AND "sessionId" IS NOT NULL)) AND "action"=ANY(${held}::text[]) ORDER BY "id" FOR UPDATE`;
+    const earlier=(await tx.opsApprovalSession.findMany({where:{projectId:input.projectId,tokenId:input.tokenId,closedAt:null},select:{id:true}})).map(x=>x.id);
+    const closed=await tx.opsApprovalSession.updateMany({where:{id:{in:earlier},closedAt:null},data:{closedAt:now,closedById:admin.id}});
     const s=await tx.opsApprovalSession.create({data:{projectId:input.projectId,tokenId:input.tokenId,approvedById:admin.id,via:input.via,openedAt:now,expiresAt,totpVersion:a.totpVersion}});
-    const pending=await tx.opsApproval.findMany({where:{projectId:input.projectId,tokenId:input.tokenId,status:'PENDING',expiresAt:{gt:now},action:{in:[...HELD_ACTIONS]}},select:{id:true,action:true,objectId:true}});
+    // Unused approvals granted by the replaced session carry over to the new one (the same token, an ADMIN code proved just now).
+    if(earlier.length)await tx.opsApproval.updateMany({where:{sessionId:{in:earlier},status:'APPROVED'},data:{sessionId:s.id}});
+    const pending=await tx.opsApproval.findMany({where:{projectId:input.projectId,tokenId:input.tokenId,status:'PENDING',expiresAt:{gt:now},action:{in:held}},select:{id:true,action:true,objectId:true}});
     let approvedPending=0;
     if(pending.length){
       const n=await tx.opsApproval.updateMany({where:{id:{in:pending.map(p=>p.id)},status:'PENDING'},data:{status:'APPROVED',sessionId:s.id,decidedById:admin.id,decidedAt:now,decisionNote:sessionNote(now)}});
@@ -110,9 +130,14 @@ export async function closeApprovalSession(db:PrismaClient,input:{projectId:stri
   return db.$transaction(async tx=>{
     const now=new Date(),where={projectId:input.projectId,closedAt:null,expiresAt:{gt:now},...(input.tokenId?{tokenId:input.tokenId}:{}),...(input.sessionId?{id:input.sessionId}:{})};
     const ids=(await tx.opsApprovalSession.findMany({where,select:{id:true}})).map(x=>x.id);
-    const n=await tx.opsApprovalSession.updateMany({where:{...where,id:{in:ids}},data:{closedAt:now,closedById:input.actorId}});
     // "Khóa phiên ngay" stops at once: approvals granted by these sessions and not yet used lapse (the AI must ask again, new key).
-    const lapsed=ids.length?await tx.opsApproval.updateMany({where:{sessionId:{in:ids},status:'APPROVED'},data:{status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE}}):{count:0};
+    // Approval rows first (lock order), then the sessions.
+    let lapsed={count:0};
+    if(ids.length){
+      await tx.$queryRaw`SELECT "id" FROM "OpsApproval" WHERE "sessionId"=ANY(${ids}::text[]) AND "status"='APPROVED' ORDER BY "id" FOR UPDATE`;
+      lapsed=await tx.opsApproval.updateMany({where:{sessionId:{in:ids},status:'APPROVED'},data:{status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE}});
+    }
+    const n=ids.length?await tx.opsApprovalSession.updateMany({where:{...where,id:{in:ids}},data:{closedAt:now,closedById:input.actorId}}):{count:0};
     await tx.auditLog.create({data:{projectId:input.projectId,userId:input.actorId,action:'OPS_SESSION_CLOSE',entity:'OpsApprovalSession',entityId:input.sessionId??input.tokenId??input.projectId,changes:{tokenId:input.tokenId??null,sessionId:input.sessionId??null,closed:n.count,lapsedApprovals:lapsed.count}}});
     return {closed:n.count};
   });
