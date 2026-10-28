@@ -116,17 +116,19 @@ creates, merges and deletes nothing.
 
 ### Money input and VND → USDT (owner brief 19 October 2026, replaces the free-text money fields)
 
-- Fields use the Vietnamese convention: "." groups thousands, "," starts the decimals. With VND "70000" and "70.000" are seventy
-  thousand, "420.000" is four hundred twenty thousand, "16,27" is sixteen point twenty-seven. Malformed groups ("25.82") are errors
-  at the field; nothing is multiplied or divided by 1.000 silently.
-- Exact decimals are valid in every money field, up to 8 decimals for amounts and 12 for rates: "0,424", "16,125 USDT", a rate
-  "1 USDT = 25.820,5 VND". Only a **VND** field (a VND amount or a "1 USDT = N VND" rate) warns about the English thousands comma:
-  "25,820" or "70,000" there is refused with both readings ("nếu là 25.820 thì ghi 25.820; nếu thật sự có phần lẻ thì ghi 25,82");
-  "0,xxx" is never taken for a thousands group. (Independent review 19/10/2026: the warning used to apply to every field, so the
-  web refused its own "0,424" after switching 2,12 USDT / 5 PP to a unit price.)
+- **US number format (owner decision 28 October 2026, REPLACES the Vietnamese convention of 19/10/2026 for display AND input, every
+  currency including VND):** "." is the decimal point, "," an optional thousands separator. "12.18" is twelve point eighteen,
+  "1,234.56" = 1234.56, VND "420,000" = 420000. A decimal comma or a comma group that is not exactly three digits ("12,18",
+  "1.234,56", "0,424") is refused at the field with "Dùng dấu . cho phần thập phân, ví dụ 12.18"; nothing is guessed. The old
+  VND-only "English thousands comma" warning is gone (commas ARE thousands now). Parser: `parseMoneyNumber` in
+  src/lib/money-input.ts; display: `formatUsd` / `formatMoney` / `formatLedger` / `displayMoney` (`$1,234.56`, `16.27 USDT`,
+  `420,000 ₫`, `$32.12 PayPal`). Stored data and the ops API (canonical "12.18") are unchanged; history text written before
+  28/10/2026 keeps its old format.
+- Exact decimals are valid in every money field, up to 8 decimals for amounts and 12 for rates: "0.424", "16.125 USDT", a rate
+  "1 USDT = 25,820.5 VND".
 - Text the web writes into a field (the unit price after switching, a fetched rate, an edited cost) always reads back as the same
-  value (`viInput`); in the rare VND case where it would look like a thousands group it gets a trailing zero ("15,6250").
-- Switching total ↔ unit keeps the total: total → unit fills the exact quotient (2,12 ÷ 5 = 0,424). The total actually paid is what
+  value (`moneyInput`).
+- Switching total ↔ unit keeps the total: total → unit fills the exact quotient (2.12 ÷ 5 = 0.424). The total actually paid is what
   gets recorded, so changing the view never turns an entered amount into "Chưa ghi chi phí": when the total cannot become an exact
   unit price (no quantity, a division not exact to 8 decimals such as 10 USDT / 3 or 100.000 VND / 3, an error in the field) the form
   stays on **Tổng tiền thực trả** with the same amount (and rate), says so at the field and shows only the reference allocation
@@ -143,10 +145,10 @@ creates, merges and deletes nothing.
   imported with priceMode NONE.)
 - The typed text and the number sent to the API are different things: `src/lib/money-input.ts` parses once and the form sends only
   canonical numbers ("420000", "25820", "16.27"). The batch endpoints (`accountStore.importPreview / importCommit / batchCost`)
-  refuse anything else, so "25.820" can never be read as 25,82 again (the bug that turned 420.000 VND into 16.266 USDT). The Chi phí
+  refuse anything else, so a typed rate can never be read in two ways again (19/10 bug: "25.820" read as 25.82 turned 420,000 VND into 16,266 USDT). The Chi phí
   form parses the same way; its API keeps its older contract.
-- USDT = original amount ÷ rate, with the existing Decimal arithmetic; the label reads "1 USDT = 25.820 VND". USDT shows with two
-  decimals (≈ 16,27 USDT); the stored precision (16,26646) shows on hover and in the batch details.
+- USDT = original amount ÷ rate, with the existing Decimal arithmetic; the label reads "1 USDT = 25,820 VND". USDT shows with two
+  decimals (≈ 16.27 USDT); the stored precision (16.26646) shows on hover and in the batch details.
 - VND fetches the Binance P2P BUY USDT reference through the existing `businessManagement.p2pQuote` (sealed token, 10 minutes). The
   line shows source and time; editing the number makes it "Nhập tay". A failed fetch keeps the form and offers Thử lại or a manual
   rate; there is no fake price, no default 1 and no USD = USDT. An expired quote blocks Nhập with "Lấy giá mới" or "Giữ … ghi là
@@ -155,10 +157,10 @@ creates, merges and deletes nothing.
 - The cost record keeps amount, currency, rate, USDT and the rate source (`fxSource` BINANCE_P2P_BUY with the quote time, or
   MANUAL). A new market price never changes a recorded cost.
 - Total vs unit price: *Tổng tiền thực trả* is the default and the source of truth; *Tính theo giá mỗi PP / tài khoản* needs the
-  quantity actually bought (a PayPal purchase counts PP codes: 6 PP with 30 emails is 6). The form shows "6 PP × 70.000 ₫ = 420.000 ₫".
-  Switching unit → total carries the total (420.000); without a quantity the total stays empty, so 70.000 never becomes the whole
+  quantity actually bought (a PayPal purchase counts PP codes: 6 PP with 30 emails is 6). The form shows "6 PP × 70,000 ₫ = 420,000 ₫".
+  Switching unit → total carries the total (420,000); without a quantity the total stays empty, so 70,000 never becomes the whole
   purchase. Switching back keeps a unit price only while unit × quantity still equals the total. An optional quantity with a total
-  shows the reference allocation (≈ 70.000 ₫ / PP), never a second cost.
+  shows the reference allocation (≈ 70,000 ₫ / PP), never a second cost.
 - Retries: one command key per content (Nhập kho, Ghi chi phí); a retry after a lost answer re-sends the first attempt's content.
 - Batch PP-2026-10-19-1 on the host (6 PP / 30 emails, 420.000 VND ≈ 16,26646 USDT) was recorded correctly and is left unchanged; no
   cost is recomputed with today's rate.
@@ -233,7 +235,7 @@ creates, merges and deletes nothing.
   - **Nơi mua and Số lượng mua:** shown as recorded, or *Chưa ghi*. The quantity is never filled from the import count.
   - **Đã nhập kho:** the accounts of the purchase in the web stock (not delivered-confirmed, NEW or assigned). Clicking the
     number opens them (same kind, `?batch=`).
-  - **Tổng tiền mua:** the current cost record in its own currency, right-aligned, Vietnamese format with every significant
+  - **Tổng tiền mua:** the current cost record in its own currency, right-aligned, US number format (since 28/10/2026) with every significant
     decimal (`batch-format.ts`). Non-USDT amounts add ≈ USDT. *Chi tiết* opens under the row: rate, first price after an
     adjustment or void, notes, lines pasted first. Hidden without the money right.
   - **Chi phí:** *Đã ghi* (links to the cost when the member may see money), *Chưa ghi* (not recorded; does not mean unpaid) or
