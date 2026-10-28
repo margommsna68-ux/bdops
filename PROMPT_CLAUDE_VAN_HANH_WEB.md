@@ -105,6 +105,7 @@ Phần này chỉ áp dụng khi token được chủ cấp PAYOUT / RECEIPT. To
   - Chỉ khi chủ giao. Người bấm "Tạo lại N VM" / "Ghi nhận đã tạo lại N VM" trên web; fleet `RECREATE_VM` ghi qua `vms/{id}/recreated`.
   - Không tự tạo lại khi tiền về hay khi SUS.
 - **Quét mail PayPal (sau này):** `GET withdrawals?projectId=…&email=<email nhận>` tìm yêu cầu theo email. Việc quét mail chưa được giao.
+- **Mã giao dịch PayPal (29/10/2026):** trước khi ghi tiền về từ một mail PayPal, gọi `GET withdrawals?projectId=…&transactionId=<mã>` — có kết quả là khoản đó ĐÃ ghi, không ghi lại.
 
 ## 6. Lô lệnh
 

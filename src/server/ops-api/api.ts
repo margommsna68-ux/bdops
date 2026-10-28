@@ -1,3 +1,4 @@
+import {txQuery} from '@/lib/paypal-tx';
 import {createHash,randomUUID} from 'node:crypto';
 import type {PrismaClient} from '@prisma/client';
 import {z} from 'zod';
@@ -430,7 +431,12 @@ async function withdrawals(c:Ctx){
   const email=q(c,'email')?.trim()??null;
   if(email!==null&&(!email||email.length>254||/\s/.test(email)))throw fail('VALIDATION','email: một địa chỉ email nhận PayPal');
   if(email&&!rights.payoutEmail)throw fail('FORBIDDEN','Lọc theo email cần quyền chuẩn bị rút (PAYOUT) hoặc ghi tiền về (RECEIPT)');
-  const rows=await c.db.earnPayoutRequest.findMany({where:{projectId,...(st?WITHDRAWAL_FILTER[st]:{}),...(email?{paypalEmail:{email:{equals:email,mode:'insensitive'}}}:{})},select:requestSelect,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  // transactionId= (29/10/2026): the request(s) whose receipt carries that PayPal transaction id (exact, case-insensitive, a pasted
+  // "Mã giao dịch:" label dropped), so the AI scanning PayPal mails checks first and never records the same payment twice.
+  const rawTx=q(c,'transactionId'),tx=rawTx==null?null:txQuery(rawTx);
+  if(tx!==null&&(!tx||tx.length>160||/\s/.test(tx)))throw fail('VALIDATION','transactionId: một mã giao dịch PayPal');
+  if(tx&&!rights.requestMoney)throw fail('FORBIDDEN','Lọc theo mã giao dịch cần quyền xem tiền của yêu cầu rút');
+  const rows=await c.db.earnPayoutRequest.findMany({where:{projectId,...(st?WITHDRAWAL_FILTER[st]:{}),...(email?{paypalEmail:{email:{equals:email,mode:'insensitive'}}}:{}),...(tx?{receipts:{some:{projectId,transactionId:{equals:tx,mode:'insensitive'}}}}:{})},select:requestSelect,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   const cycles=new Map((await c.db.vmOperation.findMany({where:{vmId:{in:rows.map(r=>r.vmId)}},select:{vmId:true,cycle:true}})).map(o=>[o.vmId,o.cycle]));
   const r=paged(rows,limit);return {items:r.items.map(x=>withdrawalView(x,rights,{currentCycle:cycles.get(x.vmId)??1})),nextCursor:r.nextCursor};
 }

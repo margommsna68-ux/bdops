@@ -2,7 +2,7 @@ import {afterAll,afterEach,it,expect,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
-import {readPayoutReport,readPayoutDashboard,readPayoutVoided} from '@/server/vm-ops/payout-report';
+import {readPayoutReport,readPayoutDashboard,readPayoutVoided,findPayoutByTransaction} from '@/server/vm-ops/payout-report';
 import {appRouter} from '@/server/routers/_app';
 
 afterAll(()=>db.$disconnect());
@@ -376,4 +376,39 @@ it('lists voided requests per project and server scope, money only with request 
    await expect(caller.vmOps.payoutVoided({projectId:foreign.scope.projectId})).rejects.toBeTruthy();
   }finally{await db.earnPayoutRequestVoid.deleteMany({where:{projectId:foreign.scope.projectId}});await foreign.cleanup();}
  }finally{await db.earnPayoutRequestVoid.deleteMany({where:{projectId}});await f.cleanup();}
+});
+
+// Search by PayPal transaction id (29/10/2026): the report q matches a request whose receipt has exactly that id (case-insensitive,
+// the "Mã giao dịch:" label dropped), never another request; findPayoutByTransaction finds the VM for the Server / VM search.
+it('report q matches a PayPal transaction id exactly, case-insensitively and with a pasted label',async()=>{
+ const f=await fixture();try{
+  const hit=await f.request(),miss=await f.request();
+  await f.receipt(hit.id,{transactionId:'8JR02442V10816200'});
+  await f.receipt(miss.id,{transactionId:'8JR02442V10816201'});
+  for(const q of ['8JR02442V10816200','8jr02442v10816200','  Mã giao dịch: 8JR02442V10816200 ','Transaction ID:8JR02442V10816200']){
+   const report=await readPayoutReport(f.scope,{q},db);
+   expect(report.rows.map(r=>r.id)).toEqual([hit.id]);
+   expect(report.rows[0].matchedTransactionId).toBe('8JR02442V10816200');
+  }
+  expect((await readPayoutReport(f.scope,{q:'8JR02442V1081620'},db)).rows.map(r=>r.id)).toEqual([]);
+  expect((await readPayoutReport(f.scope,{},db)).rows.every(r=>r.matchedTransactionId===null)).toBe(true);
+ }finally{await f.cleanup();}
+});
+
+it('findPayoutByTransaction returns the request VM, null when unknown, and refuses scoped / no-money members',async()=>{
+ const f=await fixture(),other=await fixture();try{
+  const r=await f.request();await f.receipt(r.id,{transactionId:'9AB12345CD6789012'});
+  const o=await other.request();await other.receipt(o.id,{transactionId:'7ZZ12345CD6789012'});
+  expect(await findPayoutByTransaction(f.scope,{transactionId:'Mã giao dịch: 9ab12345cd6789012'},db)).toEqual({vmId:f.vm.id,serverId:f.server.id,requestId:r.id});
+  expect(await findPayoutByTransaction(f.scope,{transactionId:'7ZZ12345CD6789012'},db)).toBeNull();
+  expect(await findPayoutByTransaction(f.scope,{transactionId:'0000000000000000'},db)).toBeNull();
+  await expect(findPayoutByTransaction(f.worker,{transactionId:'9AB12345CD6789012'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  const member={userId_projectId:{userId:f.worker.userId,projectId:f.scope.projectId}};
+  await db.projectMember.update({where:member,data:{capabilities:['EARN_PAYOUT']}});
+  expect((await findPayoutByTransaction(f.worker,{transactionId:'9AB12345CD6789012'},db))?.vmId).toBe(f.vm.id);
+  await db.projectMember.update({where:member,data:{serverScope:'SELECTED',allowedServerIds:[f.server.id]}});
+  await expect(findPayoutByTransaction(f.worker,{transactionId:'9AB12345CD6789012'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+  const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,email:'fixture@invalid'},expires:new Date(Date.now()+60000).toISOString()} as never});
+  expect(await caller.vmOps.findByTransaction({projectId:f.scope.projectId,transactionId:'9AB12345CD6789012'})).toEqual({vmId:f.vm.id,serverId:f.server.id,requestId:r.id});
+ }finally{await f.cleanup();await other.cleanup();}
 });

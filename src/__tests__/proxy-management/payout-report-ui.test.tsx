@@ -60,3 +60,12 @@ it('"Đã xoá do ghi nhầm" is collapsed with its count and lists the voided r
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   for(const t of ['VM_007','moon1','pp-tut40','x@example.invalid','Ghi nhầm VM','$9.00','Tut'])expect(host.textContent).toContain(t);
 });
+
+it('search box mentions PayPal transaction ids and a matched id is shown on the row (29/10/2026)',async()=>{
+  mock.params=new URLSearchParams('q=8JR02442V10816200');const d=report();
+  mock.query.mockReturnValue({data:{...d,rows:[{...d.rows[0],matchedTransactionId:'8JR02442V10816200'}]},error:null,isLoading:false});
+  await render();
+  expect(mock.query.mock.calls[0][0]).toMatchObject({q:'8JR02442V10816200'});
+  expect((host.querySelector('input[aria-label="Tìm yêu cầu rút"]') as HTMLInputElement).placeholder).toContain('mã giao dịch PayPal');
+  expect(host.textContent).toContain('Mã giao dịch: 8JR02442V10816200');
+});

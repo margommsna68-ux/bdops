@@ -9,7 +9,7 @@ import {addPayoutMembers,removePayoutMember} from '../vm-ops/payout-members';
 import {editPayoutRequest,unsendPayoutRequest,voidPayoutRequest} from '../vm-ops/payout-fix';
 import {markEarnAppSuspended} from '../vm-ops/suspend';
 import {recordBalanceChecks,readBalanceHistory,previewBalancePaste} from '../vm-ops/balance';
-import {readPayoutReport,readPayoutDashboard,readPayoutVoided,PAYOUT_REPORT_VIEWS} from '../vm-ops/payout-report';
+import {readPayoutReport,readPayoutDashboard,readPayoutVoided,findPayoutByTransaction,PAYOUT_REPORT_VIEWS} from '../vm-ops/payout-report';
 // VM operating state, payout requests and recreation (owner brief 18/10/2026). People and AI use these same checked endpoints.
 const project=z.object({projectId:z.string().min(1)}),id=z.string().min(1),key=z.string().min(8).max(100),cycle=z.number().int().positive(),revision=z.number().int().nonnegative();
 const member=z.object({vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),shareAmount:z.string().max(40).nullish()});
@@ -17,6 +17,7 @@ const scope=(ctx:{prisma:Parameters<typeof loadInfrastructureScope>[0];user:{id:
 export const vmOpsRouter=router({
   payoutDashboard:protectedProcedure.input(project.extend({serverId:id.optional()})).query(({ctx,input})=>domain(async()=>readPayoutDashboard(await scope(ctx,input.projectId),input,ctx.prisma))),
   payoutReport:protectedProcedure.input(project.extend({serverId:id.optional(),paypalId:id.optional(),status:z.enum(['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW','LOST']).optional(),q:z.string().max(200).optional(),from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),page:z.number().int().min(1).max(100000).optional(),view:z.enum(PAYOUT_REPORT_VIEWS).optional(),day:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()})).query(({ctx,input})=>domain(async()=>readPayoutReport(await scope(ctx,input.projectId),input,ctx.prisma))),
+  findByTransaction:protectedProcedure.input(project.extend({transactionId:z.string().trim().min(1).max(200)})).query(({ctx,input})=>domain(async()=>findPayoutByTransaction(await scope(ctx,input.projectId),input,ctx.prisma))),
   payoutVoided:protectedProcedure.input(project.extend({serverId:id.optional(),page:z.number().int().min(1).max(100000).optional()})).query(({ctx,input})=>domain(async()=>readPayoutVoided(await scope(ctx,input.projectId),input,ctx.prisma))),
   board:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>readVmOps(await scope(ctx,input.projectId),ctx.prisma))),
   history:protectedProcedure.input(project.extend({vmId:id})).query(({ctx,input})=>domain(async()=>readVmOpsHistory(await scope(ctx,input.projectId),input,ctx.prisma))),

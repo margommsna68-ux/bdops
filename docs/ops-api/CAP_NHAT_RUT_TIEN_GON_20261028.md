@@ -1,4 +1,4 @@
-# Cập nhật 28/10/2026 — Rút EarnApp gọn lại (web build 2RHnkRVDs2G_mKoGCWyTd, OpenAPI 1.9.0; bổ sung 1.9.1 ngày 29/10/2026)
+# Cập nhật 28/10/2026 — Rút EarnApp gọn lại (web build 2RHnkRVDs2G_mKoGCWyTd, OpenAPI 1.9.0; bổ sung 1.9.1 và 1.9.2 ngày 29/10/2026)
 
 Đọc kèm PROMPT_CLAUDE_VAN_HANH_WEB.md (đã cập nhật) và OPENAPI_WEB_HIEN_TAI.json.
 
@@ -15,6 +15,7 @@
 - `POST withdrawals/{id}/void` — xoá yêu cầu ghi nhầm (chưa có tiền về); VM tạo yêu cầu mới được.
 - `POST vms/{id}/suspended` — EarnApp bị SUS: lệnh rút → "Mất do SUS" (`state` LOST_SUS, `phase` LOST), email PP của EarnApp bị xoá khỏi kho, VM vào "Chờ tạo lại". Ghi SUS qua `vms/{id}/status` cũng đóng y hệt.
 - `GET withdrawals?projectId=…&email=<email PayPal nhận>` — tìm lệnh đang chờ theo email trong thư báo tiền PayPal (cần quyền PAYOUT hoặc RECEIPT).
+- `GET withdrawals?projectId=…&transactionId=<mã giao dịch PayPal>` (OpenAPI 1.9.2) — yêu cầu rút có khoản tiền về mang đúng mã đó (không phân biệt hoa thường; dán cả "Mã giao dịch: …" cũng được). Khi quét mail PayPal: KIỂM TRA MÃ NÀY TRƯỚC; có kết quả = đã ghi rồi, không ghi lại. Cần quyền xem tiền của yêu cầu rút.
 
 ## Tiền về
 - Luôn ghi ĐÚNG số tiền thấy trong PayPal kèm mã giao dịch PayPal (`transactionId`). Số PayPal là con số chính xác và cuối cùng (chủ quyết định 28/10/2026).

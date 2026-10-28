@@ -112,6 +112,26 @@ describe('ops API: fix and SUS routes',()=>{
       expect((await call('GET','withdrawals?projectId='+f.projectId+'&email=nobody@example.invalid',{token:t})).json.data.items).toEqual([]);
     }finally{await cleanupAll(f);}
   });
+  it('GET withdrawals?transactionId= finds the request whose receipt carries that PayPal id (exact, case-insensitive, label dropped) (29/10/2026)',async()=>{
+    const f=await setup();try{
+      const t=await f.token(f.ai,ALL),emails=(await f.pp('pp-82')).emails;
+      const a=await request(f,t,0,emails[0].id,true,{amount:'10.00'}),b=await request(f,t,1,emails[1].id,true);
+      const tx='8JR'+randomUUID().replace(/-/g,'').slice(0,14).toUpperCase();
+      for(const [id,txid] of [[a,tx],[b,tx.slice(0,-1)+'Z']] as const){
+        const r=await call('POST','withdrawals/'+id+'/receipts',{token:t,autoApprove:false,body:{projectId:f.projectId,expectedRequestRevision:await reqRev(id),amount:'3.00',currency:'USD',receivedAt:new Date().toISOString(),transactionId:txid}});
+        expect(r.status,JSON.stringify(r.json.error)).toBe(200);
+      }
+      for(const q of [tx,tx.toLowerCase(),'Mã giao dịch: '+tx]){
+        const found=await call('GET','withdrawals?projectId='+f.projectId+'&transactionId='+encodeURIComponent(q),{token:t});
+        expect(found.status,JSON.stringify(found.json.error)).toBe(200);expect(found.json.data.items.map((x:{id:string})=>x.id)).toEqual([a]);
+      }
+      const detail=await call('GET','withdrawals/'+a+'?projectId='+f.projectId,{token:t});expect(detail.json.data.receipts.map((x:{transactionId:string})=>x.transactionId)).toContain(tx);
+      expect((await call('GET','withdrawals?projectId='+f.projectId+'&transactionId=0000AAAA0000AAAA',{token:t})).json.data.items).toEqual([]);
+      const ro=await f.token(f.ai,['READ'] as never);
+      const denied=await call('GET','withdrawals?projectId='+f.projectId+'&transactionId='+tx,{token:ro});
+      expect(denied.status).toBe(403);
+    }finally{await cleanupAll(f);}
+  });
   it('a receipt above the request (owner 28/10/2026) is recorded exactly and closes it as received with the surplus',async()=>{
     const f=await setup();try{
       const t=await f.token(f.ai,ALL),email=(await f.pp('pp-82')).emails[0].id,a=await request(f,t,0,email,true,{amount:'20.04'});

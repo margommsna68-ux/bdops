@@ -7,6 +7,7 @@ import {payoutRights} from './payout';
 import {moneyOfRequest} from './ops';
 import {dayDate,dayText} from '../business-management/money';
 import {assertScopedServerIds,hasServerScope} from '../permissions/server-scope';
+import {txQuery,sameTx} from '@/lib/paypal-tx';
 
 const statuses=['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW','LOST'] as const;
 export type PayoutReportStatus=typeof statuses[number];
@@ -21,7 +22,7 @@ const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Bộ lọc báo c
 async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
  const from=input.from===undefined?undefined:dayDate(input.from),to=input.to===undefined?undefined:dayDate(input.to);
  if(from&&to&&from>to)invalid();
- const q=input.q?.trim().toLocaleLowerCase()??'';
+ const q=input.q?.trim().toLocaleLowerCase()??'',tx=txQuery(input.q);
  const [requests,servers,paypals]=await Promise.all([
   db.earnPayoutRequest.findMany({where:{projectId,earnApp:{projectId},paypal:{projectId},paypalEmail:{projectId},
    ...(input.paypalId?{paypalId:input.paypalId}:{}),
@@ -57,10 +58,12 @@ async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
    amount:r.amount.toFixed(2),currency:r.currency,received:money.received,remaining:r.submission==='SENT'&&money.phase==='WAITING'?money.remaining:'0.00',shortfall:r.shortfall?.toFixed(2)??'0.00',lostAmount:r.lostAmount?.toFixed(2)??'0.00',lostAt:r.lostAt?.toISOString()??null,status,reference:r.reference,
    members:r.members.map(m=>{const v=vmById.get(m.vmId);return {vmId:m.vmId,serverId:v?.serverId??null,server:v?.server.code??null,vm:v?.code??null,cycle:m.cycle,consumed:!!m.consumedAt};}),
    receipts:r.receipts.map(x=>({id:x.id,date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,
-    status:x.voidedAt?'VOIDED' as const:x.failed?'FAILED' as const:x.confirmed?'CONFIRMED' as const:'PENDING' as const,transactionId:x.transactionId}))};
+    status:x.voidedAt?'VOIDED' as const:x.failed?'FAILED' as const:x.confirmed?'CONFIRMED' as const:'PENDING' as const,transactionId:x.transactionId})),
+   // Search by PayPal transaction id (29/10/2026): the receipt id equal to the query (label dropped), shown on the row.
+   matchedTransactionId:tx?r.receipts.find(x=>sameTx(x.transactionId,tx))?.transactionId??null:null};
   return {row,money,submission:r.submission};
  }).filter(({row})=>(!input.serverId||row.serverId===input.serverId||row.members.some(m=>m.serverId===input.serverId))&&(!input.status||row.status===input.status)
-  &&(!q||[row.server,row.vm,row.login,row.paypal,row.email,row.reference,...row.members.flatMap(m=>[m.server,m.vm])].some(s=>s?.toLocaleLowerCase().includes(q))));
+  &&(!q||row.matchedTransactionId!==null||[row.server,row.vm,row.login,row.paypal,row.email,row.reference,...row.members.flatMap(m=>[m.server,m.vm])].some(s=>s?.toLocaleLowerCase().includes(q))));
  return {entries:filtered,servers,paypals};
 }
 
@@ -142,6 +145,22 @@ export async function readPayoutReport(scope:ActorScope,input:PayoutReportInput,
    receivedInView:view==='RECEIVED_TODAY'?sumAmounts(confirmedReceipts(entry,day)):null})),total:filtered.length,page:currentPage,pages,
   updatedAt:at.toISOString(),summary,lost:lostTotals(filtered),servers:model.servers,paypals:model.paypals,focus,
   rights:{manage:rights.writeMoney,markSubmission:rights.writeMoney||rights.payout,userId:current.userId}};
+}
+
+/** Server / VM search by PayPal transaction id (29/10/2026): the VM of the request whose receipt carries exactly that id
+ * (case-insensitive, pasted label dropped). Same rights as the report (request money; server-scoped members are refused). */
+export async function findPayoutByTransaction(scope:ActorScope,input:{transactionId:string},db:DB=prisma){
+ const current=await authorizeVM(scope,'READ',db),rights=await payoutRights(current,db);
+ if(!rights.requestMoney)throw new ProxyDomainError('FORBIDDEN','Tìm theo mã giao dịch cần quyền xem tiền của yêu cầu rút');
+ const tx=txQuery(input.transactionId);
+ if(!tx||tx.length>160)invalid();
+ const receipt=await db.fundTransaction.findFirst({where:{projectId:rights.current.projectId,transactionId:{equals:tx,mode:'insensitive'},payoutRequestId:{not:null}},
+  select:{payoutRequest:{select:{id:true,vmId:true,projectId:true}}},orderBy:[{date:'desc'},{id:'desc'}]});
+ const request=receipt?.payoutRequest;
+ if(!request||request.projectId!==rights.current.projectId)return null;
+ const vm=await db.virtualMachine.findFirst({where:{id:request.vmId,server:{projectId:rights.current.projectId}},select:{id:true,serverId:true}});
+ if(!vm||hasServerScope(rights.current)&&!rights.current.serverIds!.includes(vm.serverId))return null;
+ return {vmId:vm.id,serverId:vm.serverId,requestId:request.id};
 }
 
 /** No payout rows/options/totals are queried for a member without requestMoney. */
