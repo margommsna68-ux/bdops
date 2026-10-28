@@ -12,6 +12,7 @@ import {queryRegistry,getProxyTimeline,exportBlocked,copyProxyEndpoint,copyProxy
 import {refreshGenjy} from '../proxy-management/sources';
 import {ProxyDomainError,userMessage} from '../proxy-management/types';
 import {saveProviderAccount,listPackages,setPackageRenewal} from '../proxy-management/catalog-management';
+import {renamePackage} from '../proxy-management/package-credentials';
 import {listProxyMembers,listServerAccessChoices,proxyCapabilities,setProxyCapabilities} from '../proxy-management/capabilities';
 import {archiveGroup,createGroup,listGroups,renameGroup,MAX_GROUP_NAME} from '../proxy-management/groups';
 import {createProxyEditService,listVmTargets,MAX_EDIT_ROWS} from '../proxy-management/edits';
@@ -75,4 +76,5 @@ export const proxyManagementRouter=router({
   sync:protectedProcedure.input(project).mutation(({ctx,input})=>domain(async()=>{const scope=await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId);assertInfrastructureAction(scope,'BLOCK');return refreshGenjy(input.projectId,ctx.prisma);})),
   catalog:protectedProcedure.input(project).query(({ctx,input})=>domain(async()=>listPackages(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),ctx.prisma))),
   saveCatalog:protectedProcedure.input(project.extend({code:z.string().min(1).max(80),label:z.string().min(1).max(100),username:z.string().max(100).nullable().optional(),password:z.string().max(500).nullable().optional(),site:z.string().max(120).nullable().optional(),note:z.string().max(500).nullable().optional(),price:z.string().max(40).nullable().optional(),priceCurrency:z.string().max(8).nullable().optional(),cycleMonths:z.number().int().min(1).max(60).nullable().optional(),nextDueDate:z.string().max(10).nullable().optional(),reminderDays:z.number().int().min(1).max(90).nullable().optional(),disabled:z.boolean().optional()})).mutation(({ctx,input})=>domain(async()=>saveProviderAccount(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
+  renamePackage:protectedProcedure.input(project.extend({key:z.string().min(8).max(100),code:z.string().min(1).max(80),newCode:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative().optional()})).mutation(({ctx,input})=>domain(async()=>{const {projectId:_p,...rest}=input;return renamePackage(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),rest,ctx.prisma);})),
 });
