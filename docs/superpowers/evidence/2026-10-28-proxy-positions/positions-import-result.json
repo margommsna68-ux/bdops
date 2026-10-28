@@ -1,0 +1,15 @@
+{
+ "projectId": "cmvknb7gj0001cu13xj8wngra",
+ "intervals": 735,
+ "proxies": 714,
+ "assigned": 735,
+ "released": 58,
+ "unknownStart": 25,
+ "window": {
+  "from": "2026-09-29T06:24:20.404Z",
+  "to": "2026-10-22T14:01:42.812Z"
+ },
+ "sourceSha256": "9aa078b0dcc35b88284ddffc023fa38bf18febe523f60c68ca7c731a205a7481",
+ "key": "SHEET-POSITIONS-c911cf15d96533ab9a9df060",
+ "appliedAt": "2026-10-28T07:14:14.201Z"
+}
