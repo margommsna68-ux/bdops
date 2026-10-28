@@ -6,6 +6,8 @@ import {VM_OPS_STATUSES} from '@/lib/vm-ops';
 import {setVmStatus,recordRecreated} from '../vm-ops/ops';
 import {createPayoutRequest,updatePayoutRequest,readVmOps,readVmOpsHistory,readPayoutPick,readPaypalGather,recordPayoutReceipt} from '../vm-ops/payout';
 import {addPayoutMembers,removePayoutMember} from '../vm-ops/payout-members';
+import {editPayoutRequest,unsendPayoutRequest,voidPayoutRequest} from '../vm-ops/payout-fix';
+import {markEarnAppSuspended} from '../vm-ops/suspend';
 import {recordBalanceChecks,readBalanceHistory,previewBalancePaste} from '../vm-ops/balance';
 import {readPayoutReport,readPayoutDashboard,PAYOUT_REPORT_VIEWS} from '../vm-ops/payout-report';
 // VM operating state, payout requests and recreation (owner brief 18/10/2026). People and AI use these same checked endpoints.
@@ -26,6 +28,11 @@ export const vmOpsRouter=router({
   addPayoutMembers:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,members:z.array(member).min(1).max(100)})).mutation(({ctx,input})=>domain(async()=>addPayoutMembers(await scope(ctx,input.projectId),input,ctx.prisma))),
   removePayoutMember:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id})).mutation(({ctx,input})=>domain(async()=>removePayoutMember(await scope(ctx,input.projectId),input,ctx.prisma))),
   updatePayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,history:z.boolean().optional(),action:z.enum(['FAILED','CANCELLED','RETRY','CORRECT','SETTLE','SENT','UNKNOWN']),note:z.string().max(500).nullish(),amount:z.string().max(40).nullish(),reference:z.string().max(200).nullish()})).mutation(({ctx,input})=>domain(async()=>updatePayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  // Fixing a mistaken request and EarnApp SUS (owner 28/10/2026): the same services as the ops API.
+  editPayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,paypalEmailId:id.optional(),amount:z.string().max(40).optional(),requestedAt:z.string().max(40).optional(),reference:z.string().max(200).nullish(),note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>editPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  unsendPayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>unsendPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  voidPayout:protectedProcedure.input(project.extend({key,requestId:id,expectedRevision:revision,vmId:id,expectedCycle:cycle,earnAppId:id,reason:z.string().min(1).max(500)})).mutation(({ctx,input})=>domain(async()=>voidPayoutRequest(await scope(ctx,input.projectId),input,ctx.prisma))),
+  suspendEarnApp:protectedProcedure.input(project.extend({key,vmId:id,expectedCycle:cycle,expectedVmRevision:revision.optional(),note:z.string().max(500).nullish()})).mutation(({ctx,input})=>domain(async()=>markEarnAppSuspended(await scope(ctx,input.projectId),input,ctx.prisma))),
   // Money received for one payout request (review fix 21/10/2026): the same command as the ops API (recordPayoutReceipt); managers or
   // PAYPAL_RECEIPT_RECORD. Confirmed money only, parts add up, never over what is open, duplicates refused, period lock.
   payoutReceipt:protectedProcedure.input(project.extend({key,requestId:id,expectedRequestRevision:revision,amount:z.string().max(20),currency:z.string().max(5),receivedAt:z.string().max(40),transactionId:z.string().max(100).nullish(),evidence:z.string().max(300).nullish(),settleRemainder:z.boolean().optional()})).mutation(({ctx,input})=>domain(async()=>recordPayoutReceipt(await scope(ctx,input.projectId),input,ctx.prisma))),

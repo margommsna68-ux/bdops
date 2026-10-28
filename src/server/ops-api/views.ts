@@ -36,7 +36,7 @@ export function vmView(vm:VmRow){
     currentSdk:vm.sdkRecord?{id:vm.sdkRecord.id,code:maskSdk(vm.sdkRecord.code),revision:vm.sdkRecord.revision,linkState:vm.sdkRecord.linkState}:null,
     earnAppAccount:ea?{id:ea.id,login:maskEmail(ea.login.email)}:null};
 }
-export const requestSelect={id:true,revision:true,vmId:true,cycle:true,earnAppId:true,paypalId:true,paypalEmailId:true,currency:true,amount:true,requestedAt:true,state:true,stateNote:true,submission:true,submittedAt:true,settledAt:true,shortfall:true,consumedAt:true,history:true,createdAt:true,
+export const requestSelect={id:true,revision:true,vmId:true,cycle:true,earnAppId:true,paypalId:true,paypalEmailId:true,currency:true,amount:true,requestedAt:true,state:true,stateNote:true,submission:true,submittedAt:true,settledAt:true,shortfall:true,consumedAt:true,history:true,createdAt:true,lostAmount:true,lostAt:true,
   paypal:{select:{code:true}},paypalEmail:{select:{email:true}},earnApp:{select:{vmId:true,closedAt:true}},
   receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true,noTxId:true,transactionId:true,createdAt:true}},
   // Merged payout (27/10/2026): the other VMs whose SDKs were merged into this EarnApp account for this payout.
@@ -48,9 +48,9 @@ export function withdrawalView(r:RequestRow,rights:ViewRights,opts:{currentCycle
   const money=rights.requestMoney;
   return {id:r.id,revision:r.revision,vmId:r.vmId,cycle:r.cycle,earnAppAccountId:r.earnAppId,current,paypalId:r.paypalId,paypalCode:r.paypal.code,paypalEmailId:r.paypalEmailId,
     paypalEmail:rights.payoutEmail?r.paypalEmail.email:maskEmail(r.paypalEmail.email),requestedOn:dayText(r.requestedAt),state:r.state,submission:SUBMISSION[r.submission]??r.submission,submittedAt:r.submittedAt?.toISOString()??null,
-    phase:m.phase,settled:!!r.settledAt,consumed:!!r.consumedAt,
+    phase:m.phase,settled:!!r.settledAt,consumed:!!r.consumedAt,lostAt:r.lostAt?.toISOString()??null,
     members:r.members.map(x=>({vmId:x.vmId,cycle:x.cycle,consumed:!!x.consumedAt,share:money?x.shareAmount?.toFixed(2)??null:null})),
-    money:money?{currency:r.currency,requested:r.amount.toFixed(2),received:m.received,pendingLinked:m.pendingLinked,remaining:m.remaining,shortfall:r.shortfall?.toFixed(2)??null}:null,
+    money:money?{currency:r.currency,requested:r.amount.toFixed(2),received:m.received,pendingLinked:m.pendingLinked,remaining:m.remaining,shortfall:r.shortfall?.toFixed(2)??null,lostAmount:r.lostAmount?.toFixed(2)??null}:null,
     note:money?redactSecrets(r.stateNote):null,
     ...(opts.history?{
       receipts:money?r.receipts.map(x=>({id:x.id,amount:x.amount.toFixed(2),currency:x.currency,receivedOn:dayText(x.date),transactionId:x.noTxId?null:x.transactionId,status:x.voidedAt?'VOIDED':x.failed?'FAILED':x.confirmed?'RECEIVED':'PENDING',recordedAt:x.createdAt.toISOString()})):null,

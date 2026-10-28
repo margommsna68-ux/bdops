@@ -15,7 +15,7 @@ async function fixture(){
 }
 describe('owner-authorized unattended inventory access',()=>{
  it('advertises approval only for money commands; account credentials are direct and audited without secrets',async()=>{const f=await fixture();try{
-  const me=await api('GET','me',{token:f.token});expect(me.json.data.approvalRequired).toEqual(['WITHDRAWAL_PREPARE','WITHDRAWAL_STATUS','WITHDRAWAL_RECEIPT','WITHDRAWAL_MEMBERS']);
+  const me=await api('GET','me',{token:f.token});expect(me.json.data.approvalRequired).toEqual(['WITHDRAWAL_PREPARE']);
   const r=await api('POST',f.accountPath,{token:f.token,pin:null,body:f.accountBody,autoApprove:false});expect(r.status).toBe(200);expect(r.json.data.credentials.password).toMatch(/^Secret-pw-/);
   expect(await db.opsApproval.count({where:{projectId:f.projectId}})).toBe(0);
   const audit=JSON.stringify(await db.auditLog.findMany({where:{projectId:f.projectId,action:'AI_ACCOUNT_CREDENTIALS'}}));expect(audit).toContain(f.v.id);expect(audit).not.toContain(r.json.data.credentials.password);

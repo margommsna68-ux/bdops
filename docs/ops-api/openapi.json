@@ -2,8 +2,8 @@
  "openapi": "3.0.3",
  "info": {
   "title": "MoneyToHome — API vận hành AI",
-  "version": "1.7.1",
-  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Only withdrawal prepare/status/receipts retain approval. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
+  "version": "1.8.0",
+  "description": "MoneyToHome reads and records stock assignments and observed VM/EarnApp work. It does not connect to, create, configure or log in to real VMs, EarnApp or PayPal. Base: https://wow.lalamail.sbs/api/ops/v1. Bearer token; every POST needs Idempotency-Key (no PIN). Effective rights are current user rights intersected with token projects and scopes. Owner creates the 90-day operator token in the UI with READ, VM_OPS, BALANCE_WRITE, PROXY_CREDENTIALS, ACCOUNT_OPS; no PAYOUT or RECEIPT. Assigned proxy credentials are available directly for the active VM job with PROXY_CREDENTIALS and VM_PROXY_FOR_OPS. Inventory account credentials and SDK reveals are direct with current token/user/server rights; no ADMIN approval or TOTP. Owner decision 28/10/2026: only withdrawals/prepare retains ADMIN approval; status, receipts, members, edit, unsend, void and vms/{id}/suspended run directly with current rights. Standalone approval holds return 202 ok:false; a pending batch returns 202 ok:true with per-item results, summary and one approval. Final batch returns 200 even with refused items. Stock writes require the caller token own ACTIVE, unexpired job for that VM and round. Read back current state; an API acknowledgement proves a web record only. SDK and account usage are separate facts, never inferred from assignment or money."
  },
  "servers": [
   {
@@ -107,7 +107,8 @@
          "SDK_CONFLICT",
          "VALIDATION",
          "INTERNAL",
-         "PAYPAL_DAILY_LIMIT"
+         "PAYPAL_DAILY_LIMIT",
+         "EMAIL_HAS_MONEY"
         ]
        },
        "message": {
@@ -115,7 +116,7 @@
        },
        "details": {
         "type": "object",
-        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored). APPROVAL_REJECTED (403): approvalId, status \"REJECTED\". APPROVAL_EXPIRED (410): approvalId, expiredAt. (The 202 APPROVAL_REQUIRED hold has its own schema ApprovalRequired.)"
+        "description": "Filtered by rights. On 409: `current` = the state now (VM: expectedCycle, revision, earnAppAccountId; or the withdrawal). DUPLICATE: withdrawalId / receiptId. SDK_CONFLICT (SDK survey): kind CURRENT_DIFFERS (observedCode, currentCode, currentSdkId, currentRevision, currentLinkState) or SAME_TIME_OTHER_AMOUNT (code, sdkId, revision, storedAmountUsd, observedAt). REVISION_CONFLICT on an SDK: code + sdk {sdkId, revision, linkState} (null = the code is not stored). APPROVAL_REJECTED (403): approvalId, status \"REJECTED\". APPROVAL_EXPIRED (410): approvalId, expiredAt. (The 202 APPROVAL_REQUIRED hold has its own schema ApprovalRequired.) EMAIL_HAS_MONEY (409): the request / its receiving email already has money recorded (a receipt, voided ones included); it cannot be unsent, voided or moved to another email."
        }
       },
       "required": [
@@ -463,6 +464,13 @@
       "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
       "example": "10.00",
       "nullable": true
+     },
+     "lostAmount": {
+      "type": "string",
+      "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+      "example": "10.00",
+      "nullable": true,
+      "description": "amount lost to SUS (never income, never waiting)"
      }
     },
     "required": [
@@ -471,7 +479,8 @@
      "received",
      "pendingLinked",
      "remaining",
-     "shortfall"
+     "shortfall",
+     "lostAmount"
     ]
    },
    "Receipt": {
@@ -596,8 +605,10 @@
       "enum": [
        "REQUESTED",
        "FAILED",
-       "CANCELLED"
-      ]
+       "CANCELLED",
+       "LOST_SUS"
+      ],
+      "description": "LOST_SUS (28/10/2026): the EarnApp was suspended before the rest arrived; the unpaid part is lost (never waiting, never received)"
      },
      "submission": {
       "type": "string",
@@ -619,7 +630,8 @@
        "RECEIVED",
        "REVIEW",
        "FAILED",
-       "CANCELLED"
+       "CANCELLED",
+       "LOST"
       ],
       "description": "from the PayPal book"
      },
@@ -647,6 +659,12 @@
        "$ref": "#/components/schemas/WithdrawalMember"
       },
       "description": "Merged payout (27/10/2026): other VMs whose SDKs were merged into this EarnApp account; empty for a normal request. The money is the request money, counted once."
+     },
+     "lostAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true,
+      "description": "when the request was closed as lost to SUS"
      }
     },
     "required": [
@@ -669,7 +687,8 @@
      "consumed",
      "money",
      "note",
-     "members"
+     "members",
+     "lostAt"
     ]
    },
    "WithdrawalDetail": {
@@ -718,8 +737,10 @@
       "enum": [
        "REQUESTED",
        "FAILED",
-       "CANCELLED"
-      ]
+       "CANCELLED",
+       "LOST_SUS"
+      ],
+      "description": "LOST_SUS (28/10/2026): the EarnApp was suspended before the rest arrived; the unpaid part is lost (never waiting, never received)"
      },
      "submission": {
       "type": "string",
@@ -741,7 +762,8 @@
        "RECEIVED",
        "REVIEW",
        "FAILED",
-       "CANCELLED"
+       "CANCELLED",
+       "LOST"
       ],
       "description": "from the PayPal book"
      },
@@ -782,6 +804,12 @@
        "$ref": "#/components/schemas/WithdrawalMember"
       },
       "description": "Merged payout (27/10/2026): other VMs whose SDKs were merged into this EarnApp account; empty for a normal request. The money is the request money, counted once."
+     },
+     "lostAt": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true,
+      "description": "when the request was closed as lost to SUS"
      }
     },
     "required": [
@@ -806,7 +834,8 @@
      "note",
      "receipts",
      "history",
-     "members"
+     "members",
+     "lostAt"
     ]
    },
    "ActiveJob": {
@@ -2241,6 +2270,17 @@
        "transactionId": {
         "type": "string",
         "nullable": true
+       },
+       "settled": {
+        "type": "boolean",
+        "description": "true = settleRemainder closed the request; the rest is a fee / shortfall"
+       },
+       "shortfall": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true,
+        "description": "the fee / shortfall settled by this receipt (null without money rights or when nothing was settled)"
        }
       },
       "required": [
@@ -2252,7 +2292,9 @@
        "currency",
        "receivedOn",
        "receivedAt",
-       "transactionId"
+       "transactionId",
+       "settled",
+       "shortfall"
       ]
      },
      "current": {
@@ -7497,6 +7539,376 @@
      "data",
      "error"
     ]
+   },
+   "EditAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "changed": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "revisionAfter": {
+        "type": "integer"
+       },
+       "paypalEmailId": {
+        "type": "string"
+       },
+       "amount": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       },
+       "currency": {
+        "type": "string"
+       },
+       "requestedOn": {
+        "type": "string",
+        "format": "date"
+       },
+       "submission": {
+        "type": "string",
+        "enum": [
+         "PREPARING",
+         "SUBMITTED_ON_EARNAPP",
+         "UNKNOWN_RESULT"
+        ]
+       },
+       "note": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "withdrawalId"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "nullable": true,
+        "allOf": [
+         {
+          "$ref": "#/components/schemas/Withdrawal"
+         }
+        ]
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "changed",
+     "recorded",
+     "current"
+    ]
+   },
+   "UnsendAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "changed": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawalId": {
+        "type": "string"
+       },
+       "submission": {
+        "type": "string",
+        "enum": [
+         "PREPARING"
+        ]
+       },
+       "revisionAfter": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "withdrawalId",
+       "submission",
+       "revisionAfter"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "nullable": true,
+        "allOf": [
+         {
+          "$ref": "#/components/schemas/Withdrawal"
+         }
+        ]
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "changed",
+     "recorded",
+     "current"
+    ]
+   },
+   "VoidAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "voidId": {
+        "type": "string"
+       },
+       "withdrawalId": {
+        "type": "string"
+       },
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "earnAppAccountId": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "voidId",
+       "withdrawalId",
+       "vmId",
+       "cycle",
+       "earnAppAccountId"
+      ]
+     },
+     "current": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "withdrawal": {
+        "nullable": true,
+        "allOf": [
+         {
+          "$ref": "#/components/schemas/Withdrawal"
+         }
+        ]
+       }
+      },
+      "required": [
+       "withdrawal"
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "SuspendedAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "replay": {
+      "type": "boolean"
+     },
+     "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "vmId": {
+        "type": "string"
+       },
+       "cycle": {
+        "type": "integer"
+       },
+       "changed": {
+        "type": "boolean",
+        "description": "false = the VM was already SUS (nothing written)"
+       },
+       "withdrawalId": {
+        "type": "string",
+        "nullable": true
+       },
+       "outcome": {
+        "type": "string",
+        "enum": [
+         "LOST",
+         "VOIDED"
+        ],
+        "nullable": true,
+        "description": "LOST: a sent request became LOST_SUS; VOIDED: a request never sent was removed"
+       },
+       "lostAmount": {
+        "type": "string",
+        "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+        "example": "10.00",
+        "nullable": true
+       },
+       "archivedEmailIds": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       }
+      },
+      "required": [
+       "vmId",
+       "cycle",
+       "changed",
+       "withdrawalId",
+       "outcome",
+       "lostAmount",
+       "archivedEmailIds"
+      ]
+     },
+     "current": {
+      "nullable": true,
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/VmNow"
+       }
+      ]
+     }
+    },
+    "required": [
+     "replay",
+     "recorded",
+     "current"
+    ]
+   },
+   "OkEditAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/EditAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkUnsendAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/UnsendAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkVoidAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/VoidAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
+   },
+   "OkSuspendedAck": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "enum": [
+       true
+      ]
+     },
+     "data": {
+      "$ref": "#/components/schemas/SuspendedAck"
+     },
+     "error": {
+      "nullable": true,
+      "enum": [
+       null
+      ]
+     }
+    },
+    "required": [
+     "ok",
+     "data",
+     "error"
+    ]
    }
   }
  },
@@ -8377,8 +8789,19 @@
         "SUBMITTED_ON_EARNAPP",
         "UNKNOWN_RESULT",
         "FAILED",
-        "CANCELLED"
+        "CANCELLED",
+        "LOST"
        ]
+      }
+     },
+     {
+      "name": "email",
+      "in": "query",
+      "required": false,
+      "description": "Receiving PayPal email, exact and case-insensitive (28/10/2026: match a PayPal money mail to its request; each row carries money.remaining). Needs the PAYOUT or RECEIPT right (403 otherwise).",
+      "schema": {
+       "type": "string",
+       "maxLength": 254
       }
      },
      {
@@ -8844,7 +9267,7 @@
   },
   "/withdrawals/{id}/status": {
    "post": {
-    "summary": "SUBMITTED_ON_EARNAPP (seen in EarnApp history) or UNKNOWN_RESULT (keeps holding) (operation PAYOUT)",
+    "summary": "SUBMITTED_ON_EARNAPP (seen in EarnApp history) or UNKNOWN_RESULT (keeps holding) (operation PAYOUT) — no ADMIN approval (28/10/2026)",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -8922,16 +9345,6 @@
        }
       }
      },
-     "202": {
-      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalRequired"
-        }
-       }
-      }
-     },
      "401": {
       "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
@@ -8963,21 +9376,11 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
       "content": {
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "410": {
-      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -9008,7 +9411,7 @@
   },
   "/withdrawals/{id}/receipts": {
    "post": {
-    "summary": "Money that really arrived on PayPal for this request (operation RECEIPT); parts add up; never over what is open",
+    "summary": "Money that really arrived on PayPal for this request (operation RECEIPT); parts add up; never over what is open — no ADMIN approval (28/10/2026)",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -9052,6 +9455,10 @@
           "type": "string",
           "maxLength": 300,
           "nullable": true
+         },
+         "settleRemainder": {
+          "type": "boolean",
+          "description": "Owner 28/10/2026: the real PayPal amount is always below the withdrawn one. true = record this exact PayPal amount and close the request, the rest being the PayPal fee (shortfall). Allowed to anyone who may record the receipt."
          }
         },
         "required": [
@@ -9072,16 +9479,6 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/OkReceiptAck"
-        }
-       }
-      }
-     },
-     "202": {
-      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalRequired"
         }
        }
       }
@@ -9117,21 +9514,11 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
       "content": {
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "410": {
-      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -12824,7 +13211,7 @@
   },
   "/withdrawals/{id}/members": {
    "post": {
-    "summary": "Add VMs whose SDKs were merged into this withdrawal's EarnApp account (operation PAYOUT, ADMIN approval)",
+    "summary": "Add VMs whose SDKs were merged into this withdrawal's EarnApp account (operation PAYOUT, ADMIN approval) — no ADMIN approval (28/10/2026)",
     "parameters": [
      {
       "$ref": "#/components/parameters/id"
@@ -12876,16 +13263,6 @@
        }
       }
      },
-     "202": {
-      "description": "APPROVAL_REQUIRED — lệnh quan trọng chưa ghi, chờ ADMIN duyệt trên web; gửi lại cùng Idempotency-Key + cùng nội dung sau khi duyệt",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalRequired"
-        }
-       }
-      }
-     },
      "401": {
       "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
       "content": {
@@ -12917,21 +13294,11 @@
       }
      },
      "409": {
-      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS",
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / AMBIGUOUS / EMAIL_HAS_MONEY",
       "content": {
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/Error"
-        }
-       }
-      }
-     },
-     "410": {
-      "description": "APPROVAL_EXPIRED — yêu cầu duyệt hết hạn (15 phút), chưa ghi; gửi lại với Idempotency-Key mới",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ApprovalExpired"
         }
        }
       }
@@ -12958,6 +13325,561 @@
      }
     },
     "description": " Per PayPal: at most two distinct receiving emails per Vietnam calendar day, including open preparations. PAYPAL_DAILY_LIMIT (409) includes paypalId/date/timeZone/limit/used/reserved/remaining. No third email is assigned or held; keep the draft. Server clock is authoritative, not requestedAt/observedAt."
+   }
+  },
+  "/withdrawals/{id}/edit": {
+   "post": {
+    "summary": "Fix a mistaken request: receiving email / amount / date / reference (operation PAYOUT, no approval)",
+    "description": "Until money is confirmed. A new email only while no money was recorded on the old one (EMAIL_HAS_MONEY otherwise); a sent request keeps its send day for the daily two-email limit (PAYPAL_DAILY_LIMIT). A note (reason) is required once the request is sent or has money. Unchanged = changed:false, nothing written. Every change leaves a history line.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "paypalEmailId": {
+          "type": "string"
+         },
+         "amount": {
+          "type": "string",
+          "pattern": "^\\d{1,10}(\\.\\d{1,2})?$",
+          "example": "10.00"
+         },
+         "requestedAt": {
+          "type": "string",
+          "format": "date-time"
+         },
+         "reference": {
+          "type": "string",
+          "maxLength": 200,
+          "nullable": true
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 300,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "expectedCycle",
+         "earnAppAccountId",
+         "expectedRequestRevision"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkEditAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / EMAIL_HAS_MONEY",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}/unsend": {
+   "post": {
+    "summary": "Undo \"Đã rút\": SUBMITTED_ON_EARNAPP / UNKNOWN_RESULT → PREPARING (operation PAYOUT, no approval)",
+    "description": "The email stays held for the preparation; its permanent binding and send-day slot are removed. Refused EMAIL_HAS_MONEY once any receipt exists. Already PREPARING = changed:false.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "note": {
+          "type": "string",
+          "maxLength": 300,
+          "nullable": true
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "expectedCycle",
+         "earnAppAccountId",
+         "expectedRequestRevision"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkUnsendAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / EMAIL_HAS_MONEY",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/withdrawals/{id}/void": {
+   "post": {
+    "summary": "Remove a mistaken request (operation PAYOUT, no approval)",
+    "description": "A full snapshot is kept on the web; the email goes back to stock; the EarnApp may withdraw again. Refused with any receipt (EMAIL_HAS_MONEY), once used for a recreation, lost to SUS or while it has merged members. current.withdrawal is null afterwards.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "vmId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "earnAppAccountId": {
+          "type": "string"
+         },
+         "expectedRequestRevision": {
+          "type": "integer"
+         },
+         "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+         }
+        },
+        "required": [
+         "projectId",
+         "vmId",
+         "expectedCycle",
+         "earnAppAccountId",
+         "expectedRequestRevision",
+         "reason"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkVoidAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / EMAIL_HAS_MONEY",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/vms/{id}/suspended": {
+   "post": {
+    "summary": "EarnApp SUS (operation VM_OPS, no approval)",
+    "description": "Same command as the web button \"EarnApp bị SUS\": VM status SUSPENDED; this round's sent request becomes LOST_SUS (its unpaid part is lost, never waiting / received; late money later still records on it), a never-sent one is removed; the receiving email is retired. Already SUS = changed:false (nothing written). New VM / Chờ áp dụng proxy end only through their job.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/id"
+     },
+     {
+      "$ref": "#/components/parameters/key"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "projectId": {
+          "type": "string"
+         },
+         "expectedCycle": {
+          "type": "integer"
+         },
+         "expectedVmRevision": {
+          "type": "integer"
+         },
+         "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "evidence seen on EarnApp"
+         }
+        },
+        "required": [
+         "projectId",
+         "expectedCycle",
+         "note"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OkSuspendedAck"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "UNAUTHORIZED / TOKEN_EXPIRED / TOKEN_REVOKED",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "FORBIDDEN",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "NOT_FOUND (also a project outside the token)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "conflict: REVISION_CONFLICT / CYCLE_CHANGED / ACCOUNT_CHANGED / DUPLICATE / IDEMPOTENCY_CONFLICT / EMAIL_HAS_MONEY",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "VALIDATION",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "RATE_LIMITED (Retry-After header)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "INTERNAL: outcome may be unknown; retry original command key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
    }
   }
  }

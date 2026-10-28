@@ -9,6 +9,8 @@ import {dayText} from '../business-management/money';
 import {balanceRights,recordBalanceChecks} from '../vm-ops/balance';
 import {createPayoutRequest,payoutRights,recordPayoutReceipt,suggestPayout,updatePayoutRequest} from '../vm-ops/payout';
 import {addPayoutMembers} from '../vm-ops/payout-members';
+import {editPayoutRequest,unsendPayoutRequest,voidPayoutRequest} from '../vm-ops/payout-fix';
+import {markEarnAppSuspended} from '../vm-ops/suspend';
 import {hashToken,memberOps,userActive,OPS_SCOPES,type OpsScope} from './tokens';
 import {recordRecreated} from '../vm-ops/ops';
 import {updateManagedVM} from '../vm-management/metadata';
@@ -40,13 +42,13 @@ import {listAiProxies,assignAiProxy,assignAiSdk,linkAiSdk} from './ai-inventory'
 //   { ok: true, data, error: null } | { ok: false, data: null, error: { code, message, details? } }
 // Nothing here logs headers or bodies; the audit (OpsAudit) keeps only the allowed fields.
 // 23/10/2026: no PIN for the AI any more (PIN_* kept in the type for old clients' documentation); critical commands answer APPROVAL_*.
-export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'APPROVAL_REQUIRED'|'APPROVAL_REJECTED'|'APPROVAL_EXPIRED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'PAYPAL_DAILY_LIMIT'|'VALIDATION'|'INTERNAL';
-const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,APPROVAL_REQUIRED:202,APPROVAL_REJECTED:403,APPROVAL_EXPIRED:410,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,PAYPAL_DAILY_LIMIT:409,VALIDATION:422,INTERNAL:500};
+export type OpsCode='UNAUTHORIZED'|'TOKEN_EXPIRED'|'TOKEN_REVOKED'|'FORBIDDEN'|'PIN_REQUIRED'|'PIN_INVALID'|'PIN_LOCKED'|'APPROVAL_REQUIRED'|'APPROVAL_REJECTED'|'APPROVAL_EXPIRED'|'RATE_LIMITED'|'NOT_FOUND'|'AMBIGUOUS'|'REVISION_CONFLICT'|'CYCLE_CHANGED'|'ACCOUNT_CHANGED'|'IDEMPOTENCY_CONFLICT'|'DUPLICATE'|'SDK_CONFLICT'|'PAYPAL_DAILY_LIMIT'|'EMAIL_HAS_MONEY'|'VALIDATION'|'INTERNAL';
+const STATUS:Record<OpsCode,number>={UNAUTHORIZED:401,TOKEN_EXPIRED:401,TOKEN_REVOKED:401,FORBIDDEN:403,PIN_REQUIRED:401,PIN_INVALID:401,PIN_LOCKED:403,APPROVAL_REQUIRED:202,APPROVAL_REJECTED:403,APPROVAL_EXPIRED:410,RATE_LIMITED:429,NOT_FOUND:404,AMBIGUOUS:409,REVISION_CONFLICT:409,CYCLE_CHANGED:409,ACCOUNT_CHANGED:409,IDEMPOTENCY_CONFLICT:409,DUPLICATE:409,SDK_CONFLICT:409,PAYPAL_DAILY_LIMIT:409,EMAIL_HAS_MONEY:409,VALIDATION:422,INTERNAL:500};
 export class OpsError extends Error{constructor(public readonly code:OpsCode,message:string,public readonly details?:Record<string,unknown>,public readonly retryAfter?:number){super(message);}}
 const fail=(code:OpsCode,message:string,details?:Record<string,unknown>,retryAfter?:number)=>new OpsError(code,message,details,retryAfter);
 const json=(status:number,body:unknown,headers:Record<string,string>={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 function fromDomain(e:ProxyDomainError):OpsError{
-  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED',SDK_CONFLICT:'SDK_CONFLICT',PAYPAL_DAILY_LIMIT:'PAYPAL_DAILY_LIMIT',EMAIL_HAS_MONEY:'VALIDATION'};
+  const byReason:Record<DomainReason,OpsCode>={CYCLE_CHANGED:'CYCLE_CHANGED',ACCOUNT_CHANGED:'ACCOUNT_CHANGED',REVISION_CONFLICT:'REVISION_CONFLICT',DUPLICATE:'DUPLICATE',NOT_FOUND:'NOT_FOUND',VALIDATION:'VALIDATION',UNAUTHORIZED:'UNAUTHORIZED',TOKEN_REVOKED:'TOKEN_REVOKED',TOKEN_EXPIRED:'TOKEN_EXPIRED',SDK_CONFLICT:'SDK_CONFLICT',PAYPAL_DAILY_LIMIT:'PAYPAL_DAILY_LIMIT',EMAIL_HAS_MONEY:'EMAIL_HAS_MONEY'};
   const code:OpsCode=e.reason?byReason[e.reason]:e.code==='FORBIDDEN'?'FORBIDDEN':e.code==='NOT_FOUND'?'NOT_FOUND':e.code==='INVALID_INPUT'?'VALIDATION':e.code==='KEY_PAYLOAD_MISMATCH'?'IDEMPOTENCY_CONFLICT':'REVISION_CONFLICT';
   const message=e.code==='KEY_PAYLOAD_MISMATCH'?'Idempotency-Key này đã dùng cho một nội dung khác; dùng key mới cho lệnh mới':redactSecrets(userMessage(e))!;
   return fail(code,message,e.details);
@@ -100,11 +102,18 @@ const routes:Route[]=[
   {method:'GET',path:/^withdrawals$/,scope:'READ',action:'WITHDRAWALS',run:withdrawals},
   {method:'GET',path:new RegExp('^withdrawals/'+ID+'$'),scope:'READ',action:'WITHDRAWAL',run:withdrawalDetail},
   {method:'POST',path:new RegExp('^vms/'+ID+'/balance-check$'),scope:'BALANCE_WRITE',action:'BALANCE_CHECK',run:balanceCheck},
+  // Owner decision 28/10/2026 ("chỉ cần xin duyệt khi rút tiền"): only prepare waits for an ADMIN; status, receipts, members and the
+  // fixes of a mistaken request (edit / unsend / void) run directly with the token's current rights.
   {method:'POST',path:/^withdrawals\/prepare$/,scope:'PAYOUT',action:'WITHDRAWAL_PREPARE',run:prepare,approval:true},
-  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status,approval:true},
-  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt,approval:true},
-  // Merged payout (27/10/2026): add VMs whose SDKs were merged into this request's EarnApp account; held for an ADMIN like prepare.
-  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/members$'),scope:'PAYOUT',action:'WITHDRAWAL_MEMBERS',run:members,approval:true},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/status$'),scope:'PAYOUT',action:'WITHDRAWAL_STATUS',run:status},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/receipts$'),scope:'RECEIPT',action:'WITHDRAWAL_RECEIPT',run:receipt},
+  // Merged payout (27/10/2026): add VMs whose SDKs were merged into this request's EarnApp account.
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/members$'),scope:'PAYOUT',action:'WITHDRAWAL_MEMBERS',run:members},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/edit$'),scope:'PAYOUT',action:'WITHDRAWAL_EDIT',run:editWithdrawal},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/unsend$'),scope:'PAYOUT',action:'WITHDRAWAL_UNSEND',run:unsendWithdrawal},
+  {method:'POST',path:new RegExp('^withdrawals/'+ID+'/void$'),scope:'PAYOUT',action:'WITHDRAWAL_VOID',run:voidWithdrawal},
+  // EarnApp SUS (28/10/2026): closes the round's payout (LOST_SUS / void when never sent) and retires its email, as the web button.
+  {method:'POST',path:new RegExp('^vms/'+ID+'/suspended$'),scope:'VM_OPS',action:'VM_SUSPENDED',run:vmSuspended},
   // Owner decision 24/10/2026: inventory secrets are direct with current rights; list reads remain masked and reveals audited.
   {method:'POST',path:new RegExp('^sdks/'+ID+'/reveal$'),scope:'VM_OPS',action:'SDK_REVEAL',run:sdkReveal},
   // Real machines (21/10/2026): take a VM in hand, steps, the full proxy of that VM, the SDK of this install, status, Blocked, notes.
@@ -277,7 +286,7 @@ async function runBatch(db:PrismaClient,caller:CallerRow,rawBody:unknown,batchKe
   return {status:summary.waiting?202:200,result:summary.waiting?'WAITING_APPROVAL':summary.refused?'PARTIAL':'OK',body:{ok:true,data:{batchKey,approval:approvalInfo,items:results,summary},error:null},audit};
 }
 // Only bound operational data is available to selected-server members. New routes fail closed.
-const SCOPED_ACTIONS=new Set(['MONITOR_POLICY','MONITOR_HEARTBEAT','GEN2_TARGETS','GEN2_SCAN','GEN2_REMINDERS','ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
+const SCOPED_ACTIONS=new Set(['MONITOR_POLICY','MONITOR_HEARTBEAT','GEN2_TARGETS','GEN2_SCAN','GEN2_REMINDERS','ME','PROJECTS','SERVERS','VMS','VM_RESOLVE','VM','SDK_LOOKUP','SDK_REVEAL','ACCOUNT_LOGIN_ISSUE','EARNAPP','BALANCE_CHECK','JOB','VM_CLAIM','JOB_STEP','JOB_RELEASE','VM_PROXY_CREDENTIALS','VM_SDK','VM_SDK_OBSERVE','VM_STATUS','VM_SUSPENDED','VM_PROXY_BLOCKED','VM_NOTE','JOB_FINISH_PREPARE','JOB_FINISH_PROXY']);
 for(const action of ['FLEET_TELEGRAM','FLEET_CREATE','FLEET_LIST','FLEET_CLAIM','FLEET_DETAIL','FLEET_RENEW','FLEET_STEP','FLEET_NATIVE_AUTH','FLEET_COMPLETE','FLEET_CANCEL'])SCOPED_ACTIONS.add(action);
 function routeTargets(c:Ctx,path:string,params:string[]){
  const root=path.split('/')[0],id=params[0];
@@ -407,11 +416,16 @@ async function paypalSuggest(c:Ctx){
   if(amount!=null&&!/^\d{1,10}(\.\d{1,2})?$/.test(amount))throw fail('VALIDATION','amount là chuỗi thập phân, ví dụ "10.00"');
   c.audit.objectId=earnAppId;return suggestPayout(scopeOf(c,projectId),{earnAppId,amount,currency},c.db);
 }
-const WITHDRAWAL_FILTER:Record<string,object>={PREPARING:{submission:'PREPARING',state:'REQUESTED'},SUBMITTED_ON_EARNAPP:{submission:'SENT',state:'REQUESTED'},UNKNOWN_RESULT:{submission:'UNKNOWN',state:'REQUESTED'},FAILED:{state:'FAILED'},CANCELLED:{state:'CANCELLED'}};
+const WITHDRAWAL_FILTER:Record<string,object>={PREPARING:{submission:'PREPARING',state:'REQUESTED'},SUBMITTED_ON_EARNAPP:{submission:'SENT',state:'REQUESTED'},UNKNOWN_RESULT:{submission:'UNKNOWN',state:'REQUESTED'},FAILED:{state:'FAILED'},CANCELLED:{state:'CANCELLED'},LOST:{state:'LOST_SUS'}};
 async function withdrawals(c:Ctx){
   const {projectId}=await projectOf(c,q(c,'projectId')),{limit,cursor}=page(c),st=q(c,'status'),rights=await rightsOf(c,projectId);
   if(st&&!WITHDRAWAL_FILTER[st])throw fail('VALIDATION','status: '+Object.keys(WITHDRAWAL_FILTER).join(' | '));
-  const rows=await c.db.earnPayoutRequest.findMany({where:{projectId,...(st?WITHDRAWAL_FILTER[st]:{})},select:requestSelect,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  // email= (28/10/2026): the requests of one receiving email (exact, case-insensitive), so the AI can match a PayPal mail to its request.
+  // Only with the payout / receipt rights that show the full email (never an oracle for a masked one).
+  const email=q(c,'email')?.trim()??null;
+  if(email!==null&&(!email||email.length>254||/\s/.test(email)))throw fail('VALIDATION','email: một địa chỉ email nhận PayPal');
+  if(email&&!rights.payoutEmail)throw fail('FORBIDDEN','Lọc theo email cần quyền chuẩn bị rút (PAYOUT) hoặc ghi tiền về (RECEIPT)');
+  const rows=await c.db.earnPayoutRequest.findMany({where:{projectId,...(st?WITHDRAWAL_FILTER[st]:{}),...(email?{paypalEmail:{email:{equals:email,mode:'insensitive'}}}:{})},select:requestSelect,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   const cycles=new Map((await c.db.vmOperation.findMany({where:{vmId:{in:rows.map(r=>r.vmId)}},select:{vmId:true,cycle:true}})).map(o=>[o.vmId,o.cycle]));
   const r=paged(rows,limit);return {items:r.items.map(x=>withdrawalView(x,rights,{currentCycle:cycles.get(x.vmId)??1})),nextCursor:r.nextCursor};
 }
@@ -464,7 +478,7 @@ async function withCurrentVm(c:Ctx,projectId:string,vmId:string,e:unknown){
 }
 async function withCurrentRequest(c:Ctx,projectId:string,requestId:string,e:unknown){
   const err=e instanceof ProxyDomainError?fromDomain(e):e;
-  if(err instanceof OpsError&&['REVISION_CONFLICT','CYCLE_CHANGED','ACCOUNT_CHANGED','DUPLICATE','VALIDATION'].includes(err.code)){
+  if(err instanceof OpsError&&['REVISION_CONFLICT','CYCLE_CHANGED','ACCOUNT_CHANGED','DUPLICATE','VALIDATION','EMAIL_HAS_MONEY'].includes(err.code)){
     const r=await c.db.earnPayoutRequest.findFirst({where:{id:requestId,projectId},select:requestSelect});
     if(r){const ops=await c.db.vmOperation.findUnique({where:{vmId:r.vmId},select:{cycle:true}});return fail(err.code,err.message,{...err.details,current:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:ops?.cycle??1})});}
   }
@@ -513,18 +527,70 @@ async function members(c:Ctx,[id]:string[]){
   const {r,cycle}=await loadRequest(c,projectId,id);
   return {replay:!!c.audit.replay,recorded:{withdrawalId:id,added:rec.added.map(a=>a.vmId),revisionAfter:rec.revision},current:{withdrawal:withdrawalView(r,await rightsOf(c,projectId),{currentCycle:cycle})}};
 }
-const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note}).strict();
+const ReceiptBody=z.object({projectId:id64,expectedRequestRevision:z.number().int().min(0),amount:money,currency:cur,receivedAt:iso,transactionId:z.string().min(1).max(100).nullish(),evidenceNote:note,settleRemainder:z.boolean().optional()}).strict();
 async function receipt(c:Ctx,[id]:string[]){
   const b=ReceiptBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
-  let rec:{receiptId:string;requestId:string;amount:string;currency:string;receivedOn:string;receivedAt:string;transactionId:string|null;earnAppId:string;paypalEmailId:string};
+  let rec:{receiptId:string;requestId:string;amount:string;currency:string;receivedOn:string;receivedAt:string;transactionId:string|null;earnAppId:string;paypalEmailId:string;settled?:boolean;shortfall?:string|null};
   try{
-    const r=await recordPayoutReceipt(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRequestRevision:b.expectedRequestRevision,amount:b.amount,currency:b.currency.toUpperCase(),receivedAt:b.receivedAt,transactionId:b.transactionId?.trim()||null,evidence:redactSecrets(b.evidenceNote?.trim()||null)},c.db);
+    const r=await recordPayoutReceipt(scopeOf(c,projectId),{key:serviceKey(c,projectId),requestId:id,expectedRequestRevision:b.expectedRequestRevision,amount:b.amount,currency:b.currency.toUpperCase(),receivedAt:b.receivedAt,transactionId:b.transactionId?.trim()||null,evidence:redactSecrets(b.evidenceNote?.trim()||null),settleRemainder:b.settleRemainder},c.db);
     rec=r as unknown as typeof rec;c.audit.replay=!!r.replay;
   }catch(e){throw await withCurrentRequest(c,projectId,id,e);}
   const {r,cycle}=await loadRequest(c,projectId,id),rights=await rightsOf(c,projectId);c.audit.objectId=rec.receiptId;
   return {replay:!!c.audit.replay,
-    recorded:{receiptId:rec.receiptId,withdrawalId:rec.requestId,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,receivedOn:rec.receivedOn,receivedAt:rec.receivedAt,transactionId:rec.transactionId},
+    recorded:{receiptId:rec.receiptId,withdrawalId:rec.requestId,earnAppAccountId:rec.earnAppId,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount:null,currency:rec.currency,receivedOn:rec.receivedOn,receivedAt:rec.receivedAt,transactionId:rec.transactionId,settled:!!rec.settled,shortfall:rights.requestMoney?rec.shortfall??null:null},
     current:{withdrawal:withdrawalView(r,rights,{currentCycle:cycle,history:true})}};
+}
+
+// ─── Fixing a mistaken request, EarnApp SUS (owner 28/10/2026) ─────────────────────────────────────────────────────────────
+// Same services as the web (vm-ops/payout-fix.ts, vm-ops/suspend.ts); every command names the request / VM as it was read.
+const FixIdent={projectId:id64,vmId:id64,expectedCycle:z.number().int().min(1),earnAppAccountId:id64,expectedRequestRevision:z.number().int().min(0)};
+const EditBody=z.object({...FixIdent,paypalEmailId:id64.optional(),amount:money.optional(),requestedAt:iso.optional(),reference:z.string().max(200).nullish(),note}).strict();
+const UnsendBody=z.object({...FixIdent,note}).strict();
+const VoidBody=z.object({...FixIdent,reason:z.string().trim().min(1).max(300)}).strict();
+const SUBMISSION_OUT:Record<string,string>={PREPARING:'PREPARING',SENT:'SUBMITTED_ON_EARNAPP',UNKNOWN:'UNKNOWN_RESULT'};
+const fixIdent=(c:Ctx,projectId:string,id:string,b:{vmId:string;expectedCycle:number;earnAppAccountId:string;expectedRequestRevision:number})=>({key:serviceKey(c,projectId),requestId:id,expectedRevision:b.expectedRequestRevision,vmId:b.vmId,expectedCycle:b.expectedCycle,earnAppId:b.earnAppAccountId});
+async function requestNow(c:Ctx,projectId:string,id:string){
+  const r=await c.db.earnPayoutRequest.findFirst({where:{id,projectId},select:requestSelect});if(!r)return null;
+  const ops=await c.db.vmOperation.findUnique({where:{vmId:r.vmId},select:{cycle:true}});return withdrawalView(r,await rightsOf(c,projectId),{currentCycle:ops?.cycle??1});
+}
+async function editWithdrawal(c:Ctx,[id]:string[]){
+  const b=EditBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
+  if(b.requestedAt&&new Date(b.requestedAt).getTime()>Date.now()+5*60e3)throw fail('VALIDATION','requestedAt ở tương lai');
+  let rec:{changed:boolean;revision:number;paypalEmailId?:string;amount?:string;currency?:string;requestedOn?:string;submission?:string};
+  try{
+    const r=await editPayoutRequest(scopeOf(c,projectId),{...fixIdent(c,projectId,id,b),paypalEmailId:b.paypalEmailId,amount:b.amount,requestedAt:b.requestedAt?dayText(new Date(b.requestedAt)):undefined,
+      reference:b.reference===undefined?undefined:redactSecrets(b.reference?.trim()||null),note:redactSecrets(b.note?.trim()||null)},c.db);
+    rec=r as typeof rec;c.audit.replay=!!r.replay;
+  }catch(e){throw await withCurrentRequest(c,projectId,id,e);}
+  const rights=await rightsOf(c,projectId);
+  return {replay:!!c.audit.replay,changed:rec.changed,
+    recorded:rec.changed?{withdrawalId:id,revisionAfter:rec.revision,paypalEmailId:rec.paypalEmailId,amount:rights.requestMoney?rec.amount??null:null,currency:rec.currency,requestedOn:rec.requestedOn,submission:SUBMISSION_OUT[rec.submission??'']??rec.submission}
+      :{withdrawalId:id,note:'Không thay đổi'},
+    current:{withdrawal:await requestNow(c,projectId,id)}};
+}
+async function unsendWithdrawal(c:Ctx,[id]:string[]){
+  const b=UnsendBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
+  let rec:{changed:boolean;revision:number};
+  try{const r=await unsendPayoutRequest(scopeOf(c,projectId),{...fixIdent(c,projectId,id,b),note:redactSecrets(b.note?.trim()||null)},c.db);rec=r;c.audit.replay=!!r.replay;}
+  catch(e){throw await withCurrentRequest(c,projectId,id,e);}
+  return {replay:!!c.audit.replay,changed:rec.changed,recorded:{withdrawalId:id,submission:'PREPARING',revisionAfter:rec.revision},current:{withdrawal:await requestNow(c,projectId,id)}};
+}
+async function voidWithdrawal(c:Ctx,[id]:string[]){
+  const b=VoidBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=id;
+  let rec:{voidId:string;requestId:string;vmId:string;cycle:number;earnAppId:string};
+  try{const r=await voidPayoutRequest(scopeOf(c,projectId),{...fixIdent(c,projectId,id,b),reason:redactSecrets(b.reason)??''},c.db);rec=r;c.audit.replay=!!r.replay;}
+  catch(e){throw await withCurrentRequest(c,projectId,id,e);}
+  // current.withdrawal = null: the mistaken request is gone (a snapshot stays on the web); the EarnApp may withdraw again.
+  return {replay:!!c.audit.replay,recorded:{voidId:rec.voidId,withdrawalId:rec.requestId,vmId:rec.vmId,cycle:rec.cycle,earnAppAccountId:rec.earnAppId},current:{withdrawal:await requestNow(c,projectId,id)}};
+}
+const SuspendedBody=z.object({projectId:id64,expectedCycle:z.number().int().min(1),expectedVmRevision:z.number().int().min(0).optional(),note:z.string().trim().min(1).max(300)}).strict();
+async function vmSuspended(c:Ctx,[vmId]:string[]){
+  const b=SuspendedBody.parse(c.body),{projectId}=await projectOf(c,b.projectId);c.audit.objectId=vmId;
+  const r=await asOps(c,projectId,vmId,()=>markEarnAppSuspended(scopeOf(c,projectId),{key:serviceKey(c,projectId),vmId,expectedCycle:b.expectedCycle,expectedVmRevision:b.expectedVmRevision,note:redactSecrets(b.note)},c.db,{operator:true}));
+  c.audit.replay=!!r.replay;const rights=await rightsOf(c,projectId);
+  return {replay:!!r.replay,
+    recorded:{vmId:r.vmId,cycle:r.cycle,changed:r.changed,withdrawalId:r.request.id,outcome:r.request.outcome,lostAmount:rights.requestMoney?r.request.lostAmount:null,archivedEmailIds:r.archivedEmailIds},
+    current:await vmNow(c,projectId,vmId)};
 }
 
 // ─── Real machines (21/10/2026) ──────────────────────────────────────────────────────────────────────────────────────────────────
