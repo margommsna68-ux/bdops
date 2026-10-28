@@ -185,6 +185,21 @@ it('unsend returns SENT to PREPARING, email still held, day marker removed',asyn
  await f.receipt(r.id,'4');await expect(f.unsend(r.id)).rejects.toMatchObject({reason:'EMAIL_HAS_MONEY'});
  }finally{await f.cleanup();}
 });
+it('unsend counts the held email on today and never takes another operator slot',async()=>{
+ clock('2026-10-19T05:00:00Z');const f=await setup();try{const a=f.rows[0].email;
+ const r=await f.prep(0);await f.sent(r.id);
+ vi.setSystemTime(new Date('2026-10-20T05:00:00Z'));await f.prep(1);await f.prep(2);
+ await expect(f.unsend(r.id)).rejects.toMatchObject({reason:'PAYPAL_DAILY_LIMIT'});
+ expect(await f.req(r.id)).toMatchObject({submission:'SENT'});expect(await f.email(a.id)).toMatchObject({usedEarnAppId:f.rows[0].ea.id,holdEarnAppId:null});
+ expect((await f.markers(a.id)).map(m=>m.day)).toEqual(['2026-10-19']);
+ }finally{await f.cleanup();}
+});
+it('unsend on a PayPal no longer active says so',async()=>{
+ const f=await setup();try{const r=await f.prep(0);await f.sent(r.id);
+ await db.payPalAccount.update({where:{id:f.pp.id},data:{status:'LIMITED'}});
+ await expect(f.unsend(r.id)).rejects.toThrow(/LIMITED/);expect((await f.req(r.id)).submission).toBe('SENT');
+ }finally{await f.cleanup();}
+});
 it('void deletes a request with no receipts and frees its email; VM can request again',async()=>{
  const f=await setup();try{const a=f.rows[0].email,ea=f.rows[0].ea;
  const r=await f.prep(0);await f.sent(r.id);
@@ -199,7 +214,7 @@ it('void deletes a request with no receipts and frees its email; VM can request 
  const hist=await readVmOpsHistory(f.scope,{vmId:f.rows[0].vm.id},db);
  expect(hist.voided).toEqual([expect.objectContaining({reason:'Ghi nhầm VM',paypal:'PP-fix-1',email:a.email,amount:'10.00',currency:'USD'})]);
  // Without the money rights the line is there, the amount is not.
- expect((await readVmOpsHistory(f.worker,{vmId:f.rows[0].vm.id},db)).voided).toEqual([expect.objectContaining({reason:'Ghi nhầm VM',amount:null,currency:null})]);
+ expect((await readVmOpsHistory(f.worker,{vmId:f.rows[0].vm.id},db)).voided).toEqual([expect.objectContaining({reason:null,amount:null,currency:null})]);
  const again=await f.prep(0);expect(again.id).not.toBe(r.id);expect((await f.email(a.id)).holdEarnAppId).toBe(ea.id);
  }finally{await f.cleanup();}
 });
@@ -226,6 +241,15 @@ it('undo of a void restores the request, its history and its email hold',async()
  const row=await f.req(r.id);expect(row).toMatchObject({paypalEmailId:a.id,submission:'PREPARING',state:'REQUESTED',requestedById:before.requestedById});
  expect(row.history).toEqual(before.history);expect((await f.email(a.id)).holdEarnAppId).toBe(ea.id);
  expect(await db.earnPayoutRequestVoid.count({where:{projectId:f.scope.projectId}})).toBe(0);
+ }finally{await f.cleanup();}
+});
+it('undo of a void is refused once the VM has another EarnApp account in the same round',async()=>{
+ const f=await setup();try{const r=await f.prep(0),key=randomUUID();await f.voidIt(r.id,'Bỏ',key);
+ await db.earnAppAccount.update({where:{id:f.rows[0].ea.id},data:{vmId:null}});
+ const login=await db.gmailAccount.create({data:{projectId:f.scope.projectId,email:randomUUID()+'@example.invalid'}});
+ await db.earnAppAccount.create({data:{projectId:f.scope.projectId,loginId:login.id,vmId:f.rows[0].vm.id}});
+ await expect(undoOperation(f.scope,(await f.journal(key)).id,'x',db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ expect(await db.earnPayoutRequest.findUnique({where:{id:r.id}})).toBeNull();
  }finally{await f.cleanup();}
 });
 it('undo of unsend restores the sent binding',async()=>{

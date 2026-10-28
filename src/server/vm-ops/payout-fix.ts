@@ -75,7 +75,11 @@ async function takeEmail(tx:Tx,images:BusinessCollector,projectId:string,earnApp
     data:mode==='HOLD'?{holdEarnAppId:earnAppId,holdAt:email.holdEarnAppId===earnAppId?email.holdAt:now,revision:{increment:1}}:{usedEarnAppId:earnAppId,usedAt:email.usedAt??now,holdEarnAppId:null,holdAt:null,revision:{increment:1}}});}
   // One hold per EarnApp (holdEarnAppId is unique): another email still held for it is a conflict to reconcile, never overwritten.
   catch(e){if((e as {code?:string}).code==='P2002')throw stale();throw e;}
-  if(n.count!==1)throw stale();
+  if(n.count!==1){const now2=await tx.payPalEmail.findUnique({where:{id:email.id},select:{archivedAt:true,reviewHold:true,paypal:{select:{code:true,status:true,archivedAt:true}}}});
+    if(!now2||now2.archivedAt||now2.paypal.archivedAt)throw new ProxyDomainError('INVALID_INPUT','Email PayPal / PP '+(now2?.paypal.code??'')+' không còn trong kho','VALIDATION');
+    if(now2.paypal.status!=='ACTIVE')throw new ProxyDomainError('INVALID_INPUT','PP '+now2.paypal.code+' không còn hoạt động ('+now2.paypal.status+'); chọn email khác','VALIDATION');
+    if(now2.reviewHold)throw new ProxyDomainError('INVALID_INPUT','Email đang tạm giữ để đối chiếu; xử lý ở Cần đối chiếu trước','VALIDATION');
+    throw stale();}
   await images.remember('PAYPAL',taken.paypalId);await tx.payPalAccount.update({where:{id:taken.paypalId},data:{revision:{increment:1}}});
   return taken;
 }
@@ -142,6 +146,8 @@ export async function unsendPayoutRequest(scope:ActorScope,input:PayoutUnsendInp
     const note=input.note?.trim().slice(0,500)||null;
     await images.remember('PAYOUT_REQUEST',r.id);
     await unbindMistakenEmail(tx,images,r);
+    // Held again from today on: it takes a slot of today like any open preparation (never another operator's slot).
+    await assertPayoutDailySlot(tx,scope.projectId,r.paypalId,r.paypalEmailId,payoutDay().date,r.id);
     await takeEmail(tx,images,scope.projectId,r.earnAppId,r.paypalEmailId,'HOLD');
     const after=await tx.earnPayoutRequest.update({where:{id:r.id},data:{submission:'PREPARING',submittedAt:null,revision:{increment:1},
       history:[...(r.history as Prisma.JsonArray),historyEntry(current.userId,'UNSEND','Bỏ "Đã rút": '+label(r.submission)+' → '+label('PREPARING')+', email '+r.paypal.code+' · '+r.paypalEmail.email+' vẫn giữ'+(note?' · '+note:''))]}});
@@ -192,8 +198,10 @@ export async function restoreVoidedRequest(tx:Tx,projectId:string,requestId:stri
   if(!v)throw new ProxyDomainError('INVALID_INPUT','Không còn ảnh chụp của yêu cầu rút đã xoá; không hoàn tác');
   const s=v.snapshot as Record<string,unknown>&{history:Prisma.JsonArray;members:Record<string,unknown>[]};
   if(await tx.earnPayoutRequest.findFirst({where:{earnAppId:v.earnAppId},select:{id:true}}))throw new ProxyDomainError('INVALID_INPUT','EarnApp này đã có yêu cầu rút mới; không hoàn tác lệnh xoá');
-  const earnApp=await tx.earnAppAccount.findUnique({where:{id:v.earnAppId},select:{closedAt:true}}),ops=await tx.vmOperation.findUnique({where:{vmId:v.vmId},select:{cycle:true}});
-  if(!earnApp||earnApp.closedAt||(ops?.cycle??1)!==v.cycle)throw new ProxyDomainError('INVALID_INPUT','VM đã sang lượt mới hoặc EarnApp đã đóng; không hoàn tác lệnh xoá yêu cầu rút');
+  const earnApp=await tx.earnAppAccount.findUnique({where:{id:v.earnAppId},select:{closedAt:true,vmId:true}}),ops=await tx.vmOperation.findUnique({where:{vmId:v.vmId},select:{cycle:true}});
+  // The account must still be this VM's (A → B in the same round refuses). Undo may have cleared vmId of the imaged account just before.
+  const other=await tx.earnAppAccount.findFirst({where:{vmId:v.vmId,id:{not:v.earnAppId}},select:{id:true}});
+  if(!earnApp||earnApp.closedAt||(earnApp.vmId!==null&&earnApp.vmId!==v.vmId)||other||(ops?.cycle??1)!==v.cycle)throw new ProxyDomainError('INVALID_INPUT','VM đã sang lượt mới hoặc EarnApp đã đóng; không hoàn tác lệnh xoá yêu cầu rút');
   const str=(k:string)=>s[k]==null?null:String(s[k]),date=(k:string)=>s[k]==null?null:new Date(String(s[k]));
   if(s.state==='REQUESTED'&&(s.submission==='PREPARING'||s.submission==='UNKNOWN'))await assertPayoutDailySlot(tx,projectId,String(s.paypalId),String(s.paypalEmailId));
   const history=[...s.history];const last=history.at(-1) as {kind?:string}|undefined;if(last?.kind==='VOID')history.pop();

@@ -357,7 +357,7 @@ export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:P
   const voids=await db.earnPayoutRequestVoid.findMany({where:{projectId:scope.projectId,vmId:vm.id},orderBy:{voidedAt:'desc'}});
   return {
     voided:voids.map(v=>{const s=v.snapshot as {amount?:string;currency?:string;paypalCode?:string;email?:string};
-      return {id:v.id,requestId:v.requestId,cycle:v.cycle,at:v.voidedAt.toISOString(),by:who(v.voidedById),reason:v.reason,paypal:s.paypalCode??null,email:s.email??null,amount:money?s.amount??null:null,currency:money?s.currency??null:null};}),
+      return {id:v.id,requestId:v.requestId,cycle:v.cycle,at:v.voidedAt.toISOString(),by:who(v.voidedById),reason:money?v.reason:null,paypal:s.paypalCode??null,email:s.email??null,amount:money?s.amount??null:null,currency:money?s.currency??null:null};}),
     events:events.map(e=>({id:e.id,cycle:e.cycle,kind:e.kind,from:e.fromStatus,to:e.toStatus,note:hasServerScope(current)?null:e.note,detail:hasServerScope(current)?null:e.detail,by:who(e.actorId),at:e.createdAt.toISOString()})),
     cycles:cycles.map(c=>({number:c.number,reason:c.reason,login:logins.find(l=>l.id===c.loginId)?.email??null,sdk:hasServerScope(current)?null:c.sdkId,status:c.status,closedAt:c.closedAt.toISOString(),by:who(c.closedById),note:c.note,proxyKept:!!c.proxyKept})),
     // old = the request's account has left this VM or round: only reconciling it is offered (never on the account now on the VM).
