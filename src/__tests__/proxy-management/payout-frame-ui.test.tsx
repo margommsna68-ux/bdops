@@ -146,3 +146,13 @@ it('"Tiền đã về" with a surplus above the usual (review 29/10/2026): confi
   await act(async()=>box.click());expect(button('Ghi tiền đã về')!.disabled).toBe(false);await click('Ghi tiền đã về');
   expect(mock.receipt.mock.calls[0][0]).toMatchObject({requestId:'req',amount:'11.50',acceptSurplus:true});
 });
+it('changing the amount after ticking "Xác nhận nhận dư" clears the tick (re-review 29/10/2026)',async()=>{
+  await render(request({submission:'SENT'}));await click('Tiền đã về');
+  const input=Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác trong PayPal'))!.querySelector('input')!;
+  await type(input,'11.50');
+  await act(async()=>(Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Xác nhận nhận dư $1.50 (lớn hơn mức thường)')!.querySelector('input') as HTMLInputElement).click());
+  expect(button('Ghi tiền đã về')!.disabled).toBe(false);
+  await type(input,'12.00');
+  const box=Array.from(host.querySelectorAll('label')).find(l=>l.textContent==='Xác nhận nhận dư $2.00 (lớn hơn mức thường)')!.querySelector('input') as HTMLInputElement;
+  expect(box.checked).toBe(false);expect(button('Ghi tiền đã về')!.disabled).toBe(true);
+});

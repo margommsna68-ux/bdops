@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
-import {parseMoneyNumber,amountOptions,parsePositiveAmount} from '@/lib/money-input';
+import {parseMoneyNumber,amountOptions,parsePositiveAmount,moneyInput} from '@/lib/money-input';
 import {readPurchase,emptyPurchase,switchMode} from '@/components/account-store/purchase-money';
-import {parseSdkAmount} from '@/lib/sdk-money';
+import {parseSdkAmount,amountInput} from '@/lib/sdk-money';
 import {checkTransfer} from '@/lib/paypal-transfer';
 import {normalizeCostMoney} from '@/server/business-management/usdt-money';
 import {packageTerms} from '@/server/proxy-management/catalog-management';
@@ -50,11 +50,29 @@ describe('a lone comma group is ambiguous where more than 2 decimals are allowed
     expect(parseSdkAmount('1,234,567')).toEqual({value:'1234567'});
     expect(parseSdkAmount('12.345')).toEqual({value:'12.345'});
   });
-  it('USDT amounts and unit prices refuse it; VND and 2-decimal USD fields accept "1,234"',()=>{
-    expect(readPurchase(pp({total:'1,125'}),'PP').errors.total).toBe('Ghi rõ: 1125 hoặc 1.125');
+  it('unit prices refuse it; totals (USD, USDT, USD PayPal, VND) and 2-decimal USD fields accept "1,234" as thousands',()=>{
+    expect(readPurchase(pp({total:'1,125'}),'PP')).toMatchObject({errors:{},payload:{amount:'1125'}});
+    expect(readPurchase(pp({total:'1,000',currency:'PPUSD',paypalVndRate:'24,000',vndUsdtRate:'25,940'}),'PP')).toMatchObject({errors:{},payload:{amount:'1000'}});
     expect(readPurchase(pp({mode:'UNIT',unit:'1,125',quantity:'2'}),'PP').errors.unit).toBe('Ghi rõ: 1125 hoặc 1.125');
     expect(readPurchase(pp({total:'1,125.5'}),'PP').errors).toEqual({});
     expect(parseMoneyNumber('1,234',amountOptions('VND'))).toEqual({value:'1234',error:null});
     expect(parsePositiveAmount('1,234')).toEqual({value:'1234',error:null});
+  });
+});
+describe('round trip (re-review 29/10/2026): text the web writes always reads back in the same field',()=>{
+  const xs=['1200','1234.5','0.424','420000'];
+  it('totals and unit prices in USD, USDT, USD PayPal and VND',()=>{
+    for(const cur of ['USD','USDT','PPUSD','VND'])for(const x of xs){
+      if(cur==='VND'&&x.includes('.'))continue;
+      for(const kind of ['total','unit'] as const)
+        expect(parseMoneyNumber(moneyInput(x,amountOptions(cur,kind)),amountOptions(cur,kind)).value,cur+' '+kind+' '+x).toBe(x);
+    }
+  });
+  it('SDK money',()=>{for(const x of xs)expect(parseSdkAmount(amountInput(x))).toEqual({value:x});});
+  it('switching 12 USDT × 100 to the total and back reads back (1,200 is one thousand two hundred)',()=>{
+    const t=switchMode(pp({mode:'UNIT',unit:'12',quantity:'100'}),'TOTAL');
+    expect(readPurchase(t,'PP')).toMatchObject({errors:{},payload:{amount:'1200'}});
+    const u=switchMode(pp({total:'1,234.5',quantity:'1'}),'UNIT');expect(u.mode).toBe('UNIT');
+    expect(readPurchase(u,'PP')).toMatchObject({errors:{},payload:{amount:'1234.5'}});
   });
 });

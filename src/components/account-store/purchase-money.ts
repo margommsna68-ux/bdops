@@ -50,12 +50,12 @@ const product=(unit:string,qty:number)=>strip(new CashDecimal(unit).mul(qty).toF
 function exactUnit(total:string,qty:number,currency?:string){const u=strip(new CashDecimal(total).div(qty).toFixed(8));return sameNumber(product(u,qty),total)&&!(currency==='VND'&&u.includes('.'))?u:null;}
 export const quoteLabel=(q:Quote)=>'Binance P2P · '+(q.side==='BUY'?'Mua':'Bán')+' USDT · lấy lúc '+new Date(q.fetchedAt).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});
 export function readPurchase(s:PurchaseState,unitWord:string,now=Date.now()){
-  const errors:Partial<Record<Field,string>>={},cur=s.currency,money=positive(s.mode==='TOTAL'?s.total:s.unit,amountOptions(cur)),qty=quantityOf(s);
+  const errors:Partial<Record<Field,string>>={},cur=s.currency,money=positive(s.mode==='TOTAL'?s.total:s.unit,amountOptions(cur,s.mode==='TOTAL'?'total':'unit')),qty=quantityOf(s);
   if(money.error)errors[s.mode==='TOTAL'?'total':'unit']=money.error;
   if(qty.error)errors.quantity=qty.error;
   // A view left empty over an amount kept in the other view (older drafts) is never "no cost": it blocks until that amount is used.
   const shown=s.mode==='TOTAL'?s.total:s.unit,hidden=s.mode==='TOTAL'?s.unit:s.total,kept=!shown.trim()&&!!hidden.trim();
-  if(kept){const h=positive(hidden,amountOptions(cur)).value,text=h?formatMoney(h,cur,{exact:true}):hidden.trim();
+  if(kept){const h=positive(hidden,amountOptions(cur,s.mode==='TOTAL'?'unit':'total')).value,text=h?formatMoney(h,cur,{exact:true}):hidden.trim();
     if(s.mode==='UNIT')errors.unit=`Chưa có giá mỗi ${unitWord}; tổng ${text} vẫn giữ: nhập giá mỗi ${unitWord} hoặc bấm Tổng tiền thực trả.`;
     else errors.total=`Chưa có tổng tiền; giá mỗi ${unitWord} ${text} vẫn giữ: nhập tổng hoặc bấm Tính theo giá mỗi ${unitWord}.`;}
   const priced=money.value!==null||!!money.error||kept;
@@ -93,14 +93,14 @@ export function switchMode(s:PurchaseState,next:'TOTAL'|'UNIT'):PurchaseState{
   if(s.mode===next)return s;const qty=quantityOf(s).value;
   if(next==='TOTAL'){
     if(!s.unit.trim())return {...s,mode:'TOTAL',held:false};
-    const u=positive(s.unit,amountOptions(s.currency)).value;
-    return u&&qty!==null?{...s,mode:'TOTAL',held:false,total:moneyInput(product(u,qty))}:{...s,held:true};
+    const u=positive(s.unit,amountOptions(s.currency,'unit')).value;
+    return u&&qty!==null?{...s,mode:'TOTAL',held:false,total:moneyInput(product(u,qty),amountOptions(s.currency,'total'))}:{...s,held:true};
   }
   if(!s.total.trim())return {...s,mode:'UNIT',held:false};
-  const t=positive(s.total,amountOptions(s.currency)).value,u=positive(s.unit,amountOptions(s.currency)).value;
+  const t=positive(s.total,amountOptions(s.currency,'total')).value,u=positive(s.unit,amountOptions(s.currency,'unit')).value;
   if(t&&qty!==null&&u&&sameNumber(product(u,qty),t))return {...s,mode:'UNIT',held:false};
   const exact=t&&qty!==null?exactUnit(t,qty,s.currency):null;
-  return exact?{...s,mode:'UNIT',held:false,unit:moneyInput(exact)}:{...s,held:true};
+  return exact?{...s,mode:'UNIT',held:false,unit:moneyInput(exact,amountOptions(s.currency,'unit'))}:{...s,held:true};
 }
 /** The visible amount field typed by the person; clearing it is the only way to "no cost" (the other view's amount goes too). */
 export function editAmount(s:PurchaseState,text:string):PurchaseState{

@@ -20,8 +20,9 @@ export const ambiguousCommaHint=(a:string,b:string)=>'Ghi rõ: '+a+b+' hoặc '+
  *   12.345, so it is refused as ambiguous; "12,345.5" and "1,234,567" (several groups) stay valid.
  */
 export interface MoneyParseOptions {fraction?:number;integer?:boolean;vnd?:boolean;vndRate?:boolean;strictComma?:boolean}
-/** Parse options of an amount in this currency for fields that allow more than 2 decimals (purchase totals / unit prices, costs). */
-export const amountOptions=(currency:string|null|undefined,fraction=8):MoneyParseOptions=>currency?.toUpperCase()==='VND'?{fraction,vnd:true}:{fraction,strictComma:true};
+/** Parse options of an amount in this currency (re-review 29/10/2026): VND whole đồng; a total (USD, USDT, USD PayPal) reads "1,000" as
+ *  one thousand; only a unit price outside VND, where more than 2 decimals are usual, refuses a lone "1,125" (strictComma). */
+export const amountOptions=(currency:string|null|undefined,kind:'total'|'unit'='total',fraction=8):MoneyParseOptions=>currency?.toUpperCase()==='VND'?{fraction,vnd:true}:kind==='unit'?{fraction,strictComma:true}:{fraction};
 export function parseMoneyNumber(text:string,opts:MoneyParseOptions={}):ParsedNumber{
   const fraction=opts.fraction??8;let t=text.trim().replace(/\s+/g,'');
   for(let i=0;i<2;i++)t=t.replace(UNIT,'');
@@ -56,8 +57,11 @@ export function moneyNumber(value:string|null|undefined):string{
   if(!value)return '';const neg=value.startsWith('-'),[int,dec='']=value.replace(/^-/,'').split('.'),frac=dec.replace(/0+$/,'');
   return (neg?'-':'')+group(int)+(frac?'.'+frac:'');
 }
-/** Canonical decimal → text for an input that parseMoneyNumber reads back as the same value (US text has no ambiguous form). */
-export function moneyInput(value:string|null|undefined):string{return moneyNumber(value);}
+/** Canonical decimal → text for an input that parseMoneyNumber reads back as the same value with the same options: a strict-comma field
+ *  (unit price, SDK money) gets no thousands separator ("1200"), any other field the US grouping ("1,200"). */
+export function moneyInput(value:string|null|undefined,opts:MoneyParseOptions={}):string{
+  if(!opts.strictComma)return moneyNumber(value);if(!value)return '';const [int,dec='']=value.split('.'),frac=dec.replace(/0+$/,'');return (int.replace(/^0+(?=\d)/,'')||'0')+(frac?'.'+frac:'');
+}
 /** Round a canonical decimal half up to `places` decimals, on the digits (never through a float). */
 export function roundDecimal(value:string,places:number):string{
   const neg=value.startsWith('-'),[int,dec='']=value.replace(/^-/,'').split('.');
