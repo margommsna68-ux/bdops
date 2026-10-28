@@ -1,11 +1,12 @@
 import {router,protectedProcedure} from '../trpc';
 import {domain} from './businessManagement';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
-import {FleetCreate,FleetIdentity,FleetList,FleetControl} from '../fleet-commands/schema';
-import {createFleetCommand,readFleetCommand,listFleetCommands,cancelFleetCommand,readFleetControl} from '../fleet-commands/service';
+import {FleetCreate,FleetIdentity,FleetList,FleetControl,FleetServers} from '../fleet-commands/schema';
+import {createFleetCommand,readFleetCommand,listFleetCommands,cancelFleetCommand,readFleetControl,readFleetServers} from '../fleet-commands/service';
 
 // Web and Telegram adapters share these services. No browser-to-AE or financial route.
 export const fleetCommandsRouter=router({
+ servers:protectedProcedure.input(FleetServers).query(({ctx,input})=>domain(async()=>readFleetServers(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  control:protectedProcedure.input(FleetControl).query(({ctx,input})=>domain(async()=>readFleetControl(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  create:protectedProcedure.input(FleetCreate).mutation(({ctx,input})=>domain(async()=>createFleetCommand(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),
  detail:protectedProcedure.input(FleetIdentity).query(({ctx,input})=>domain(async()=>readFleetCommand(await loadInfrastructureScope(ctx.prisma,ctx.user.id,input.projectId),input,ctx.prisma))),

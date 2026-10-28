@@ -27,7 +27,13 @@ export function shareOf(vm:ManagedVM){
   return s.kind==='OK'||s.kind==='STALE'||s.kind==='NO_TIME'?s.amount:s.kind==='FAILED'?s.amount:null;
 }
 const openRequest=(o:OpsRow|undefined)=>o?.request&&o.request.state==='REQUESTED'?o.request:null;
-export function MergePayoutPanel({projectId,userId,vms,opsOf,rights,onSaved,onBusy}:{projectId:string;userId:string;vms:ManagedVM[];opsOf:(id:string)=>OpsRow|undefined;rights:OpsRights;onSaved:()=>Promise<unknown>|void;onBusy:(busy:boolean)=>void}){
+type MergeProps={projectId:string;vms:ManagedVM[];opsOf:(id:string)=>OpsRow|undefined;rights:OpsRights;onSaved:()=>Promise<unknown>|void;onBusy:(busy:boolean)=>void};
+/** The journal is per signed-in user: nothing is read, written or sent until the session user is known (no shared anonymous keys). */
+export function MergePayoutPanel({userId,...p}:MergeProps&{userId?:string}){
+  if(!userId)return <p className="pm-muted text-xs">Đang tải phiên đăng nhập…</p>;
+  return <MergeQueue key={p.projectId+':'+userId} userId={userId} {...p}/>;
+}
+function MergeQueue({projectId,userId,vms,opsOf,rights,onSaved,onBusy}:{projectId:string;userId:string;vms:ManagedVM[];opsOf:(id:string)=>OpsRow|undefined;rights:OpsRights;onSaved:()=>Promise<unknown>|void;onBusy:(busy:boolean)=>void}){
   const utils=trpc.useContext(),create=trpc.vmOps.requestPayout.useMutation(),attach=trpc.vmOps.addPayoutMembers.useMutation();
   // The selection and identities are captured when the frame opens; a reload never retargets the draft.
   const [rows]=useState(()=>vms.map(vm=>({vm,ops:opsOf(vm.id)})));

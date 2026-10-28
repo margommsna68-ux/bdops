@@ -43,6 +43,17 @@ export function enrollment(b:Pick<CreateInput,'projectId'|'serverId'|'vmId'|'mac
  if(!match)throw new ProxyDomainError('FORBIDDEN','VM không thuộc đúng UUID / lượt / cấu hình canary');
  return {serverUuid:match.serverUuid};
 }
+/**
+ * Servers of this project under fleet control (bulk "Tạo lại N VM" splits on it). Server ids only, never UUIDs; not ready / broken
+ * configuration = none. Every command is still checked by enrollment() + binding() when it is created.
+ */
+export function enrolledServerIds(projectId:string):string[]{
+ if(process.env.FLEET_CONTROL_M1_READY!=='1')return [];
+ try{
+  const rows:{projectId:string;serverId:string}[]=process.env.FLEET_CONTROL_SERVERS?z.array(FleetServerEnrollment).min(1).max(100).parse(JSON.parse(process.env.FLEET_CONTROL_SERVERS)):z.array(FleetEnrollment).min(1).max(100).parse(JSON.parse(process.env.FLEET_CONTROL_CANARY??'null'));
+  return [...new Set(rows.filter(r=>r.projectId===projectId).map(r=>r.serverId))];
+ }catch{return [];}
+}
 export async function workerAuth(tx:Prisma.TransactionClient,scope:ActorScope,serverId?:string){
  await assertOpsToken(tx,scope);const current=await authorizeVM(scope,'ASSIGN',tx);
  if(serverId)await assertScopedTargets(tx,current,{serverId});return current;

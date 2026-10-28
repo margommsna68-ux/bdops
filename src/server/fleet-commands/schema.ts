@@ -15,6 +15,7 @@ export const FleetStep=FleetFence.extend({stepId:uuid,phase:z.enum(['DISPATCH','
 export const FleetEvidence=z.object({operationId:uuid,machineUuid:uuid,verified:z.boolean(),observedAt:z.string().datetime({offset:true}),vmState:z.enum(['RUNNING','POWERED_OFF','PAUSED','ABORTED','UNKNOWN']),aeOperationId:uuid,detail:FleetEvidenceDetail.optional()}).strict();
 export const FleetComplete=FleetFence.extend({completionId:uuid,outcome:z.enum(['SUCCEEDED','FAILED','UNKNOWN']),evidence:FleetEvidence}).strict();
 export const FleetList=z.object({projectId:id,serverId:id.optional()}).strict();
+export const FleetServers=z.object({projectId:id}).strict();
 export const FleetControl=z.object({projectId:id,serverId:id,vmId:id}).strict();
 export const FleetServerEnrollment=z.object({projectId:id,serverId:id,serverUuid:uuid}).strict();
 export const FleetEnrollment=z.object({projectId:id,serverId:id,serverUuid:uuid,vmId:id,machineUuid:uuid,expectedCycle:z.number().int().min(1),configurationId:id.nullable()}).strict();

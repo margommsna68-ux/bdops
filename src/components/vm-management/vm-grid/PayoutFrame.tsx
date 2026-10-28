@@ -8,6 +8,7 @@ import type {OpsRights} from './OpsCells';
 import {PayoutDailyInfo,payoutEmailAllowed} from './OpsCells';
 import {payoutActions,requestHasReceipts,pickPayoutEmail,defaultPayoutAmount,receiptCheck,frameJournalKey,readFrameCommand,refusedAnswer,bangkokDay,requestLabel,
   type VmOpsRequestView,type FrameAction,type FrameCommand,type FrameCommandAction} from './payout-frame-model';
+import {receiptBody} from './payout-bulk-model';
 // One payout frame (owner 28/10/2026) for the Tiền VM cell, the VM panel and the "Rút EarnApp" report: Rút (one click, email held),
 // Đã rút, Bỏ, Sửa, Bỏ "Đã rút", Tiền đã về (exact PayPal amount), EarnApp bị SUS, Thất bại, Gửi lại. Every command keeps its key and
 // exact body in this tab before sending; a lost answer is retried with the same key and body (pattern of PayoutBulkPanel).
@@ -144,7 +145,7 @@ function ReceiptForm({request:r,busy,onSubmit,onCancel}:{request:VmOpsRequestVie
   const m=r.money;
   if(!m)return <p className="pm-muted">Ghi tiền về cần quyền xem số tiền của yêu cầu.</p>;
   const c=receiptCheck({...m,phase:r.phase},entered),cur=m.currency,today=bangkokDay();
-  const submit=()=>{if(!c.valid||!date)return;void onSubmit({amount:c.amount,currency:cur,receivedAt:date===today?new Date().toISOString():date+'T12:00:00+07:00',transactionId:txid.trim()||null,...(c.showSettle?{settleRemainder:settle}:{})});};
+  const submit=()=>{const b=receiptBody(c,{currency:cur,date,today,txid,settle});if(b)void onSubmit(b);};
   return <div className="space-y-2">
     <p>Tiền về <strong>{r.paypal}</strong> qua <strong>{r.email}</strong>. Đã rút <strong>{formatLedger(m.amount,cur)}</strong>{m.received!=='0.00'?' · đã về '+formatLedger(m.received,cur):''} · còn chờ {formatLedger(c.open,cur)}</p>
     <div className="grid grid-cols-2 gap-2">

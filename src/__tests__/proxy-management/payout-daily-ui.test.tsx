@@ -57,7 +57,7 @@ const bulk = (ids = ['1', '2', '3']) => act(async () => root.render(<PayoutBulkP
 const cell = () => act(async () => root.render(<PayoutCell projectId="p" userId="u" vm={vm('1')} ops={ops('1')} account={{earnApp: {id: 'acc1', login: {email: 'acc1@example.invalid'}}} as VmAccount} rights={rights} onDone={() => {}} onBusy={() => {}}/>));
 const select = (id: string) => document.querySelector<HTMLSelectElement>('[aria-label="Email PP An-01 / VM_'+id+'"]')!;
 const option = (id: string, email: string) => Array.from(select(id).options).find(o => o.value===email)!;
-const save = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent?.startsWith('Lưu chuẩn bị'))!;
+const save = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent?.startsWith('Rút '))!;
 async function change(el: HTMLInputElement|HTMLSelectElement, value: string) {
   expect(el).toBeTruthy();
   await act(async () => {
@@ -177,7 +177,7 @@ it('does not count an already occupied own email twice against the bulk remainin
   await change(select('2'), 'e2');
   expect(option('3', 'e3').disabled).toBe(true);
   for(const id of ['1','2']) await change(document.querySelector<HTMLInputElement>('[aria-label="Số tiền An-01 / VM_'+id+'"]')!, '10');
-  expect(save().textContent).toBe('Lưu chuẩn bị 2 VM');
+  expect(save().textContent).toBe('Rút 2 VM');
 });
 
 it('keeps three fixed own drafts but only admits the first two new emails for this day', async () => {
@@ -188,7 +188,7 @@ it('keeps three fixed own drafts but only admits the first two new emails for th
   });
   await bulk();
   for(const id of ['1','2','3']) await change(document.querySelector<HTMLInputElement>('[aria-label="Số tiền An-01 / VM_'+id+'"]')!, '10');
-  expect(save().textContent).toBe('Lưu chuẩn bị 2 VM');
+  expect(save().textContent).toBe('Rút 2 VM');
   expect(select('3').value).toBe('e3'); expect(select('3').disabled).toBe(true);
   await act(async () => save().click());
   expect(mock.request.mock.calls.map(([body])=>body.vmId)).toEqual(['1','2']);
@@ -231,11 +231,11 @@ it.each(['revision','cycle','account'] as const)('releases stale unsent fixed-em
   const render=()=>act(async()=>root.render(<PayoutBulkPanel projectId="p" userId="u" vms={liveVms} opsOf={liveOps} rights={rights} onSaved={()=>{}} onBusy={()=>{}}/>));
   await render();
   for(const id of ['1','2','3']) await change(document.querySelector<HTMLInputElement>('[aria-label="Số tiền An-01 / VM_'+id+'"]')!, '10');
-  expect(save().textContent).toBe('Lưu chuẩn bị 2 VM');
+  expect(save().textContent).toBe('Rút 2 VM');
   refreshed=true;
   if(kind==='revision') {liveVms[0]={...liveVms[0],revision:3};liveVms[1]={...liveVms[1],revision:3};}
   await render();
-  expect(save().textContent).toBe('Lưu chuẩn bị 1 VM'); expect(save().disabled).toBe(false);
+  expect(save().textContent).toBe('Rút 1 VM'); expect(save().disabled).toBe(false);
   expect(select('3').value).toBe('e3');
   expect(document.querySelector<HTMLInputElement>('[aria-label="Số tiền An-01 / VM_3"]')!.value).toBe('10');
   await act(async()=>save().click());

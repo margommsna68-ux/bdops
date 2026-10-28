@@ -25,6 +25,7 @@ import {PasteTablePanel,AssignProxyPanel,NotesPanel} from './vm-grid/BulkPanels'
 import {AccountBulkPanel} from './vm-grid/AccountPanels';
 import {PayoutBulkPanel} from './vm-grid/PayoutBulkPanel';
 import {MergePayoutPanel} from './vm-grid/MergePayoutPanel';
+import {RecreateBulkPanel} from './vm-grid/RecreateBulkPanel';
 import type {VmAccount} from './vm-grid/AccountCell';
 import {ServerPicker,ColumnMenu,Pager} from './vm-grid/GridControls';
 import {vmMoneySortKey,vmMoneyState,vmMoneySummary} from '@/lib/vm-money';
@@ -34,7 +35,7 @@ import {applyFilters,countWith,serverDistribution,vmIdLines,VIEW_LABEL,type Grid
 import {selectionKey,useSessionSelection} from '@/lib/session-selection';
 import {VM_OPS,VM_OPS_STATUSES,NO_STATUS_LABEL,MILESTONE_LABEL,opsPriority,type Milestone,type VmOpsStatus} from '@/lib/vm-ops';
 type Blocked={id:string;code:string;reason:string;cause?:string};
-type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|'payout'|'merge'|null;
+type BulkPanel='paste'|'assign'|'account'|'note'|'copy'|'payout'|'merge'|'recreate'|null;
 const CAUSE_TAB:Record<string,PanelTab>={HOLD:'proxy',TASK:'overview',INSTALLED:'proxy',SDK:'overview',SERVER:'overview'};
 const STATUS_ORDER={BLOCKED:0,REVIEW:1,MISSING:2,ASSIGNED:3,ARCHIVED:4} as const;
 // Server/VM operations table. One scroll area under a fixed header (server picker, counts, search, bulk bar); sticky identity and
@@ -227,6 +228,8 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
   const toggle=(id:string,on:boolean)=>setSelected(prev=>{const n=new Set(prev);if(on)n.add(id);else n.delete(id);return n;});
   const togglePage=(on:boolean)=>setSelected(prev=>{const n=new Set(prev);paged.rows.forEach(v=>{if(on)n.add(v.id);else n.delete(v.id);});return n;});
   // Bulk bar buttons always open their panel; only the header "Dán bảng" button toggles.
+  // "Chờ tạo lại" (owner 28/10/2026): selected VMs whose money milestone allows recreating (paid in full, or EarnApp SUS).
+  const recreateCount=selectedRows.filter(v=>opsOfVm.get(v.id)?.milestone==='RECREATE').length;
   const openBulk=(panel:BulkPanel,toggle=false)=>{if(payoutBusy)return;if(url.vm) go({vm:null,cause:null});setBulk(toggle&&bulk===panel?null:panel);};
   useEffect(()=>{if(!selected.size) setBulk(b=>b==='assign'||b==='account'||b==='note'?null:b);},[selected.size]);
   const chip=(view:GridView,label:string,n:number|null)=><button type="button" className={'vm-chip'+(url.view===view?' active':'')+(n&&['MISSING','BLOCKED','REVIEW','SDK_MISSING','ACCOUNT_MISSING','PAYPAL_MISSING','APPLY','TODO'].includes(view)?' attention':'')} aria-pressed={url.view===view} onClick={()=>go({view:url.view===view&&view?'':view,page:1})}>{label} <strong>{n??'…'}</strong></button>;
@@ -282,6 +285,7 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
             {rights.accountAssign&&<button className={'pm-button'+(bulk==='account'?' pm-button-primary':'')} onClick={()=>openBulk('account')}>Gán tài khoản</button>}
             {(opsRights.writeMoney||opsRights.payout||opsRights.receipt)&&<button className={'pm-button'+(bulk==='payout'?' pm-button-primary':'')} disabled={payoutBusy||!board.data||!accounts.data} onClick={()=>openBulk('payout')}>Rút về PayPal</button>}
             {(opsRights.writeMoney||opsRights.payout)&&selectedRows.length>=2&&<button className={'pm-button'+(bulk==='merge'?' pm-button-primary':'')} disabled={payoutBusy||!board.data} onClick={()=>openBulk('merge')}>Rút gộp về PayPal</button>}
+            {(rights.manage||rights.assign)&&recreateCount>0&&<button className={'pm-button'+(bulk==='recreate'?' pm-button-primary':'')} disabled={payoutBusy||!board.data} onClick={()=>openBulk('recreate')}>Tạo lại {recreateCount} VM</button>}
             {rights.manage&&<button className={'pm-button'+(bulk==='note'?' pm-button-primary':'')} onClick={()=>openBulk('note')}>Sửa ghi chú</button>}
             {rights.manage&&<button className="pm-button" disabled={busy} onClick={()=>void remove(selectedRows.map(v=>v.id))}><Trash2 size={15}/>Xoá</button>}</>}
             <button className="pm-button pm-button-quiet" onClick={()=>setSelected(new Set())}><X size={15}/>Bỏ chọn</button></span></div>}
@@ -295,9 +299,10 @@ export function ServerWorkspace({projectId,serverId}:{projectId:string;serverId?
         <div hidden={storeOpen}>{pager('bottom')}</div>
       </div>
       {panelOpen&&<div className="vm-panel-host" style={{maxHeight:maxHeight+110}}>
-        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='payout'?`Rút về PayPal · ${selectedRows.length} VM`:bulk==='merge'?`Rút gộp về PayPal · ${selectedRows.length} VM`:bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" disabled={payoutBusy} onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
-          {bulk==='payout'&&<PayoutBulkPanel key={projectId+':'+userId} projectId={projectId} userId={userId} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={opsRights} onSaved={()=>Promise.all([board.refetch(),refresh()])} onAssign={rights.accountAssign?()=>openBulk('account'):undefined} onBusy={setPayoutBusy}/>}
-          {bulk==='merge'&&<MergePayoutPanel key={projectId+':'+userId+':'+selectedRows.map(v=>v.id).join(',')} projectId={projectId} userId={userId} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={opsRights} onSaved={()=>Promise.all([board.refetch(),refresh()])} onBusy={setPayoutBusy}/>}
+        {bulk?<aside className="vm-panel" aria-label="Thao tác hàng loạt"><div className="vm-panel-head"><h2>{bulk==='payout'?`Rút về PayPal · ${selectedRows.length} VM`:bulk==='merge'?`Rút gộp về PayPal · ${selectedRows.length} VM`:bulk==='recreate'?`Chờ tạo lại · ${selectedRows.length} VM`:bulk==='paste'?'Dán bảng':bulk==='assign'?`Gán proxy · ${selectedRows.length} VM`:bulk==='account'?`Gán tài khoản · ${selectedRows.length} VM`:bulk==='note'?`Sửa ghi chú · ${selectedRows.length} VM`:'Copy thủ công'}</h2><button className="pm-icon-button" aria-label="Đóng khung" disabled={payoutBusy} onClick={closePanel}><X size={16}/></button></div><div className="vm-panel-body">
+          {bulk==='payout'&&<PayoutBulkPanel key={projectId+':'+sessionUser} projectId={projectId} userId={sessionUser} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={opsRights} onSaved={()=>Promise.all([board.refetch(),refresh()])} onAssign={rights.accountAssign?()=>openBulk('account'):undefined} onBusy={setPayoutBusy}/>}
+          {bulk==='merge'&&<MergePayoutPanel key={projectId+':'+sessionUser+':'+selectedRows.map(v=>v.id).join(',')} projectId={projectId} userId={sessionUser} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={opsRights} onSaved={()=>Promise.all([board.refetch(),refresh()])} onBusy={setPayoutBusy}/>}
+          {bulk==='recreate'&&<RecreateBulkPanel key={projectId+':'+sessionUser} projectId={projectId} userId={sessionUser} vms={selectedRows} opsOf={id=>opsOfVm.get(id)} rights={{manage:rights.manage,assign:rights.assign}} onSaved={()=>Promise.all([board.refetch(),refresh()])} onBusy={setPayoutBusy}/>}
           {bulk==='paste'&&<PasteTablePanel projectId={projectId} servers={servers.map(s=>({id:s.id,code:s.code}))} serverId={serverId} onSaved={()=>void refresh()}/>}
           {bulk==='assign'&&<AssignProxyPanel projectId={projectId} vms={selectedRows} sourceConnected={rights.sourceConnected} onSaved={()=>void refresh()}/>}
           {bulk==='account'&&<AccountBulkPanel projectId={projectId} vms={selectedRows} onSaved={()=>void refresh()}/>}

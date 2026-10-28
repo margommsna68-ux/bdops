@@ -36,7 +36,7 @@ function baseLine(ops:OpsRow|undefined):MoneyLine|null{
   if(!m)return {text:ops!.milestone?MILESTONE_LABEL[ops!.milestone as keyof typeof MILESTONE_LABEL]:'Đã yêu cầu',sub:r.paypal,tone:ops!.milestone==='WAITING'?'waiting':ops!.milestone==='RECREATE'?'recreate':ops!.milestone?'failed':''};
   if(r.phase==='WAITING')return m.received!=='0.00'?{text:'Đã về '+money(m.received,m.currency)+' · còn chờ '+money(m.remaining,m.currency),sub:who,tone:'waiting'}:{text:'Chờ về PP '+money(m.amount,m.currency),sub:who,tone:'waiting'};
   // Closed = received in full or settled short with a stated gap: the label is the money really received (review fix 20/10/2026).
-  if(r.phase==='RECEIVED'){const gap=m.shortfall&&m.shortfall!=='0.00'?'Đã chốt thiếu '+money(m.shortfall,m.currency):'';return {text:'Đã về PP '+money(m.received,m.currency),sub:[gap,ops!.milestone==='RECREATE'?'Cần tạo lại VM':gap?'':who].filter(Boolean).join(' · '),tone:'recreate'};}
+  if(r.phase==='RECEIVED'){const gap=m.shortfall&&m.shortfall!=='0.00'?'Đã chốt thiếu '+money(m.shortfall,m.currency):'';return {text:'Đã về PP '+money(m.received,m.currency),sub:[gap,ops!.milestone==='RECREATE'?'Chờ tạo lại':gap?'':who].filter(Boolean).join(' · '),tone:'recreate'};}
   // Lost to SUS (28/10/2026): never waiting, never received; shown as its own line with what was lost (money rights only).
   if(r.phase==='LOST')return {text:'Mất do SUS'+(m.lost?' '+money(m.lost,m.currency):''),sub:who,tone:'failed'};
   if(r.phase==='REVIEW')return {text:'Cần đối chiếu tiền',sub:who,tone:'money_review'};

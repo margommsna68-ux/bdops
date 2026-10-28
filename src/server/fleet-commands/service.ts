@@ -7,9 +7,9 @@ import {businessHash} from '../business-management/idempotency';
 import {assertOpsToken,currentOpsAuth} from '../ops-api/context';
 import {authorizeVM} from '../vm-management/repository';
 import {assertScopedTargets,serverWhere} from '../permissions/server-scope';
-import {FleetCreate,FleetClaim,FleetStep,FleetComplete,FleetFence,FleetIdentity,FleetList,FleetControl,FleetAction,FleetNativeAuthorization,READ_ACTIONS,type CreateInput} from './schema';
+import {FleetCreate,FleetClaim,FleetStep,FleetComplete,FleetFence,FleetIdentity,FleetList,FleetControl,FleetServers,FleetAction,FleetNativeAuthorization,READ_ACTIONS,type CreateInput} from './schema';
 import type {z} from 'zod';
-import {ACTIVE,TERMINAL,LEASE_MS,MAX_EVENTS,requesterAuth,workerAuth,binding,checkFence,conflict,invalid} from './guards';
+import {ACTIVE,TERMINAL,LEASE_MS,MAX_EVENTS,requesterAuth,workerAuth,binding,checkFence,conflict,invalid,enrolledServerIds} from './guards';
 import {machineUuid} from '../dashboard/scan';
 import {assertInfrastructureAction} from '../permissions/infrastructure';
 import {currentTelegramDelegation,telegramTransaction,assertTelegramContextCurrent,assertTelegramProof,recordTelegramProof} from './telegram-delegation';
@@ -195,6 +195,17 @@ export async function listFleetCommands(scope:ActorScope,raw:unknown,db:PrismaCl
  });
 }
 
+/** Servers of the project (within the reader's server scope) under fleet control: ids only. Bulk "Tạo lại N VM" splits on it. */
+export async function readFleetServers(scope:ActorScope,raw:unknown,db:PrismaClient=prisma){
+ const b=FleetServers.parse(raw);project(scope,b.projectId);
+ const ids=enrolledServerIds(b.projectId);
+ return transaction(scope,db,async tx=>{
+  const current=await authorizeVM(scope,'READ',tx);
+  if(!ids.length)return {serverIds:[] as string[]};
+  const rows=await tx.server.findMany({where:{projectId:b.projectId,managed:true,archivedAt:null,id:{in:ids},...serverWhere(current)},select:{id:true}});
+  return {serverIds:rows.map(r=>r.id)};
+ });
+}
 export async function readFleetControl(scope:ActorScope,raw:unknown,db:PrismaClient=prisma){
  const b=FleetControl.parse(raw);project(scope,b.projectId);
  return transaction(scope,db,async tx=>{
