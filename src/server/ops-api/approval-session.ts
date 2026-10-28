@@ -1,7 +1,7 @@
 import type {OpsApprovalSession,Prisma,PrismaClient} from '@prisma/client';
 import {ProxyDomainError} from '../proxy-management/types';
 import {checkTotp,totpMessage,TOTP_LOCK_MS,type TotpCheck} from '../users/totp';
-import {HELD_ACTIONS} from './approvals';
+import {HELD_ACTIONS,SESSION_ENDED_NOTE} from './approvals';
 // Approval session (owner decision 28/10/2026, replaces the 23/10 anti-goal "a TOTP never passes through the chat"): an ADMIN of the
 // project with 2FA proves ONE code (typed in the Claude chat and passed to `ops-client session-open`, or on the web) and for 15 minutes
 // the withdrawal prepares of exactly that token + project are approved at once. Every use re-checks, inside the transaction that
@@ -48,11 +48,16 @@ export async function activeSession(tx:Tx,input:{projectId:string;tokenId:string
   }
   return null;
 }
-/** Approve a just-held (or still pending) approval row under the session; called by gateApproval inside its transaction. */
+/**
+ * Approve a PENDING approval row under the session; called by gateApproval inside its transaction. Status-guarded: a row that is no
+ * longer PENDING (rejected, locked, expired, consumed…) is never touched; the caller gets the row as it is now and honours it.
+ */
 export async function approveUnderSession(tx:Tx,s:OpsApprovalSession,row:{id:string;action:string;objectId:string|null;tokenId:string}){
-  const approved=await tx.opsApproval.update({where:{id:row.id},data:{status:'APPROVED',sessionId:s.id,decidedById:s.approvedById,decidedAt:new Date(),decisionNote:sessionNote(s.openedAt)}});
+  const n=await tx.opsApproval.updateMany({where:{id:row.id,status:'PENDING'},data:{status:'APPROVED',sessionId:s.id,decidedById:s.approvedById,decidedAt:new Date(),decisionNote:sessionNote(s.openedAt)}});
+  const now=await tx.opsApproval.findUniqueOrThrow({where:{id:row.id}});
+  if(n.count!==1)return {approved:false,row:now} as const;
   await tx.auditLog.create({data:{projectId:s.projectId,userId:s.approvedById,action:'OPS_APPROVE',entity:'OpsApproval',entityId:row.id,changes:{action:row.action,objectId:row.objectId,tokenId:row.tokenId,via:'SESSION',sessionId:s.id}}});
-  return approved;
+  return {approved:true,row:now} as const;
 }
 interface OpenInput {projectId:string;tokenId:string;admin:string;totp:string;via:'CLI'|'WEB';actorId?:string}
 /**
@@ -103,9 +108,12 @@ export async function openApprovalSession(db:PrismaClient,input:OpenInput){
 /** Close now ("Khóa phiên ngay" / `ops-client session-close`): the token's sessions, one session, or (web, neither given) all of the project. */
 export async function closeApprovalSession(db:PrismaClient,input:{projectId:string;tokenId?:string;sessionId?:string;actorId:string}){
   return db.$transaction(async tx=>{
-    const now=new Date();
-    const n=await tx.opsApprovalSession.updateMany({where:{projectId:input.projectId,closedAt:null,expiresAt:{gt:now},...(input.tokenId?{tokenId:input.tokenId}:{}),...(input.sessionId?{id:input.sessionId}:{})},data:{closedAt:now,closedById:input.actorId}});
-    await tx.auditLog.create({data:{projectId:input.projectId,userId:input.actorId,action:'OPS_SESSION_CLOSE',entity:'OpsApprovalSession',entityId:input.sessionId??input.tokenId??input.projectId,changes:{tokenId:input.tokenId??null,sessionId:input.sessionId??null,closed:n.count}}});
+    const now=new Date(),where={projectId:input.projectId,closedAt:null,expiresAt:{gt:now},...(input.tokenId?{tokenId:input.tokenId}:{}),...(input.sessionId?{id:input.sessionId}:{})};
+    const ids=(await tx.opsApprovalSession.findMany({where,select:{id:true}})).map(x=>x.id);
+    const n=await tx.opsApprovalSession.updateMany({where:{...where,id:{in:ids}},data:{closedAt:now,closedById:input.actorId}});
+    // "Khóa phiên ngay" stops at once: approvals granted by these sessions and not yet used lapse (the AI must ask again, new key).
+    const lapsed=ids.length?await tx.opsApproval.updateMany({where:{sessionId:{in:ids},status:'APPROVED'},data:{status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE}}):{count:0};
+    await tx.auditLog.create({data:{projectId:input.projectId,userId:input.actorId,action:'OPS_SESSION_CLOSE',entity:'OpsApprovalSession',entityId:input.sessionId??input.tokenId??input.projectId,changes:{tokenId:input.tokenId??null,sessionId:input.sessionId??null,closed:n.count,lapsedApprovals:lapsed.count}}});
     return {closed:n.count};
   });
 }

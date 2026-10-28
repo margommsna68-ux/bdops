@@ -3,10 +3,11 @@ import {randomUUID} from 'node:crypto';
 import {db,api,setup,prepareBody,type F} from './ops-fixture';
 import {expectConforms} from './openapi-conform';
 import {beginTotpSetup,confirmTotpSetup,totpCodeFor} from '@/server/users/totp';
-import {listApprovals,pendingApprovalCount} from '@/server/ops-api/approvals';
+import {decideApproval,listApprovals,pendingApprovalCount} from '@/server/ops-api/approvals';
+import * as sessionMod from '@/server/ops-api/approval-session';
 import {APPROVAL_SESSION_MS,activeSession,approveAllPending,closeApprovalSession,openApprovalSession} from '@/server/ops-api/approval-session';
 afterAll(()=>db.$disconnect());
-afterEach(()=>{vi.useRealTimers();});
+afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 // Owner decision 28/10/2026: one ADMIN TOTP opens a 15-minute window in which the token's withdrawal prepares are approved at once.
 // Only Date is faked: each new code is taken after moving the clock one TOTP step (30 s) forward, so checkTotp sees a fresh step.
 let clock=0;
@@ -144,6 +145,59 @@ describe('15-minute approval session',()=>{
       await expect(openApprovalSession(db,{projectId:f.g.scope.projectId,tokenId,admin:'',totp:fresh(secret),via:'WEB',actorId:admin.id})).rejects.toThrow();
       const s=await openApprovalSession(db,{projectId:f.projectId,tokenId,admin:'',totp:fresh(secret),via:'WEB',actorId:admin.id});
       expect(s.approvedPending).toBe(0);expect((await db.opsApprovalSession.findUniqueOrThrow({where:{id:s.sessionId}})).via).toBe('WEB');
+    }finally{await done(f);}
+  });
+  // Review fix round 1 (28/10/2026): a session never overturns a decision, and closing / invalidating it stops unused approvals.
+  it('an ADMIN rejection stays rejected while a session is open; approveUnderSession never touches a non-PENDING row',async()=>{
+    const {f,admin,secret,t}=await ready();try{
+      const p1=await prepare(f,t,0,0),approvalId=p1.r.json.error!.details.approvalId as string;
+      await decideApproval(db,{approvalId,actorId:admin.id,projectId:f.projectId,approve:false,code:fresh(secret),note:'không'});
+      const o=await open(f,t,admin.email,fresh(secret));expect(o.json.data.approvedPending).toBe(0);
+      const again=await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false});
+      expect(again.status).toBe(403);expect(again.json.error?.code).toBe('APPROVAL_REJECTED');
+      expect(await db.earnPayoutRequest.count({where:{projectId:f.projectId}})).toBe(0);
+      const s=await db.opsApprovalSession.findUniqueOrThrow({where:{id:o.json.data.sessionId}}),row=await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}});
+      const a=await db.$transaction(tx=>sessionMod.approveUnderSession(tx,s,row));
+      expect(a.approved).toBe(false);expect(a.row.status).toBe('REJECTED');
+      expect(await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}})).toMatchObject({status:'REJECTED',sessionId:null});
+    }finally{await done(f);}
+  });
+  it('a rejection racing the session gate is never overturned',async()=>{
+    const {f,admin,secret,t,tokenId}=await ready();try{
+      const p1=await prepare(f,t,0,0),approvalId=p1.r.json.error!.details.approvalId as string,code=fresh(secret);
+      // A session created directly, so the pending row is still PENDING when the retry reaches the gate.
+      const u=await db.user.findUniqueOrThrow({where:{id:admin.id}});
+      await db.opsApprovalSession.create({data:{projectId:f.projectId,tokenId,approvedById:admin.id,via:'CLI',openedAt:new Date(),expiresAt:new Date(Date.now()+APPROVAL_SESSION_MS),totpVersion:u.totpVersion}});
+      let rejecting:Promise<unknown>|null=null;const real=sessionMod.activeSession;
+      vi.spyOn(sessionMod,'activeSession').mockImplementationOnce(async(tx,i)=>{
+        rejecting=decideApproval(db,{approvalId,actorId:admin.id,projectId:f.projectId,approve:false,code}).then(()=>'REJECTED',e=>e);
+        await new Promise(r=>setTimeout(r,400));
+        return real(tx,i);
+      });
+      const retry=await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false});
+      const rej=await rejecting,row=await db.opsApproval.findUniqueOrThrow({where:{id:approvalId}}),recorded=await db.earnPayoutRequest.count({where:{projectId:f.projectId}});
+      if(rej==='REJECTED'){expect(row.status).toBe('REJECTED');expect(retry.status).toBe(403);expect(recorded).toBe(0);}
+      else{expect(rej).toBeInstanceOf(Error);expect(retry.status).toBe(200);expect(row.status).toBe('CONSUMED');expect(recorded).toBe(1);}
+    }finally{await done(f);}
+  });
+  it('closing the session lapses an approval it granted but the AI has not used (410)',async()=>{
+    const {f,admin,secret,t}=await ready();try{
+      const p1=await prepare(f,t,0,0);expect(p1.r.status).toBe(202);
+      expect((await open(f,t,admin.email,fresh(secret))).json.data.approvedPending).toBe(1);
+      expect((await api('POST','approval-sessions/close',{token:t,body:{projectId:f.projectId},autoApprove:false})).json.data.closed).toBe(1);
+      const again=await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false});
+      expect(again.status).toBe(410);expect(again.json.error?.code).toBe('APPROVAL_EXPIRED');
+      expect(await db.opsApproval.findUniqueOrThrow({where:{id:p1.r.json.error!.details.approvalId}})).toMatchObject({status:'EXPIRED',decisionNote:'Phiên duyệt đã khoá'});
+      expect(await db.earnPayoutRequest.count({where:{projectId:f.projectId}})).toBe(0);
+    }finally{await done(f);}
+  });
+  it('demoting the approver lapses an approval the session granted but the AI has not used (410)',async()=>{
+    const {f,admin,secret,t}=await ready();try{
+      const p1=await prepare(f,t,0,0);
+      expect((await open(f,t,admin.email,fresh(secret))).json.data.approvedPending).toBe(1);
+      await db.projectMember.update({where:{userId_projectId:{userId:admin.id,projectId:f.projectId}},data:{role:'MODERATOR'}});
+      const again=await api('POST','withdrawals/prepare',{token:t,key:p1.key,body:p1.body,autoApprove:false});
+      expect(again.status).toBe(410);expect(await db.earnPayoutRequest.count({where:{projectId:f.projectId}})).toBe(0);
     }finally{await done(f);}
   });
 });

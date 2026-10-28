@@ -15,6 +15,7 @@ export type ApprovalStatus='PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'|'CONSUMED'|
 export const APPROVAL_ACTIONS=['WITHDRAWAL_PREPARE'] as const;
 // The rows an ADMIN may still decide: held actions + batches holding them. Rows held before 28/10 for other actions stay as history
 // (their route now runs directly on retry): they are not listed, counted or approved.
+export const SESSION_ENDED_NOTE='Phiên duyệt đã khoá';
 export const HELD_ACTIONS=[...APPROVAL_ACTIONS,'BATCH'] as const;
 const isHeld=(action:string)=>(HELD_ACTIONS as readonly string[]).includes(action);
 export const ACTION_LABEL:Record<string,string>={BATCH:'Lô lệnh (nhiều mục cần duyệt)',ACCOUNT_CREDENTIALS:'Lấy thông tin đăng nhập tài khoản EarnApp',WITHDRAWAL_PREPARE:'Chuẩn bị rút tiền (giữ email PayPal)',WITHDRAWAL_MEMBERS:'Gộp thêm VM vào lệnh rút',WITHDRAWAL_STATUS:'Ghi trạng thái yêu cầu rút',WITHDRAWAL_RECEIPT:'Ghi tiền về PayPal',VM_PROXY_CREDENTIALS:'Lấy proxy đầy đủ của VM',SDK_REVEAL:'Xem mã SDK đầy đủ'};
@@ -47,23 +48,39 @@ type GateResult={approval:OpsApproval;replay:boolean;pending?:undefined;expired?
 export async function gateApproval(db:PrismaClient,g:GateInput){
  return db.$transaction(async (tx):Promise<GateResult>=>{
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${g.requestKey},0))`;
-  const now=new Date(),rows=await tx.opsApproval.findMany({where:{requestKey:g.requestKey},orderBy:{requestedAt:'desc'}}),row=rows[0];
-  if(row){
+  const now=new Date(),latest=await tx.opsApproval.findFirst({where:{requestKey:g.requestKey},orderBy:{requestedAt:'desc'},select:{id:true}});
+  if(latest){
+    // Review fix 28/10/2026: the row itself is locked before its status is read, so a web decision / CLI confirm / session close
+    // (all status-guarded writes on this row) either commits before — and is honoured — or waits until this gate has decided.
+    await tx.$queryRaw`SELECT "id" FROM "OpsApproval" WHERE "id"=${latest.id} FOR UPDATE`;
+    return decide(await tx.opsApproval.findUniqueOrThrow({where:{id:latest.id}}));
+  }
+  const created=await tx.opsApproval.create({data:{projectId:g.projectId,tokenId:g.tokenId,userId:g.userId,action:g.action,method:g.method,path:g.path,objectId:g.objectId,requestKey:g.requestKey,payloadHash:g.payloadHash,summary:g.summary as object,expiresAt:new Date(now.getTime()+APPROVAL_TTL_MS)}});
+  return underSession(created);
+  async function decide(row:OpsApproval):Promise<GateResult>{
     if(row.payloadHash!==g.payloadHash)throw new ProxyDomainError('KEY_PAYLOAD_MISMATCH','Idempotency-Key đã dùng cho nội dung khác; dùng key mới');
     if(row.tokenId!==g.tokenId)throw new ApprovalHold('APPROVAL_REJECTED','Yêu cầu duyệt thuộc token cũ; chỉ kết quả đã ghi được phát lại, mục chưa chạy phải xin duyệt mới',{approvalId:row.id,status:'REJECTED'});
     if(row.status==='CONSUMED')return {approval:row,replay:true};
     if(row.status==='REJECTED'||row.status==='LOCKED')throw new ApprovalHold('APPROVAL_REJECTED',row.status==='LOCKED'?'Yêu cầu đã khoá sau 5 lần sai mã; xin lại bằng key mới':'ADMIN đã từ chối lệnh này',{approvalId:row.id,status:row.status});
     if(row.status==='EXPIRED'||row.expiresAt<now){await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED'}});return {expired:row};}
-    if(row.status==='APPROVED')return {approval:row,replay:false};
+    if(row.status==='APPROVED'){
+      // Approved by a session: usable only while a session of this token + project is still in force ("Khóa phiên ngay", expiry,
+      // approver demoted / 2FA reset / token revoked end it at once); otherwise the approval lapses (410, new key).
+      if(row.sessionId&&!await activeSession(tx,{projectId:row.projectId,tokenId:row.tokenId})){
+        const lapsed=await tx.opsApproval.update({where:{id:row.id},data:{status:'EXPIRED',decisionNote:SESSION_ENDED_NOTE}});return {expired:lapsed};
+      }
+      return {approval:row,replay:false};
+    }
+    if(row.status!=='PENDING')return {pending:row};
     return underSession(row);
   }
-  const created=await tx.opsApproval.create({data:{projectId:g.projectId,tokenId:g.tokenId,userId:g.userId,action:g.action,method:g.method,path:g.path,objectId:g.objectId,requestKey:g.requestKey,payloadHash:g.payloadHash,summary:g.summary as object,expiresAt:new Date(now.getTime()+APPROVAL_TTL_MS)}});
-  return underSession(created);
   // A 15-minute approval session of this token + project (re-checked here, FOR SHARE) approves the row at once; otherwise it waits.
   async function underSession(r:OpsApproval):Promise<GateResult>{
     const s=isHeld(r.action)&&r.tokenId===g.tokenId&&r.projectId===g.projectId?await activeSession(tx,{projectId:g.projectId,tokenId:g.tokenId}):null;
     if(!s)return {pending:r};
-    return {approval:await approveUnderSession(tx,s,r),replay:false};
+    const a=await approveUnderSession(tx,s,r);
+    // Not PENDING any more (decided meanwhile): honour the real status, never overturn it.
+    return a.approved?{approval:a.row,replay:false}:decide(a.row);
   }
  }).then(result=>{
   if(result.expired)throw new ApprovalHold('APPROVAL_EXPIRED','Yêu cầu đã hết hạn; gửi lại với Idempotency-Key mới',{approvalId:result.expired.id,status:'EXPIRED',expiresAt:result.expired.expiresAt.toISOString()});
