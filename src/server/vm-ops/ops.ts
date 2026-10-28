@@ -9,6 +9,7 @@ import {authorizeVM} from '../vm-management/repository';
 import {vmHash,type ConfigurationSnapshot} from '../vm-management/types';
 import {releaseForRecreate} from '../vm-management/sdk-store';
 import {memberOf} from './payout-members';
+import {closeSuspendedInTx,susDetail} from './suspend';
 import {currentProxyOf,loadChangeVM,markVmBlocked} from '../vm-management/proxy-change';
 import {assertInfrastructureAction} from '../permissions/infrastructure';
 const canBlock=(scope:ActorScope)=>{try{assertInfrastructureAction(scope,'BLOCK');return true;}catch{return false;}};
@@ -63,17 +64,27 @@ export async function setVmStatus(scope:ActorScope,input:{key:string;items:Statu
         const endpoint=position.endpointId?await tx.proxyIP.findUnique({where:{id:position.endpointId},select:{inventoryState:true}}):null;
         if(endpoint?.inventoryState==='BLOCKED'){rows.push({...base,outcome:'ERROR',message:'Proxy hiện tại đang BLOCKED; thay proxy trước khi ghi '+opsLabel(item.status),status:vm.operation?.status??null,cycle});continue;}
       }
-      const ops=await ensureOps(tx,images,scope.projectId,vm.id);
-      // A status chosen by a person replaces a pending Blocked: the replacement will then keep this newer decision.
-      // A person who moves "Chờ áp dụng proxy" to a working status has dealt with the machine: the apply mark goes with it.
-      const handled=ops.status==='PROXY_PENDING'&&['OK','NOT_LINKED','LINKED'].includes(item.status)&&!opts.operator;
-      await tx.vmOperation.update({where:{id:ops.id},data:{status:item.status,statusAt:now,statusById:current.userId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1},
-        ...(handled?{proxyAppliedConfigId:ops.proxyPendingConfigId,proxyAppliedAt:now,proxyAppliedById:current.userId,proxyPendingConfigId:null,proxyPendingAt:null}:{})}});
-      await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,kind:'STATUS',fromStatus:ops.status,toStatus:item.status,note:input.note?.trim().slice(0,500)||null,actorId:current.userId}});
-      rows.push({...base,outcome:'APPLIED',message:opsLabel(ops.status)+' → '+VM_OPS[item.status].label,status:item.status,cycle});
+      // "EarnApp bị SUS" (28/10/2026, spec addition 1): choosing SUS here closes the payout of the round exactly like the button.
+      const closed=item.status==='SUSPENDED'?await closeSuspendedInTx(tx,images,{projectId:scope.projectId,actorId:current.userId,scope:infra},vm):null;
+      const {from}=await applyVmStatus(tx,images,{projectId:scope.projectId,actorId:current.userId,now,operator:!!opts.operator},vm,item.status,input.note??null,closed?susDetail(closed):undefined);
+      rows.push({...base,outcome:'APPLIED',message:opsLabel(from)+' → '+VM_OPS[item.status].label,status:item.status,cycle});
     }
     return {rows,applied:rows.filter(r=>r.outcome==='APPLIED').length,skipped:rows.filter(r=>r.outcome==='SKIP').length,errors:rows.filter(r=>r.outcome==='ERROR').length};
   },db);
+}
+/**
+ * The status write of one VM (shared by setVmStatus and "EarnApp bị SUS"): the operating row (created on the first record), the new status,
+ * a pending Blocked mark cleared, and the STATUS event. Callers have already checked the VM, its round, revision and the status rules.
+ */
+export async function applyVmStatus(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string;now:Date;operator?:boolean},vm:{id:string;operation:{cycle:number}|null},status:VmOpsStatus,note:string|null,detail?:Prisma.InputJsonObject):Promise<{from:VmOpsStatus|null}>{
+  const cycle=vm.operation?.cycle??1,ops=await ensureOps(tx,images,ctx.projectId,vm.id);
+  // A status chosen by a person replaces a pending Blocked: the replacement will then keep this newer decision.
+  // A person who moves "Chờ áp dụng proxy" to a working status has dealt with the machine: the apply mark goes with it.
+  const handled=ops.status==='PROXY_PENDING'&&['OK','NOT_LINKED','LINKED'].includes(status)&&!ctx.operator;
+  await tx.vmOperation.update({where:{id:ops.id},data:{status,statusAt:ctx.now,statusById:ctx.actorId,blockedFrom:null,blockedFromKnown:false,blockedEndpointId:null,blockedCycle:null,blockedAt:null,revision:{increment:1},
+    ...(handled?{proxyAppliedConfigId:ops.proxyPendingConfigId,proxyAppliedAt:ctx.now,proxyAppliedById:ctx.actorId,proxyPendingConfigId:null,proxyPendingAt:null}:{})}});
+  await tx.vmOpsEvent.create({data:{projectId:ctx.projectId,vmId:vm.id,cycle,kind:'STATUS',fromStatus:ops.status,toStatus:status,note:note?.trim().slice(0,500)||null,...(detail?{detail}:{}),actorId:ctx.actorId}});
+  return {from:ops.status};
 }
 /**
  * "Blocked" at the VM = its current proxy reported BLOCKED in Kho proxy too (BLOCK right), one fact on both pages; the status before it

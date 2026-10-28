@@ -147,10 +147,10 @@ export async function removePayoutMember(scope:ActorScope,input:{key:string;requ
 /**
  * The merged payout this VM is a member of in this round (active row of a request that is not failed / cancelled), with its money and
  * whether the primary account went SUS (owner 27/10/2026: then the money is never counted as received, and every member may be
- * recreated as SUSPENDED like the primary).
+ * recreated as SUSPENDED like the primary). A request lost to SUS (LOST_SUS, 28/10/2026) keeps its members: they follow the primary.
  */
 export async function memberOf(tx:Tx|PrismaClient,projectId:string,vmId:string,cycle:number){
-  const member=await tx.earnPayoutMember.findFirst({where:{projectId,vmId,cycle,removedAt:null,request:{state:'REQUESTED'}},include:{request:{include:{receipts:{select:{amount:true,currency:true,confirmed:true,failed:true,voidedAt:true}},earnApp:{select:{closedReason:true}}}}}});
+  const member=await tx.earnPayoutMember.findFirst({where:{projectId,vmId,cycle,removedAt:null,request:{state:{in:['REQUESTED','LOST_SUS']}}},include:{request:{include:{receipts:{select:{amount:true,currency:true,confirmed:true,failed:true,voidedAt:true}},earnApp:{select:{closedReason:true}}}}}});
   if(!member)return null;
   const r=member.request,ops=await tx.vmOperation.findUnique({where:{vmId:r.vmId},select:{cycle:true,status:true}});
   const primarySus=r.earnApp.closedReason==='SUSPENDED'||(ops?.status==='SUSPENDED'&&ops.cycle===r.cycle);

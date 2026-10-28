@@ -213,7 +213,8 @@ describe('Tạo lại VM',()=>{
     const f=await setup(1);try{
       await f.link(0,0,f.emails[0].id);const req=await f.request(0,f.emails[0].id,'24');
       await expect(recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db)).rejects.toThrow(/SUS/);
-      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'SUSPENDED',expectedCycle:1}]},db);
+      // SUS recorded before 28/10/2026 (spec addition 1: such a VM is not converted; choosing SUS now closes the payout, see payout-suspend tests).
+      await db.vmOperation.upsert({where:{vmId:f.vms[0].id},create:{projectId:f.scope.projectId,vmId:f.vms[0].id,cycle:1,status:'SUSPENDED',statusAt:new Date(),statusById:f.scope.userId},update:{status:'SUSPENDED'}});
       const r=await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);expect(r).toMatchObject({reason:'SUSPENDED',cycle:2});
       expect((await db.payPalAccount.findUniqueOrThrow({where:{id:f.pp13.id}})).status).toBe('ACTIVE');
       const old=await db.earnPayoutRequest.findUniqueOrThrow({where:{id:req.id}});expect(old).toMatchObject({state:'REQUESTED',consumedAt:null});

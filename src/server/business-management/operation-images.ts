@@ -24,7 +24,7 @@ const fields:Record<BusinessResource,string[]>={
  EARNAPP:['loginId','vmId','paypalId','paypalEmailId','registeredAt','registeredById','revision','closedAt','closedReason'],
  PAYOUT:['earnAppId','paypalId','paypalEmailId','vmId','startedAt','endedAt'],
  VM_OPS:['vmId','cycle','status','statusAt','statusById','blockedFrom','blockedFromKnown','blockedEndpointId','blockedCycle','blockedAt','revision'],
- PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt'],
+ PAYOUT_REQUEST:['earnAppId','vmId','cycle','paypalId','paypalEmailId','currency','amount','reference','requestedAt','state','stateNote','settledAt','settledById','settleNote','shortfall','consumedAt','revision','submission','submittedAt','lostAmount','lostAt'],
  VM_CYCLE:['vmId','number','reason','earnAppId','payoutRequestId','payoutMemberId','closedAt'],
  // Merged payout member (27/10/2026): another VM whose SDK was merged into the request's EarnApp account.
  PAYOUT_MEMBER:['requestId','vmId','cycle','sdkId','shareAmount','shareObservedAt','removedAt','removedById','consumedAt','consumedReason','revision'],
@@ -70,6 +70,11 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  // of a mistaken email is recreated from its image.
  if((image.after as unknown)===null&&image.before){
   if(image.resource==='PAYOUT_REQUEST'){const {restoreVoidedRequest}=await import('../vm-ops/payout-fix');await restoreVoidedRequest(tx,projectId,image.id);return;}
+  // A member taken out of a mistaken / SUS preparation that was then voided (28/10/2026): the void restore above brought the row back
+  // (members are restored after their request: the request image is remembered first); it gets its active state back, never into two open requests.
+  if(image.resource==='PAYOUT_MEMBER'){const b=image.before,now=await tx.earnPayoutMember.findFirst({where:{id:image.id,projectId}});if(!now)throw new ProxyDomainError('INVALID_INPUT','VM gộp không còn trong lệnh rút; không hoàn tác');
+   if(!b.removedAt){const {openPayoutOf}=await import('../vm-ops/payout-members');const other=await openPayoutOf(tx,projectId,String(b.vmId),Number(b.cycle),String(b.requestId));if(other)throw new ProxyDomainError('INVALID_INPUT','VM đã vào lệnh rút khác ('+other.where+'); không hoàn tác');}
+   await tx.earnPayoutMember.update({where:{id:image.id},data:{removedAt:b.removedAt?new Date(String(b.removedAt)):null,removedById:(b.removedById as string|null)??null,revision:{increment:1}}});return;}
   if(image.resource==='PAYOUT'){const b=image.before;await tx.earnAppPayout.create({data:{id:image.id,projectId,earnAppId:String(b.earnAppId),paypalId:(b.paypalId as string|null)??null,paypalEmailId:(b.paypalEmailId as string|null)??null,vmId:(b.vmId as string|null)??null,startedAt:new Date(String(b.startedAt)),endedAt:b.endedAt?new Date(String(b.endedAt)):null}});return;}
   throw new ProxyDomainError('INVALID_INPUT');
  }
@@ -82,7 +87,7 @@ export async function restoreBusinessImage(tx:Prisma.TransactionClient,projectId
  if(image.resource==='SDK'){await restoreSdkImage(tx,projectId,image,actorId);return;}
  if(image.resource==='SPLIT_PAYMENT'&&(image.after.paid||image.before?.paid))throw new ProxyDomainError('INVALID_INPUT','Ghi nhận đã trả tiền cần nghiệp vụ điều chỉnh riêng');
  const before=image.before,data:Record<string,unknown>={};
- if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt','submittedAt','holdAt','loginIssueAt','removedAt','shareObservedAt'].includes(key)?new Date(String(value)):value;}}
+ if(before){for(const [key,value] of Object.entries(before)){if(key==='revision')continue;data[key]=value&&['date','receivedAt','fxAppliedAt','paidAt','periodStart','periodEnd','completedAt','dueDate','archivedAt','voidedAt','nextDueDate','lastPaidAt','registeredAt','purchasedAt','usedAt','startedAt','endedAt','closedAt','statusAt','requestedAt','settledAt','consumedAt','submittedAt','holdAt','loginIssueAt','removedAt','shareObservedAt','lostAt'].includes(key)?new Date(String(value)):value;}}
  else if(['GMAIL','PAYPAL','PAYPAL_EMAIL','WORK','ACCOUNT_BATCH'].includes(image.resource))data.archivedAt=new Date();
  else if(image.resource==='EARNAPP'){await tx.earnAppPayout.deleteMany({where:{earnAppId:image.id}});await tx.earnAppAccount.delete({where:{id:image.id}});return;} // created by the undone operation
  else if(image.resource==='PAYOUT'){await tx.earnAppPayout.deleteMany({where:{id:image.id}});return;} // history period opened by the undone operation

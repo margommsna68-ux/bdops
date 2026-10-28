@@ -158,7 +158,9 @@ describe('review fixes: request identity, free text',()=>{
     const f=await setup();try{
       const p60=await f.pp('pp-60'),email=p60.emails[0].id,oldId=await f.ea(0);
       const r=await createPayoutRequest(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1,earnAppId:oldId,paypalEmailId:email,amount:'10',date:today,submission:'PREPARING'},db);
-      await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.vms[0].id,status:'SUSPENDED',expectedCycle:1}]},db);await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
+      // SUS recorded before 28/10/2026 (spec addition 1: such a VM is not converted; choosing SUS now closes the payout, see payout-suspend tests).
+      await db.vmOperation.upsert({where:{vmId:f.vms[0].id},create:{projectId:f.scope.projectId,vmId:f.vms[0].id,cycle:1,status:'SUSPENDED',statusAt:new Date(),statusById:f.scope.userId},update:{status:'SUSPENDED'}});
+      await recordRecreated(f.scope,{key:randomUUID(),vmId:f.vms[0].id,expectedCycle:1},db);
       const v=await db.virtualMachine.findUniqueOrThrow({where:{id:f.vms[0].id}});await applyLinks(f.scope,{key:randomUUID(),items:[{line:1,vmId:v.id,expectedRevision:v.revision,login:f.logins[5].id}]},db);
       const newId=await f.ea(0);expect(newId).not.toBe(oldId);
       // The operating command (from the cell, with the identity it saw) is refused, with or without the identity.
