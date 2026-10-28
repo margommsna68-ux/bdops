@@ -37,9 +37,9 @@ Khung sau khi giữ: email + Copy, số tiền, nút **Đã rút** và **Bỏ**.
 - Đóng khung không bấm gì: email **vẫn giữ**, yêu cầu hiện "Đang rút, chưa xác nhận" (chip / bộ lọc ở Server/VM, trang Rút EarnApp, Tổng quan). **Không tự nhả theo thời gian** [builder]: có thể đã rút thật mà quên bấm.
 - Hàng loạt: "Rút N VM" giữ N email khác nhau trong từng lệnh riêng (giữ cơ chế khoá lệnh / thử lại của `PayoutBulkPanel`), mỗi dòng Copy riêng, "Đã rút" từng dòng hoặc "Đã rút N dòng".
 
-**Tiền đã về.** Nút trên dòng: số tiền mặc định = phần còn chờ, ngày mặc định = hôm nay (giờ Bangkok), mã giao dịch PayPal tuỳ chọn. Đi qua `recordPayoutReceipt` hiện có (sổ PayPal không đổi, chống trùng mã / cùng email-ngày-số tiền giữ nguyên). Về thiếu: ô **"Chốt luôn, phần thiếu là phí"** tick sẵn [builder] → cùng một lệnh ghi receipt + `SETTLE` (ghi chú tự sinh "Phí / thiếu X"). Hàng loạt: "Đã về đủ N dòng" (mỗi dòng ghi đúng phần còn chờ).
+**Tiền đã về.** Chủ 28/10: "tiền thực nhận về PayPal sẽ thấp hơn tiền rút về, do đó khi xác nhận tiền sẽ note lại số tiền chính xác có trong PayPal". Nút trên dòng: ô **"Số tiền chính xác trong PayPal"** để trống, bắt buộc nhập (không điền sẵn phần còn chờ); cạnh đó hiện số đã rút và phí tự tính = số rút − số thực nhận; ngày mặc định = hôm nay (giờ Bangkok), mã giao dịch PayPal tuỳ chọn. Đi qua `recordPayoutReceipt` hiện có (sổ PayPal không đổi, chống trùng mã / cùng email-ngày-số tiền giữ nguyên). Về thiếu (trường hợp thường gặp): ô **"Chốt luôn, phần thiếu là phí"** tick sẵn → cùng một lệnh ghi receipt + `SETTLE` (ghi chú tự sinh "Phí / thiếu X"). Hàng loạt: **"Tiền đã về N dòng"** — mỗi dòng một ô nhập số thực nhận, phí tính từng dòng.
 
-**Một khung dùng chung.** Một component (thay `PayoutStatusActions` + các form rút trong `OpsCells` / `PayoutBulkPanel` / `VmSidePanel`) dùng ở cả ô Tiền VM, khung VM và trang Rút EarnApp, có đủ: Đã rút / Bỏ / Sửa / Tiền đã về / EarnApp bị SUS / Huỷ. Trang Rút EarnApp có chọn nhiều dòng + Đã rút N / Đã về đủ N.
+**Một khung dùng chung.** Một component (thay `PayoutStatusActions` + các form rút trong `OpsCells` / `PayoutBulkPanel` / `VmSidePanel`) dùng ở cả ô Tiền VM, khung VM và trang Rút EarnApp, có đủ: Đã rút / Bỏ / Sửa / Tiền đã về / EarnApp bị SUS / Huỷ. Trang Rút EarnApp có chọn nhiều dòng + Đã rút N / Tiền đã về N.
 
 **Nhãn trạng thái** (hiển thị; dữ liệu giữ cột `state` / `submission`): Đang rút (chưa xác nhận) → Đã rút, chờ tiền → Đã về / Về thiếu (đã chốt) / **Mất do SUS** / Huỷ. `UNKNOWN` giữ cho AI (lỡ mất câu trả lời), hiển thị "Chưa rõ đã rút chưa".
 
@@ -104,7 +104,7 @@ Nút **"EarnApp bị SUS"** ở khung tiền / khung VM (và lệnh AI tương �
 2. **Thất bại / Gửi lại giữ như hiện có** (EarnApp trả lệnh về / từ chối mà không SUS): khung có "Thất bại" và "Gửi lại" cho người có quyền ghi tiền; "Huỷ" trên lệnh chưa gửi = "Bỏ" (xoá ghi nhầm). Email / slot ngày khi Thất bại một lệnh đã gửi: giữ như hiện có.
 3. **Gỡ email khi sửa / bỏ / xoá không phân biệt ai đã gán**: email của yêu cầu được trả kho nếu chưa từng có khoản tiền nào về email đó cho EarnApp này, kể cả khi email đã gán qua "PayPal nhận" từ trước.
 4. **Số tiền yêu cầu vẫn sửa được sau khi đã có tiền về một phần** (như `CORRECT` hiện có, bắt buộc lý do); email / PP thì không.
-5. **Chốt thiếu giữ quyền như cũ**: chỉ người có quyền ghi tiền (writeMoney) thấy ô "Chốt luôn, phần thiếu là phí" (tick sẵn); AI và người chỉ có quyền ghi khoản nhận không chốt; API mặc định `settleRemainder=false`.
+5. **Chốt phần phí đi cùng quyền ghi tiền về** (sửa sau bổ sung của chủ 28/10 về số thực nhận luôn thấp hơn): ai được ghi tiền về (writeMoney hoặc PAYPAL_RECEIPT_RECORD, gồm AI) thì chốt được phần thiếu của chính lần ghi đó; ô tick sẵn trên web; API nhận `settleRemainder` (AI gửi true khi đã đọc đúng số trong PayPal), mặc định false. Lệnh SETTLE riêng sau đó vẫn chỉ cho người có quyền ghi tiền.
 6. **Ngày tính hạn mức 2 email khi sửa email**: ngày của lần ghi "Đã rút" (`submittedAt`, giờ server), không phải ngày rút người dùng sửa; sửa "ngày rút" chỉ đổi `requestedAt`.
 
 ## Để builder quyết

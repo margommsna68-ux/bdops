@@ -15,7 +15,7 @@
 - Nguồn: worktree `D:/MoneyToHome/dev-payout-simple-20261028`, nhánh `codex/payout-simple`; commit đầu = phủ bản live `D:/MoneyToHome/app` (BUILD `DA1lGJ8RFpsq0u7O2EFoM`). Kiểm lại BUILD_ID live trước khi phủ và trước khi deploy; khác thì dừng, đối chiếu.
 - Migration chỉ cộng thêm, một file `prisma/migrations/20261028120000_payout_simplify/migration.sql`.
 - Không đổi: sổ PayPal, `PAYPAL_DAILY_EMAIL_LIMIT=2`, gợi ý PP, `requestMoney` cho state cũ, quyền (`payoutRights`), Rút gộp.
-- Mọi chuỗi giao diện tiếng Việt như spec: "Rút", "Đã rút", "Bỏ", "Sửa", "Tiền đã về", "Chốt luôn, phần thiếu là phí", "EarnApp bị SUS", "Mất do SUS", "Đang rút, chưa xác nhận", "Chờ tạo lại", "Tạo lại N VM", "Ghi nhận đã tạo lại N VM", "Đã rút N dòng", "Đã về đủ N dòng", "Duyệt tất cả đang chờ", "Mở phiên 15 phút", "Khóa phiên ngay", "Đã xoá do ghi nhầm".
+- Mọi chuỗi giao diện tiếng Việt như spec: "Rút", "Đã rút", "Bỏ", "Sửa", "Tiền đã về", "Chốt luôn, phần thiếu là phí", "EarnApp bị SUS", "Mất do SUS", "Đang rút, chưa xác nhận", "Chờ tạo lại", "Tạo lại N VM", "Ghi nhận đã tạo lại N VM", "Đã rút N dòng", "Tiền đã về N dòng", "Số tiền chính xác trong PayPal", "Duyệt tất cả đang chờ", "Mở phiên 15 phút", "Khóa phiên ngay", "Đã xoá do ghi nhầm".
 - Chạy vitest từ PowerShell (Git Bash làm hỏng 10 test CLI). DB test = PostgreSQL portable cổng **55432** (memory local-trial-postgres); KHÔNG BAO GIỜ trỏ test vào `MoneyToHome-Postgres` cổng 5432 (production).
 - Không quay video. Kiểm trình duyệt chỉ trên dữ liệu giả, local.
 - Mỗi commit kết thúc bằng `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -26,7 +26,7 @@
 2. Sửa email trên lệnh đã rút khi email cũ đã có một khoản tiền về (kể cả khoản đã thu hồi rồi ghi lại) → từ chối, không gỡ gì (test ở Task 3).
 3. SUS trên VM là VM chính của Rút gộp → khoản gộp ra "Mất do SUS", các VM thành viên vào Chờ tạo lại, không VM thành viên nào còn tính "chờ tiền" (test ở Task 5).
 4. Phiên duyệt mở rồi ADMIN bị gỡ quyền / token bị thu hồi trong 15 phút → lệnh Rút tiếp theo bị giữ chờ duyệt, không chạy (test ở Task 8).
-5. Bấm "Đã về đủ N dòng" khi một dòng vừa bị người khác ghi tiền về → dòng đó báo lỗi revision, các dòng khác vẫn ghi, không dòng nào ghi hai lần (test ở Task 10).
+5. Bấm "Tiền đã về N dòng" khi một dòng vừa bị người khác ghi tiền về → dòng đó báo lỗi revision, các dòng khác vẫn ghi, không dòng nào ghi hai lần (test ở Task 10).
 
 ---
 
@@ -130,7 +130,8 @@ it('LOST_SUS is neither waiting nor received',()=>{
 - [ ] **Step 1: Test hỏng:**
   - `receipt with settleRemainder settles the gap in the same command`: request 20.00 SENT, ghi 18.50 + `settleRemainder:true` → phase `RECEIVED`, `shortfall='1.50'`, `settleNote='Phí / thiếu 1,50 USD'`, history có RECEIPT và SETTLE.
   - `receipt without settleRemainder leaves 1.50 waiting`.
-  - `settleRemainder without writeMoney is refused` (scope chỉ có PAYPAL_RECEIPT_RECORD → FORBIDDEN, không ghi gì).
+  - `settleRemainder works for a receipt-only recorder` (scope chỉ có PAYPAL_RECEIPT_RECORD: ghi 18.50 + settle → RECEIVED, shortfall 1.50; chủ 28/10: số thực nhận luôn thấp hơn số rút vì phí).
+  - `a standalone SETTLE still needs writeMoney` (updatePayoutRequest SETTLE với scope chỉ PAYPAL_RECEIPT_RECORD → FORBIDDEN, như hiện có).
   - `a late receipt on LOST_SUS reopens and records it`: state `LOST_SUS` → receipt đủ → `state='REQUESTED'`, phase `RECEIVED`, `lostAmount=null`, history "Tiền về muộn sau SUS".
 - [ ] **Step 2:** FAIL.
 - [ ] **Step 3:** Cài đặt trong `recordPayoutReceipt`: cho phép `state==='LOST_SUS'` (đổi state về `REQUESTED`, xoá `lostAmount/lostAt` trước khi tính `open`); sau khi tạo FundTransaction, nếu `settleRemainder` và còn thiếu > 0 thì ghi settle như nhánh SETTLE của `updatePayoutRequest`.
@@ -244,8 +245,8 @@ it('LOST_SUS is neither waiting nor received',()=>{
   - SENT, WAITING, chưa receipt → `['RECEIPT','EDIT','UNSEND','SUS','FAIL']`;
   - FAILED / CANCELLED → `['RETRY']`;
   - SENT có receipt, còn thiếu → `['RECEIPT','SUS']`;
-  - RECEIVED → `[]`; LOST → `['RECEIPT']`; thiếu quyền ghi tiền → không có `EDIT/UNSEND/VOID/FAIL/RETRY` và ô chốt thiếu không hiện.
-- [ ] **Step 2:** FAIL. **Step 3:** cài đặt model + component. Luồng: "Rút" gọi `payoutPick` → `requestPayout({submission:'PREPARING', paypalEmailId: gợi ý, amount: Tiền VM})` ngay khi bấm; khung hiện email + Copy + "Đã rút" (SENT, **không** ô tick bằng chứng) + "Bỏ" (`voidPayout` lý do "Bỏ trước khi rút") + "Đổi email" (`editPayout`). "Tiền đã về": số tiền = `remaining`, ngày = hôm nay giờ Bangkok, ô "Chốt luôn, phần thiếu là phí" tick sẵn, chỉ hiện khi số nhập < remaining. Mỗi lệnh giữ key + body khi mất câu trả lời (theo mẫu sessionStorage của `PayoutBulkPanel`). Trang Rút EarnApp mở cùng `PayoutFrame` trong panel phải.
+  - RECEIVED → `[]`; LOST → `['RECEIPT']`; thiếu quyền ghi tiền → không có `EDIT/UNSEND/VOID/FAIL/RETRY` (ô chốt thiếu vẫn hiện nếu có quyền ghi tiền về).
+- [ ] **Step 2:** FAIL. **Step 3:** cài đặt model + component. Luồng: "Rút" gọi `payoutPick` → `requestPayout({submission:'PREPARING', paypalEmailId: gợi ý, amount: Tiền VM})` ngay khi bấm; khung hiện email + Copy + "Đã rút" (SENT, **không** ô tick bằng chứng) + "Bỏ" (`voidPayout` lý do "Bỏ trước khi rút") + "Đổi email" (`editPayout`). "Tiền đã về": ô "Số tiền chính xác trong PayPal" để trống, bắt buộc; hiện số đã rút + phí tự tính (rút − thực nhận); ngày = hôm nay giờ Bangkok; ô "Chốt luôn, phần thiếu là phí" tick sẵn, hiện khi số nhập < remaining, cho mọi người có quyền ghi tiền về. Mỗi lệnh giữ key + body khi mất câu trả lời (theo mẫu sessionStorage của `PayoutBulkPanel`). Trang Rút EarnApp mở cùng `PayoutFrame` trong panel phải.
 - [ ] **Step 4:** PASS; `npx tsc --noEmit`; `npx eslint` các file đã sửa sạch.
 - [ ] **Step 5:** Commit `feat(ui): one payout frame for cell, VM panel and report`.
 
@@ -258,10 +259,10 @@ it('LOST_SUS is neither waiting nor received',()=>{
 
 **Interfaces:**
 - Consumes: Task 7 tRPC; `vmOps.recreate`; tRPC tạo lệnh fleet hiện có mà `FleetCommandPanel.tsx` dùng (action `RECREATE_VM`).
-- Produces: `bulkPlan(rows, kind:'SEND'|'RECEIVE_FULL'|'RECREATE'|'RECORD_RECREATED') → {ready:Row[]; skipped:{row:Row;why:string}[]}` (hàm thuần).
+- Produces: `bulkPlan(rows, kind:'SEND'|'RECEIVE'|'RECREATE'|'RECORD_RECREATED') → {ready:Row[]; skipped:{row:Row;why:string}[]}` (hàm thuần).
 
 - [ ] **Step 1: Test hỏng:** `bulkPlan` bỏ qua dòng không đúng trạng thái kèm lý do; `RECREATE` tách VM thuộc server có điều khiển (`fleetEnrolled:true`) và VM phải tạo tay; một dòng lỗi revision trong khi chạy không chặn dòng khác (mô phỏng bằng hàm chạy tuần tự nhận kết quả giả).
-- [ ] **Step 2:** FAIL. **Step 3:** cài đặt: "Đã rút N dòng", "Đã về đủ N dòng" (mỗi dòng một key, chạy tuần tự, kết quả từng dòng, retry giữ key); bộ lọc "Chờ tạo lại" (đổi nhãn) + "Tạo lại N VM" (chủ 28/10: chạy hàng loạt nhiều VM, nhiều server, không giới hạn 1 VM; bắt buộc một hộp xác nhận liệt kê số VM theo từng server trước khi gửi; gửi lệnh fleet `RECREATE_VM` cho VM có điều khiển, nhắc tạo tay cho phần còn lại) + "Ghi nhận đã tạo lại N VM". "Rút N VM" giữ nguyên hàng đợi hiện có nhưng tạo PREPARING ngay khi bấm.
+- [ ] **Step 2:** FAIL. **Step 3:** cài đặt: "Đã rút N dòng", "Tiền đã về N dòng" (bảng nhỏ: mỗi dòng một ô "Số tiền chính xác trong PayPal" bắt buộc + phí tự tính, một ô "Chốt luôn, phần thiếu là phí" chung tick sẵn; mỗi dòng một key, chạy tuần tự, kết quả từng dòng, retry giữ key); bộ lọc "Chờ tạo lại" (đổi nhãn) + "Tạo lại N VM" (chủ 28/10: chạy hàng loạt nhiều VM, nhiều server, không giới hạn 1 VM; bắt buộc một hộp xác nhận liệt kê số VM theo từng server trước khi gửi; gửi lệnh fleet `RECREATE_VM` cho VM có điều khiển, nhắc tạo tay cho phần còn lại) + "Ghi nhận đã tạo lại N VM". "Rút N VM" giữ nguyên hàng đợi hiện có nhưng tạo PREPARING ngay khi bấm.
 - [ ] **Step 4:** PASS; tsc / eslint sạch. **Step 5:** Commit `feat(ui): bulk send, receive and recreate`.
 
 ### Task 11: Trang Phê duyệt và báo cáo
