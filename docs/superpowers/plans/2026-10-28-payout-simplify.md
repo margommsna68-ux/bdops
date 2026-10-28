@@ -261,7 +261,7 @@ it('LOST_SUS is neither waiting nor received',()=>{
 - Produces: `bulkPlan(rows, kind:'SEND'|'RECEIVE_FULL'|'RECREATE'|'RECORD_RECREATED') → {ready:Row[]; skipped:{row:Row;why:string}[]}` (hàm thuần).
 
 - [ ] **Step 1: Test hỏng:** `bulkPlan` bỏ qua dòng không đúng trạng thái kèm lý do; `RECREATE` tách VM thuộc server có điều khiển (`fleetEnrolled:true`) và VM phải tạo tay; một dòng lỗi revision trong khi chạy không chặn dòng khác (mô phỏng bằng hàm chạy tuần tự nhận kết quả giả).
-- [ ] **Step 2:** FAIL. **Step 3:** cài đặt: "Đã rút N dòng", "Đã về đủ N dòng" (mỗi dòng một key, chạy tuần tự, kết quả từng dòng, retry giữ key); bộ lọc "Chờ tạo lại" (đổi nhãn) + "Tạo lại N VM" (gửi lệnh fleet cho VM có điều khiển; nhắc tạo tay cho phần còn lại) + "Ghi nhận đã tạo lại N VM". "Rút N VM" giữ nguyên hàng đợi hiện có nhưng tạo PREPARING ngay khi bấm.
+- [ ] **Step 2:** FAIL. **Step 3:** cài đặt: "Đã rút N dòng", "Đã về đủ N dòng" (mỗi dòng một key, chạy tuần tự, kết quả từng dòng, retry giữ key); bộ lọc "Chờ tạo lại" (đổi nhãn) + "Tạo lại N VM" (chủ 28/10: chạy hàng loạt nhiều VM, nhiều server, không giới hạn 1 VM; bắt buộc một hộp xác nhận liệt kê số VM theo từng server trước khi gửi; gửi lệnh fleet `RECREATE_VM` cho VM có điều khiển, nhắc tạo tay cho phần còn lại) + "Ghi nhận đã tạo lại N VM". "Rút N VM" giữ nguyên hàng đợi hiện có nhưng tạo PREPARING ngay khi bấm.
 - [ ] **Step 4:** PASS; tsc / eslint sạch. **Step 5:** Commit `feat(ui): bulk send, receive and recreate`.
 
 ### Task 11: Trang Phê duyệt và báo cáo

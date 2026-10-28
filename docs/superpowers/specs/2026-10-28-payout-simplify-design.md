@@ -76,6 +76,7 @@ Nút **"EarnApp bị SUS"** ở khung tiền / khung VM (và lệnh AI tương �
 - Bộ lọc tiền **"Chờ tạo lại"** ở Server/VM (đổi tên mốc `RECREATE` "Cần tạo lại VM") = mọi VM mà `recreateRule` cho phép: tiền lượt này về đủ và chưa dùng, hoặc VM SUS (kể cả thành viên gộp). Tổng quan có số đếm, bấm vào ra đúng danh sách.
 - Chọn dòng → **"Tạo lại N VM"**:
   - VM thuộc server đã nối điều khiển (`FLEET_CONTROL_SERVERS`) → tạo lệnh `RECREATE_VM` của dịch vụ lệnh fleet hiện có (từng VM một lệnh, cùng quyền MANAGE, cùng điều kiện).
+  - Chủ 28/10: "nút tạo lại cho chạy hàng loạt VM, hàng loạt server khi xác nhận" → không giới hạn số VM / server; luôn có một hộp xác nhận (số VM theo từng server) trước khi gửi.
   - VM chưa nối → không gửi lệnh; nhắc "Tạo lại trên máy rồi bấm Ghi nhận đã tạo lại".
   - **"Ghi nhận đã tạo lại N VM"** (hàng loạt `recordRecreated`, từng VM một lệnh riêng, kết quả từng dòng).
 - Sau tạo lại: lượt mới, trạng thái Chưa cài (NEW_VM), proxy tốt giữ lại, EarnApp cũ đóng, SDK cũ rời vị trí (như hiện có). Tài khoản EarnApp mới và email PP mới lấy theo luồng hiện có khi làm VM; lúc tạo lại không tự gán [builder].
