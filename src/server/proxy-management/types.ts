@@ -69,7 +69,7 @@ export interface RegistryHistoryHint {total:number;rows:RegistryHistoryMatch[]}
 export interface RegistryPage {rows:RegistryRow[];nextCursor:string|null;page:number;counts:{current:number;historical:number;reserved:number;shared:number;quarantined:number};total:number;servers:string[];groups:ProxyGroupRef[];groupCounts:Record<string,number>;stateCounts:Record<string,number>;packageCounts:Record<string,number>;historyHint:RegistryHistoryHint|null}
 export type CopySkipReason='NO_CREDENTIALS'|'NO_ENDPOINT';
 export interface CopyResult {proxies:string[];copied:number;total:number;skipped:{reason:CopySkipReason;count:number}[]}
-export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
+export interface ProxyTimeline {identity:IdentityFact;events:{kind:string;occurredAt:string|null;recordedAt:string;reversedAt?:string|null;actor:string|null;sourceRef:string|null;/** what happened, e.g. which VM (28/10/2026: shown in the timeline) */reason:string|null}[];replacements:{oldIp:string;newIp:string;receivedDate:string|null;recordedAt:string;status:'APPLIED'|'VOID'}[];vmRefs:string[]}
 export interface ProxyGroupRef {id:string;name:string;archivedAt?:string|null;proxyCount?:number}
 // GENJY = Genjy riêng only; SHARED = Chung mooon–Genjy.
 export const GROUP_TUT='TUT',GROUP_GENJY='GENJY',GROUP_SHARED='SHARED',GROUP_UNKNOWN='UNKNOWN';
