@@ -4,6 +4,7 @@ import type {VirtualMachine,EarnAppAccount,PayPalEmail,PayPalAccount} from '@pri
 import {businessDB as db,businessFixture} from './business-fixture';
 import {createPayoutRequest,updatePayoutRequest,recordPayoutReceipt,readVmOpsHistory} from '@/server/vm-ops/payout';
 import {editPayoutRequest,unsendPayoutRequest,voidPayoutRequest} from '@/server/vm-ops/payout-fix';
+import {moneyOfRequest} from '@/server/vm-ops/ops';
 import {applyLinks} from '@/server/account-store/links';
 import {undoOperation} from '@/server/operation-history/undo';
 
@@ -274,5 +275,55 @@ it('undo of an email edit on a preparation gives the holds back',async()=>{
  const r=await f.prep(0),key=randomUUID();await f.edit(r.id,{paypalEmailId:f.free.id},key);
  await undoOperation(f.scope,(await f.journal(key)).id,'Bấm nhầm',db);
  expect((await f.req(r.id)).paypalEmailId).toBe(a.id);expect((await f.email(a.id)).holdEarnAppId).toBe(ea.id);expect((await f.email(f.free.id)).holdEarnAppId).toBeNull();
+ }finally{await f.cleanup();}
+});
+
+// Task 4 (owner 28/10/2026): "Tiền đã về" can settle the remainder as a fee in the same command; late money after SUS.
+const rcpt=(f:Awaited<ReturnType<typeof setup>>,id:string,amount:string,extra:Record<string,unknown>={},scope=f.scope)=>f.req(id).then(r=>recordPayoutReceipt(scope,{key:randomUUID(),requestId:id,expectedRequestRevision:r.revision,amount,currency:'USD',receivedAt:new Date().toISOString(),...extra} as never,db));
+const phaseOf=async(f:Awaited<ReturnType<typeof setup>>,id:string)=>{const r=await db.earnPayoutRequest.findUniqueOrThrow({where:{id},include:{receipts:true}});return moneyOfRequest(r).phase;};
+const kinds=(h:unknown)=>(h as {kind?:string}[]).map(x=>x.kind);
+async function sentTwenty(f:Awaited<ReturnType<typeof setup>>){const r=await f.prep(0,undefined,{amount:'20'});await f.sent(r.id);return r;}
+it('receipt with settleRemainder settles the gap in the same command',async()=>{
+ const f=await setup();try{const r=await sentTwenty(f);
+ const out=await rcpt(f,r.id,'18.50',{settleRemainder:true});
+ expect(out).toMatchObject({settled:true,shortfall:'1.50'});
+ const row=await f.req(r.id);expect(row).toMatchObject({settleNote:'Phí / thiếu 1,50 USD',settledById:f.scope.userId});expect(row.shortfall?.toString()).toBe('1.5');expect(row.settledAt).not.toBeNull();
+ expect(await phaseOf(f,r.id)).toBe('RECEIVED');expect(kinds(row.history)).toEqual(expect.arrayContaining(['RECEIPT','SETTLE']));
+ }finally{await f.cleanup();}
+});
+it('receipt without settleRemainder leaves 1.50 waiting',async()=>{
+ const f=await setup();try{const r=await sentTwenty(f);
+ const out=await rcpt(f,r.id,'18.50');expect(out).toMatchObject({settled:false,shortfall:null});
+ const row=await f.req(r.id);expect(row.settledAt).toBeNull();expect(await phaseOf(f,r.id)).toBe('WAITING');
+ }finally{await f.cleanup();}
+});
+it('settleRemainder on a full receipt settles nothing',async()=>{
+ const f=await setup();try{const r=await sentTwenty(f);
+ expect(await rcpt(f,r.id,'20',{settleRemainder:true})).toMatchObject({settled:false,shortfall:null});
+ expect((await f.req(r.id)).settledAt).toBeNull();expect(await phaseOf(f,r.id)).toBe('RECEIVED');
+ }finally{await f.cleanup();}
+});
+async function receiptOnly(f:Awaited<ReturnType<typeof setup>>){
+ await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.worker.projectId}},data:{capabilities:['PAYPAL_RECEIPT_RECORD']}});
+ return {...f.worker,capabilities:['PAYPAL_RECEIPT_RECORD']} as typeof f.worker;
+}
+it('settleRemainder works for a receipt-only recorder',async()=>{
+ const f=await setup();try{const w=await receiptOnly(f);const r=await sentTwenty(f);
+ expect(await rcpt(f,r.id,'18.50',{settleRemainder:true},w)).toMatchObject({settled:true,shortfall:'1.50'});
+ expect(await phaseOf(f,r.id)).toBe('RECEIVED');expect((await f.req(r.id)).settledById).toBe(w.userId);
+ }finally{await f.cleanup();}
+});
+it('a standalone SETTLE still needs writeMoney',async()=>{
+ const f=await setup();try{const w=await receiptOnly(f);const r=await sentTwenty(f);await rcpt(f,r.id,'18.50');
+ await expect(updatePayoutRequest(w,{key:randomUUID(),requestId:r.id,expectedRevision:(await f.req(r.id)).revision,action:'SETTLE',note:'phí'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
+ }finally{await f.cleanup();}
+});
+it('a late receipt on LOST_SUS reopens and records it',async()=>{
+ const f=await setup();try{const r=await sentTwenty(f);await rcpt(f,r.id,'5');
+ await db.earnPayoutRequest.update({where:{id:r.id},data:{state:'LOST_SUS',lostAmount:'15',lostAt:new Date()}});
+ expect(await phaseOf(f,r.id)).toBe('LOST');
+ await rcpt(f,r.id,'15');
+ const row=await f.req(r.id);expect(row).toMatchObject({state:'REQUESTED',lostAmount:null,lostAt:null});
+ expect(await phaseOf(f,r.id)).toBe('RECEIVED');expect(JSON.stringify(row.history)).toContain('Tiền về muộn sau SUS');
  }finally{await f.cleanup();}
 });

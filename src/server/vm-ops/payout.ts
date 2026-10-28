@@ -139,7 +139,7 @@ export async function suggestPayout(scope:ActorScope,input:{earnAppId:string;amo
 //   open; nothing is settled short automatically; "received in full" follows from the book;
 // - a payment id is recorded once (any key); without one, a receipt with the same email, day and amount is a possible duplicate and
 //   is refused (a person decides "khoản riêng" in Kho tài khoản); the period lock applies.
-export interface PayoutReceiptInput {key:string;requestId:string;expectedRequestRevision:number;amount:string;currency:string;receivedAt:string;transactionId?:string|null;evidence?:string|null}
+export interface PayoutReceiptInput {key:string;requestId:string;expectedRequestRevision:number;amount:string;currency:string;receivedAt:string;transactionId?:string|null;evidence?:string|null;/** Owner 28/10/2026: the real PayPal amount is always below the withdrawn one (fees); true settles the rest as a fee in this same command. */settleRemainder?:boolean}
 export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptInput,db:PrismaClient=prisma){
   const authorize=async(tx:Tx)=>{const r=await payoutRights(scope,tx);if(!r.receipt)throw new ProxyDomainError('FORBIDDEN','Ghi tiền về PP cần quyền ghi Tiền vào PayPal hoặc quyền "Ghi khoản nhận PP của yêu cầu rút"');return r.current;};
   return runBusinessCommand(scope,{key:input.key,payload:input,kind:'EARN_PAYOUT_RECEIPT',module:'FUNDS',authorize},async(tx,images,current)=>{
@@ -148,7 +148,7 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     const refuse=(m:string)=>{throw new ProxyDomainError('INVALID_INPUT',m,'VALIDATION',{submission:r.submission,state:r.state});};
     if(r.submission==='PREPARING')refuse('Yêu cầu chưa được ghi là đã gửi trên EarnApp; chưa nhận tiền cho yêu cầu này');
     if(r.submission==='UNKNOWN')refuse('Yêu cầu đang "chưa xác định kết quả gửi": đối chiếu lịch sử EarnApp và ghi đã gửi trước khi ghi tiền về');
-    if(r.state!=='REQUESTED')refuse('Yêu cầu đã đánh dấu '+(r.state==='FAILED'?'thất bại':'huỷ')+'; đối chiếu ở Lịch sử VM trước');
+    if(r.state!=='REQUESTED'&&r.state!=='LOST_SUS')refuse('Yêu cầu đã đánh dấu '+(r.state==='FAILED'?'thất bại':'huỷ')+'; đối chiếu ở Lịch sử VM trước');
     if(r.paypal.archivedAt)refuse('PP '+r.paypal.code+' không còn trong kho');
     const currency=currencyOf(input.currency);if(currency!==r.currency)refuse('Yêu cầu rút bằng '+r.currency+'; khoản về bằng '+currency+' cần đối chiếu ở Kho tài khoản');
     const amount=ledgerAmount(input.amount,'Số tiền thực nhận'),at=new Date(input.receivedAt);
@@ -160,7 +160,9 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     else{const same=await tx.fundTransaction.findFirst({where:{projectId:scope.projectId,paypalEmailId:r.paypalEmailId,date,currency,amount,voidedAt:null,entryKind:'RECEIPT'},select:{id:true}});
       if(same)throw new ProxyDomainError('INVALID_INPUT','Đã có khoản cùng email, cùng ngày, cùng số tiền và không có mã giao dịch để phân biệt; đối chiếu ở Kho tài khoản (Khoản riêng do người xác nhận)','DUPLICATE',{receiptId:same.id});}
     // After the duplicate checks (a payment already recorded is reported as such, not as "over what is open").
-    const m=moneyOfRequest(r),open=toCents(m.remaining)-toCents(m.pendingLinked);
+    // Late money after SUS (28/10/2026): the request is reopened (the lost part is no longer lost) and the receipt recorded below.
+    const late=r.state==='LOST_SUS';
+    const m=moneyOfRequest(late?{...r,state:'REQUESTED'}:r),open=toCents(m.remaining)-toCents(m.pendingLinked);
     if(m.phase!=='WAITING')refuse(m.phase==='RECEIVED'?'Yêu cầu đã nhận đủ theo sổ':'Yêu cầu cần đối chiếu (nhận vượt hoặc khác đồng tiền)');
     if(toCents(amount.toFixed(2))>open)refuse('Khoản này vượt phần còn chờ ('+fromCents(open)+' '+r.currency+'); đối chiếu trước khi ghi');
     await assertPeriodOpen(tx,scope.projectId,date,currency);
@@ -170,8 +172,19 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     const f=await tx.fundTransaction.create({data:{payoutRequestId:r.id,projectId:scope.projectId,date,amount,currency,transactionId:txId||'OPS-'+input.key,noTxId:!txId,confirmed:true,failed:false,company:'',paypalId:r.paypalId,paypalEmailId:r.paypalEmailId,earnAppId:r.earnAppId,vmId:r.vmId,serverId:vm?.serverId??null,entryKind:'RECEIPT',businessManaged:true,createdById:current.userId,notes:'Nhận lúc '+at.toISOString()+(evidence?' · '+evidence:'')}});
     await images.remember('FUND',f.id,true);
     await tx.payPalAccount.update({where:{id:r.paypalId},data:{revision:{increment:1}}});await tx.payPalEmail.update({where:{id:r.paypalEmailId},data:{revision:{increment:1}}});
-    await tx.earnPayoutRequest.update({where:{id:r.id},data:{revision:{increment:1},history:[...(r.history as Prisma.JsonArray),{...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()}]}});
-    return {receiptId:f.id,requestId:r.id,vmId:r.vmId,cycle:r.cycle,earnAppId:r.earnAppId,paypalEmailId:r.paypalEmailId,amount:amount.toFixed(2),currency,receivedOn:dayText(date),receivedAt:at.toISOString(),transactionId:txId};
+    const history:Prisma.JsonArray=[...(r.history as Prisma.JsonArray)];
+    const data:Prisma.EarnPayoutRequestUncheckedUpdateInput={revision:{increment:1}};
+    if(late){Object.assign(data,{state:'REQUESTED',lostAmount:null,lostAt:null});history.push(historyEntry(current.userId,'RECEIPT','Tiền về muộn sau SUS: yêu cầu mở lại (trước đó mất '+(r.lostAmount?.toFixed(2)??m.remaining)+' '+currency+')'));}
+    history.push({...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()});
+    // Settle the rest as a fee in the same command (anyone who may record the receipt; a standalone SETTLE still needs writeMoney).
+    const gap=open-toCents(amount.toFixed(2));let shortfall:string|null=null;
+    if(input.settleRemainder&&gap>0){
+      shortfall=fromCents(gap);const note='Phí / thiếu '+shortfall.replace('.',',')+' '+currency;
+      Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall:D(shortfall)});
+      history.push(historyEntry(current.userId,'SETTLE','Chốt nhận '+fromCents(toCents(m.received)+toCents(amount.toFixed(2)))+' '+currency+', thiếu '+shortfall+': '+note));
+    }
+    await tx.earnPayoutRequest.update({where:{id:r.id},data:{...data,history}});
+    return {settled:shortfall!==null,shortfall,receiptId:f.id,requestId:r.id,vmId:r.vmId,cycle:r.cycle,earnAppId:r.earnAppId,paypalEmailId:r.paypalEmailId,amount:amount.toFixed(2),currency,receivedOn:dayText(date),receivedAt:at.toISOString(),transactionId:txId};
   },db);
 }
 // ─── Commands ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
