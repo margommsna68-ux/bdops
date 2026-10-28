@@ -1,7 +1,7 @@
 import type {Prisma,PrismaClient,VmOpsStatus} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encrypt} from '@/lib/encryption';
-import {VM_OPS,VM_OPS_STATUSES,opsLabel,requestMoney} from '@/lib/vm-ops';
+import {VM_OPS,VM_OPS_STATUSES,opsLabel,recreateReason,requestMoney} from '@/lib/vm-ops';
 import {ProxyDomainError,isShared,type ActorScope} from '../proxy-management/types';
 import {decodeEndpoint} from '../proxy-management/repository';
 import {runBusinessCommand,type BusinessCollector} from '../business-management/idempotency';
@@ -121,15 +121,13 @@ export function moneyOfRequest(r:{amount:Prisma.Decimal;currency:string;state:st
 export async function recreateRule(tx:Tx|PrismaClient,projectId:string,vm:{id:string;operation:{cycle:number;status:VmOpsStatus|null}|null}):Promise<{refusal:string|null;reason:'PAYOUT_RECEIVED'|'SUSPENDED'|null}>{
   const cycle=vm.operation?.cycle??1;
   const {earnApp,request,money}=await currentRoundPayout(tx,projectId,vm);
-  const paid=!!request&&money?.phase==='RECEIVED'&&!request.consumedAt,sus=vm.operation?.status==='SUSPENDED'||request?.state==='LOST_SUS';
-  const merged=!request||request.state!=='REQUESTED'?await memberOf(tx,projectId,vm.id,cycle):null,mFree=!!merged&&!merged.member.consumedAt;
-  const mPaid=mFree&&merged!.money.phase==='RECEIVED',mSus=mFree&&!mPaid&&merged!.primarySus,viaMember=mPaid||mSus;
-  if(merged&&!viaMember&&!sus){
+  const merged=!request||request.state!=='REQUESTED'?await memberOf(tx,projectId,vm.id,cycle):null;
+  const reason=recreateReason({status:vm.operation?.status??null,own:request&&money?{state:request.state,phase:money.phase,consumed:!!request.consumedAt}:null,member:merged?{consumed:!!merged.member.consumedAt,phase:merged.money.phase,primarySus:merged.primarySus}:null});
+  if(merged&&!reason){
     const m=merged.money,why=merged.member.consumedAt?'Khoản gộp này đã dùng để tạo lại VM':m.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':m.phase==='REVIEW'?'Tiền về cần đối chiếu trước':m.phase==='LOST'?'Khoản gộp đã mất do SUS':'Lệnh rút chưa xong';
     return {refusal:'VM đã gộp vào lệnh rút của '+merged.primaryWhere+': '+why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp của VM chính bị SUS',reason:null};
   }
-  if(paid||mPaid)return {refusal:null,reason:'PAYOUT_RECEIVED'};
-  if(sus||viaMember)return {refusal:null,reason:'SUSPENDED'};
+  if(reason)return {refusal:null,reason};
   const why=!earnApp?'VM chưa có tài khoản EarnApp ở lượt này':!request?'Chưa có yêu cầu rút cho lượt này':request.consumedAt?'Khoản nhận này đã dùng để tạo lại VM':money?.phase==='WAITING'?'Tiền chưa về đủ PP (còn chờ)':money?.phase==='REVIEW'?'Tiền về cần đối chiếu trước':(request.state==='LOST_SUS'?'Yêu cầu rút đã mất do SUS':'Yêu cầu rút đang '+(request.state==='FAILED'?'thất bại':'huỷ'));
   return {refusal:why+'. Chỉ ghi tạo lại khi tiền đã về đủ PP, hoặc khi EarnApp bị SUS',reason:null};
 }

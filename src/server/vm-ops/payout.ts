@@ -1,7 +1,7 @@
 import {Prisma,type PrismaClient} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {vmWhere,assertScopedVmIds,hasServerScope} from '../permissions/server-scope';
-import {fromCents,gatherOf,milestoneOf,suggestPaypal,toCents} from '@/lib/vm-ops';
+import {fromCents,gatherOf,milestoneOf,recreateReady,suggestPaypal,toCents} from '@/lib/vm-ops';
 import {ProxyDomainError,type ActorScope} from '../proxy-management/types';
 import {loadInfrastructureScope} from '../permissions/infrastructure';
 import {assertInfrastructureAction} from '../permissions/infrastructure';
@@ -340,18 +340,28 @@ export async function readVmOps(scope:ActorScope,db:PrismaClient=prisma){
   // Merged payout (27/10/2026): a member VM shows the request it was merged into (this round); a primary lists its members.
   const cycleOf=new Map(vms.map(v=>[v.id,v.operation?.cycle??1]));
   const asMember=(await db.earnPayoutMember.findMany({where:{projectId:scope.projectId,removedAt:null,vmId:{in:vms.map(v=>v.id)},request:{state:'REQUESTED'}},include:{request:{include:requestInclude}}})).filter(m=>cycleOf.get(m.vmId)===m.cycle);
+  // Members of a payout lost to SUS follow their primary (memberOf): the queue "Chờ tạo lại" reads them in the same batch.
+  const lostMembers=(await db.earnPayoutMember.findMany({where:{projectId:scope.projectId,removedAt:null,vmId:{in:vms.map(v=>v.id)},request:{state:'LOST_SUS'}},orderBy:{createdAt:'desc'},include:{request:{include:{...requestInclude,earnApp:{select:{closedReason:true}}}}}})).filter(m=>cycleOf.get(m.vmId)===m.cycle);
+  const memberPrimaries=[...asMember,...lostMembers].map(m=>m.request.vmId);
+  const primaryOps=new Map((await db.vmOperation.findMany({where:{vmId:{in:[...new Set(memberPrimaries)]}},select:{vmId:true,cycle:true,status:true}})).map(o=>[o.vmId,o]));
+  const primaryClosed=new Map((await db.earnAppAccount.findMany({where:{id:{in:asMember.map(m=>m.request.earnAppId)}},select:{id:true,closedReason:true}})).map(e=>[e.id,e.closedReason]));
+  const memberReady=(vmId:string)=>{
+    const m=asMember.find(x=>x.vmId===vmId)??lostMembers.find(x=>x.vmId===vmId);if(!m)return null;
+    const r=m.request,ops=primaryOps.get(r.vmId),closed=r.state==='LOST_SUS'?'SUSPENDED':primaryClosed.get(r.earnAppId);
+    return {consumed:!!m.consumedAt,phase:moneyOfRequest(r).phase,primarySus:r.state==='LOST_SUS'||closed==='SUSPENDED'||(ops?.status==='SUSPENDED'&&ops.cycle===r.cycle)};
+  };
   const primaryIds=vms.map(v=>v.earnApp?.payoutRequest?.id).filter((x):x is string=>!!x);
   const ofPrimary=await db.earnPayoutMember.findMany({where:{projectId:scope.projectId,removedAt:null,requestId:{in:primaryIds}},orderBy:{createdAt:'asc'}});
   const names=new Map((await db.virtualMachine.findMany({where:{id:{in:[...new Set([...asMember.map(m=>m.request.vmId),...ofPrimary.map(m=>m.vmId)])]}},select:{id:true,code:true,server:{select:{code:true}}}})).map(v=>[v.id,v.server.code+' / '+v.code]));
   const requestView=(r:NonNullable<NonNullable<typeof vms[number]['earnApp']>['payoutRequest']>,m:ReturnType<typeof moneyOfRequest>)=>({id:r.id,revision:r.revision,cycle:r.cycle,earnAppId:r.earnAppId,state:r.state,submission:r.submission,submittedAt:r.submittedAt?.toISOString()??null,stateNote:money?r.stateNote:null,phase:m.phase,paypalId:r.paypal.id,paypal:r.paypal.code,email:r.paypalEmail.email,emailId:r.paypalEmail.id,requestedAt:dayText(r.requestedAt),reference:money?r.reference:null,settled:!!r.settledAt,
-    money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,pendingLinked:m.pendingLinked,remaining:m.remaining,shortfall:r.shortfall?.toFixed(2)??null,settleNote:r.settleNote}:null});
+    money:money?{lost:r.lostAmount?.toFixed(2)??null,amount:r.amount.toFixed(2),currency:r.currency,received:m.received,pendingLinked:m.pendingLinked,remaining:m.remaining,shortfall:r.shortfall?.toFixed(2)??null,settleNote:r.settleNote}:null});
   // money = amounts of payout requests (PayPal money readers, or EARN_PAYOUT / PAYPAL_RECEIPT_RECORD); book = the PayPal book itself.
   return {rights:{money,book,writeMoney,assign,payout,receipt,balanceRead:bal.read,balanceWrite:bal.write},vms:vms.map(v=>{
     const cycle=v.operation?.cycle??1,own=v.earnApp?.payoutRequest&&v.earnApp.payoutRequest.cycle===cycle&&v.earnApp.payoutRequest.vmId===v.id?v.earnApp.payoutRequest:null;
     const mem=own?null:asMember.find(x=>x.vmId===v.id)??null,r=own??mem?.request??null,m=r?moneyOfRequest(r):null;
     const members=own?ofPrimary.filter(x=>x.requestId===own.id):[];
     const merge:MergeView=mem?{role:'MEMBER',primaryVmId:mem.request.vmId,primaryWhere:names.get(mem.request.vmId)??'',consumed:!!mem.consumedAt}:members.length?{role:'PRIMARY',members:members.map(x=>({vmId:x.vmId,where:names.get(x.vmId)??'',share:money?x.shareAmount?.toFixed(2)??null:null,consumed:!!x.consumedAt}))}:null;
-    return {vmId:v.id,cycle,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null,balance:balances.get(v.id)??{latest:null,lastOk:null},status:v.operation?.status??null,statusAt:v.operation?.statusAt?.toISOString()??null,statusBy:who(v.operation?.statusById),milestone:milestoneOf(m&&{phase:m.phase,consumed:mem?!!mem.consumedAt:!!r!.consumedAt,submission:r!.submission}),
+    return {vmId:v.id,cycle,earnAppId:v.earnApp&&!v.earnApp.closedAt?v.earnApp.id:null,balance:balances.get(v.id)??{latest:null,lastOk:null},status:v.operation?.status??null,statusAt:v.operation?.statusAt?.toISOString()??null,statusBy:who(v.operation?.statusById),milestone:recreateReady({status:v.operation?.status??null,own:own&&m?{state:own.state,phase:m.phase,consumed:!!own.consumedAt}:null,member:memberReady(v.id)})?'RECREATE':milestoneOf(m&&{phase:m.phase,consumed:mem?!!mem.consumedAt:!!r!.consumedAt,submission:r!.submission}),
       merge,request:r?requestView(r,m!):null};
   })};
 }

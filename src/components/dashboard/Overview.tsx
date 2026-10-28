@@ -90,11 +90,13 @@ function Row({href,label,count,tone,children}:{href:string;label:string;count:nu
 // Short list of what needs handling now: broken proxies, VMs to check, packages to pay, install tasks left open at a VM.
 function Attention({ops}:{ops:Ops}){
   const overdue=ops.packages.filter(p=>p.daysLeft<0).length,blocked=ops.stock.rows.reduce((a,r)=>a+r.BLOCKED,0);
-  const clear=!blocked&&!ops.totals.REVIEW&&!ops.packages.length&&!ops.totals.BLOCKED;
+  const q=ops.queue,clear=!blocked&&!ops.totals.REVIEW&&!ops.packages.length&&!ops.totals.BLOCKED&&!q?.recreate&&!q?.preparing;
   return <section className="pm-surface ov-card ov-side" aria-labelledby="ov-attention"><div className="ov-card-head"><h2 id="ov-attention">Cần xử lý</h2></div>
     {clear?<p className="ov-empty">Không có việc cần xử lý.</p>:<ul className="ov-list">
       {blocked>0&&<Row href={links.proxies({state:'BLOCKED'})} label="Proxy BLOCKED" count={blocked} tone="red"><small className="ov-sub">báo nhà cung cấp hoặc nhận replace</small></Row>}
       {ops.totals.BLOCKED>0&&<Row href={links.vms({view:'BLOCKED'})} label="VM dùng proxy Blocked" count={ops.totals.BLOCKED} tone="red"><small className="ov-sub">bấm ô Proxy để thay</small></Row>}
+      {!!q?.recreate&&<Row href={links.vms({money:'RECREATE'})} label="Chờ tạo lại" count={q.recreate} tone="amber"><small className="ov-sub">tiền đã về hoặc EarnApp SUS</small></Row>}
+      {!!q?.preparing&&<Row href={links.vms({money:'PREPARING'})} label="Đang rút, chưa xác nhận" count={q.preparing} tone="blue"/>}
       {ops.totals.REVIEW>0&&<Row href={links.vms({view:'REVIEW'})} label="VM cần kiểm tra" count={ops.totals.REVIEW} tone="amber"/>}
       {ops.packages.length>0&&<Row href={links.packages()} label="Gói proxy cần thanh toán" count={ops.packages.length} tone={overdue?'red':'amber'}>{overdue?<small className="ov-sub">{overdue} quá hạn</small>:null}</Row>}
       {ops.packages.slice(0,3).map(p=><li key={p.id}><Link href={p.link} className={'ov-row ov-row-child ov-'+(p.severity==='error'?'red':p.severity==='warning'?'amber':'blue')}><span className="ov-row-label">{p.title}</span><ChevronRight size={14} className="pm-muted shrink-0"/></Link></li>)}

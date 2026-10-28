@@ -22,7 +22,7 @@ export const NO_STATUS_LABEL='Chưa ghi';
 export const opsLabel=(s:VmOpsStatus|null|undefined)=>s?VM_OPS[s].label:NO_STATUS_LABEL;
 // Money milestone of the current round (computed from the payout request and the PayPal book, never picked by hand).
 export type Milestone=''|'WAITING'|'RECREATE'|'MONEY_REVIEW'|'FAILED'|'PREPARING'|'UNKNOWN'|'LOST';
-export const MILESTONE_LABEL:Record<Exclude<Milestone,''>,string>={WAITING:'Chờ tiền về',RECREATE:'Chờ tạo lại',MONEY_REVIEW:'Cần đối chiếu tiền',FAILED:'Rút thất bại / huỷ',PREPARING:'Đang chuẩn bị rút',UNKNOWN:'Chưa xác định kết quả rút',LOST:'Mất do SUS'};
+export const MILESTONE_LABEL:Record<Exclude<Milestone,''>,string>={WAITING:'Chờ tiền về',RECREATE:'Chờ tạo lại',MONEY_REVIEW:'Cần đối chiếu tiền',FAILED:'Rút thất bại / huỷ',PREPARING:'Đang rút, chưa xác nhận',UNKNOWN:'Chưa xác định kết quả rút',LOST:'Mất do SUS'};
 // "Cần xử lý trước": SUS, proxy BLOCKED, Earn/VM lỗi, needs recreating, OFF, waiting for money, then the preparation steps and OK.
 export function opsPriority(v:{status:VmOpsStatus|null;proxyBlocked:boolean;milestone:Milestone}){
   if(v.status==='SUSPENDED')return 0;
@@ -34,6 +34,21 @@ export function opsPriority(v:{status:VmOpsStatus|null;proxyBlocked:boolean;mile
   if(v.milestone==='WAITING'||v.milestone==='PREPARING')return 5;
   return ({NEW_VM:6,MAIL_LOGGED:7,NOT_LINKED:8,LINKED:9} as Record<string,number>)[v.status||'']??(v.status==='OK'?11:10);
 }
+/**
+ * The single "may this VM be recreated now" decision (owner 28/10/2026), shared by recreateRule / recordRecreated and the board's
+ * "Chờ tạo lại" queue. Recreate is allowed when the payout of this round was received in full and not consumed (own request, or the
+ * merged payout this VM is a member of), or when the EarnApp is SUS: VM status SUSPENDED, its own request lost to SUS, or the primary
+ * of its merged payout is SUS. `member` is looked at only when the VM has no live own request (a merged member keeps its own EarnApp).
+ */
+export interface RecreateInput {status:string|null;own:{state:string;phase:RequestPhase;consumed:boolean}|null;member:{consumed:boolean;phase:RequestPhase;primarySus:boolean}|null}
+export function recreateReason(i:RecreateInput):'PAYOUT_RECEIVED'|'SUSPENDED'|null{
+  const o=i.own,paid=!!o&&o.phase==='RECEIVED'&&!o.consumed,sus=i.status==='SUSPENDED'||o?.state==='LOST_SUS';
+  const m=!o||o.state!=='REQUESTED'?i.member:null,mFree=!!m&&!m.consumed,mPaid=mFree&&m!.phase==='RECEIVED',mSus=mFree&&!mPaid&&m!.primarySus;
+  if(paid||mPaid)return 'PAYOUT_RECEIVED';
+  if(sus||mSus)return 'SUSPENDED';
+  return null;
+}
+export const recreateReady=(i:RecreateInput):boolean=>recreateReason(i)!==null;
 // ─── Money (cents) ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 export const toCents=(v:string|number)=>{const t=String(v).trim(),neg=t.startsWith('-'),[i,d='']=(neg?t.slice(1):t).split('.');return (neg?-1:1)*(Number(i)*100+Number((d+'00').slice(0,2)));};
 export const fromCents=(c:number)=>{const neg=c<0,a=Math.abs(c);return (neg?'-':'')+Math.floor(a/100)+'.'+String(a%100).padStart(2,'0');};

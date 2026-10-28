@@ -12,7 +12,8 @@ export interface VmFacts {
   id:string;serverId:string;server:string;code:string;archived:boolean;serverArchived:boolean;
   view:VMView;applyPending:boolean;todo:boolean;noSdk:boolean;
   hasAccount:boolean|null;hasPaypal:boolean|null;            // null = EarnApp accounts not loaded
-  opsKey:OpsFilter;milestone:Milestone|null;moneyFlags:Record<MoneyFlag,boolean>|null; // null = operating board not loaded
+  opsKey:OpsFilter;milestone:Milestone|null;requestPhase?:string|null; // phase of the current-round request (SUS_WAITING)
+  moneyFlags:Record<MoneyFlag,boolean>|null; // null = operating board not loaded
   vmMoney:VmMoneyKind;                                       // Tiền VM comes with the workspace, so it is always known
   text:string;                                               // lower-cased search text (server, VM, note, IPs, SDK codes, account)
 }
@@ -39,7 +40,8 @@ function moneyMatch(f:VmFacts,money:MoneyFilter):Tri{
     case 'STALE':return f.vmMoney==='STALE'||f.vmMoney==='FAILED_STALE';
     case 'VM_FAILED':return f.vmMoney==='FAILED'||f.vmMoney==='FAILED_STALE';
     case 'NONE':return f.milestone==null?null:!f.milestone;
-    case 'WAITING':case 'RECREATE':case 'MONEY_REVIEW':case 'FAILED':return f.milestone==null?null:f.milestone===money;
+    case 'SUS_WAITING':return f.milestone==null?null:f.opsKey==='SUSPENDED'&&f.requestPhase==='WAITING';
+    case 'WAITING':case 'RECREATE':case 'PREPARING':case 'LOST':case 'MONEY_REVIEW':case 'FAILED':return f.milestone==null?null:f.milestone===money;
     default:return f.moneyFlags==null?null:f.moneyFlags[money];
   }
 }

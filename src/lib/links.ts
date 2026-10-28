@@ -21,7 +21,7 @@ export function readPeriod(p:{get(name:string):string|null},fallbackMonth:string
 export const links={
   dashboard:()=>'/dashboard',
   // Server / VM grid. The server is in the path; vm + tab open the side panel on that VM (same keys as grid-model writeGridUrl).
-  vms:(o:{serverId?:string|null;view?:VmView;q?:string;vm?:string|null;tab?:VmTab}={})=>(o.serverId?'/infrastructure/servers/'+encodeURIComponent(o.serverId):'/infrastructure/servers')+query({q:o.q,view:o.view,vm:o.vm,tab:o.vm&&o.tab&&o.tab!=='overview'?o.tab:undefined}),
+  vms:(o:{serverId?:string|null;view?:VmView;money?:'RECREATE'|'PREPARING'|'LOST'|'SUS_WAITING';q?:string;vm?:string|null;tab?:VmTab}={})=>(o.serverId?'/infrastructure/servers/'+encodeURIComponent(o.serverId):'/infrastructure/servers')+query({q:o.q,view:o.view,money:o.money,vm:o.vm,tab:o.vm&&o.tab&&o.tab!=='overview'?o.tab:undefined}),
   // Proxy registry: ?q &servers &group &state &package &tab (current is the default tab) &page. servers uses 'none' for unassigned.
   proxies:(o:{q?:string;group?:ProxyGroupKey|string;state?:ProxyStateKey|string;package?:string;servers?:string[];tab?:ProxyTab;pay?:string;page?:number;batch?:string}={})=>'/infrastructure/proxies'+query({q:o.q,servers:o.servers?.length?o.servers.join(','):undefined,group:o.group,state:o.state,package:o.package,tab:o.tab&&o.tab!=='current'?o.tab:undefined,page:o.page&&o.page>1?o.page:undefined,pay:o.pay,batch:o.batch}),
   // Proxy packages: the package list (Thiết lập → Gói proxy) on the registry, due ones first, or the payment form of one package.

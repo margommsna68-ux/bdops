@@ -2,7 +2,7 @@ import {afterAll,it,expect} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import type {VirtualMachine,EarnAppAccount,PayPalEmail} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
-import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal} from '@/server/vm-ops/payout';
+import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal,readVmOps} from '@/server/vm-ops/payout';
 import {readPayoutReport} from '@/server/vm-ops/payout-report';
 import {recordRecreated,recreateRule,setVmStatus} from '@/server/vm-ops/ops';
 import {memberOf} from '@/server/vm-ops/payout-members';
@@ -202,5 +202,32 @@ it('SUS then recordRecreated: EarnApp closed SUSPENDED, the round closed without
  expect(await db.vmCycle.findFirstOrThrow({where:{vmId:a.vm.id,number:1}})).toMatchObject({reason:'SUSPENDED',payoutRequestId:null});
  expect(await f.ops(0)).toMatchObject({cycle:2,status:'NEW_VM'});
  expect(await f.req(r.id)).toMatchObject({state:'LOST_SUS',consumedAt:null});
+ }finally{await f.cleanup();}
+});
+
+// ─── Task 6: the board queue "Chờ tạo lại" equals what recreateRule allows ─────────────────────────────────────────────────
+it('board shows RECREATE for paid, SUS and merged-SUS members, nothing for waiting',async()=>{
+ const f=await setup(5);try{
+ // 0: paid in full, 1: waiting (SENT, nothing yet), 2: SUS primary with member 3, 4: waiting primary with member
+ const paid=await f.create(0,'10','SENT');await f.receipt(paid.id,'10');
+ // other PayPal codes: the 2 emails / day limit is per PP code
+ for(const i of [1,4]){const pp2=await db.payPalAccount.create({data:{projectId:f.scope.projectId,code:'PP-sus-b'+i,primaryEmail:randomUUID()+'@example.invalid'}});await db.payPalEmail.update({where:{id:f.rows[i].email.id},data:{paypalId:pp2.id}});}
+ await f.create(1,'10','SENT');
+ await f.create(2,'20','SENT',{members:[{vmId:f.rows[3].vm.id,expectedCycle:1}]});await f.sus(2);
+ const board=async()=>new Map((await readVmOps(f.scope,db)).vms.map(v=>[v.vmId,v.milestone]));
+ const m=await board();
+ expect(m.get(f.rows[0].vm.id)).toBe('RECREATE');
+ expect(m.get(f.rows[1].vm.id)).toBe('WAITING');
+ expect(m.get(f.rows[2].vm.id)).toBe('RECREATE');
+ expect(m.get(f.rows[3].vm.id)).toBe('RECREATE');
+ expect(m.get(f.rows[4].vm.id)).toBe('');
+ // every VM the board queues is allowed by recreateRule, and nothing else is
+ for(const [i,row] of f.rows.entries()){const rule=await recreateRule(db,f.scope.projectId,await f.vmOps(i));expect(m.get(row.vm.id)==='RECREATE').toBe(rule.refusal===null);}
+ }finally{await f.cleanup();}
+});
+it('a VM recorded SUS by hand (no request) is queued for recreation',async()=>{
+ const f=await setup(1);try{
+ await setVmStatus(f.scope,{key:randomUUID(),items:[{vmId:f.rows[0].vm.id,status:'SUSPENDED',expectedCycle:1}]},db);
+ expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)?.milestone).toBe('RECREATE');
  }finally{await f.cleanup();}
 });

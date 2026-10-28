@@ -14,6 +14,7 @@ import {assertBusinessArea} from '../business-management/scope';
 import {dayText,period} from '../business-management/money';
 import {CashDecimal} from '../business-management/usdt-money';
 import {readBusinessPulse} from './pulse';
+import {readVmOps} from '../vm-ops/payout';
 import {hasServerScope} from '../permissions/server-scope';
 // Dashboard read model (MoneyToHome Proxy / VM). Giao việc and Việc cài proxy are hidden modules (src/lib/features.ts): no work
 // block here. Since 19/10/2026 there is no install step: VMs are counted as with a proxy, with a Blocked proxy, to review or missing.
@@ -53,6 +54,9 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
   const vms=workspace.vms.filter(v=>!v.archivedAt&&active.has(v.serverId));
   const perServer=servers.map(s=>{const own=vms.filter(v=>v.serverId===s.id),b:Record<VmBucket,number>={ASSIGNED:0,BLOCKED:0,REVIEW:0,MISSING:0};for(const v of own){const k=vmView(v);if(k!=='ARCHIVED')b[k]++;}return {id:s.id,code:s.code,total:own.length,...b};});
   const sum=(k:VmBucket)=>perServer.reduce((a,s)=>a+s[k],0);
+  // Money queue of the Server / VM board (same milestone the grid chips filter by); null when the board cannot be read.
+  const board=await maybe(()=>readVmOps(scope,db)),ids=new Set(vms.map(v=>v.id));
+  const queue=board?{recreate:board.vms.filter(v=>ids.has(v.vmId)&&v.milestone==='RECREATE').length,preparing:board.vms.filter(v=>ids.has(v.vmId)&&v.milestone==='PREPARING').length}:null;
   const accountOf=new Map((accounts||[]).map(a=>[a.vmId,a.earnApp]));
   // Gaps overlap (a VM without an account has no PayPal either); they are never added up into one "VM lỗi" number.
   const gaps={noSdk:vms.filter(v=>!v.sdks.length&&!v.sdk).length,noAccount:accounts?vms.filter(v=>!accountOf.get(v.id)).length:null,noPaypal:accounts?vms.filter(v=>!accountOf.get(v.id)?.paypal).length:null};
@@ -69,6 +73,7 @@ async function readOperations(scope:ActorScope,db:PrismaClient,now:Date,costs:bo
     servers:perServer,
     totals:{servers:servers.length,vms:vms.length,ASSIGNED:sum('ASSIGNED'),BLOCKED:sum('BLOCKED'),REVIEW:sum('REVIEW'),MISSING:sum('MISSING')},
     gaps,
+    queue,
     stock:{rows:Array.from(stock.values()),total:registry.rows.length,ready:{autofill:autofill.length,sharedManual:manual.filter(m=>m.shared).length}},
     packages:reminders.map(r=>{const p=packages.find(p=>p.id===r.packageId)!;return {id:r.packageId,code:r.code,title:r.title,severity:r.severity,daysLeft:r.daysLeft,link:r.link,dueAt:r.createdAt.toISOString(),amount:costs?p.price?.toString()??null:null,currency:costs?p.priceCurrency:null};}),
   };
