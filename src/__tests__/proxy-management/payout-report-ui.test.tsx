@@ -2,15 +2,15 @@
 import React,{act} from 'react';
 import {afterEach,beforeEach,it,expect,vi} from 'vitest';
 import {createRoot,type Root} from 'react-dom/client';
-const mock=vi.hoisted(()=>({query:vi.fn(),replace:vi.fn(),params:new URLSearchParams(),board:vi.fn(),receipt:vi.fn(),update:vi.fn()}));
+const mock=vi.hoisted(()=>({voided:vi.fn(),query:vi.fn(),replace:vi.fn(),params:new URLSearchParams(),board:vi.fn(),receipt:vi.fn(),update:vi.fn()}));
 vi.mock('next/navigation',()=>({useRouter:()=>({replace:mock.replace}),useSearchParams:()=>mock.params}));
 vi.mock('next/link',()=>({default:({children,...props}:React.AnchorHTMLAttributes<HTMLAnchorElement>)=><a {...props}>{children}</a>}));
 vi.mock('@/components/vm-management/vm-grid/PayoutFrame',()=>({PayoutFrameForVm:()=> <div data-testid="status-editor">Rút về PayPal</div>}));
-vi.mock('@/lib/trpc',()=>({trpc:{vmOps:{payoutReport:{useQuery:mock.query},board:{useQuery:mock.board},updatePayout:{useMutation:()=>({mutateAsync:mock.update})},payoutReceipt:{useMutation:()=>({mutateAsync:mock.receipt})}}}}));
+vi.mock('@/lib/trpc',()=>({trpc:{vmOps:{payoutVoided:{useQuery:mock.voided},payoutReport:{useQuery:mock.query},board:{useQuery:mock.board},updatePayout:{useMutation:()=>({mutateAsync:mock.update})},payoutReceipt:{useMutation:()=>({mutateAsync:mock.receipt})}}}}));
 import {PayoutReportWorkspace} from '@/components/business-management/PayoutReportWorkspace';
 let root:Root,host:HTMLDivElement;
 const report=()=>({rights:{manage:true,markSubmission:true,userId:'u'},total:1,page:1,pages:1,updatedAt:'2026-10-26T08:00:00.000Z',servers:[{id:'s',code:'moon1'}],paypals:[{id:'p',code:'pp-tut32'}],summary:[{currency:'USD',prepared:'16.94',sent:'10.00',waiting:'4.00',received:'6.00',unknown:'0.00'}],rows:[{id:'r',revision:1,current:true,consumed:false,earnAppId:'ea',vmId:'v',serverId:'s',server:'moon1',vm:'VM_001',cycle:1,login:'a@example.invalid',paypalId:'p',paypal:'pp-tut32',email:'receive@example.invalid',requestedAt:'2026-10-26',submittedAt:'2026-10-26T07:00:00Z',amount:'10.00',currency:'USD',received:'6.00',remaining:'4.00',shortfall:null,status:'PARTIAL',reference:'ref-1',receipts:[{id:'f',date:'2026-10-26',amount:'6.00',currency:'USD',status:'RECEIVED',transactionId:'tx-1'}]}]});
-beforeEach(()=>{vi.stubGlobal('React',React);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host);mock.params=new URLSearchParams();mock.replace.mockReset();mock.query.mockReset().mockReturnValue({data:report(),isLoading:false,error:null,isFetching:false,refetch:vi.fn()});});
+beforeEach(()=>{mock.voided.mockReset().mockReturnValue({data:{total:0,page:1,pages:1,money:true,rows:[]},error:null,isLoading:false});vi.stubGlobal('React',React);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host);mock.params=new URLSearchParams();mock.replace.mockReset();mock.query.mockReset().mockReturnValue({data:report(),isLoading:false,error:null,isFetching:false,refetch:vi.fn()});});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
 const render=()=>act(async()=>root.render(<PayoutReportWorkspace projectId="project"/>));
 it('shows request identity, separate sent/received/open totals and historical VM drilldown',async()=>{await render();expect(host.textContent).toContain('Rút EarnAp');expect(host.textContent).toContain('$16.94');expect(host.textContent).toContain('$6.00');expect(host.textContent).toContain('$4.00');expect(host.textContent).toContain('pp-tut32');expect(host.textContent).toContain('receive@example.invalid');expect(host.querySelector('button[aria-label="Xem yêu cầu moon1 / VM_001"]')).toBeTruthy();});
@@ -41,4 +41,22 @@ it('selected rows: "Tiền đã về N dòng" opens one bulk panel on the VMs cu
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'3.5');input.dispatchEvent(new Event('input',{bubbles:true}));});
   await act(async()=>(Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Tiền đã về 1 dòng' && b.closest('[role="dialog"]')) as HTMLButtonElement).click());
   expect(mock.receipt).toHaveBeenCalledTimes(1);expect(mock.receipt.mock.calls[0][0]).toMatchObject({projectId:'project',requestId:'r',expectedRequestRevision:1,amount:'3.50',settleRemainder:true});
+});
+
+it('shows the "Mất do SUS" total per currency only when the report has lost money',async()=>{
+  mock.query.mockReturnValue({data:{...report(),lost:{USD:'12.50'}},error:null,isLoading:false});await render();
+  const tile=host.querySelector('.pr-total-lost');expect(tile?.textContent).toContain('Mất do SUS');expect(tile?.textContent).toContain('$12.50');
+  mock.query.mockReturnValue({data:{...report(),lost:{}},error:null,isLoading:false});await render();
+  expect(host.querySelector('.pr-total-lost')).toBeNull();
+});
+it('"Đã xoá do ghi nhầm" is collapsed with its count and lists the voided requests when opened, on the report server filter',async()=>{
+  mock.params=new URLSearchParams('server=s');
+  mock.voided.mockReturnValue({data:{total:1,page:1,pages:1,money:true,rows:[{id:'v1',requestId:'r9',vmId:'v',serverId:'s',server:'moon1',vm:'VM_007',cycle:2,paypal:'pp-tut40',email:'x@example.invalid',voidedAt:'2026-10-28T03:00:00.000Z',voidedBy:'Tut',reason:'Ghi nhầm VM',amount:'9.00',currency:'USD'}]},error:null,isLoading:false});
+  await render();
+  expect(mock.voided.mock.calls[0][0]).toMatchObject({projectId:'project',serverId:'s'});
+  const toggle=Array.from(host.querySelectorAll('button')).find(b=>b.textContent?.includes('Đã xoá do ghi nhầm'))!;
+  expect(toggle.textContent).toContain('1');expect(toggle.getAttribute('aria-expanded')).toBe('false');expect(host.textContent).not.toContain('VM_007');
+  await act(async()=>toggle.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  for(const t of ['VM_007','moon1','pp-tut40','x@example.invalid','Ghi nhầm VM','$9.00','Tut'])expect(host.textContent).toContain(t);
 });

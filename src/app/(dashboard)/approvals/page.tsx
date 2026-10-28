@@ -7,6 +7,8 @@ import {Input} from '@/components/ui/input';
 import {Badge} from '@/components/ui/badge';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {countdown,summaryPairs} from '@/lib/approvals-ui';
+import {ApprovalSessionBlock} from '@/components/approvals/ApprovalSessionBlock';
+import {TotpCodeInput} from '@/components/approvals/TotpCodeInput';
 const STATUS:Record<string,{t:string;c:string}>={PENDING:{t:'Đang chờ',c:'bg-amber-100 text-amber-800'},APPROVED:{t:'Đã duyệt, chờ AI gửi lại',c:'bg-blue-100 text-blue-800'},CONSUMED:{t:'Đã duyệt và đã chạy',c:'bg-green-100 text-green-800'},REJECTED:{t:'Đã từ chối',c:'bg-red-100 text-red-800'},EXPIRED:{t:'Hết hạn',c:'bg-gray-100 text-gray-700'}};
 const when=(iso:string|null)=>iso?new Date(iso).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',hour12:false}):'—';
 // Phê duyệt lệnh AI (owner decision 23/10/2026): the AI's critical commands (withdrawal, full proxy, full SDK code) wait here. The ADMIN
@@ -40,6 +42,7 @@ export default function ApprovalsPage(){
         <p className="text-sm text-gray-500">Lệnh quan trọng của AI (rút tiền, lấy proxy đầy đủ, xem mã SDK) chờ ADMIN duyệt bằng mã Google Authenticator. Yêu cầu hết hạn sau 15 phút; AI gửi lại cùng Idempotency-Key sau khi được duyệt.</p></div>
       <Button size="sm" variant="outline" onClick={refresh}>Tải lại</Button>
     </div>
+    <ApprovalSessionBlock projectId={projectId} pending={((open.data as Row[]|undefined)||[]).filter(r=>r.status==='PENDING'&&new Date(r.expiresAt).getTime()>now).length}/>
     <div className="flex gap-1 border-b border-gray-200" role="tablist">
       {([['OPEN','Đang chờ'+(open.data?.length?' ('+open.data.length+')':'')],['DONE','Đã xử lý']] as const).map(([k,label])=>
         <button key={k} role="tab" aria-selected={tab===k} onClick={()=>setTab(k)} className={`px-3 py-2 text-sm border-b-2 -mb-px ${tab===k?'border-blue-600 text-blue-700 font-medium':'border-transparent text-gray-500 hover:text-gray-800'}`}>{label}</button>)}
@@ -82,9 +85,7 @@ function DecideDialog({projectId,row,approve,onClose,onDone}:{projectId:string;r
       </dl>
       {approve&&<p className="text-xs text-gray-600">Duyệt đúng nội dung trên: AI đổi nội dung thì duyệt này không dùng được. Lệnh chạy khi AI gửi lại trong hạn.</p>}
       {!approve&&<label className="block space-y-1 text-sm"><span className="text-xs text-gray-600">Lý do từ chối (tuỳ chọn, AI sẽ thấy)</span><Input value={note} maxLength={300} aria-label="Lý do từ chối" onChange={e=>setNote(e.target.value)}/></label>}
-      <label className="block space-y-1 text-sm"><span className="text-xs text-gray-600">Mã Google Authenticator của bạn</span>
-        <Input inputMode="numeric" autoComplete="one-time-code" maxLength={11} aria-label="Mã Google Authenticator của bạn" value={code} autoFocus placeholder="000000"
-          onChange={e=>setCode(e.target.value.replace(/[^0-9a-zA-Z-]/g,''))} onKeyDown={e=>{if(e.key==='Enter')void submit();}} className="text-center text-xl tracking-[0.3em]"/></label>
+      <TotpCodeInput value={code} onChange={setCode} onSubmit={()=>void submit()}/>
       {error&&<p role="alert" className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-2 justify-end">
         <Button variant="outline" disabled={decide.isLoading} onClick={onClose}>Huỷ</Button>

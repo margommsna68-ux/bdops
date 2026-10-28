@@ -78,7 +78,13 @@ it('"Thử lại lệnh chưa rõ" for RECREATE_VM asks before re-sending',async
   await click('Thử lại lệnh chưa rõ');expect(mock.create).toHaveBeenCalledTimes(4);expect(mock.create.mock.calls[3][0]).toEqual(mock.create.mock.calls[0][0]);
 });
 it('without the session user nothing is shown or sent',async()=>{await render({manage:true,assign:true},null);expect(host.textContent).toContain('Đang tải phiên đăng nhập');expect(mock.control).not.toHaveBeenCalled();});
-it('fleet read failure: every VM is treated as manual (nothing sent to machines)',async()=>{
+it('fleet read failure: nothing sent to machines; neither "Tạo lại" nor "Ghi nhận đã tạo lại" is offered (fail closed)',async()=>{
   mock.servers.mockReturnValue({isLoading:false,error:{message:'down'},data:undefined});
-  await render();expect(host.textContent).toContain('Tạo tay 4 VM');expect(button('Ghi nhận đã tạo lại 4 VM')).toBeTruthy();expect(button('Tạo lại 0 VM')!.disabled).toBe(true);
+  await render();expect(host.textContent).toContain('Chưa đọc được danh sách server có điều khiển');
+  expect(Array.from(host.querySelectorAll('button')).some(b=>b.textContent?.startsWith('Ghi nhận đã tạo lại'))).toBe(false);
+  expect(Array.from(host.querySelectorAll('button')).some(b=>b.textContent?.startsWith('Tạo lại'))).toBe(false);expect(host.textContent).not.toContain('Tạo tay');expect(mock.recreate).not.toHaveBeenCalled();expect(mock.create).not.toHaveBeenCalled();
+});
+it('fleet read still loading: no recreate or record action is offered',async()=>{
+  mock.servers.mockReturnValue({isLoading:true,data:undefined});
+  await render();expect(Array.from(host.querySelectorAll('button')).some(b=>b.textContent?.startsWith('Ghi nhận đã tạo lại')||b.textContent?.startsWith('Tạo lại'))).toBe(false);
 });

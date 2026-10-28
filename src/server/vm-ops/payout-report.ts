@@ -6,6 +6,7 @@ import {authorizeVM} from '../vm-management/repository';
 import {payoutRights} from './payout';
 import {moneyOfRequest} from './ops';
 import {dayDate,dayText} from '../business-management/money';
+import {assertScopedServerIds,hasServerScope} from '../permissions/server-scope';
 
 const statuses=['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW','LOST'] as const;
 export type PayoutReportStatus=typeof statuses[number];
@@ -150,5 +151,27 @@ export async function readPayoutDashboard(scope:ActorScope,input:{serverId?:stri
  const current=await authorizeVM(rights.current,'READ',db),at=new Date(),day=reportDay(undefined,at);
  const {entries}=await loadPayoutModel(current.projectId,input,db);
  const card=(view:PayoutReportView)=>focusTotals(selectView(entries,view,day),view,day);
- return {available:true as const,day,updatedAt:at.toISOString(),cards:{sent:card('SENT_TODAY'),waiting:card('WAITING'),received:card('RECEIVED_TODAY'),attention:card('ATTENTION')}};
+ return {available:true as const,day,updatedAt:at.toISOString(),cards:{sent:card('SENT_TODAY'),waiting:card('WAITING'),received:card('RECEIVED_TODAY'),attention:card('ATTENTION')},lost:lostTotals(entries)};
+}
+
+/** "Đã xoá do ghi nhầm" (28/10/2026): requests removed as mistaken, from their EarnPayoutRequestVoid snapshot. Readable by anyone who
+ * reads the VMs; selected-server members only their servers; reason / amount only with request money rights (as the VM history). */
+export async function readPayoutVoided(scope:ActorScope,input:{serverId?:string;page?:number},db:DB=prisma){
+ const current=await authorizeVM(scope,'READ',db),rights=await payoutRights(current,db),money=rights.requestMoney;
+ const page=input.page??1;if(!Number.isSafeInteger(page)||page<1)invalid();
+ if(input.serverId)await assertScopedServerIds(db,current,[input.serverId]);
+ const serverIds=input.serverId?[input.serverId]:hasServerScope(current)?current.serverIds!:null;
+ const vmIds=serverIds?(await db.virtualMachine.findMany({where:{serverId:{in:serverIds},server:{projectId:current.projectId}},select:{id:true}})).map(v=>v.id):null;
+ const where={projectId:current.projectId,...(vmIds?{vmId:{in:vmIds}}:{})};
+ const [total,voids]=await Promise.all([db.earnPayoutRequestVoid.count({where}),
+  db.earnPayoutRequestVoid.findMany({where,orderBy:[{voidedAt:'desc'},{id:'desc'}],skip:(page-1)*50,take:50})]);
+ const vms=await db.virtualMachine.findMany({where:{id:{in:[...new Set(voids.map(v=>v.vmId))]},server:{projectId:current.projectId}},select:{id:true,code:true,serverId:true,server:{select:{code:true}}}});
+ const users=await db.user.findMany({where:{id:{in:[...new Set(voids.map(v=>v.voidedById))]}},select:{id:true,name:true,username:true}});
+ const vmById=new Map(vms.map(v=>[v.id,v])),who=(id:string)=>{const u=users.find(x=>x.id===id);return u?u.name||u.username||'Tài khoản cũ':'—';};
+ return {total,page,pages:Math.max(1,Math.ceil(total/50)),money,rows:voids.map(v=>{
+  const s=(v.snapshot??{}) as {amount?:string;currency?:string;paypalCode?:string;email?:string},vm=vmById.get(v.vmId);
+  return {id:v.id,requestId:v.requestId,vmId:v.vmId,serverId:vm?.serverId??null,server:vm?.server.code??null,vm:vm?.code??null,cycle:v.cycle,
+   paypal:s.paypalCode??null,email:s.email??null,voidedAt:v.voidedAt.toISOString(),voidedBy:who(v.voidedById),
+   reason:money?v.reason:null,amount:money?s.amount??null:null,currency:money?s.currency??null:null};
+ })};
 }

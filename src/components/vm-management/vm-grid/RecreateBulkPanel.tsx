@@ -24,12 +24,15 @@ export function RecreateBulkPanel({projectId,userId,vms,opsOf,rights,onSaved,onB
   const servers=trpc.fleetCommands.servers.useQuery({projectId},{retry:false,staleTime:60000});
   if(!userId)return <p className="pm-muted text-xs">Đang tải phiên đăng nhập…</p>;
   if(servers.isLoading)return <p className="pm-muted text-xs">Đang kiểm tra server có điều khiển…</p>;
+  // Fail closed (28/10/2026): without the list of servers under fleet control, a VM the worker records itself could be recorded (or
+  // listed to recreate) by hand; neither section is offered until the list is read.
+  const known=!!servers.data&&!servers.error;
   const enrolled=new Set(servers.data?.serverIds??[]);
   const rows:Row[]=vms.map(vm=>({vmId:vm.id,serverId:vm.serverId,server:vm.server,code:vm.code,label:vm.server+' / '+vm.code,fleetEnrolled:enrolled.has(vm.serverId),ops:opsOf(vm.id)}));
   return <div className="space-y-4">
-    {servers.error&&<p className="pm-error text-xs" role="alert">Không đọc được danh sách server có điều khiển ({servers.error.message}); mọi VM coi như tạo tay.</p>}
-    {rights.manage&&<Section key={'R:'+userId} kind="RECREATE" projectId={projectId} userId={userId} rows={rows} onSaved={onSaved} onBusy={onBusy}/>}
-    {rights.assign&&<Section key={'G:'+userId} kind="RECORD_RECREATED" projectId={projectId} userId={userId} rows={rows} onSaved={onSaved} onBusy={onBusy}/>}
+    {!known&&<p className="pm-error text-xs" role="alert">Chưa đọc được danh sách server có điều khiển{servers.error?' ('+servers.error.message+')':''}; chưa tạo lại / ghi nhận tạo lại được. Tải lại sau.</p>}
+    {rights.manage&&known&&<Section key={'R:'+userId} kind="RECREATE" projectId={projectId} userId={userId} rows={rows} onSaved={onSaved} onBusy={onBusy}/>}
+    {rights.assign&&known&&<Section key={'G:'+userId} kind="RECORD_RECREATED" projectId={projectId} userId={userId} rows={rows} onSaved={onSaved} onBusy={onBusy}/>}
     {!rights.manage&&!rights.assign&&<p className="pm-muted text-xs">Cần quyền quản lý / gán VM để tạo lại.</p>}
   </div>;
 }

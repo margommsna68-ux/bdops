@@ -2,7 +2,7 @@ import {afterAll,afterEach,it,expect,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
-import {readPayoutReport,readPayoutDashboard} from '@/server/vm-ops/payout-report';
+import {readPayoutReport,readPayoutDashboard,readPayoutVoided} from '@/server/vm-ops/payout-report';
 import {appRouter} from '@/server/routers/_app';
 
 afterAll(()=>db.$disconnect());
@@ -335,4 +335,45 @@ it('reloads rights, denies server-scoped money, and isolates rows, totals and op
   await db.projectMember.update({where:member,data:{serverScope:'ALL',capabilities:['PAYPAL_RECEIPT_RECORD'],allowedModules:[]}});
   await expect(readPayoutReport(f.worker,{},db)).rejects.toMatchObject({code:'FORBIDDEN'});
  }finally{await f.cleanup();await other.cleanup();}
+});
+
+// Task 11 (28/10/2026): "Đã xoá do ghi nhầm" on the report reads EarnPayoutRequestVoid; reason / amount only with request money rights,
+// selected-server members only their servers.
+it('lists voided requests per project and server scope, money only with request money rights',async()=>{
+ const f=await fixture(),projectId=f.scope.projectId;
+ try{
+  const server2=await db.server.create({data:{projectId,code:'business-fixture-2',managed:true}});
+  const vm2=await db.virtualMachine.create({data:{serverId:server2.id,code:'VM_009',managed:true,proxySlotState:'BLANK'}});
+  const mk=(vmId:string,amount:string,reason:string,at:string)=>db.earnPayoutRequestVoid.create({data:{projectId,requestId:randomUUID(),vmId,cycle:1,earnAppId:randomUUID(),paypalEmailId:randomUUID(),
+   snapshot:{amount,currency:'USD',paypalCode:'PP-report',email:'mail-'+amount+'@fixture.invalid'},reason,voidedById:f.scope.userId,voidedAt:new Date(at)}});
+  await mk(f.vm.id,'10.00','Ghi nhầm VM','2026-10-27T01:00:00Z');await mk(vm2.id,'7.50','Sai email','2026-10-28T01:00:00Z');
+  const foreign=await businessFixture();
+  await db.earnPayoutRequestVoid.create({data:{projectId:foreign.scope.projectId,requestId:randomUUID(),vmId:foreign.vm.id,cycle:1,earnAppId:randomUUID(),paypalEmailId:randomUUID(),snapshot:{amount:'1.00',currency:'USD'},reason:'x',voidedById:foreign.scope.userId}});
+  try{
+   const all=await readPayoutVoided(f.scope,{},db);
+   expect(all.total).toBe(2);
+   expect(all.rows.map(r=>[r.server,r.vm,r.amount,r.reason,r.paypal])).toEqual([['business-fixture-2','VM_009','7.50','Sai email','PP-report'],['business-fixture','VM_001','10.00','Ghi nhầm VM','PP-report']]);
+   expect(all.rows[0]).toMatchObject({currency:'USD',email:'mail-7.50@fixture.invalid',voidedAt:'2026-10-28T01:00:00.000Z',cycle:1});
+   expect(all.rows[0].voidedBy).toBeTruthy();expect(all.money).toBe(true);
+   expect((await readPayoutVoided(f.scope,{serverId:f.server.id},db)).rows.map(r=>r.vm)).toEqual(['VM_001']);
+   // Infrastructure reader without money rights: rows yes, reason / amount never.
+   const plain=await readPayoutVoided(f.worker,{},db);
+   expect(plain.money).toBe(false);expect(plain.total).toBe(2);
+   for(const r of plain.rows){expect(r.amount).toBeNull();expect(r.currency).toBeNull();expect(r.reason).toBeNull();}
+   // Selected-server member: only their server; asking for another server is refused.
+   const member={userId_projectId:{userId:f.worker.userId,projectId}};
+   await db.projectMember.update({where:member,data:{serverScope:'SELECTED',allowedServerIds:[f.server.id]}});
+   const scoped=await readPayoutVoided(f.worker,{},db);
+   expect(scoped.rows.map(r=>r.vm)).toEqual(['VM_001']);expect(scoped.rows[0].amount).toBeNull();
+   await expect(readPayoutVoided(f.worker,{serverId:server2.id},db)).rejects.toMatchObject({code:'NOT_FOUND'});
+   // Through the router.
+   const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,email:'fixture@invalid'},expires:new Date(Date.now()+60000).toISOString()} as never});
+   expect((await caller.vmOps.payoutVoided({projectId})).total).toBe(2);
+   // Tổng quan carries the money lost to SUS of the same rows as the report (server filter too).
+   await f.request({state:'LOST_SUS',lostAmount:'4.25',lostAt:new Date()});
+   const dash=await readPayoutDashboard(f.scope,{},db);if(!dash.available)throw Error('expected available');expect(dash.lost).toEqual({USD:'4.25'});
+   const dash2=await readPayoutDashboard(f.scope,{serverId:server2.id},db);if(!dash2.available)throw Error('expected available');expect(dash2.lost).toEqual({});
+   await expect(caller.vmOps.payoutVoided({projectId:foreign.scope.projectId})).rejects.toBeTruthy();
+  }finally{await db.earnPayoutRequestVoid.deleteMany({where:{projectId:foreign.scope.projectId}});await foreign.cleanup();}
+ }finally{await db.earnPayoutRequestVoid.deleteMany({where:{projectId}});await f.cleanup();}
 });

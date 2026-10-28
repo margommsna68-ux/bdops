@@ -65,3 +65,5 @@
 @media(max-width:600px){.payout-report .pr-focus{display:grid;grid-template-columns:minmax(0,1fr) 36px;padding:14px;gap:10px}.payout-report .pr-focus>div:first-child{grid-column:1;grid-row:1}.payout-report .pr-focus>.pr-icon-button{grid-column:2;grid-row:1;align-self:start}.payout-report .pr-focus-value{grid-column:1/-1;text-align:left}.payout-report .pr-focus h2{font-size:16px}}
 .pr-check{width:36px;padding-right:0!important}.pr-check input{width:16px;height:16px}
 .pr-bulkbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;font-size:13px}
+.pr-lost{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;padding:12px 24px}.pr-lost span{font-size:12px}.pr-lost strong{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;color:var(--pr-warn)}.pr-lost small{font-size:11px}
+.pr-voided{padding:4px 8px}.pr-voided-toggle{display:flex;align-items:center;gap:6px;width:100%;min-height:40px;padding:8px 12px;font-size:13px;font-weight:600;text-align:left;background:none;border:0;cursor:pointer;color:inherit}.pr-voided .pr-rotated{transform:rotate(90deg)}.pr-voided-empty{padding:8px 12px 14px;font-size:12px}

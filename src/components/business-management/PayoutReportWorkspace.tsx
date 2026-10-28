@@ -11,7 +11,7 @@ import '@/components/proxy-management/proxy-management.css';
 import './payout-report.css';
 import {PayoutFrameForVm} from '@/components/vm-management/vm-grid/PayoutFrame';
 import {PayoutStatusBulk,type StatusBulkKind,type StatusBulkRow} from '@/components/vm-management/vm-grid/PayoutStatusBulk';
-import type {readPayoutReport} from '@/server/vm-ops/payout-report';
+import type {readPayoutReport,readPayoutVoided} from '@/server/vm-ops/payout-report';
 
 const statuses={PREPARING:'Đang chuẩn bị',UNKNOWN:'Chưa rõ kết quả',WAITING:'Chờ về PayPal',PARTIAL:'Đã nhận một phần',RECEIVED:'Đã nhận đủ / chốt',FAILED:'Thất bại',CANCELLED:'Đã huỷ',REVIEW:'Cần đối chiếu',LOST:'Mất do SUS'};
 const views={SENT_TODAY:{label:'Đã gửi trên EarnApp',note:'Tính theo ngày thực sự gửi, kể cả yêu cầu tạo từ hôm trước.'},WAITING:{label:'Đang chờ về PayPal',note:'Phần còn chờ của các yêu cầu đã gửi, gồm cả những ngày trước.'},RECEIVED_TODAY:{label:'PayPal thực nhận trong ngày',note:'Chỉ cộng khoản nhận đã xác nhận trong ngày này. Mở yêu cầu để xem toàn bộ lịch sử.'},ATTENTION:{label:'Yêu cầu cần xử lý',note:'Thất bại, chưa rõ kết quả hoặc cần đối chiếu; gồm mọi ngày.'}};
@@ -41,6 +41,8 @@ function PayoutReportView({projectId}:{projectId:string}){
   {data?.focus?<div className="pr-focus pm-surface"><div><span className="pm-muted">{data.focus.day&&view?.endsWith('TODAY')?dateText(data.focus.day)+' · giờ Việt Nam':'Toàn bộ các ngày'}</span><h2>{views[data.focus.view].label}</h2><p className="pm-muted">{views[data.focus.view].note}</p></div><div className="pr-focus-value">{data.focus.view==='ATTENTION'?<strong>{data.focus.requests} yêu cầu</strong>:data.focus.amounts.length?data.focus.amounts.map(s=><strong key={s.currency}>{displayMoney(s.amount,s.currency)}</strong>):<strong>—</strong>}<small className="pm-muted">{data.focus.vms} VM · {data.focus.requests} yêu cầu</small></div><button className="pr-icon-button" aria-label="Bỏ nhóm từ dashboard" title="Bỏ nhóm từ dashboard" onClick={clearView}><X size={16}/></button></div>:<div className="pr-summary pm-surface" aria-label="Tổng theo bộ lọc">
    {([['waiting','Còn chờ về PayPal'],['received','PayPal thực nhận'],['prepared','Đang chuẩn bị'],['sent','Đã gửi trên EarnApp']] as const).map(([key,label])=><div key={key} className={'pr-total-'+key}><span className="pm-muted">{label}</span>{data?data.summary.length?data.summary.map(s=><strong key={s.currency}>{displayMoney(s[key],s.currency)}</strong>):<strong>—</strong>:<strong>…</strong>}</div>)}
   </div>}
+  {/* Money lost because the EarnApp was suspended: never part of waiting or received; shown apart (money rights: the report needs them). */}
+  {!!data&&Object.keys(data.lost??{}).length>0&&<div className="pr-lost pm-surface pr-total-lost" aria-label="Mất do SUS"><span className="pm-muted">Mất do SUS</span>{Object.entries(data.lost).map(([currency,amount])=><strong key={currency}>{displayMoney(amount,currency)}</strong>)}<small className="pm-muted">Không tính vào tiền chờ về hay thực nhận.</small></div>}
   {!view&&<p className="pr-explain pm-muted">Thực nhận chỉ tính tiền đã xác nhận. Đã gửi gồm cả lượt sau đó thất bại hoặc huỷ.</p>}
   {data?.summary.filter(s=>s.unknown!=='0.00').map(s=><p key={s.currency} className="pm-error">Chưa rõ kết quả gửi: {displayMoney(s.unknown,s.currency)} — cần đối chiếu lịch sử EarnApp.</p>)}
   <div className="pr-filter-surface pm-surface"><div className="pr-filters">
@@ -66,6 +68,7 @@ function PayoutReportView({projectId}:{projectId:string}){
    <td data-label="Trạng thái"><Status row={r}/></td>
   </tr>)}</tbody></table></div>}
   {data&&<footer className="pr-footer"><span className="pm-muted">Tổng theo bộ lọc, gồm mọi trang.<br/>Cập nhật {dateText(data.updatedAt)}</span><div className="flex gap-2 items-center"><button className="pm-button" disabled={data.page<=1} onClick={()=>filter('page',String(data.page-1))}>Trước</button><span>Trang {data.page} / {data.pages}</span><button className="pm-button" disabled={data.page>=data.pages} onClick={()=>filter('page',String(data.page+1))}>Sau</button></div></footer>}
+  {data&&<VoidedSection key={value('server')} projectId={projectId} serverId={value('server')||undefined}/>}
   <Dialog.Root open={!!bulk} onOpenChange={isOpen=>{if(!isOpen)setBulk(null);}}>
    {bulk&&data?.rights&&<Dialog.Portal><Dialog.Overlay className="pr-overlay"/><Dialog.Content className="payout-report pr-panel">
     <header className="pr-panel-header"><div><Dialog.Title>{bulk==='SEND'?'Đã rút':'Tiền đã về'}<span>{picked.length} dòng đã chọn</span></Dialog.Title><Dialog.Description>Mỗi dòng một lệnh riêng; kết quả từng dòng.</Dialog.Description></div><Dialog.Close className="pr-icon-button" aria-label="Đóng thao tác hàng loạt"><X size={20}/></Dialog.Close></header>
@@ -107,4 +110,24 @@ function PayoutDetail({row:r,projectId,rights,onSaved}:{row:Row;projectId:string
   {r.current&&!r.consumed&&rights&&<div className="pr-status-editor"><h2>Rút về PayPal</h2><PayoutFrameForVm projectId={projectId} userId={rights.userId} vmId={r.vmId} requestId={r.id} onDone={onSaved}/></div>}
   <section className="pr-receipts"><h2>Tiền về email <span>{r.receipts.length} khoản</span></h2>{r.receipts.length?<ul>{r.receipts.map(f=><li key={f.id}><div><strong>{displayMoney(f.amount,f.currency)}</strong><span>{receiptStatuses[f.status]||f.status}</span></div><small className="pm-muted">{dateText(f.date)}</small><p>Mã giao dịch: {f.transactionId||'Chưa ghi'}</p></li>)}</ul>:<p className="pm-muted pr-receipts-empty">Chưa ghi khoản thực nhận.</p>}</section>
  </div>;
+}
+type Voided=Awaited<ReturnType<typeof readPayoutVoided>>;
+/** "Đã xoá do ghi nhầm" (28/10/2026): requests removed as mistaken, kept as history; collapsed by default, follows the server filter. */
+function VoidedSection({projectId,serverId}:{projectId:string;serverId?:string}){
+ const [open,setOpen]=useState(false),[page,setPage]=useState(1);
+ const q=trpc.vmOps.payoutVoided.useQuery({projectId,serverId,page},{refetchInterval:open?30000:false,keepPreviousData:true});
+ const data=q.data as Voided|undefined;
+ return <section className="pr-voided pm-surface">
+  <button type="button" className="pr-voided-toggle" aria-expanded={open} onClick={()=>setOpen(v=>!v)}><ChevronRight size={15} className={open?'pr-rotated':''}/>Đã xoá do ghi nhầm <span className="pm-muted">{data?`(${data.total})`:q.error?'':'(…)'}</span></button>
+  {open&&(q.error?<p role="alert" className="pm-error">{q.error.message}</p>:!data?<p className="pm-muted">Đang tải…</p>:!data.rows.length?<p className="pm-muted pr-voided-empty">Chưa có yêu cầu rút nào bị xoá do ghi nhầm.</p>:<>
+   <div className="pr-table-wrap"><table className="pr-table"><thead><tr><th>Server / VM</th><th>PayPal nhận</th><th className="pr-number">Số tiền</th><th>Xoá lúc</th><th>Lý do</th></tr></thead><tbody>
+    {data.rows.map(v=><tr key={v.id}><td data-label="VM"><strong>{v.vm||v.vmId}</strong><span className="pr-server"> {v.server||'Server cũ'}</span><small className="pm-muted block">Lượt {v.cycle}</small></td>
+     <td data-label="PayPal"><strong>{v.paypal||'—'}</strong><small>{v.email||''}</small></td>
+     <td data-label="Số tiền" className="pr-number">{v.amount&&v.currency?displayMoney(v.amount,v.currency):<span className="pm-muted">Ẩn</span>}</td>
+     <td data-label="Xoá lúc">{dateText(v.voidedAt)}<small className="pm-muted block">{v.voidedBy}</small></td>
+     <td data-label="Lý do">{v.reason??<span className="pm-muted">Ẩn</span>}</td></tr>)}
+   </tbody></table></div>
+   {data.pages>1&&<footer className="pr-footer"><span/><div className="flex gap-2 items-center"><button className="pm-button" disabled={data.page<=1} onClick={()=>setPage(data.page-1)}>Trước</button><span>Trang {data.page} / {data.pages}</span><button className="pm-button" disabled={data.page>=data.pages} onClick={()=>setPage(data.page+1)}>Sau</button></div></footer>}
+  </>)}
+ </section>;
 }

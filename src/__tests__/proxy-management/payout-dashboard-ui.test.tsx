@@ -17,3 +17,9 @@ it('keeps receipt currencies separate',async()=>{const d=data();d.cards.received
 it('never shows cached money after error or no-rights response',async()=>{mock.query.mockReturnValue({data:data(),error:{message:'Denied'},refetch:mock.refetch});await render();expect(host.textContent).not.toContain('$32.12');expect(host.querySelector('[role="alert"]')).toBeTruthy();mock.query.mockReturnValue({data:{available:false}});await render();expect(host.textContent).toBe('');});
 it('loading does not pretend there are zero requests',async()=>{mock.query.mockReturnValue({isLoading:true});await render();expect(host.textContent).toContain('Đang tải');expect(host.textContent).not.toContain('$0.00');expect(host.querySelector('a[href*="view="]')).toBeNull();});
 it('an empty successful read shows zero without inventing currency',async()=>{const d=data();for(const c of Object.values(d.cards)){c.vms=0;c.requests=0;c.amounts=[];}mock.query.mockReturnValue({data:d});await render();expect(host.querySelectorAll('.ps-metric')).toHaveLength(4);expect(host.textContent).toContain('0 VM');expect(host.textContent).toContain('Chưa có khoản nhận');expect(host.textContent).not.toContain('$0.00');});
+
+it('"Mất do SUS" shows only when money was lost, and opens the report filtered on it',async()=>{
+  mock.query.mockReturnValue({data:{...data(),lost:{USD:'12.50'}}});await render();
+  const a=host.querySelector('a[href*="status=LOST"]')!;expect(a.textContent).toContain('Mất do SUS');expect(a.textContent).toContain('$12.50');
+  mock.query.mockReturnValue({data:{...data(),lost:{}}});await render();expect(host.querySelector('a[href*="status=LOST"]')).toBeNull();
+});
