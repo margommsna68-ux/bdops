@@ -54,7 +54,7 @@ it('a definite refusal of a first send records nothing and keeps no command; a r
 });
 it('"Tiền đã về": empty required exact amount, live fee, settle ticked by default → one receipt command with settleRemainder',async()=>{
   await render(request({submission:'SENT'}));
-  expect(['Tiền đã về','Sửa','Bỏ “Đã rút”','EarnApp bị SUS','Thất bại'].every(t=>!!button(t))).toBe(true);
+  expect(['Tiền đã về','Sửa','Bỏ "Đã rút"','EarnApp bị SUS','Thất bại'].every(t=>!!button(t))).toBe(true);
   await click('Tiền đã về');
   const input=Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác trong PayPal'))!.querySelector('input')!;
   expect(input.value).toBe('');expect(button('Ghi tiền đã về')!.disabled).toBe(true);
@@ -66,7 +66,7 @@ it('"Tiền đã về": empty required exact amount, live fee, settle ticked by 
 });
 it('the receipt right alone: Tiền đã về and its settle box, never Sửa / Bỏ "Đã rút" / Thất bại',async()=>{
   await render(request({submission:'SENT'}),{assign:false,money:true,writeMoney:false,payout:false,receipt:true});
-  expect(button('Tiền đã về')).toBeTruthy();for(const t of ['Sửa','Bỏ “Đã rút”','Thất bại','EarnApp bị SUS','Gửi lại'])expect(button(t)).toBeUndefined();
+  expect(button('Tiền đã về')).toBeTruthy();for(const t of ['Sửa','Bỏ "Đã rút"','Thất bại','EarnApp bị SUS','Gửi lại'])expect(button(t)).toBeUndefined();
   await click('Tiền đã về');await type(Array.from(host.querySelectorAll('label')).find(l=>l.textContent?.startsWith('Số tiền chính xác'))!.querySelector('input')!,'5');
   expect(host.textContent).toContain('Chốt luôn, phần thiếu là phí');
 });
@@ -91,4 +91,42 @@ it('FAILED: only "Gửi lại"; a merged member is read-only',async()=>{
   expect(Array.from(host.querySelectorAll('button')).map(b=>b.textContent).filter(t=>t!=='Copy')).toEqual(['Gửi lại']);
   await render(request(),all,{readOnly:'Đã gộp vào VM chính'});
   expect(button('Đã rút')).toBeUndefined();expect(host.textContent).toContain('Đã gộp vào VM chính');
+});
+it('a short receipt already in: "Chốt nhận thiếu" (money write, note required) sends SETTLE on the same request',async()=>{
+  const short=request({submission:'SENT',money:{lost:null,amount:'10.00',currency:'USD',received:'4.00',pendingLinked:'0.00',remaining:'6.00',shortfall:null,settleNote:null}});
+  await render(short);
+  expect(['Tiền đã về','Chốt nhận thiếu','EarnApp bị SUS'].every(t=>!!button(t))).toBe(true);for(const t of ['Sửa','Thất bại','Bỏ "Đã rút"'])expect(button(t)).toBeUndefined();
+  await click('Chốt nhận thiếu');const go=()=>Array.from(host.querySelectorAll('button')).filter(b=>b.textContent==='Chốt nhận thiếu').at(-1)!;
+  expect(go().disabled).toBe(true);
+  await act(async()=>{const t=host.querySelector('textarea')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(t,'Phí PayPal');t.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>go().click());
+  expect(mock.update.mock.calls[0][0]).toMatchObject({...identity,action:'SETTLE',note:'Phí PayPal'});
+  await render(short,{assign:false,money:true,writeMoney:false,payout:true,receipt:true});expect(button('Chốt nhận thiếu')).toBeUndefined();
+});
+it('REVIEW: a reconcile hint and only "Thất bại"',async()=>{
+  await render(request({submission:'SENT',phase:'REVIEW'}));
+  expect(host.textContent).toContain('Cần đối chiếu tiền về ở Kho tài khoản / Tiền vào PayPal');
+  expect(Array.from(host.querySelectorAll('button')).map(b=>b.textContent).filter(t=>t!=='Copy')).toEqual(['Thất bại']);
+});
+it('a refused retry offers "Bỏ lệnh chưa rõ (đã đối chiếu)"; only a confirmed drop clears the command and unlocks the frame',async()=>{
+  mock.update.mockRejectedValueOnce(new Error('Mất kết nối')).mockRejectedValueOnce(Object.assign(new Error('Yêu cầu vừa được sửa'),{data:{code:'CONFLICT'}}));
+  await render(request());await click('Đã rút');
+  expect(button('Bỏ lệnh chưa rõ (đã đối chiếu)')).toBeUndefined(); // still unknown: no drop
+  await click('Thử lại đúng lệnh');
+  expect(button('Bỏ lệnh chưa rõ (đã đối chiếu)')).toBeTruthy();expect(button('Đã rút')!.disabled).toBe(true);
+  const confirm=vi.spyOn(window,'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await click('Bỏ lệnh chưa rõ (đã đối chiếu)');expect(window.sessionStorage.length).toBe(1);
+  await click('Bỏ lệnh chưa rõ (đã đối chiếu)');expect(confirm).toHaveBeenCalledTimes(2);
+  expect(window.sessionStorage.length).toBe(0);expect(button('Thử lại đúng lệnh')).toBeUndefined();expect(button('Đã rút')!.disabled).toBe(false);
+});
+it('no signed-in user yet: no mutating action and no journal',async()=>{
+  await act(async()=>root.render(<PayoutFrame projectId="p" vmId="vm" cycle={2} earnAppId="ea" request={request()} rights={all} onDone={mock.done}/>));
+  expect(button('Đã rút')).toBeUndefined();
+  await act(async()=>root.render(<PayoutFrame projectId="p" vmId="vm" cycle={2} earnAppId="ea" request={null} rights={all} onDone={mock.done}/>));
+  expect(button('Rút')).toBeUndefined();expect(host.textContent).toContain('Đang tải phiên đăng nhập');
+});
+it('the "Rút" amount follows the latest Tiền VM until the person edits it',async()=>{
+  await render(null,all,{vmMoney:'5'});const input=()=>host.querySelector('input[aria-label="Số tiền rút"]') as HTMLInputElement;
+  expect(input().value).toBe('5.00');await render(null,all,{vmMoney:'7.129'});expect(input().value).toBe('7.12');
+  await type(input(),'6');await render(null,all,{vmMoney:'9'});expect(input().value).toBe('6');
 });

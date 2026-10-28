@@ -54,7 +54,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {await act(async () => root.unmount()); dom.window.close(); vi.unstubAllGlobals();});
 const bulk = (ids = ['1', '2', '3']) => act(async () => root.render(<PayoutBulkPanel projectId="p" userId="u" vms={ids.map(vm)} opsOf={ops} rights={rights} onSaved={() => {}} onBusy={() => {}}/>));
-const cell = () => act(async () => root.render(<PayoutCell projectId="p" vm={vm('1')} ops={ops('1')} account={{earnApp: {id: 'acc1', login: {email: 'acc1@example.invalid'}}} as VmAccount} rights={rights} onDone={() => {}} onBusy={() => {}}/>));
+const cell = () => act(async () => root.render(<PayoutCell projectId="p" userId="u" vm={vm('1')} ops={ops('1')} account={{earnApp: {id: 'acc1', login: {email: 'acc1@example.invalid'}}} as VmAccount} rights={rights} onDone={() => {}} onBusy={() => {}}/>));
 const select = (id: string) => document.querySelector<HTMLSelectElement>('[aria-label="Email PP An-01 / VM_'+id+'"]')!;
 const option = (id: string, email: string) => Array.from(select(id).options).find(o => o.value===email)!;
 const save = () => Array.from(document.querySelectorAll('button')).find(b => b.textContent?.startsWith('Lưu chuẩn bị'))!;

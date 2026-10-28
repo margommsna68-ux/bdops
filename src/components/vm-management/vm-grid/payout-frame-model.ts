@@ -4,7 +4,7 @@ import {toCents,fromCents} from '@/lib/vm-ops';
 // One payout frame (owner 28/10/2026) for the Tiền VM cell, the VM panel and the "Rút EarnApp" report: pure rules, no React.
 type RouterOutputs=inferRouterOutputs<AppRouter>;
 export type VmOpsRequestView=NonNullable<RouterOutputs['vmOps']['board']['vms'][number]['request']>;
-export type FrameAction='SEND'|'DROP'|'EDIT'|'UNSEND'|'RECEIPT'|'SUS'|'FAIL'|'RETRY'|'VOID';
+export type FrameAction='SEND'|'DROP'|'EDIT'|'UNSEND'|'RECEIPT'|'SETTLE'|'SUS'|'FAIL'|'RETRY'|'VOID';
 export type FrameRights={writeMoney:boolean;payout?:boolean;receipt?:boolean;assign:boolean};
 export interface FrameView {phase:string;submission:string;state:string;hasReceipts:boolean;consumed:boolean;rights:FrameRights}
 /**
@@ -18,10 +18,12 @@ export function payoutActions(v:FrameView|null):FrameAction[]{
   const out:(FrameAction|false)[]=[];
   if(v.state==='FAILED'||v.state==='CANCELLED')out.push(write&&'RETRY');
   else if(v.phase==='LOST'||v.state==='LOST_SUS')out.push(receipt&&'RECEIPT');
+  // Received more than asked / another currency: reconcile in the PayPal book; only "Thất bại" is offered here.
+  else if(v.state==='REQUESTED'&&v.phase==='REVIEW')out.push(write&&'FAIL');
   else if(v.state==='REQUESTED'&&v.phase==='WAITING'){
     if(v.submission==='PREPARING')out.push(payout&&'SEND',payout&&'DROP',write&&'EDIT',sus&&'SUS');
     else if(v.submission==='UNKNOWN')out.push(payout&&'SEND',write&&'EDIT',write&&'UNSEND',sus&&'SUS',write&&'FAIL');
-    else if(v.hasReceipts)out.push(receipt&&'RECEIPT',sus&&'SUS');
+    else if(v.hasReceipts)out.push(receipt&&'RECEIPT',write&&'SETTLE',sus&&'SUS');
     else out.push(receipt&&'RECEIPT',write&&'EDIT',write&&'UNSEND',sus&&'SUS',write&&'FAIL');
   }
   return out.filter((a):a is FrameAction=>!!a);
@@ -64,7 +66,7 @@ export function receiptCheck(m:{amount:string;received:string;remaining:string;p
   return {valid:true,amount:fromCents(c),fee:fromCents(open-c),showSettle:c<open,open:fromCents(open),error:''};
 }
 // Lost answers (pattern of PayoutBulkPanel): the command (key + exact body) is written to this tab before sending; a retry sends it again.
-export const FRAME_ACTIONS=['REQUEST','SEND','DROP','EDIT','UNSEND','RECEIPT','SUS','FAIL','RETRY','VOID'] as const;
+export const FRAME_ACTIONS=['REQUEST','SEND','DROP','EDIT','UNSEND','RECEIPT','SETTLE','SUS','FAIL','RETRY','VOID'] as const;
 export type FrameCommandAction=typeof FRAME_ACTIONS[number];
 export interface FrameCommand {action:FrameCommandAction;target:string;body:{projectId:string;key:string}&Record<string,unknown>}
 export const frameJournalKey=(projectId:string,userId:string,target:string)=>'mth-payout-frame:'+JSON.stringify([projectId,userId,target]);

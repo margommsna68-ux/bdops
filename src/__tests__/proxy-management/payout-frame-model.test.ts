@@ -12,7 +12,14 @@ describe('payoutActions: request state → buttons',()=>{
     expect(payoutActions(view({submission:'SENT',state:'FAILED',phase:'FAILED'}))).toEqual(['RETRY']);
     expect(payoutActions(view({submission:'SENT',state:'CANCELLED',phase:'CANCELLED'}))).toEqual(['RETRY']);
   });
-  it('SENT with a receipt, still short: Tiền đã về and SUS only',()=>{expect(payoutActions(view({submission:'SENT',hasReceipts:true}))).toEqual(['RECEIPT','SUS']);});
+  it('SENT with a receipt, still short: Tiền đã về, Chốt nhận thiếu (money write) and SUS',()=>{
+    expect(payoutActions(view({submission:'SENT',hasReceipts:true}))).toEqual(['RECEIPT','SETTLE','SUS']);
+    expect(payoutActions(view({submission:'SENT',hasReceipts:true,rights:{writeMoney:false,payout:true,receipt:true,assign:true}}))).toEqual(['RECEIPT','SUS']);
+  });
+  it('REVIEW (received over / other currency): only Thất bại with the money write right',()=>{
+    expect(payoutActions(view({submission:'SENT',phase:'REVIEW',hasReceipts:true}))).toEqual(['FAIL']);
+    expect(payoutActions(view({submission:'SENT',phase:'REVIEW',hasReceipts:true,rights:{writeMoney:false,payout:true,receipt:true,assign:true}}))).toEqual([]);
+  });
   it('RECEIVED: nothing; LOST (Mất do SUS): only late money',()=>{
     expect(payoutActions(view({submission:'SENT',phase:'RECEIVED',hasReceipts:true}))).toEqual([]);
     expect(payoutActions(view({submission:'SENT',state:'LOST_SUS',phase:'LOST'}))).toEqual(['RECEIPT']);
@@ -25,7 +32,7 @@ describe('payoutActions: request state → buttons',()=>{
     expect(payoutActions(view({submission:'SENT',rights:narrow}))).toEqual(['RECEIPT','SUS']);
     expect(payoutActions(view({submission:'SENT',state:'FAILED',phase:'FAILED',rights:narrow}))).toEqual([]);
     for(const v of [view({rights:narrow}),view({submission:'SENT',rights:narrow}),view({submission:'UNKNOWN',rights:narrow})])
-      for(const a of ['EDIT','UNSEND','VOID','FAIL','RETRY'] as const)expect(payoutActions(v)).not.toContain(a);
+      for(const a of ['EDIT','UNSEND','VOID','FAIL','RETRY','SETTLE'] as const)expect(payoutActions(v)).not.toContain(a);
   });
   it('SUS needs the assign right; Đã rút / Bỏ need payout or money write; Tiền đã về needs the receipt right',()=>{
     expect(payoutActions(view({rights:{...all,assign:false}}))).toEqual(['SEND','DROP','EDIT']);
