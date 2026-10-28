@@ -124,9 +124,11 @@ describe('ops API: fix and SUS routes',()=>{
       for(const q of [tx,tx.toLowerCase(),'Mã giao dịch: '+tx]){
         const found=await call('GET','withdrawals?projectId='+f.projectId+'&transactionId='+encodeURIComponent(q),{token:t});
         expect(found.status,JSON.stringify(found.json.error)).toBe(200);expect(found.json.data.items.map((x:{id:string})=>x.id)).toEqual([a]);
+        expect(found.json.data.items[0].matchedReceipts).toEqual([expect.objectContaining({transactionId:tx,status:'RECEIVED',amount:'3.00'})]);
       }
       const detail=await call('GET','withdrawals/'+a+'?projectId='+f.projectId,{token:t});expect(detail.json.data.receipts.map((x:{transactionId:string})=>x.transactionId)).toContain(tx);
       expect((await call('GET','withdrawals?projectId='+f.projectId+'&transactionId=0000AAAA0000AAAA',{token:t})).json.data.items).toEqual([]);
+      for(const bad of ['%',tx.slice(0,3)+'_'+tx.slice(4),tx.slice(0,-1)+'%'])expect((await call('GET','withdrawals?projectId='+f.projectId+'&transactionId='+encodeURIComponent(bad),{token:t})).status).toBe(422);
       const ro=await f.token(f.ai,['READ'] as never);
       const denied=await call('GET','withdrawals?projectId='+f.projectId+'&transactionId='+tx,{token:ro});
       expect(denied.status).toBe(403);

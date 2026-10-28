@@ -7,7 +7,7 @@ import {payoutRights} from './payout';
 import {moneyOfRequest} from './ops';
 import {dayDate,dayText} from '../business-management/money';
 import {assertScopedServerIds,hasServerScope} from '../permissions/server-scope';
-import {txQuery,sameTx} from '@/lib/paypal-tx';
+import {txQuery,sameTx,validTxId} from '@/lib/paypal-tx';
 
 const statuses=['PREPARING','UNKNOWN','WAITING','PARTIAL','RECEIVED','FAILED','CANCELLED','REVIEW','LOST'] as const;
 export type PayoutReportStatus=typeof statuses[number];
@@ -22,7 +22,7 @@ const invalid=()=>{throw new ProxyDomainError('INVALID_INPUT','Bộ lọc báo c
 async function loadPayoutModel(projectId:string,input:PayoutReportInput,db:DB){
  const from=input.from===undefined?undefined:dayDate(input.from),to=input.to===undefined?undefined:dayDate(input.to);
  if(from&&to&&from>to)invalid();
- const q=input.q?.trim().toLocaleLowerCase()??'',tx=txQuery(input.q);
+ const q=input.q?.trim().toLocaleLowerCase()??'',rawTx=txQuery(input.q),tx=validTxId(rawTx)?rawTx:'';
  const [requests,servers,paypals]=await Promise.all([
   db.earnPayoutRequest.findMany({where:{projectId,earnApp:{projectId},paypal:{projectId},paypalEmail:{projectId},
    ...(input.paypalId?{paypalId:input.paypalId}:{}),
@@ -153,14 +153,23 @@ export async function findPayoutByTransaction(scope:ActorScope,input:{transactio
  const current=await authorizeVM(scope,'READ',db),rights=await payoutRights(current,db);
  if(!rights.requestMoney)throw new ProxyDomainError('FORBIDDEN','Tìm theo mã giao dịch cần quyền xem tiền của yêu cầu rút');
  const tx=txQuery(input.transactionId);
- if(!tx||tx.length>160)invalid();
- const receipt=await db.fundTransaction.findFirst({where:{projectId:rights.current.projectId,transactionId:{equals:tx,mode:'insensitive'},payoutRequestId:{not:null}},
-  select:{payoutRequest:{select:{id:true,vmId:true,projectId:true}}},orderBy:[{date:'desc'},{id:'desc'}]});
- const request=receipt?.payoutRequest;
- if(!request||request.projectId!==rights.current.projectId)return null;
- const vm=await db.virtualMachine.findFirst({where:{id:request.vmId,server:{projectId:rights.current.projectId}},select:{id:true,serverId:true}});
- if(!vm||hasServerScope(rights.current)&&!rights.current.serverIds!.includes(vm.serverId))return null;
- return {vmId:vm.id,serverId:vm.serverId,requestId:request.id};
+ if(!validTxId(tx))throw new ProxyDomainError('INVALID_INPUT','Mã giao dịch PayPal chỉ gồm chữ, số và "-" (tối đa 64 ký tự)');
+ const projectId=rights.current.projectId;
+ // ILIKE without wildcards (validated above), then the exact case-insensitive compare.
+ const receipts=(await db.fundTransaction.findMany({where:{projectId,transactionId:{equals:tx,mode:'insensitive'},payoutRequestId:{not:null}},
+  select:{transactionId:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,payoutRequest:{select:{id:true,vmId:true,projectId:true}}},orderBy:[{date:'desc'},{id:'desc'}]}))
+  .filter(x=>sameTx(x.transactionId,tx));
+ for(const receipt of receipts){
+  const request=receipt.payoutRequest;
+  if(!request||request.projectId!==projectId)continue;
+  // Archived (deleted) VMs / servers are not offered.
+  const vm=await db.virtualMachine.findFirst({where:{id:request.vmId,archivedAt:null,server:{projectId,archivedAt:null}},select:{id:true,serverId:true,server:{select:{code:true}}}});
+  if(!vm||hasServerScope(rights.current)&&!rights.current.serverIds!.includes(vm.serverId))continue;
+  return {vmId:vm.id,serverId:vm.serverId,serverCode:vm.server.code,requestId:request.id,
+   receipt:{transactionId:receipt.transactionId,amount:receipt.amount.toFixed(2),currency:receipt.currency,
+    status:receipt.voidedAt?'VOIDED' as const:receipt.failed?'FAILED' as const:receipt.confirmed?'CONFIRMED' as const:'PENDING' as const}};
+ }
+ return null;
 }
 
 /** No payout rows/options/totals are queried for a member without requestMoney. */

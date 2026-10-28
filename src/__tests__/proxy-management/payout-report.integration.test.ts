@@ -391,6 +391,7 @@ it('report q matches a PayPal transaction id exactly, case-insensitively and wit
    expect(report.rows[0].matchedTransactionId).toBe('8JR02442V10816200');
   }
   expect((await readPayoutReport(f.scope,{q:'8JR02442V1081620'},db)).rows.map(r=>r.id)).toEqual([]);
+  for(const q of ['%','8JR_2442V10816200','8JR02442V1081620%'])expect((await readPayoutReport(f.scope,{q},db)).rows.map(r=>r.id)).toEqual([]);
   expect((await readPayoutReport(f.scope,{},db)).rows.every(r=>r.matchedTransactionId===null)).toBe(true);
  }finally{await f.cleanup();}
 });
@@ -399,7 +400,10 @@ it('findPayoutByTransaction returns the request VM, null when unknown, and refus
  const f=await fixture(),other=await fixture();try{
   const r=await f.request();await f.receipt(r.id,{transactionId:'9AB12345CD6789012'});
   const o=await other.request();await other.receipt(o.id,{transactionId:'7ZZ12345CD6789012'});
-  expect(await findPayoutByTransaction(f.scope,{transactionId:'Mã giao dịch: 9ab12345cd6789012'},db)).toEqual({vmId:f.vm.id,serverId:f.server.id,requestId:r.id});
+  expect(await findPayoutByTransaction(f.scope,{transactionId:'Mã giao dịch: 9ab12345cd6789012'},db)).toEqual({vmId:f.vm.id,serverId:f.server.id,serverCode:f.server.code,requestId:r.id,
+   receipt:{transactionId:'9AB12345CD6789012',amount:'3.00',currency:'USD',status:'CONFIRMED'}});
+  // ILIKE wildcards never reach the database: "%" / "_" are refused, not matched.
+  for(const transactionId of ['%','9AB_2345CD6789012','9AB12345CD678901%'])await expect(findPayoutByTransaction(f.scope,{transactionId},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
   expect(await findPayoutByTransaction(f.scope,{transactionId:'7ZZ12345CD6789012'},db)).toBeNull();
   expect(await findPayoutByTransaction(f.scope,{transactionId:'0000000000000000'},db)).toBeNull();
   await expect(findPayoutByTransaction(f.worker,{transactionId:'9AB12345CD6789012'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
@@ -409,6 +413,12 @@ it('findPayoutByTransaction returns the request VM, null when unknown, and refus
   await db.projectMember.update({where:member,data:{serverScope:'SELECTED',allowedServerIds:[f.server.id]}});
   await expect(findPayoutByTransaction(f.worker,{transactionId:'9AB12345CD6789012'},db)).rejects.toMatchObject({code:'FORBIDDEN'});
   const caller=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId,email:'fixture@invalid'},expires:new Date(Date.now()+60000).toISOString()} as never});
-  expect(await caller.vmOps.findByTransaction({projectId:f.scope.projectId,transactionId:'9AB12345CD6789012'})).toEqual({vmId:f.vm.id,serverId:f.server.id,requestId:r.id});
+  expect(await caller.vmOps.findByTransaction({projectId:f.scope.projectId,transactionId:'9AB12345CD6789012'})).toMatchObject({vmId:f.vm.id,requestId:r.id});
+  await expect(caller.vmOps.findByTransaction({projectId:f.scope.projectId,transactionId:'%'})).rejects.toMatchObject({code:'BAD_REQUEST'});
+  // A voided receipt is reported as such; an archived VM is not offered.
+  const v=await f.request();await f.receipt(v.id,{transactionId:'VOID12345CD678901',voidedAt:new Date()});
+  expect((await findPayoutByTransaction(f.scope,{transactionId:'VOID12345CD678901'},db))?.receipt.status).toBe('VOIDED');
+  await db.virtualMachine.update({where:{id:f.vm.id},data:{archivedAt:new Date()}});
+  expect(await findPayoutByTransaction(f.scope,{transactionId:'9AB12345CD6789012'},db)).toBeNull();
  }finally{await f.cleanup();await other.cleanup();}
 });

@@ -10,7 +10,12 @@ export function looksLikeTxId(raw:string|null|undefined):boolean{
   const s=txQuery(raw);
   return /^[A-Za-z0-9]{12,20}$/.test(s)&&/\d/.test(s)&&/[A-Za-z]/.test(s);
 }
+/** The only shape a transaction-id lookup accepts (after the label is dropped): letters, digits and "-", 1–64 characters.
+ * Prisma `equals`+`mode:'insensitive'` is an ILIKE, so "%" / "_" must never reach the database (review 29/10/2026). */
+export const TX_ID_MAX=64;
+export function validTxId(id:string):boolean{return /^[A-Za-z0-9-]{1,64}$/.test(id);}
+/** Exact, case-insensitive comparison; a query that is not a valid id never matches. */
 export function sameTx(id:string|null|undefined,raw:string|null|undefined):boolean{
   const q=txQuery(raw);
-  return !!q&&!!id&&id.toLocaleLowerCase()===q.toLocaleLowerCase();
+  return validTxId(q)&&!!id&&id.toLowerCase()===q.toLowerCase();
 }

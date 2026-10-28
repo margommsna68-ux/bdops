@@ -19,10 +19,11 @@ it('recognises PayPal transaction ids, with or without the pasted label, and lea
 });
 
 it('offers "Mở VM có giao dịch" when the grid is empty and the query looks like a tx id, then opens that VM',async()=>{
-  mock.find.mockReturnValue({data:{vmId:'vm-1',serverId:'s-1',requestId:'r-1'},isFetching:false,error:null});
+  mock.find.mockReturnValue({data:{vmId:'vm-1',serverId:'s-1',serverCode:'MOON-02',requestId:'r-1',receipt:{transactionId:'8JR02442V10816200',amount:'3.00',currency:'USD',status:'VOIDED'}},isFetching:false,error:null});
   const onOpen=vi.fn();
-  await act(async()=>root.render(<TxLookupOffer projectId="p" query="Mã giao dịch: 8JR02442V10816200" empty onOpen={onOpen}/>));
+  await act(async()=>root.render(<TxLookupOffer projectId="p" query="Mã giao dịch: 8JR02442V10816200" empty currentServerId="s-other" onOpen={onOpen}/>));
   expect(mock.find).toHaveBeenLastCalledWith({projectId:'p',transactionId:'8JR02442V10816200'},expect.objectContaining({enabled:true}));
+  expect(host.textContent).toContain('VM ở server MOON-02');expect(host.textContent).toContain('đã thu hồi');
   const b=Array.from(host.querySelectorAll('button')).find(x=>x.textContent==='Mở VM có giao dịch 8JR02442V10816200')!;expect(b).toBeTruthy();
   await act(async()=>b.click());expect(onOpen).toHaveBeenCalledWith('vm-1');
 });
@@ -32,6 +33,8 @@ it('does not ask the server when rows were found or the query is not a tx id; sa
   await act(async()=>root.render(<TxLookupOffer projectId="p" query="8JR02442V10816200" empty={false} onOpen={vi.fn()}/>));
   expect(mock.find).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({enabled:false}));expect(host.textContent).toBe('');
   await act(async()=>root.render(<TxLookupOffer projectId="p" query="moon1" empty onOpen={vi.fn()}/>));
+  expect(mock.find).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({enabled:false}));
+  await act(async()=>root.render(<TxLookupOffer projectId="p" query="8JR_2442V10816200" empty onOpen={vi.fn()}/>));
   expect(mock.find).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({enabled:false}));expect(host.textContent).toBe('');
   mock.find.mockReturnValue({data:null,isFetching:false,error:null});
   await act(async()=>root.render(<TxLookupOffer projectId="p" query="8JR02442V10816200" empty onOpen={vi.fn()}/>));

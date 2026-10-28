@@ -1,4 +1,4 @@
-import {txQuery} from '@/lib/paypal-tx';
+import {txQuery,sameTx,validTxId} from '@/lib/paypal-tx';
 import {createHash,randomUUID} from 'node:crypto';
 import type {PrismaClient} from '@prisma/client';
 import {z} from 'zod';
@@ -434,11 +434,16 @@ async function withdrawals(c:Ctx){
   // transactionId= (29/10/2026): the request(s) whose receipt carries that PayPal transaction id (exact, case-insensitive, a pasted
   // "Mã giao dịch:" label dropped), so the AI scanning PayPal mails checks first and never records the same payment twice.
   const rawTx=q(c,'transactionId'),tx=rawTx==null?null:txQuery(rawTx);
-  if(tx!==null&&(!tx||tx.length>160||/\s/.test(tx)))throw fail('VALIDATION','transactionId: một mã giao dịch PayPal');
+  // Only letters, digits and "-" (≤ 64): Prisma's insensitive equals is an ILIKE, so "%" / "_" would act as wildcards (review 29/10/2026).
+  if(tx!==null&&!validTxId(tx))throw fail('VALIDATION','transactionId: mã giao dịch PayPal chỉ gồm chữ, số và "-" (tối đa 64 ký tự)');
   if(tx&&!rights.requestMoney)throw fail('FORBIDDEN','Lọc theo mã giao dịch cần quyền xem tiền của yêu cầu rút');
   const rows=await c.db.earnPayoutRequest.findMany({where:{projectId,...(st?WITHDRAWAL_FILTER[st]:{}),...(email?{paypalEmail:{email:{equals:email,mode:'insensitive'}}}:{}),...(tx?{receipts:{some:{projectId,transactionId:{equals:tx,mode:'insensitive'}}}}:{})},select:requestSelect,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   const cycles=new Map((await c.db.vmOperation.findMany({where:{vmId:{in:rows.map(r=>r.vmId)}},select:{vmId:true,cycle:true}})).map(o=>[o.vmId,o.cycle]));
-  const r=paged(rows,limit);return {items:r.items.map(x=>withdrawalView(x,rights,{currentCycle:cycles.get(x.vmId)??1})),nextCursor:r.nextCursor};
+  const r=paged(rows,limit);
+  // With transactionId: the exact case-insensitive compare again, and the matching receipt(s) with their status (a VOIDED one = not counted).
+  const items=tx?r.items.filter(x=>x.receipts.some(y=>sameTx(y.transactionId,tx))):r.items;
+  return {items:items.map(x=>({...withdrawalView(x,rights,{currentCycle:cycles.get(x.vmId)??1}),...(tx?{matchedReceipts:x.receipts.filter(y=>sameTx(y.transactionId,tx)).map(y=>({id:y.id,amount:y.amount.toFixed(2),currency:y.currency,receivedOn:dayText(y.date),transactionId:y.transactionId,
+    status:y.voidedAt?'VOIDED':y.failed?'FAILED':y.confirmed?'RECEIVED':'PENDING',recordedAt:y.createdAt.toISOString()}))}:{})})),nextCursor:r.nextCursor};
 }
 async function loadRequest(c:Ctx,projectId:string,id:string){
   const r=await c.db.earnPayoutRequest.findFirst({where:{id,projectId},select:requestSelect});if(!r)throw fail('NOT_FOUND','Không có yêu cầu rút này trong dự án');

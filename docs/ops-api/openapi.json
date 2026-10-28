@@ -666,6 +666,13 @@
       "format": "date-time",
       "nullable": true,
       "description": "when the request was closed as lost to SUS"
+     },
+     "matchedReceipts": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Receipt"
+      },
+      "description": "Only with GET withdrawals?transactionId=: the receipt(s) of this request carrying that id, with status (RECEIVED / PENDING / FAILED / VOIDED)."
      }
     },
     "required": [
@@ -8964,10 +8971,10 @@
       "name": "transactionId",
       "in": "query",
       "required": false,
-      "description": "PayPal transaction id (29/10/2026): the request(s) whose receipt carries exactly this id, case-insensitive; a pasted label such as \"Mã giao dịch: \" is dropped. Check it BEFORE recording a receipt from a PayPal mail so the same payment is never recorded twice (an empty list = not recorded yet). Needs the request money right (403 otherwise).",
+      "description": "PayPal transaction id (29/10/2026): the request(s) whose receipt carries exactly this id, case-insensitive; a pasted label such as \"Mã giao dịch: \" is dropped. Check it BEFORE recording a receipt from a PayPal mail so the same payment is never recorded twice (an empty list = not recorded yet). The id itself must be letters, digits or \"-\", 1–64 characters (422 VALIDATION otherwise; no wildcards). Each row then carries matchedReceipts with the receipt status: a VOIDED / FAILED receipt is not money received. Needs the request money right (403 otherwise).",
       "schema": {
        "type": "string",
-       "maxLength": 200
+       "maxLength": 100
       }
      },
      {
