@@ -156,8 +156,12 @@ export async function approveAllPending(db:PrismaClient,input:{projectId:string;
     if(a.locked)throw new ProxyDomainError('FORBIDDEN','Mã 2FA đang bị khoá');
     const now=new Date(),rows=await tx.opsApproval.findMany({where:{projectId:input.projectId,status:'PENDING',expiresAt:{gt:now},action:{in:[...HELD_ACTIONS]}},select:{id:true,action:true,objectId:true,tokenId:true}});
     if(!rows.length)return {approved:0};
-    const n=await tx.opsApproval.updateMany({where:{id:{in:rows.map(r=>r.id)},status:'PENDING'},data:{status:'APPROVED',decidedById:input.actorId,decidedAt:now,decisionNote:'Duyệt tất cả đang chờ'}});
-    await tx.auditLog.createMany({data:rows.map(r=>({projectId:input.projectId,userId:input.actorId,action:'OPS_APPROVE',entity:'OpsApproval',entityId:r.id,changes:{action:r.action,objectId:r.objectId,tokenId:r.tokenId,via:'ALL:'+t.via}}))});
+    // Lock the rows still PENDING (a row decided meanwhile by another ADMIN drops out), update exactly those and audit exactly those.
+    const locked=await tx.$queryRaw<{id:string}[]>`SELECT "id" FROM "OpsApproval" WHERE "id"=ANY(${rows.map(r=>r.id)}::text[]) AND "status"='PENDING' ORDER BY "id" FOR UPDATE`;
+    const ids=new Set(locked.map(r=>r.id)),changed=rows.filter(r=>ids.has(r.id));
+    if(!changed.length)return {approved:0};
+    const n=await tx.opsApproval.updateMany({where:{id:{in:changed.map(r=>r.id)},status:'PENDING'},data:{status:'APPROVED',decidedById:input.actorId,decidedAt:now,decisionNote:'Duyệt tất cả đang chờ'}});
+    await tx.auditLog.createMany({data:changed.map(r=>({projectId:input.projectId,userId:input.actorId,action:'OPS_APPROVE',entity:'OpsApproval',entityId:r.id,changes:{action:r.action,objectId:r.objectId,tokenId:r.tokenId,via:'ALL:'+t.via}}))});
     return {approved:n.count};
   });
 }

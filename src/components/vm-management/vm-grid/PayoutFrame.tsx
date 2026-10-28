@@ -6,7 +6,7 @@ import {trpc} from '@/lib/trpc';
 import {formatLedger} from '@/lib/money-input';
 import type {OpsRights} from './OpsCells';
 import {PayoutDailyInfo,payoutEmailAllowed} from './OpsCells';
-import {payoutActions,requestHasReceipts,pickPayoutEmail,defaultPayoutAmount,receiptCheck,frameJournalKey,readFrameCommand,refusedAnswer,bangkokDay,requestLabel,
+import {payoutActions,requestHasReceipts,pickPayoutEmail,defaultPayoutAmount,receiptCheck,frameJournalKey,readFrameCommand,refusedAnswer,bangkokDay,requestLabel,unchangedMessage,
   type VmOpsRequestView,type FrameAction,type FrameCommand,type FrameCommandAction} from './payout-frame-model';
 import {receiptBody} from './payout-bulk-model';
 // One payout frame (owner 28/10/2026) for the Tiền VM cell, the VM panel and the "Rút EarnApp" report: Rút (one click, email held),
@@ -55,7 +55,8 @@ export function PayoutFrame({projectId,userId,vmId,cycle,earnAppId,request:r,rig
     const retry=!!pending,command:FrameCommand=pending??{action,target,body:{...body,projectId,key:crypto.randomUUID()}};
     try{
       if(!retry){try{window.sessionStorage.setItem(storage,JSON.stringify(command));}catch{setError('Không lưu được mã chống lặp trong tab; chưa gửi lệnh.');return false;}setPending(command);}
-      try{await send(command);}catch(e){
+      let answer:unknown;
+      try{answer=await send(command);}catch(e){
         // A definite refusal of a first send recorded nothing; a refused retry cannot settle an earlier lost answer.
         if(!retry&&refusedAnswer(e)){try{window.sessionStorage.removeItem(storage);}catch{/* retained key is safe */}setPending(null);setError(message(e));}
         // A refused retry is an answer about the CURRENT state, not about the lost first send: keep the command, but let the person
@@ -65,7 +66,7 @@ export function PayoutFrame({projectId,userId,vmId,cycle,earnAppId,request:r,rig
         return false;
       }
       try{window.sessionStorage.removeItem(storage);}catch{/* a retained key only replays */}
-      setPending(null);setStuck(false);setForm(null);toast.success(DONE[command.action]+(vmLabel?' · '+vmLabel:''));
+      setPending(null);setStuck(false);setForm(null);toast.success((unchangedMessage(command.action,answer)??DONE[command.action])+(vmLabel?' · '+vmLabel:''));
       try{await onDone();}catch{setError('Đã lưu; chưa tải lại được bảng. Không bấm lại.');}
       return true;
     }finally{lock.current=false;setBusy(false);}

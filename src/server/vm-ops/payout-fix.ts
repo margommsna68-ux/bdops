@@ -99,6 +99,8 @@ export async function editPayoutRequest(scope:ActorScope,input:PayoutEditInput,d
     const note=input.note?.trim().slice(0,500)||null;
     const amount=input.amount!=null&&input.amount.trim()!==''?ledgerAmount(input.amount,'Số tiền yêu cầu'):r.amount;
     const requestedAt=input.requestedAt!=null&&input.requestedAt.trim()!==''?dayDate(input.requestedAt.trim()):r.requestedAt;
+    // Same rule as the ops API (5 minutes of clock slack), on every path: a withdrawal day after today (Bangkok) is refused.
+    if(requestedAt.getTime()!==r.requestedAt.getTime()&&dayText(requestedAt)>dayText(new Date(Date.now()+5*60e3)))throw new ProxyDomainError('INVALID_INPUT','Ngày rút ở tương lai','VALIDATION');
     const reference=input.reference!==undefined?input.reference?.trim().slice(0,200)||null:r.reference;
     const emailId=input.paypalEmailId||r.paypalEmailId;
     const change={email:emailId!==r.paypalEmailId,amount:!amount.eq(r.amount),date:requestedAt.getTime()!==r.requestedAt.getTime(),reference:reference!==r.reference};
@@ -162,7 +164,9 @@ const json=(row:Record<string,unknown>)=>Object.fromEntries(Object.entries(row).
  * (voided ones included), money on its email for this EarnApp, an active merged member, once used for a recreation or lost to SUS.
  * Snapshot (every column, history with the VOID line, members) + giving the email back + removing the row, together.
  */
-export async function voidInTx(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string},r:{id:string},reason:string):Promise<{voidId:string}>{
+export async function voidInTx(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string},r:{id:string},reason:string,
+  /** "EarnApp bị SUS": emails linked to / used by the EarnApp stay bound (they are archived right after); only a merely held one goes back. */
+  opts:{keepEmailIds?:string[]}={}):Promise<{voidId:string}>{
   const why=reason.trim().slice(0,500);if(!why)throw new ProxyDomainError('INVALID_INPUT','Ghi lý do xoá yêu cầu rút ghi nhầm','VALIDATION');
   const row=await tx.earnPayoutRequest.findFirst({where:{id:r.id,projectId:ctx.projectId},include:{receipts:{select:{id:true}},members:true,paypal:{select:{code:true}},paypalEmail:{select:{email:true}}}});
   if(!row)throw new ProxyDomainError('NOT_FOUND','Yêu cầu rút không còn (có thể đã xoá)','NOT_FOUND');
@@ -175,7 +179,12 @@ export async function voidInTx(tx:Tx,images:BusinessCollector,ctx:{projectId:str
   const voidLine=historyEntry(ctx.actorId,'VOID','Xoá do ghi nhầm ('+label(row.submission)+', '+row.amount.toFixed(2)+' '+row.currency+', PP '+paypal.code+' · '+paypalEmail.email+'): '+why);
   const snapshot={...json(columns),history:[...(history as Prisma.JsonArray),voidLine],paypalCode:paypal.code,email:paypalEmail.email,members:members.map(m=>json(m))} as Prisma.InputJsonObject;
   await images.remember('PAYOUT_REQUEST',row.id);
-  await unbindMistakenEmail(tx,images,row);
+  if(opts.keepEmailIds?.includes(row.paypalEmailId)){
+    // Bound to the EarnApp for good: only this request's hold (if any) and its day markers go; link, used mark and periods stay.
+    const email=await tx.payPalEmail.findFirst({where:{id:row.paypalEmailId,projectId:ctx.projectId},select:{id:true,holdEarnAppId:true}});
+    if(email?.holdEarnAppId===row.earnAppId){await images.remember('PAYPAL_EMAIL',email.id);await tx.payPalEmail.update({where:{id:email.id},data:{holdEarnAppId:null,holdAt:null,revision:{increment:1}}});}
+    await tx.payPalPayoutDayEmail.deleteMany({where:{projectId:ctx.projectId,requestId:row.id,paypalEmailId:row.paypalEmailId}});
+  }else await unbindMistakenEmail(tx,images,row);
   const v=await tx.earnPayoutRequestVoid.create({data:{projectId:ctx.projectId,requestId:row.id,vmId:row.vmId,cycle:row.cycle,earnAppId:row.earnAppId,paypalEmailId:row.paypalEmailId,snapshot,reason:why,voidedById:ctx.actorId}});
   // Members left earlier (removedAt) are kept in the snapshot; the request row goes, so the EarnApp can withdraw again.
   if(members.length)await tx.earnPayoutMember.deleteMany({where:{requestId:row.id}});

@@ -40,6 +40,13 @@ export async function suspendRefusal(tx:Tx,ctx:{projectId:string;scope:ActorScop
 export async function closeSuspendedInTx(tx:Tx,images:BusinessCollector,ctx:{projectId:string;actorId:string;scope:ActorScope},vm:{id:string;operation:{cycle:number}|null}):Promise<SuspendClosure>{
   const now=new Date(),{earnApp,request,money}=await currentRoundPayout(tx,ctx.projectId,vm);
   let outcome:'LOST'|'VOIDED'|null=null,lostAmount:string|null=null;const archive:string[]=[];
+  // Every email linked to or used by this EarnApp leaves the stock, read BEFORE a void (voiding a preparation on the EarnApp's own email
+  // must not hand that email back). An email only held by the preparation (never linked / used) goes back to stock.
+  if(earnApp){
+    const ea=await tx.earnAppAccount.findUnique({where:{id:earnApp.id},select:{paypalEmailId:true}});if(ea?.paypalEmailId)archive.push(ea.paypalEmailId);
+    for(const e of await tx.payPalEmail.findMany({where:{projectId:ctx.projectId,usedEarnAppId:earnApp.id},select:{id:true},orderBy:{id:'asc'}}))archive.push(e.id);
+  }
+  const bound=[...archive];
   if(request&&request.state==='REQUESTED'){
     if(request.submission==='PREPARING'){
       // The request first: an undo brings it back (with its members) before the members are put back as active.
@@ -51,7 +58,7 @@ export async function closeSuspendedInTx(tx:Tx,images:BusinessCollector,ctx:{pro
         const where=await tx.virtualMachine.findMany({where:{id:{in:members.map(m=>m.vmId)}},select:{code:true,server:{select:{code:true}}}});
         await tx.earnPayoutRequest.update({where:{id:request.id},data:{revision:{increment:1},history:[...(request.history as Prisma.JsonArray),historyEntry(ctx.actorId,'MEMBERS','Bỏ gộp '+where.map(v=>v.server.code+' / '+v.code).join(', ')+' ('+REASON+')')]}});
       }
-      await voidInTx(tx,images,{projectId:ctx.projectId,actorId:ctx.actorId},{id:request.id},REASON);
+      await voidInTx(tx,images,{projectId:ctx.projectId,actorId:ctx.actorId},{id:request.id},REASON,{keepEmailIds:bound});
       outcome='VOIDED';
     }else{
       archive.push(request.paypalEmailId);
@@ -66,8 +73,6 @@ export async function closeSuspendedInTx(tx:Tx,images:BusinessCollector,ctx:{pro
       }
     }
   }
-  // The receiving email of the EarnApp (read after a void, which gives a mistaken preparation's email back to stock).
-  if(earnApp){const ea=await tx.earnAppAccount.findUnique({where:{id:earnApp.id},select:{paypalEmailId:true}});if(ea?.paypalEmailId)archive.unshift(ea.paypalEmailId);}
   const archivedEmailIds:string[]=[];
   for(const id of [...new Set(archive)]){
     const email=await tx.payPalEmail.findFirst({where:{id,projectId:ctx.projectId},select:{id:true,archivedAt:true,paypalId:true}});
@@ -95,7 +100,17 @@ export async function markEarnAppSuspended(scope:ActorScope,input:SuspendInput,d
     if(cycle!==input.expectedCycle)throw new ProxyDomainError('STALE_PREVIEW',staleCycle(cycle),'CYCLE_CHANGED',{cycle});
     if(input.expectedVmRevision!==undefined&&vm.revision!==input.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW','VM vừa được sửa; tải lại','REVISION_CONFLICT',{vmRevision:vm.revision});
     const current_=await currentRoundPayout(tx,scope.projectId,vm);
-    if(vm.operation?.status==='SUSPENDED')return {vmId:vm.id,cycle,changed:false,request:{id:current_.request?.id??null,outcome:null,lostAmount:null},archivedEmailIds:[] as string[]};
+    if(vm.operation?.status==='SUSPENDED'){
+      // Already SUS (e.g. recorded before 28/10/2026 by a plain status write): the status is not written again, but a request of this
+      // round that is still open (a preparation, or sent / unconfirmed money still waiting) is closed now. Otherwise nothing changes.
+      const r=current_.request,open=!!r&&r.state==='REQUESTED'&&(r.submission==='PREPARING'||current_.money?.phase==='WAITING');
+      if(!open)return {vmId:vm.id,cycle,changed:false,request:{id:r?.id??null,outcome:null,lostAmount:null},archivedEmailIds:[] as string[]};
+      const refusal=await suspendRefusal(tx,{projectId:scope.projectId,scope:infra},vm);if(refusal)throw new ProxyDomainError('INVALID_INPUT',refusal,'VALIDATION');
+      const closed=await closeSuspendedInTx(tx,images,{projectId:scope.projectId,actorId:current.userId,scope:infra},vm);
+      // The fact is kept next to the status history (SUS → SUS, with what was closed), the status itself is not rewritten.
+      await tx.vmOpsEvent.create({data:{projectId:scope.projectId,vmId:vm.id,cycle,kind:'STATUS',fromStatus:'SUSPENDED',toStatus:'SUSPENDED',note:(input.note?.trim()||REASON+': đóng yêu cầu rút còn mở').slice(0,500),detail:susDetail(closed),actorId:current.userId}});
+      return {vmId:vm.id,cycle,changed:true,request:{id:closed.requestId,outcome:closed.request?.outcome??null,lostAmount:closed.lostAmount},archivedEmailIds:closed.archivedEmailIds};
+    }
     // An AI operator never leaves New VM / "Chờ áp dụng proxy" with a plain status (as setVmStatus); SUS is no exception.
     if(opts.operator&&vm.operation?.status&&['NEW_VM','PROXY_PENDING'].includes(vm.operation.status))throw new ProxyDomainError('INVALID_INPUT',opsLabel(vm.operation.status)+' chỉ kết thúc qua việc đã nhận (finish-prepare / finish-proxy)','VALIDATION');
     const refusal=await suspendRefusal(tx,{projectId:scope.projectId,scope:infra},vm);if(refusal)throw new ProxyDomainError('INVALID_INPUT',refusal,'VALIDATION');

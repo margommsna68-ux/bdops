@@ -138,6 +138,25 @@ describe('15-minute approval session',()=>{
       expect((await api('POST','withdrawals/prepare',{token:t,key:p2.key,body:p2.body,autoApprove:false})).status).toBe(200);
     }finally{await done(f);}
   });
+  it('approveAllPending audits only the rows its guarded update really changed (a row decided meanwhile is not audited)',async()=>{
+    const {f,admin,secret,t}=await ready();try{
+      const p1=await prepare(f,t,0,0),p2=await prepare(f,t,1,1);expect([p1.r.status,p2.r.status]).toEqual([202,202]);
+      // Another ADMIN rejects one row between the read of pending rows and the guarded update (simulated inside the same transaction).
+      const original=db.$transaction.bind(db);let raced:string|null=null;
+      const wrap=(tx:object)=>new Proxy(tx,{get(target,prop){
+        const value=(target as Record<string|symbol,unknown>)[prop];
+        if(prop==='opsApproval'){const o=value as Record<string,(...a:unknown[])=>Promise<unknown>>;return new Proxy(o,{get(m,q){
+          if(q==='findMany')return async(arg:unknown)=>{const rows=await m.findMany(arg) as {id:string}[];if(rows.length&&!raced){raced=rows[0].id;await m.update({where:{id:raced},data:{status:'REJECTED',decisionNote:'race'}});}return rows;};
+          const v=(m as Record<string|symbol,unknown>)[q];return typeof v==='function'?(v as (...a:unknown[])=>unknown).bind(m):v;}});}
+        return typeof value==='function'?(value as (...a:unknown[])=>unknown).bind(target):value;}});
+      vi.spyOn(db,'$transaction').mockImplementation(((fn:unknown)=>typeof fn==='function'?original((tx:object)=>(fn as (t:object)=>unknown)(wrap(tx)) as never):original(fn as never)) as never);
+      expect(await approveAllPending(db,{projectId:f.projectId,actorId:admin.id,code:fresh(secret)})).toEqual({approved:1});
+      vi.restoreAllMocks();
+      const audits=await db.auditLog.findMany({where:{projectId:f.projectId,action:'OPS_APPROVE'}});
+      expect(audits).toHaveLength(1);expect(audits.map(a=>a.entityId)).not.toContain(raced);
+      expect((await db.opsApproval.findUniqueOrThrow({where:{id:raced!}})).status).toBe('REJECTED');
+    }finally{await done(f);}
+  });
   it('web open needs the acting ADMIN own code and a token of the project',async()=>{
     const {f,admin,secret,tokenId}=await ready();try{
       await expect(openApprovalSession(db,{projectId:f.projectId,tokenId,admin:'',totp:fresh(secret),via:'WEB',actorId:f.plain})).rejects.toThrow(/ADMIN/);

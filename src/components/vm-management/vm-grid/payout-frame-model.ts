@@ -89,3 +89,11 @@ export function requestLabel(r:{state:string;submission:string;phase:string;sett
   if(r.phase==='REVIEW')return 'Cần đối chiếu tiền';
   return 'Đã rút, chờ tiền';
 }
+/**
+ * What the frame says after an answer (final review 28/10/2026): an answer with changed:false recorded nothing, so it never reads as
+ * "Đã ghi …" (e.g. "EarnApp bị SUS" on a VM already SUS with nothing left to close). null = use the normal done message.
+ */
+export function unchangedMessage(action:FrameCommandAction,answer:unknown):string|null{
+  if(!answer||typeof answer!=='object'||(answer as {changed?:unknown}).changed!==false)return null;
+  return action==='SUS'?'EarnApp đã ghi SUS từ trước, không còn yêu cầu rút mở: không có gì thay đổi':'Không có gì thay đổi (đã ghi trước đó)';
+}

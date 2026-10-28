@@ -2,7 +2,8 @@ import {afterAll,it,expect} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import type {VirtualMachine,EarnAppAccount,PayPalEmail} from '@prisma/client';
 import {businessDB as db,businessFixture} from './business-fixture';
-import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal,readVmOps} from '@/server/vm-ops/payout';
+import {createPayoutRequest,recordPayoutReceipt,pendingByPaypal,readVmOps,updatePayoutRequest} from '@/server/vm-ops/payout';
+import {editPayoutRequest,unsendPayoutRequest,voidPayoutRequest} from '@/server/vm-ops/payout-fix';
 import {readPayoutReport} from '@/server/vm-ops/payout-report';
 import {recordRecreated,recreateRule,setVmStatus} from '@/server/vm-ops/ops';
 import {matchVm,DEFAULT_FILTERS,type VmFacts} from '@/components/vm-management/vm-grid/filter-model';
@@ -252,5 +253,95 @@ it('legacy SUS (status set directly, request still waiting) exposes phase WAITIN
  expect(row.status).toBe('SUSPENDED');expect(row.request?.phase).toBe('WAITING');
  const facts=asFacts(row);
  expect(matchVm(facts,{...DEFAULT_FILTERS,money:'SUS_WAITING'})).toBe(true);expect(matchVm(facts,{...DEFAULT_FILTERS,money:'LOST'})).toBe(false);
+ }finally{await f.cleanup();}
+});
+
+// ─── Final whole-branch review fixes (28/10/2026) ───────────────────────────────────────────────────────────────────────────
+const legacySus=(vmId:string,projectId:string)=>db.vmOperation.upsert({where:{vmId},update:{status:'SUSPENDED'},create:{vmId,projectId,status:'SUSPENDED'} as never});
+it('final-1: "EarnApp bị SUS" on a VM already SUSPENDED (legacy) still closes the waiting request',async()=>{
+ const f=await setup(1);try{const a=f.rows[0];
+ const r=await f.create(0,'15','SENT');await f.receipt(r.id,'5');
+ await legacySus(a.vm.id,f.scope.projectId);const opsRev=(await f.ops(0))!.revision;
+ const key=randomUUID(),out=await f.sus(0,key);
+ expect(out).toMatchObject({changed:true,request:{id:r.id,outcome:'LOST',lostAmount:'10.00'},archivedEmailIds:[a.email.id]});
+ expect(await f.req(r.id)).toMatchObject({state:'LOST_SUS'});expect((await f.req(r.id)).lostAmount?.toFixed(2)).toBe('10.00');
+ expect((await f.email(a.email.id)).archivedAt).not.toBeNull();
+ expect((await f.ops(0))).toMatchObject({status:'SUSPENDED',revision:opsRev});
+ expect(await f.journal(key)).toMatchObject({kind:'EARN_SUSPEND'});
+ const again=await f.sus(0);expect(again).toMatchObject({changed:false});
+ }finally{await f.cleanup();}
+});
+it('final-1: legacy SUS with a PREPARING request voids it',async()=>{
+ const f=await setup(1);try{const a=f.rows[0];
+ const r=await f.create(0,'10','PREPARING');await legacySus(a.vm.id,f.scope.projectId);
+ const out=await f.sus(0);expect(out).toMatchObject({changed:true,request:{id:r.id,outcome:'VOIDED'}});
+ expect(await db.earnPayoutRequest.findUnique({where:{id:r.id}})).toBeNull();
+ }finally{await f.cleanup();}
+});
+it('final-2: SUS with a PREPARING request on the EarnApp\'s own pre-linked email archives that email',async()=>{
+ const f=await setup(1);try{const a=f.rows[0];
+ await db.earnAppAccount.update({where:{id:a.ea.id},data:{paypalId:f.pp.id,paypalEmailId:a.email.id}});
+ await db.payPalEmail.update({where:{id:a.email.id},data:{usedEarnAppId:a.ea.id,usedAt:new Date()}});
+ const r=await f.create(0,'10','PREPARING');expect((await f.req(r.id)).paypalEmailId).toBe(a.email.id);
+ const out=await f.sus(0);
+ expect(out).toMatchObject({request:{id:r.id,outcome:'VOIDED'},archivedEmailIds:[a.email.id]});
+ const e=await f.email(a.email.id);expect(e.archivedAt).not.toBeNull();expect(e.usedEarnAppId).toBe(a.ea.id);
+ expect((await db.earnAppAccount.findUniqueOrThrow({where:{id:a.ea.id}})).paypalEmailId).toBe(a.email.id);
+ expect(await db.payPalEmail.count({where:{id:a.email.id,archivedAt:null}})).toBe(0);
+ }finally{await f.cleanup();}
+});
+it('final-2: SUS with a PREPARING request on a merely held email gives only that one back, the linked email is archived',async()=>{
+ const f=await setup(2);try{const a=f.rows[0],held=f.rows[1].email;
+ await db.earnAppAccount.update({where:{id:a.ea.id},data:{paypalId:f.pp.id,paypalEmailId:a.email.id}});
+ await db.payPalEmail.update({where:{id:a.email.id},data:{usedEarnAppId:a.ea.id,usedAt:new Date()}});
+ const r=await f.create(0,'10','PREPARING',{paypalEmailId:held.id});expect((await f.email(held.id)).holdEarnAppId).toBe(a.ea.id);
+ const out=await f.sus(0);
+ expect(out).toMatchObject({request:{id:r.id,outcome:'VOIDED'},archivedEmailIds:[a.email.id]});
+ expect(await f.email(held.id)).toMatchObject({archivedAt:null,holdEarnAppId:null,usedEarnAppId:null});
+ expect((await f.email(a.email.id)).archivedAt).not.toBeNull();
+ }finally{await f.cleanup();}
+});
+it('final-3: a LOST_SUS request refuses every status action, edit, unsend and void',async()=>{
+ const f=await setup(1);try{const a=f.rows[0];
+ const r=await f.create(0,'15','SENT');await f.sus(0);const before=await f.req(r.id);
+ for(const extra of [{action:'RETRY'},{action:'FAILED',note:'x'},{action:'CANCELLED',note:'x'},{action:'CORRECT',amount:'9',note:'x'},{action:'SETTLE',note:'x'},{action:'SENT'},{action:'UNKNOWN'}] as const)
+  await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:before.revision,...extra},db),extra.action).rejects.toMatchObject({code:'INVALID_INPUT',message:expect.stringMatching(/mất do SUS/i)});
+ // history: true (old account reconciliation) is refused too
+ await expect(updatePayoutRequest(f.scope,{key:randomUUID(),requestId:r.id,expectedRevision:before.revision,action:'CORRECT',amount:'9',note:'x',history:true},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ const ident={requestId:r.id,expectedRevision:before.revision,vmId:a.vm.id,expectedCycle:1,earnAppId:a.ea.id};
+ await expect(editPayoutRequest(f.scope,{key:randomUUID(),...ident,amount:'9',note:'x'},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ await expect(unsendPayoutRequest(f.scope,{key:randomUUID(),...ident},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ await expect(voidPayoutRequest(f.scope,{key:randomUUID(),...ident,reason:'x'},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
+ const after=await f.req(r.id);expect(after).toMatchObject({state:'LOST_SUS',revision:before.revision});expect(after.lostAmount?.toFixed(2)).toBe('15.00');
+ }finally{await f.cleanup();}
+});
+const late=async(f:Awaited<ReturnType<typeof setup>>,id:string,amount:string,settleRemainder?:boolean)=>recordPayoutReceipt(f.scope,{key:randomUUID(),requestId:id,expectedRequestRevision:(await f.req(id)).revision,amount,currency:'USD',receivedAt:new Date().toISOString(),...(settleRemainder!==undefined?{settleRemainder}:{})},db);
+it('final-4: a partial late receipt after SUS stays LOST_SUS with the lost part reduced (never waiting)',async()=>{
+ const f=await setup(1);try{
+ const r=await f.create(0,'15','SENT');await f.sus(0);
+ await late(f,r.id,'5',false);
+ const row=await f.req(r.id);expect(row.state).toBe('LOST_SUS');expect(row.lostAmount?.toFixed(2)).toBe('10.00');expect(row.lostAt).not.toBeNull();
+ expect((row.history as {what:string}[]).some(h=>h.what==='Tiền về muộn sau SUS: 5.00 USD, còn mất 10.00 USD')).toBe(true);
+ expect((await pendingByPaypal(db,f.scope.projectId)).get(f.pp.id)).toBeUndefined();
+ const board=(await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)!;expect(board.request?.phase).toBe('LOST');
+ // the rest arrives later: full → reopened and received
+ await late(f,r.id,'10');
+ expect(await f.req(r.id)).toMatchObject({state:'REQUESTED',lostAmount:null,lostAt:null});
+ expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)!.request?.phase).toBe('RECEIVED');
+ }finally{await f.cleanup();}
+});
+it('final-4: a late receipt with "Chốt luôn" reopens and settles the rest as a fee',async()=>{
+ const f=await setup(1);try{
+ const r=await f.create(0,'15','SENT');await f.sus(0);
+ const out=await late(f,r.id,'14',true);expect(out).toMatchObject({settled:true,shortfall:'1.00'});
+ const row=await f.req(r.id);expect(row).toMatchObject({state:'REQUESTED',lostAmount:null});expect(row.shortfall?.toFixed(2)).toBe('1.00');
+ expect((await readVmOps(f.scope,db)).vms.find(v=>v.vmId===f.rows[0].vm.id)!.request?.phase).toBe('RECEIVED');
+ }finally{await f.cleanup();}
+});
+it('final-4: a late receipt covering the whole lost part reopens (received in full)',async()=>{
+ const f=await setup(1);try{
+ const r=await f.create(0,'15','SENT');await f.receipt(r.id,'5');await f.sus(0);
+ await late(f,r.id,'10',false);
+ expect(await f.req(r.id)).toMatchObject({state:'REQUESTED',lostAmount:null,lostAt:null});
  }finally{await f.cleanup();}
 });

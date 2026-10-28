@@ -327,3 +327,19 @@ it('a late receipt on LOST_SUS reopens and records it',async()=>{
  expect(await phaseOf(f,r.id)).toBe('RECEIVED');expect(JSON.stringify(row.history)).toContain('Tiền về muộn sau SUS');
  }finally{await f.cleanup();}
 });
+
+// ─── Final whole-branch review: a future withdrawal day is refused on every path (tRPC included) ───────────────────────────
+it('edit refuses a requestedAt after today on the tRPC / service path (same rule as the ops API)',async()=>{
+ const f=await setup(1);try{const r=await f.prep(0);
+ const tomorrow=new Date(Date.now()+7*3600000+86400000).toISOString().slice(0,10);
+ await expect(f.edit(r.id,{requestedAt:tomorrow})).rejects.toMatchObject({code:'INVALID_INPUT',message:expect.stringMatching(/tương lai/)});
+ const {appRouter}=await import('@/server/routers/_app');
+ const api=appRouter.createCaller({prisma:db,session:{user:{id:f.scope.userId},expires:'2099-01-01'}} as never);
+ const row=await f.req(r.id);
+ await expect(api.vmOps.editPayout({projectId:f.scope.projectId,key:randomUUID(),requestId:r.id,expectedRevision:row.revision,vmId:row.vmId,expectedCycle:row.cycle,earnAppId:row.earnAppId,requestedAt:tomorrow})).rejects.toThrow(/tương lai/);
+ expect((await f.req(r.id)).requestedAt.getTime()).toBe(row.requestedAt.getTime());
+ // today is still allowed
+ const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+ expect(await f.edit(r.id,{requestedAt:today})).toMatchObject({changed:true});
+ }finally{await f.cleanup();}
+});

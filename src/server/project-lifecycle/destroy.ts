@@ -19,7 +19,7 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.businessWorkItem.deleteMany({where});
     await tx.earnWithdrawal.deleteMany({where});
     await tx.fundTransaction.deleteMany({where});
-    await tx.earnPayoutMember.deleteMany({where});await tx.earnPayoutRequest.deleteMany({where});await tx.vmOperation.deleteMany({where});await tx.vmOpsEvent.deleteMany({where});await tx.vmCycle.deleteMany({where});
+    await tx.earnPayoutMember.deleteMany({where});await tx.earnPayoutRequest.deleteMany({where});await tx.earnPayoutRequestVoid.deleteMany({where});await tx.vmOperation.deleteMany({where});await tx.vmOpsEvent.deleteMany({where});await tx.vmCycle.deleteMany({where});
     await tx.agentSale.deleteMany({where});
     await tx.withdrawal.deleteMany({where});
     await tx.agentPaypalEmail.deleteMany({where});
@@ -49,7 +49,7 @@ export async function destroyProject(db:PrismaClient,projectId:string){
     await tx.profitSplit.deleteMany({where});
     await tx.partner.deleteMany({where});
     await tx.deleteRequest.deleteMany({where});
-    await tx.auditLog.deleteMany({where});
+    await tx.opsApprovalSession.deleteMany({where});await tx.auditLog.deleteMany({where});
     await tx.editHistory.deleteMany({where});
     await tx.operationJournal.deleteMany({where});
     await tx.projectMember.deleteMany({where});

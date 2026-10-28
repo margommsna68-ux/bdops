@@ -174,10 +174,13 @@ export async function recordPayoutReceipt(scope:ActorScope,input:PayoutReceiptIn
     await tx.payPalAccount.update({where:{id:r.paypalId},data:{revision:{increment:1}}});await tx.payPalEmail.update({where:{id:r.paypalEmailId},data:{revision:{increment:1}}});
     const history:Prisma.JsonArray=[...(r.history as Prisma.JsonArray)];
     const data:Prisma.EarnPayoutRequestUncheckedUpdateInput={revision:{increment:1}};
-    if(late){Object.assign(data,{state:'REQUESTED',lostAmount:null,lostAt:null});history.push(historyEntry(current.userId,'RECEIPT','Tiền về muộn sau SUS: yêu cầu mở lại (trước đó mất '+(r.lostAmount?.toFixed(2)??m.remaining)+' '+currency+')'));}
+    const gap=open-toCents(amount.toFixed(2));let shortfall:string|null=null;
+    // Late money after SUS (final review 28/10/2026): reopened only when it closes the request (the whole open part arrived, or the rest
+    // is settled as a fee now); a part stays LOST_SUS with the lost part reduced, never back to "waiting".
+    if(late&&(gap<=0||input.settleRemainder)){Object.assign(data,{state:'REQUESTED',lostAmount:null,lostAt:null});history.push(historyEntry(current.userId,'RECEIPT','Tiền về muộn sau SUS: yêu cầu mở lại (trước đó mất '+(r.lostAmount?.toFixed(2)??m.remaining)+' '+currency+')'));}
+    else if(late){Object.assign(data,{lostAmount:D(fromCents(gap))});history.push(historyEntry(current.userId,'RECEIPT','Tiền về muộn sau SUS: '+amount.toFixed(2)+' '+currency+', còn mất '+fromCents(gap)+' '+currency));}
     history.push({...historyEntry(current.userId,'RECEIPT','Tiền về PP '+amount.toFixed(2)+' '+currency+(txId?' · mã '+txId:' · không có mã giao dịch')),observedAt:at.toISOString()});
     // Settle the rest as a fee in the same command (anyone who may record the receipt; a standalone SETTLE still needs writeMoney).
-    const gap=open-toCents(amount.toFixed(2));let shortfall:string|null=null;
     if(input.settleRemainder&&gap>0){
       shortfall=fromCents(gap);const note='Phí / thiếu '+shortfall.replace('.',',')+' '+currency;
       Object.assign(data,{settledAt:new Date(),settledById:current.userId,settleNote:note,shortfall:D(shortfall)});
@@ -266,6 +269,9 @@ export async function updatePayoutRequest(scope:ActorScope,input:PayoutUpdateInp
     const live=!!vmNow&&earnApp.vmId===r.vmId&&!earnApp.closedAt&&(opsNow?.cycle??1)===r.cycle;
     if(!live&&!input.history)throw new ProxyDomainError('STALE_PREVIEW','VM đã đổi tài khoản EarnApp hoặc sang lượt mới; yêu cầu này thuộc tài khoản cũ — đối chiếu ở Lịch sử của VM, không áp vào tài khoản hiện hành',vmNow&&(opsNow?.cycle??1)!==r.cycle?'CYCLE_CHANGED':'ACCOUNT_CHANGED');
     if(input.expectedVmRevision!==undefined&&vmNow&&vmNow.revision!==input.expectedVmRevision)throw new ProxyDomainError('STALE_PREVIEW','VM vừa được sửa; tải lại','REVISION_CONFLICT',{vmRevision:vmNow.revision});
+    // Lost to SUS (final review 28/10/2026): no status / money action may touch it (it would corrupt the lost totals); only late money
+    // ("Tiền đã về") or undo of the SUS command. Checked after the identity checks (a stale form gets its stale answer first).
+    if(r.state==='LOST_SUS')throw new ProxyDomainError('INVALID_INPUT','Yêu cầu đã mất do SUS; chỉ ghi được tiền về muộn','VALIDATION');
     const observedAt=input.observedAt?new Date(input.observedAt):null;if(observedAt&&isNaN(observedAt.getTime()))throw new ProxyDomainError('INVALID_INPUT','Thời điểm quan sát không hợp lệ','VALIDATION');
     if(!live&&input.action==='RETRY')throw new ProxyDomainError('INVALID_INPUT','Tài khoản của yêu cầu này đã rời VM / lượt; không gửi lại, chỉ đối chiếu lịch sử');
     const release=async()=>{if(r.submission==='SENT')return;await images.remember('PAYPAL_EMAIL',r.paypalEmailId);await tx.payPalEmail.updateMany({where:{id:r.paypalEmailId,holdEarnAppId:r.earnAppId},data:{holdEarnAppId:null,holdAt:null,revision:{increment:1}}});};

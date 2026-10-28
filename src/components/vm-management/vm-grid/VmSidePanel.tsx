@@ -112,9 +112,9 @@ function OldRequestActions({projectId,request:r,onDone}:{projectId:string;reques
     <button type="button" className="pm-link" disabled={update.isLoading} onClick={()=>void run('CANCELLED')}>Chưa gửi — trả email</button>
     {error&&<span role="alert" className="vm-cell-error">{error}</span>}</div>;
 }
-const PHASE:Record<string,string>={WAITING:'Chờ tiền về',RECEIVED:'Đã nhận đủ',REVIEW:'Cần đối chiếu',FAILED:'Thất bại',CANCELLED:'Đã huỷ'};
+const PHASE:Record<string,string>={WAITING:'Chờ tiền về',RECEIVED:'Đã nhận đủ',REVIEW:'Cần đối chiếu',FAILED:'Thất bại',CANCELLED:'Đã huỷ',LOST:'Mất do SUS'};
 // Rounds of this VM position, recorded statuses and the payout request of every round (amounts only with the money rights).
-function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
+export function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
   const h=trpc.vmOps.history.useQuery({projectId,vmId});
   if(h.error)return <p role="alert" className="pm-error">{h.error.message}</p>;
   if(!h.data)return <p className="pm-muted text-xs">Đang tải lịch sử vận hành…</p>;
@@ -125,6 +125,7 @@ function OpsHistory({projectId,vmId}:{projectId:string;vmId:string}){
       {r.money&&<div className="pm-muted">Yêu cầu {formatLedger(r.money.amount,r.money.currency)} · đã về {formatLedger(r.money.received,r.money.currency)}{r.money.remaining!=='0.00'?' · còn chờ '+formatLedger(r.money.remaining,r.money.currency):''}{r.money.receipts.length?' · '+r.money.receipts.map(x=>x.date.split('-').reverse().join('/')+' '+formatLedger(x.amount,r.money!.currency)+' ('+x.status+')').join(', '):''}</div>}
       {r.old&&d.rights.writeMoney&&r.state==='REQUESTED'&&r.submission!=='SENT'&&<OldRequestActions projectId={projectId} request={r} onDone={()=>void h.refetch()}/>}
       <div className="pm-muted">{r.history.map((x,i)=><span key={i} className="block">{localDate(x.at)} · {x.by}: {x.what}</span>)}</div></li>)}</ul>:<p className="pm-muted text-xs">Chưa có yêu cầu rút.</p>}</div>
+    {d.voided.length>0&&<div><h3 className="text-sm font-semibold mb-2">Đã xoá do ghi nhầm</h3><ul className="text-xs space-y-1">{d.voided.map(v=><li key={v.id} data-voided={v.requestId}>{localDate(v.at)} · {v.by} · lượt {v.cycle}{v.paypal||v.email?' · '+[v.paypal,v.email].filter(Boolean).join(' · '):''}{v.amount&&v.currency?' · '+formatLedger(v.amount,v.currency):''}{v.reason?' · '+v.reason:''}</li>)}</ul></div>}
     <div><h3 className="text-sm font-semibold mb-2">Tình trạng đã ghi</h3>{d.events.length?<ul className="text-xs space-y-1">{d.events.map(e=>{const tok=e.detail&&typeof e.detail==='object'&&'token' in (e.detail as object)?' ('+String((e.detail as {token:string}).token)+')':'';
       // 21/10/2026: operating notes and the steps of work on the real machine (who, token, when) sit in the same history.
       if(e.kind==='NOTE'||e.kind==='JOB')return <li key={e.id}>{localDate(e.at)} · {e.by}{tok} · lượt {e.cycle} · {e.kind==='NOTE'?'Ghi chú vận hành: ':'Việc trên máy: '}{e.note}</li>;

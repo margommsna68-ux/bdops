@@ -26,6 +26,9 @@ async function richFixture(ip=randomIp()){
   await db.costRecord.create({data:{projectId,date:new Date(),total:1,amount:1}});
   await db.businessWorkItem.create({data:{projectId,title:'w',createdById:f.scope.userId,vmId:f.vm.id,serverId:f.server.id}});
   await db.auditLog.create({data:{projectId,userId:f.scope.userId,action:'X',entity:'Project',entityId:projectId}});
+  // Payout simplification (28/10/2026): a voided request snapshot and an AI approval session belong to the project too.
+  await db.earnPayoutRequestVoid.create({data:{projectId,requestId:'void-'+projectId,vmId:f.vm.id,cycle:1,earnAppId:'ea-'+projectId,paypalEmailId:'em-'+projectId,snapshot:{},reason:'r',voidedById:f.scope.userId}});
+  await db.opsApprovalSession.create({data:{projectId,tokenId:'tok-'+projectId,approvedById:f.scope.userId,via:'WEB',expiresAt:new Date(Date.now()+60000)}});
   const identityId=endpoint.identityId!;
   return {...f,projectId,identityId};
 }
@@ -35,7 +38,7 @@ it('destroyProject removes every row of a PROXY_VM project, including proxies, j
     const result=await destroyProject(db,a.projectId);
     expect(result.deleted).toBe(true);
     expect(await db.project.findUnique({where:{id:a.projectId}})).toBeNull();
-    const where={projectId:a.projectId},counts:[string,()=>Promise<number>][]=[['projectMember',()=>db.projectMember.count({where})],['server',()=>db.server.count({where})],['proxyIP',()=>db.proxyIP.count({where})],['proxyProviderAccount',()=>db.proxyProviderAccount.count({where})],['proxySourceSnapshot',()=>db.proxySourceSnapshot.count({where})],['proxyBatch',()=>db.proxyBatch.count({where})],['proxyStatusEvent',()=>db.proxyStatusEvent.count({where})],['operationJournal',()=>db.operationJournal.count({where})],['gmailAccount',()=>db.gmailAccount.count({where})],['costRecord',()=>db.costRecord.count({where})],['vMSdkHistory',()=>db.vMSdkHistory.count({where})],['vMConfiguration',()=>db.vMConfiguration.count({where})],['vMProxyAllocation',()=>db.vMProxyAllocation.count({where})],['auditLog',()=>db.auditLog.count({where})],['businessWorkItem',()=>db.businessWorkItem.count({where})]];
+    const where={projectId:a.projectId},counts:[string,()=>Promise<number>][]=[['projectMember',()=>db.projectMember.count({where})],['server',()=>db.server.count({where})],['proxyIP',()=>db.proxyIP.count({where})],['proxyProviderAccount',()=>db.proxyProviderAccount.count({where})],['proxySourceSnapshot',()=>db.proxySourceSnapshot.count({where})],['proxyBatch',()=>db.proxyBatch.count({where})],['proxyStatusEvent',()=>db.proxyStatusEvent.count({where})],['operationJournal',()=>db.operationJournal.count({where})],['gmailAccount',()=>db.gmailAccount.count({where})],['costRecord',()=>db.costRecord.count({where})],['vMSdkHistory',()=>db.vMSdkHistory.count({where})],['vMConfiguration',()=>db.vMConfiguration.count({where})],['vMProxyAllocation',()=>db.vMProxyAllocation.count({where})],['auditLog',()=>db.auditLog.count({where})],['businessWorkItem',()=>db.businessWorkItem.count({where})],['earnPayoutRequestVoid',()=>db.earnPayoutRequestVoid.count({where})],['opsApprovalSession',()=>db.opsApprovalSession.count({where})]];
     for(const [table,count] of counts) expect([table,await count()]).toEqual([table,0]);
     expect(await db.virtualMachine.count({where:{id:a.vm.id}})).toBe(0);
     expect(await db.proxyIdentity.findUnique({where:{id:a.identityId}})).toBeNull();
