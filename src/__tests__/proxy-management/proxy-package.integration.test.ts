@@ -126,3 +126,16 @@ it('a price-only edit never rematches explicitly imported proxy packages',async(
   expect(await db.proxyIP.findUnique({where:{id:row.id}})).toMatchObject({packageCode:'EXPLICIT-IMPORT',revision:row.revision});
  }finally{await f.cleanup();}
 });
+it('package list shows the proxy user only to viewers allowed to copy credentials and never returns the password',async()=>{
+  const f=await fixture();try{
+    await saveProviderAccount(f.scope,{code:'252037',label:'252037',username:'tut-proxy-user',password:'very-secret-pass',nextDueDate:ymd(day(5))},db);
+    const [admin]=await listPackages(f.scope,db);
+    expect(admin).toMatchObject({code:'252037',username:'tut-proxy-user'});
+    expect(JSON.stringify(admin)).not.toContain('very-secret-pass');
+    const [worker]=await listPackages(f.worker,db);
+    expect(worker.username).toBeNull();
+    expect(JSON.stringify(worker)).not.toContain('tut-proxy-user');expect(JSON.stringify(worker)).not.toContain('very-secret-pass');
+    await db.projectMember.update({where:{userId_projectId:{userId:f.worker.userId,projectId:f.projectId}},data:{capabilities:['COPY_CREDENTIALS']}});
+    const [copier]=await listPackages(f.worker,db);expect(copier.username).toBe('tut-proxy-user');expect(JSON.stringify(copier)).not.toContain('very-secret-pass');
+  }finally{await f.cleanup();}
+});

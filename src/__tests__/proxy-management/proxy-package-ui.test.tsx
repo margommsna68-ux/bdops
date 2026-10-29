@@ -8,12 +8,12 @@ vi.mock('@/lib/trpc',()=>{
 });
 import {PackageTable,packageHeading,type PackageRow} from '@/components/proxy-management/PackageDialog';
 import {PackageChoice} from '@/components/proxy-management/BatchDialog';
-const pkg=(o:Partial<PackageRow>):PackageRow=>({id:'a',code:'240292',label:'240292',site:'proxiware.com',note:null,price:'120',priceCurrency:'USD',cycleMonths:1,nextDueDate:'2026-10-19',lastPaidAt:null,disabled:false,revision:1,proxyCount:350,due:{state:'DUE_SOON' as const,daysLeft:3},reminderDays:7,renewalStoppedAt:null,renewalStopNote:null,reminder:true,priceHidden:false,...o});
+const pkg=(o:Partial<PackageRow>):PackageRow=>({id:'a',code:'240292',label:'240292',username:null,site:'proxiware.com',note:null,price:'120',priceCurrency:'USD',cycleMonths:1,nextDueDate:'2026-10-19',lastPaidAt:null,disabled:false,revision:1,proxyCount:350,due:{state:'DUE_SOON' as const,daysLeft:3},reminderDays:7,renewalStoppedAt:null,renewalStopNote:null,reminder:true,priceHidden:false,...o});
 it('package table lists site, price per cycle, due date with days left, proxy count and payment action',()=>{
   vi.stubGlobal('React',React);try{
     const html=renderToStaticMarkup(<PackageTable packages={[pkg({}),pkg({id:'b',code:'Account VietPhe',site:'vietphe.net',price:null,nextDueDate:'2026-10-01',due:{state:'OVERDUE',daysLeft:-15},proxyCount:200})]} canManage canPay onEdit={()=>{}} onPay={()=>{}}/>);
     expect(html).toContain('proxiware.com');expect(html).toContain('$120.00 / 1 tháng');expect(html).toContain('19/10/2026');expect(html).toContain('còn 3 ngày');expect(html).toContain('350');
-    expect(html).toContain('quá hạn 15 ngày');expect(html).toContain('Chưa có giá');expect((html.match(/Ghi thanh toán/g)||[]).length).toBe(2);expect(html).toContain('nhắc trước 7 ngày');
+    expect(html).toContain('Quá hạn 15 ngày · hết hạn 01/10/2026');expect(html).toContain('Chưa có giá');expect((html.match(/Ghi thanh toán/g)||[]).length).toBe(2);expect(html).toContain('nhắc trước 7 ngày');
     const loading=renderToStaticMarkup(<PackageTable packages={[]} loading canManage canPay onEdit={()=>{}} onPay={()=>{}}/>);expect(loading).toContain('Đang tải gói');expect(loading).not.toContain('Chưa có gói proxy');
   }finally{vi.unstubAllGlobals();}
 });
@@ -43,5 +43,32 @@ describe('package list filters and retire helpers',()=>{
   });
   it('deleting from the registry uses one fixed journal reason (no reason picker since 20/10/2026)',async()=>{
     const {DELETE_REASON}=await import('@/components/proxy-management/RegistryEdit');expect(DELETE_REASON).toBe('Xoá khỏi kho');
+  });
+});
+describe('packages shown by proxy user with clear expiry (29/10/2026)',()=>{
+  it('registry package cell shows the proxy user, the provider ID and the expiry',async()=>{
+    const {PackageCodeCell}=await import('@/components/proxy-management/PackageDialog');
+    vi.stubGlobal('React',React);try{
+      const cell=(p:PackageRow|undefined,code='252037')=>renderToStaticMarkup(<table><tbody><tr><PackageCodeCell code={code} info={p}/></tr></tbody></table>);
+      const soon=cell(pkg({code:'252037',username:'tut-proxy-user',nextDueDate:'2026-11-05',due:{state:'DUE_SOON',daysLeft:5}}));
+      expect(soon).toContain('tut-proxy-user');expect(soon).toContain('ID 252037');expect(soon).toContain('Hết hạn 05/11/2026 · còn 5 ngày');expect(soon).toContain('pm-badge-amber');
+      expect(cell(pkg({username:'u',nextDueDate:'2026-10-20',due:{state:'OVERDUE',daysLeft:-9}}))).toContain('Quá hạn 9 ngày');
+      expect(cell(pkg({username:'u',due:{state:'DUE_SOON',daysLeft:0}}))).toContain('Hết hạn hôm nay');
+      const free=cell(pkg({code:'Proxiware',label:'Proxiware',username:'proxiware-user',nextDueDate:null,due:{state:'NONE',daysLeft:null}}),'Proxiware');
+      expect(free).toContain('proxiware-user');expect(free).toContain('Proxiware');expect(free).not.toContain('ID Proxiware');expect(free).not.toContain('Hết hạn');
+      const hidden=cell(pkg({code:'252037',username:null}));expect(hidden).toContain('252037');expect(hidden).not.toContain('ID 252037');
+      expect(cell(undefined,'999')).toContain('999');
+    }finally{vi.unstubAllGlobals();}
+  });
+  it('package filter options read user · code · expiry, nearest due first and undated last',async()=>{
+    const {packageOptions}=await import('@/components/proxy-management/PackageDialog');
+    const list=[pkg({id:'a',code:'Proxiware',username:'pw',nextDueDate:null,due:{state:'NONE',daysLeft:null}}),pkg({id:'b',code:'252037',username:'tut-a',nextDueDate:'2026-11-20',due:{state:'OK',daysLeft:20}}),pkg({id:'c',code:'240292',username:null,nextDueDate:'2026-11-05',due:{state:'DUE_SOON',daysLeft:5}})];
+    expect(packageOptions(list,['252037','240292','Proxiware','orphan'])).toEqual([{code:'240292',label:'240292 · hết hạn 05/11'},{code:'252037',label:'tut-a · 252037 · hết hạn 20/11'},{code:'Proxiware',label:'pw · Proxiware'},{code:'orphan',label:'orphan'}]);
+  });
+  it('package list shows the user under the code and the expiry in words',()=>{
+    vi.stubGlobal('React',React);try{
+      const html=renderToStaticMarkup(<PackageTable packages={[pkg({code:'252037',username:'tut-proxy-user',nextDueDate:'2026-11-05',due:{state:'DUE_SOON',daysLeft:5}})]} canManage canPay onEdit={()=>{}} onPay={()=>{}}/>);
+      expect(html).toContain('tut-proxy-user');expect(html).toContain('Hết hạn 05/11/2026 · còn 5 ngày');
+    }finally{vi.unstubAllGlobals();}
   });
 });

@@ -5,7 +5,8 @@ import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@
 import {trpc} from '@/lib/trpc';
 import {CostForm} from '@/components/business-management/UsdtCostsWorkspace';
 import toast from 'react-hot-toast';
-export interface PackageRow {id:string;code:string;label:string;site:string|null;note:string|null;price:string|null;priceCurrency:string|null;cycleMonths:number;nextDueDate:string|null;lastPaidAt:string|null;disabled:boolean;revision:number;proxyCount:number;due:{state:'NONE'|'OVERDUE'|'DUE_SOON'|'OK';daysLeft:number|null};reminderDays:number;renewalStoppedAt:string|null;renewalStopNote:string|null;reminder:boolean;priceHidden:boolean}
+import {compareCodes} from '@/server/proxy-management/package-terms';
+export interface PackageRow {id:string;code:string;label:string;username:string|null;site:string|null;note:string|null;price:string|null;priceCurrency:string|null;cycleMonths:number;nextDueDate:string|null;lastPaidAt:string|null;disabled:boolean;revision:number;proxyCount:number;due:{state:'NONE'|'OVERDUE'|'DUE_SOON'|'OK';daysLeft:number|null};reminderDays:number;renewalStoppedAt:string|null;renewalStopNote:string|null;reminder:boolean;priceHidden:boolean}
 export type PackageView='ALL'|'DUE'|'OVERDUE'|'NO_DUE'|'STOPPED';
 export const PACKAGE_VIEWS:[PackageView,string][]=[['ALL','Tất cả gói'],['DUE','Hạn gần nhất trước'],['OVERDUE','Đã quá hạn'],['NO_DUE','Chưa đặt hạn'],['STOPPED','Đã ngừng gia hạn']];
 // Nearest due first; packages without a due date go last.
@@ -28,9 +29,29 @@ export function packageHeading(p:Pick<PackageRow,'site'|'price'|'priceCurrency'|
   return [p.site,priceLabel(p),due].filter(Boolean).join(' · ');
 }
 export const dueBadge=(state:PackageRow['due']['state'])=>state==='OVERDUE'?'pm-badge pm-badge-red':state==='DUE_SOON'?'pm-badge pm-badge-amber':'pm-badge pm-badge-muted';
+// Packages are known by their proxy user (29/10/2026): the provider renumbers the package ID after each payment.
+export function expiryLabel(p:Pick<PackageRow,'nextDueDate'|'due'>){
+  if(!p.nextDueDate||p.due.daysLeft===null) return '';
+  const d=p.due.daysLeft;
+  return d<0?`Quá hạn ${-d} ngày · hết hạn ${dayLabel(p.nextDueDate)}`:d===0?`Hết hạn hôm nay · ${dayLabel(p.nextDueDate)}`:`Hết hạn ${dayLabel(p.nextDueDate)} · còn ${d} ngày`;
+}
+const numericId=(code:string)=>/^\d+$/.test(code);
+export function packageOptions(list:PackageRow[],codes:string[]){
+  const byCode=new Map(list.map(p=>[p.code,p]));
+  const short=(ymd:string)=>ymd.split('-').reverse().slice(0,2).join('/');
+  const rank=(code:string)=>{const p=byCode.get(code);return p?p.due.daysLeft??Number.MAX_SAFE_INTEGER-1:Number.MAX_SAFE_INTEGER;};
+  return Array.from(new Set(codes)).sort((a,b)=>rank(a)-rank(b)||compareCodes(a,b)).map(code=>{const p=byCode.get(code);return {code,label:[p?.username,code,p?.nextDueDate?'hết hạn '+short(p.nextDueDate):null].filter(Boolean).join(' · ')};});
+}
+export function PackageName({code,info}:{code:string;info?:Pick<PackageRow,'username'|'nextDueDate'|'due'>}){
+  const user=info?.username;
+  return <><div className="font-semibold break-all">{user||code}</div>{user&&<div className="pm-muted text-xs font-normal">{numericId(code)?'ID '+code:code}</div>}{info&&expiryLabel(info)&&<div className="mt-1"><span className={dueBadge(info.due.state)}>{expiryLabel(info)}</span></div>}</>;
+}
+export function PackageCodeCell({code,info}:{code:string|null;info?:PackageRow}){
+  return <td className="pm-code">{code?<PackageName code={code} info={info}/>:<span className="pm-muted font-normal">Chưa rõ gói</span>}</td>;
+}
 export function PackageTable({packages,loading=false,canManage,canPay,onEdit,onPay,onToggle,onRenewal,onRename}:{packages:PackageRow[];loading?:boolean;canManage:boolean;canPay:boolean;onEdit:(p:PackageRow)=>void;onPay:(p:PackageRow)=>void;onToggle?:(p:PackageRow)=>void;onRenewal?:(p:PackageRow)=>void;onRename?:(p:PackageRow)=>void}){
   return <div className="pm-table-scroll"><table className="pm-table"><thead><tr><th>Gói</th><th>Site</th><th>Giá / chu kỳ</th><th>Đến hạn</th><th>Proxy</th><th></th></tr></thead><tbody>
-    {packages.map(p=><tr key={p.id} className={p.disabled?'pm-row-retired':''}><td><strong>{p.code}</strong>{p.label&&p.label!==p.code&&<div className="text-xs font-medium">{p.label}</div>}{p.disabled&&<span className="pm-badge pm-badge-muted ml-2" title="Không nhận proxy mới; proxy đang dùng, khoản chi và nhắc hạn giữ nguyên">tắt nhập mới</span>}{p.note&&<div className="pm-muted text-xs mt-1">{p.note}</div>}</td><td>{p.site||'—'}</td><td>{priceLabel(p)||<span className="pm-muted">Chưa có giá</span>}</td><td>{p.nextDueDate?<><span>{dayLabel(p.nextDueDate)}</span><div className="mt-1 flex gap-1 flex-wrap">{p.reminder?<span className={dueBadge(p.due.state)}>{dueLabel(p)}</span>:<span className="pm-badge pm-badge-muted" title={p.renewalStopNote||''}>ngừng gia hạn · {dueLabel(p)}</span>}</div></>:<span className="pm-muted">Chưa đặt hạn</span>}<div className="pm-muted text-xs mt-1">{p.lastPaidAt?'Trả gần nhất '+new Date(p.lastPaidAt).toLocaleDateString('vi-VN',{timeZone:'Asia/Bangkok'})+' · ':''}nhắc trước {p.reminderDays} ngày</div></td><td className="tabular-nums">{p.proxyCount}</td><td><div className="flex gap-1 justify-end flex-wrap">{canPay&&<button className="pm-button pm-button-primary" onClick={()=>onPay(p)}>Ghi thanh toán</button>}{canManage&&<button className="pm-button pm-button-quiet" onClick={()=>onEdit(p)}>Sửa</button>}{canManage&&onRename&&<button className="pm-button pm-button-quiet" onClick={()=>onRename(p)}>Đổi mã gói</button>}{canManage&&onRenewal&&p.nextDueDate&&<button className="pm-button pm-button-quiet" onClick={()=>onRenewal(p)}>{p.reminder?'Ngừng gia hạn':'Nhắc lại'}</button>}{canManage&&onToggle&&<button className="pm-button pm-button-quiet" onClick={()=>onToggle(p)}>{p.disabled?'Bật gói':'Tắt gói'}</button>}</div></td></tr>)}
+    {packages.map(p=><tr key={p.id} className={p.disabled?'pm-row-retired':''}><td><strong>{p.code}</strong>{p.username&&<div className="text-xs font-medium break-all">User {p.username}</div>}{p.label&&p.label!==p.code&&<div className="text-xs font-medium">{p.label}</div>}{p.disabled&&<span className="pm-badge pm-badge-muted ml-2" title="Không nhận proxy mới; proxy đang dùng, khoản chi và nhắc hạn giữ nguyên">tắt nhập mới</span>}{p.note&&<div className="pm-muted text-xs mt-1">{p.note}</div>}</td><td>{p.site||'—'}</td><td>{priceLabel(p)||<span className="pm-muted">Chưa có giá</span>}</td><td>{p.nextDueDate?<><div className="flex gap-1 flex-wrap">{p.reminder?<span className={dueBadge(p.due.state)}>{expiryLabel(p)}</span>:<span className="pm-badge pm-badge-muted" title={p.renewalStopNote||''}>ngừng gia hạn · {expiryLabel(p)}</span>}</div></>:<span className="pm-muted">Chưa đặt hạn</span>}<div className="pm-muted text-xs mt-1">{p.lastPaidAt?'Trả gần nhất '+new Date(p.lastPaidAt).toLocaleDateString('vi-VN',{timeZone:'Asia/Bangkok'})+' · ':''}nhắc trước {p.reminderDays} ngày</div></td><td className="tabular-nums">{p.proxyCount}</td><td><div className="flex gap-1 justify-end flex-wrap">{canPay&&<button className="pm-button pm-button-primary" onClick={()=>onPay(p)}>Ghi thanh toán</button>}{canManage&&<button className="pm-button pm-button-quiet" onClick={()=>onEdit(p)}>Sửa</button>}{canManage&&onRename&&<button className="pm-button pm-button-quiet" onClick={()=>onRename(p)}>Đổi mã gói</button>}{canManage&&onRenewal&&p.nextDueDate&&<button className="pm-button pm-button-quiet" onClick={()=>onRenewal(p)}>{p.reminder?'Ngừng gia hạn':'Nhắc lại'}</button>}{canManage&&onToggle&&<button className="pm-button pm-button-quiet" onClick={()=>onToggle(p)}>{p.disabled?'Bật gói':'Tắt gói'}</button>}</div></td></tr>)}
     {!packages.length&&<tr><td colSpan={6} className="pm-empty">{loading?'Đang tải gói…':'Không có gói nào trong bộ lọc này.'}</td></tr>}
   </tbody></table></div>;
 }

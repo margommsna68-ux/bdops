@@ -72,13 +72,17 @@ export async function setPackageRenewal(scope:ActorScope,input:{code:string;stop
   },db);
 }
 export const canSeeAmounts=(scope:ActorScope)=>scope.role==='ADMIN'||!!scope.allowedModules?.includes('COSTS');
+// The owner names packages by their proxy user (the provider renumbers package IDs after each payment, 29/10/2026).
+// Only viewers allowed to copy proxy credentials see it; the password never leaves the server.
+const canSeeUser=(scope:ActorScope)=>{try{assertInfrastructureAction(scope,'COPY_CREDENTIALS');return true;}catch{return false;}};
+function packageUser(cipher:string,show:boolean){if(!show)return null;try{const c=JSON.parse(decrypt(cipher)) as {username?:unknown}|null;return typeof c?.username==='string'&&c.username?c.username:null;}catch{return null;}}
 export async function listPackages(scope:ActorScope,db:PrismaClient=prisma,today:Date=new Date()){
-  const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,'READ');const showAmount=canSeeAmounts(current);
+  const current=await loadInfrastructureScope(db,scope.userId,scope.projectId);assertInfrastructureAction(current,'READ');const showAmount=canSeeAmounts(current),showUser=canSeeUser(current);
   const [accounts,counts]=await Promise.all([
     db.proxyProviderAccount.findMany({where:{projectId:scope.projectId}}),
     db.proxyIP.groupBy({by:['packageCode'],where:{projectId:scope.projectId,packageCode:{not:null},inventoryState:{in:['NEW','LIVE','BLOCKED']}},_count:{_all:true}}),
   ]);
   const byCode=new Map(counts.map(c=>[c.packageCode,c._count._all]));
   const rank=(code:string)=>/^\d+$/.test(code)?0:1;
-  return accounts.sort((a,b)=>rank(a.code)-rank(b.code)||compareCodes(a.code,b.code)).map(a=>({id:a.id,code:a.code,label:a.label,site:a.site,note:a.note,price:a.price?.toString()??null,priceCurrency:a.priceCurrency,cycleMonths:a.cycleMonths,nextDueDate:a.nextDueDate?.toISOString().slice(0,10)??null,lastPaidAt:a.lastPaidAt?.toISOString()??null,disabled:a.disabled,revision:a.revision,proxyCount:byCode.get(a.code)||0,due:dueState(a.nextDueDate,today,a.reminderDays),reminderDays:a.reminderDays,renewalStoppedAt:a.renewalStoppedAt?.toISOString()??null,renewalStopNote:a.renewalStopNote,reminder:!a.renewalStoppedAt,priceHidden:!showAmount,...(showAmount?{}:{price:null})}));
+  return accounts.sort((a,b)=>rank(a.code)-rank(b.code)||compareCodes(a.code,b.code)).map(a=>({id:a.id,code:a.code,label:a.label,username:packageUser(a.credentialCipher,showUser),site:a.site,note:a.note,price:a.price?.toString()??null,priceCurrency:a.priceCurrency,cycleMonths:a.cycleMonths,nextDueDate:a.nextDueDate?.toISOString().slice(0,10)??null,lastPaidAt:a.lastPaidAt?.toISOString()??null,disabled:a.disabled,revision:a.revision,proxyCount:byCode.get(a.code)||0,due:dueState(a.nextDueDate,today,a.reminderDays),reminderDays:a.reminderDays,renewalStoppedAt:a.renewalStoppedAt?.toISOString()??null,renewalStopNote:a.renewalStopNote,reminder:!a.renewalStoppedAt,priceHidden:!showAmount,...(showAmount?{}:{price:null})}));
 }
