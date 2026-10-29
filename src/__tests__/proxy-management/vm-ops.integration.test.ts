@@ -116,6 +116,17 @@ describe('PayPal gom tiền và yêu cầu rút',()=>{
       expect((await f.ops(0)).milestone).toBe('RECREATE');
     }finally{await f.cleanup();}
   });
+  it('VM history shows the PayPal transaction id of each receipt only with the money rights, never an internal OPS id',async()=>{
+    const f=await setup();try{
+      await f.link(0,0,f.emails[0].id);await f.request(0,f.emails[0].id,'24');
+      await f.receive(f.pp13.id,f.emails[0].email,'10','RECEIVED','8JR02442V'+f.x.slice(0,6).toUpperCase());
+      await f.receive(f.pp13.id,f.emails[0].email,'14','PENDING');
+      const full=(await readVmOpsHistory(f.scope,{vmId:f.vms[0].id},db)).requests[0].money!.receipts;
+      expect(full.map(x=>x.transactionId).filter(Boolean)).toEqual(['8JR02442V'+f.x.slice(0,6).toUpperCase()]);
+      expect(full.some(x=>x.transactionId===null)).toBe(true);
+      expect(JSON.stringify(await readVmOpsHistory(f.worker,{vmId:f.vms[0].id},db))).not.toContain('8JR02442V');
+    }finally{await f.cleanup();}
+  });
   it('one EarnApp, one withdrawal: replays and new keys never add a request, receipt or cost; a failed request is retried on the same row',async()=>{
     const f=await setup();try{
       await f.link(0,0,f.emails[0].id);const key=randomUUID(),costs=await db.costRecord.count({where:{projectId:f.scope.projectId}});

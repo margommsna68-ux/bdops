@@ -10,6 +10,7 @@ import {trpc} from '@/lib/trpc';
 import {links} from '@/lib/links';
 import {errorMessage} from '@/components/vm-management/shared';
 import {ledgerNumber,viDate} from './batch-format';
+import {sameTx} from '@/lib/paypal-tx';
 import {transferDraft} from '@/lib/paypal-transfer';
 import {formatLedger,formatUsd} from '@/lib/money-input';
 import {gatherText} from '@/lib/vm-ops';
@@ -88,20 +89,21 @@ function EmailList({p,received,showMoney,unknown}:{p:Paypal;received:Map<string,
     {showMoney&&unknown&&Object.keys(unknown).length>0&&<tr><td className="pm-muted">Chưa xác định email</td><td/><td className="text-xs pm-muted">Khoản nhận cũ không ghi email; tính vào PP, không gắn sang email nào</td><td className="num">{Object.entries(unknown).map(([c,v])=><div key={c}>{ledgerNumber(v)} {c}</div>)}</td></tr>}
   </tbody></table><p className="text-xs pm-muted">Mỗi email nhận cho một EarnApp. Email đã dùng không cấp lại cho EarnApp khác (bỏ gán không đưa về Chưa dùng) nhưng vẫn nhận tiền nhiều lần.</p></div>;
 }
-function Entries({projectId,p,direction,month,asOf,onClose}:{projectId:string;p:Paypal;direction:'IN'|'OUT';month:string|null;asOf:string|null;onClose:()=>void}){
+export function Entries({projectId,p,direction,month,asOf,onClose}:{projectId:string;p:Paypal;direction:'IN'|'OUT';month:string|null;asOf:string|null;onClose:()=>void}){
   // Same range as the number that was clicked (server ledgerRange): the month, or everything up to the cut-off day.
-  const q=trpc.accountStore.ledgerEntries.useQuery({projectId,paypalId:p.id,direction,month,asOf:month?null:asOf}),d=q.data;
+  const q=trpc.accountStore.ledgerEntries.useQuery({projectId,paypalId:p.id,direction,month,asOf:month?null:asOf}),d=q.data,[txSearch,setTxSearch]=useState('');
   const KIND={RECEIPT:'Tiền nhận',OPENING:'Số dư đầu',INTERNAL_IN:'Chuyển nội bộ vào',OUT:'PP bị trừ'} as const,vd=(x:string)=>x.split('-').reverse().join('/');
   const label=direction==='IN'?'Tiền vào':'Tiền ra',skipped=(d?.rows||[]).filter(r=>!r.counted).length;
   return <div className="space-y-2"><div className="flex justify-between items-center gap-2"><strong>{label} · {p.code}{month?' · tháng '+vd(month):d?.asOf?' · đến hết ngày '+vd(d.asOf):''}</strong><button type="button" className="pm-link text-sm" onClick={onClose}>Đóng</button></div>
     {q.error&&<p role="alert" className="pm-error text-sm">{q.error.message}</p>}
     {d&&<p className="text-sm" role="status">Cộng các khoản được tính: <strong>{Object.keys(d.totals).length?Object.entries(d.totals).map(([c,v])=>ledgerNumber(v)+' '+c).join(' · '):'0'}</strong> = số {label} đang xem.{skipped?<span className="pm-muted"> {skipped} khoản chỉ để đối chiếu, không cộng (ghi ở cột Tình trạng).</span>:null}{d.later?<span className="pm-muted"> {d.later} khoản ghi ngày sau {d.asOf?vd(d.asOf):'ngày chốt'} không thuộc phạm vi này.</span>:null}</p>}
+    <input type="search" className="pm-input text-sm" aria-label="Tìm theo mã giao dịch" placeholder="Tìm mã giao dịch (dán “Mã giao dịch: …”)" value={txSearch} onChange={e=>setTxSearch(e.target.value)}/>
     <div className="pm-table-scroll"><table className="pm-table"><thead><tr><th>Ngày</th><th>Loại</th><th className="num">Số tiền</th><th>{direction==='IN'?'Email / VM · từ PP':'Sang PP'}</th>{direction==='OUT'&&<><th className="num">Phí (trong tổng)</th><th>Bên nhận thực nhận</th></>}<th>Tình trạng</th><th>Mã GD</th></tr></thead><tbody>
-      {(d?.rows||[]).map(r=><tr key={r.kind+r.id} data-counted={r.counted?'1':'0'} className={r.counted?undefined:'pm-muted'}><td className="whitespace-nowrap">{vd(r.date)}</td><td>{KIND[r.kind]}</td><td className="num">{r.counted?null:<span className="text-xs">(không cộng) </span>}{ledgerNumber(r.amount)} {r.currency}</td>
+      {(d?.rows||[]).filter(r=>!txSearch.trim()||sameTx(r.transactionId,txSearch)).map(r=><tr key={r.kind+r.id} data-counted={r.counted?'1':'0'} className={r.counted?undefined:'pm-muted'}><td className="whitespace-nowrap">{vd(r.date)}</td><td>{KIND[r.kind]}</td><td className="num">{r.counted?null:<span className="text-xs">(không cộng) </span>}{ledgerNumber(r.amount)} {r.currency}</td>
         <td>{r.email||r.other||<span className="pm-muted">{r.kind==='RECEIPT'?'Chưa xác định email':'—'}</span>}{r.place&&<div className="text-xs pm-muted">{r.place}</div>}</td>
         {direction==='OUT'&&<><td className="num">{r.fee?r.fee.replace(/^[\d.]+/,v=>ledgerNumber(v)):'—'}</td><td className="whitespace-nowrap">{r.received?r.received.replace(/^[\d.]+/,v=>ledgerNumber(v)):'—'}</td></>}
         <td>{r.status}{r.role&&<div className="text-xs">{r.role}</div>}{r.review&&<div className="text-xs text-amber-600">{r.review}</div>}</td><td className="text-xs">{r.transactionId||<span className="pm-muted">không có</span>}</td></tr>)}
-      {d&&!d.rows.length&&<tr><td colSpan={8} className="pm-empty">Không có giao dịch.</td></tr>}{q.isLoading&&<tr><td colSpan={8} className="pm-empty">Đang tải…</td></tr>}
+      {d&&!d.rows.length&&<tr><td colSpan={8} className="pm-empty">Không có giao dịch.</td></tr>}{d&&d.rows.length>0&&txSearch.trim()&&!d.rows.some(r=>sameTx(r.transactionId,txSearch))&&<tr><td colSpan={8} className="pm-empty">Không có giao dịch khớp mã này.</td></tr>}{q.isLoading&&<tr><td colSpan={8} className="pm-empty">Đang tải…</td></tr>}
     </tbody></table></div><p className="text-xs pm-muted">Chỉ khoản Đã nhận, chưa thu hồi được cộng; số dư đầu kỳ tính ở Còn lại theo sổ. Sửa hoặc thu hồi ở <Link className="underline" href={direction==='IN'?links.paypalIn():links.originalWithdrawals(true)}>{direction==='IN'?'Tiền vào PayPal':'Rút / chuyển gốc'}</Link>; mọi nơi đọc cùng sổ.</p></div>;
 }
 // Ghi tiền vào: choose day, currency and status once, paste "Email | Số tiền | Mã giao dịch"; lines are checked while typing (no

@@ -27,7 +27,7 @@ import {assertMembersFree,attachMembers,linkMergedSdks,type MemberInput} from '.
 type Tx=Prisma.TransactionClient;
 const D=(v:Prisma.Decimal.Value)=>new Prisma.Decimal(v);
 const currencyOf=(c:string)=>{const v=c.trim().toUpperCase();if(!LEDGER_CURRENCY.test(v))throw new ProxyDomainError('INVALID_INPUT','Đồng tiền là mã 3–5 chữ cái (USD, USDT, VND…)');return v;};
-export const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
+export const requestInclude={receipts:{select:{id:true,amount:true,currency:true,confirmed:true,failed:true,voidedAt:true,date:true,transactionId:true,noTxId:true}},paypal:{select:{id:true,code:true,status:true}},paypalEmail:{select:{id:true,email:true}}} as const;
 // A history line keeps its kind next to the full text: the full text (amounts, corrections, shortfall, notes) is shown only with the
 // money rights; everyone else gets the operating milestone of the kind.
 export type PayoutHistoryKind='REQUESTED'|'CORRECT'|'FAILED'|'CANCELLED'|'RETRY'|'SETTLE'|'CONSUMED'|'PREPARED'|'SENT'|'UNKNOWN'|'RECEIPT'|'MEMBERS'|'EDIT'|'UNSEND'|'VOID'|'SUS';
@@ -407,6 +407,6 @@ export async function readVmOpsHistory(scope:ActorScope,input:{vmId:string},db:P
     // old = the request's account has left this VM or round: only reconciling it is offered (never on the account now on the VM).
     rights:{writeMoney},
     requests:requests.map(r=>{const m=moneyOfRequest(r),old=r.vmId!==vm.id||!(r.earnApp.vmId===vm.id&&!r.earnApp.closedAt&&(vm.operation?.cycle??1)===r.cycle);return {memberOf:r.vmId!==vm.id?primaries.get(r.vmId)??r.vmId:null,id:r.id,revision:r.revision,vmId:r.vmId,earnAppId:r.earnAppId,submission:r.submission,old,cycle:r.cycle,login:r.earnApp.login.email,paypal:r.paypal.code,email:r.paypalEmail.email,requestedAt:dayText(r.requestedAt),state:r.state,phase:m.phase,consumed:!!r.consumedAt,reviewAfterRecreate:m.reviewAfterRecreate,
-      history:(r.history as {at:string;by:string;kind?:string;what:string}[]).map(h=>({at:h.at,by:who(h.by),what:money?h.what:neutralHistory(h)})),money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,remaining:m.remaining,receipts:r.receipts.map(x=>({date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,status:x.voidedAt?'Đã thu hồi':x.failed?'Không về':x.confirmed?'Đã nhận':'Chờ nhận'}))}:null};}),
+      history:(r.history as {at:string;by:string;kind?:string;what:string}[]).map(h=>({at:h.at,by:who(h.by),what:money?h.what:neutralHistory(h)})),money:money?{amount:r.amount.toFixed(2),currency:r.currency,received:m.received,remaining:m.remaining,receipts:r.receipts.map(x=>({date:dayText(x.date),amount:x.amount.toFixed(2),currency:x.currency,status:x.voidedAt?'Đã thu hồi':x.failed?'Không về':x.confirmed?'Đã nhận':'Chờ nhận',transactionId:x.noTxId||!x.transactionId||/^OPS-/.test(x.transactionId)?null:x.transactionId}))}:null};}),
   };
 }

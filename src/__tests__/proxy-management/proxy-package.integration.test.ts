@@ -11,7 +11,7 @@ import {listOperations} from '@/server/operation-history/journal';
 import {undoOperation} from '@/server/operation-history/undo';
 import {saveUsdtCost} from '@/server/business-management/usdt-costs';
 import type {BatchInput} from '@/server/proxy-management/types';
-import {businessDay} from '@/server/proxy-management/package-terms';
+import {businessDay,addMonthsClamped} from '@/server/proxy-management/package-terms';
 afterAll(()=>db.$disconnect());
 it('registry NEW excludes assigned and uncertain holds; full proxy search matches endpoint without credentials',async()=>{
  const f=await fixture();try{
@@ -105,7 +105,7 @@ it('paying a package records a USDT cost and advances the due date in one comman
     await expect(saveUsdtCost(f.scope,{...base,key:randomUUID(),category:'OTHER',packageDue:{proxyAccountId:pkg.id,expectedRevision:pkg.revision}},db)).rejects.toMatchObject({code:'INVALID_INPUT'});
     await expect(saveUsdtCost(f.scope,{...base,key:randomUUID(),category:'IP_PROXY',packageDue:{proxyAccountId:pkg.id,expectedRevision:pkg.revision+5}},db)).rejects.toMatchObject({code:'STALE_PREVIEW'});
     const saved=await saveUsdtCost(f.scope,{...base,key:randomUUID(),category:'IP_PROXY',packageDue:{proxyAccountId:pkg.id,expectedRevision:pkg.revision}},db);
-    const expected=day(2);expected.setUTCMonth(expected.getUTCMonth()+1);
+    const expected=addMonthsClamped(day(2),1);
     let [after]=await listPackages(f.scope,db);expect(after).toMatchObject({nextDueDate:ymd(expected),lastPaidAt:expect.any(String),revision:pkg.revision+1,due:{state:'OK'}});
     const cost=await db.costRecord.findUniqueOrThrow({where:{id:saved.id}});expect(cost).toMatchObject({proxyAccountId:pkg.id,category:'IP_PROXY'});
     const explicit=await saveUsdtCost(f.scope,{...base,key:randomUUID(),category:'IP_PROXY',packageDue:{proxyAccountId:pkg.id,expectedRevision:after.revision,nextDueDate:ymd(day(90))}},db);
